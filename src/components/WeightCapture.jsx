@@ -34,7 +34,7 @@ const MATERIAL_OPTIONS = [
 ];
 
 
-export default function WeightCapture({ racks = [] }) {
+export default function WeightCapture({ racks = [], currentUser = null }) {
   const [connected, setConnected] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [stable, setStable] = useState(false);
@@ -52,13 +52,8 @@ export default function WeightCapture({ racks = [] }) {
   const generatedLocations = useMemo(() => {
     const list = [];
     racks.forEach(rack => {
-      for (let s = 1; s <= rack.shelves; s++) {
-        for (let l = 1; l <= rack.levels; l++) {
-          const slotNum = (s - 1) * rack.levels + l;
-          const code = `${rack.code}${slotNum < 10 ? '0' + slotNum : slotNum}`;
-          list.push({ code, label: `${rack.warehouse} - Rack ${rack.code} (Slot ${code})` });
-        }
-      }
+      const displayLabel = rack.warehouse && rack.code.includes(rack.warehouse) ? rack.code : `${rack.warehouse} - Rack ${rack.code}`;
+      list.push({ code: displayLabel, label: displayLabel, rawCode: rack.code, warehouse: rack.warehouse });
     });
     return list;
   }, [racks]);
@@ -68,6 +63,12 @@ export default function WeightCapture({ racks = [] }) {
   const [q, setQ] = useState('');
   const [orderBy, setOrderBy] = useState('id');
   const [order, setOrder] = useState('desc');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterPo, setFilterPo] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
+  const [filterOperator, setFilterOperator] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [expandedRow, setExpandedRow] = useState(null);
   const [mode, setMode] = useState('demo'); // 'demo' or 'original'
   const [printerStatus, setPrinterStatus] = useState('offline');
@@ -109,6 +110,57 @@ export default function WeightCapture({ racks = [] }) {
 
   const [metadataFlash, setMetadataFlash] = useState(false);
 
+  // Inward PO Requirement, Duplicate Bill & 3% Tolerance State
+  const [inwardCheck, setInwardCheck] = useState(null);
+  const [checkingInward, setCheckingInward] = useState(false);
+  const [approvalModal, setApprovalModal] = useState(false);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+
+  // Live Inward Pre-Check Effect
+  useEffect(() => {
+    let active = true;
+    const po = (form.poNumber || '').trim();
+    const mat = (form.materialName || '').trim();
+    const sup = (form.supplier || '').trim();
+    const inv = (form.invoiceNo || '').trim();
+    const pcs = pieces || 0;
+
+    if (!po && !mat && !sup && !inv) {
+      setInwardCheck(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setCheckingInward(true);
+        const res = await fetch(`${getBackendUrl()}/api/inward/check-eligibility`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            poNumber: po,
+            materialName: mat,
+            supplier: sup,
+            invoiceNo: inv,
+            incomingQty: pcs
+          })
+        });
+        const data = await res.json();
+        if (active && data.success) {
+          setInwardCheck(data);
+        }
+      } catch (err) {
+        console.warn('Inward eligibility check failed:', err);
+      } finally {
+        if (active) setCheckingInward(false);
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [form.poNumber, form.materialName, form.supplier, form.invoiceNo, pieces]);
+
   const areDetailsFilled = () => {
     return (
       (form.materialName || '').trim() !== '' &&
@@ -148,11 +200,18 @@ export default function WeightCapture({ racks = [] }) {
     return parts.length > 0 ? parts.join(', ') : (form.storeLocation || 'Main Store');
   };
 
-  // Disconnect on first mount to ensure proper start state
+  // Auto-connect and display live weight if starting in Demo mode
   useEffect(() => {
-    setConnected(false);
-    setStable(false);
-    setLiveWeight('00.000');
+    if (mode === 'demo') {
+      setConnected(true);
+      setStable(true);
+      setLiveWeight('30.250');
+      setGrossWeight('30.250');
+    } else {
+      setConnected(false);
+      setStable(false);
+      setLiveWeight('00.000');
+    }
   }, []);
 
   // ── Fetch captures log and highest material code from DB on mount ───────────────
@@ -168,6 +227,7 @@ export default function WeightCapture({ racks = [] }) {
             date: item.capturedAt ? new Date(item.capturedAt).toLocaleDateString('en-IN') : '',
             po: item.poNumber || 'N/A',
             material: item.materialName,
+            category: item.category || '',
             weight: item.grossWeightKg ? item.grossWeightKg.toFixed(3) : '0.000',
             netWeightKg: item.netWeightKg || 0,
             wpp: item.weightPerPieceG ? item.weightPerPieceG.toFixed(3) : '10.000',
@@ -179,8 +239,10 @@ export default function WeightCapture({ racks = [] }) {
             barcodeId: item.barcodeId || '',
             invoiceNo: item.invoiceNo || 'N/A',
             location: item.storeLocation || 'Main Store',
-            operator: item.storeIncharge || 'Ayush',
-            status: item.status || 'Captured'
+            operator: item.storeIncharge || 'Pooja',
+            entryMode: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
+            status: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
+            approvalStatus: item.approvalStatus || 'Approved'
           }));
           setCaptures(dbCaptures);
 
@@ -291,6 +353,46 @@ export default function WeightCapture({ racks = [] }) {
     return `${nwg.toLocaleString()} g ÷ ${wpp} g = ${pieces.toLocaleString()} pcs`;
   }, [netWeight, weightPerPiece, pieces]);
 
+  const isSameDate = (recordDateStr, filterDateStr) => {
+    if (!filterDateStr) return true;
+    if (!recordDateStr) return false;
+    const [fYear, fMonth, fDay] = filterDateStr.split('-');
+    const rParts = recordDateStr.split(/[\/-]/);
+    if (rParts.length !== 3) return false;
+    let rDay, rMonth, rYear;
+    if (rParts[0].length === 4) {
+      rYear = rParts[0]; rMonth = rParts[1]; rDay = rParts[2];
+    } else {
+      rDay = rParts[0]; rMonth = rParts[1]; rYear = rParts[2];
+    }
+    return (
+      parseInt(rYear, 10) === parseInt(fYear, 10) &&
+      parseInt(rMonth, 10) === parseInt(fMonth, 10) &&
+      parseInt(rDay, 10) === parseInt(fDay, 10)
+    );
+  };
+
+  const filterOptions = useMemo(() => {
+    const categories = new Set();
+    const pos = new Set();
+    const locations = new Set();
+    const operators = new Set();
+
+    captures.forEach(c => {
+      if (c.category) categories.add(c.category);
+      if (c.po && c.po !== 'N/A') pos.add(c.po);
+      if (c.location) locations.add(c.location);
+      if (c.operator) operators.add(c.operator);
+    });
+
+    return {
+      categories: Array.from(categories).sort(),
+      pos: Array.from(pos).sort(),
+      locations: Array.from(locations).sort(),
+      operators: Array.from(operators).sort()
+    };
+  }, [captures]);
+
   const stats = useMemo(() => ({
     count: captures.length,
     weight: captures.reduce((s, r) => s + parseFloat(r.weight), 0).toFixed(2),
@@ -300,9 +402,22 @@ export default function WeightCapture({ racks = [] }) {
   const filteredCaptures = useMemo(() => {
     const ql = q.toLowerCase();
     return captures
-      .filter(r => !ql ||
-        r.material.toLowerCase().includes(ql) || r.po.toLowerCase().includes(ql) ||
-        r.operator.toLowerCase().includes(ql) || r.status.toLowerCase().includes(ql))
+      .filter(r => {
+        const matchesQ = !ql ||
+          (r.material && r.material.toLowerCase().includes(ql)) ||
+          (r.po && r.po.toLowerCase().includes(ql)) ||
+          (r.operator && r.operator.toLowerCase().includes(ql)) ||
+          (r.status && r.status.toLowerCase().includes(ql)) ||
+          (r.materialCode && r.materialCode.toLowerCase().includes(ql));
+
+        const matchesCategory = !filterCategory || (r.category && r.category.toLowerCase() === filterCategory.toLowerCase());
+        const matchesPo = !filterPo || r.po === filterPo;
+        const matchesLocation = !filterLocation || r.location === filterLocation;
+        const matchesOperator = !filterOperator || r.operator === filterOperator;
+        const matchesDate = !filterDate || isSameDate(r.date, filterDate);
+
+        return matchesQ && matchesCategory && matchesPo && matchesLocation && matchesOperator && matchesDate;
+      })
       .sort((a, b) => {
         let av = a[orderBy] ?? '', bv = b[orderBy] ?? '';
         if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase(); }
@@ -310,12 +425,61 @@ export default function WeightCapture({ racks = [] }) {
         if (av > bv) return order === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [captures, q, orderBy, order]);
+  }, [captures, q, orderBy, order, filterCategory, filterPo, filterLocation, filterOperator, filterDate]);
 
   const showToast = (msg, type = 'success') => {
     setToastMessage(msg);
     setToastType(type);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const downloadCSV = () => {
+    if (filteredCaptures.length === 0) {
+      showToast('No log data available to export.', 'error');
+      return;
+    }
+    const csvHeaders = [
+      'ID', 'Material Code', 'Date', 'Time', 'PO Number', 'Material Name',
+      'Gross Weight (KG)', 'Net Weight (KG)', 'Avg Wt/Piece (g)',
+      'Sample Qty (Pcs)', 'Sample Wt (KG)', 'Total Pieces',
+      'Packets', 'Unit', 'Barcode ID', 'Invoice Number',
+      'Location', 'Operator', 'Status'
+    ];
+    const csvRows = filteredCaptures.map(row => [
+      row.id,
+      row.materialCode || '',
+      row.date || '',
+      row.time || '',
+      row.po || '',
+      row.material || '',
+      row.weight || '',
+      row.netWeightKg ?? '',
+      row.wpp || '',
+      row.sampleQty ?? '',
+      row.sampleWeightKg ?? '',
+      row.pieces ?? '',
+      row.packets ?? '',
+      row.unit || '',
+      row.barcodeId || '',
+      row.invoiceNo || '',
+      row.location || '',
+      row.operator || '',
+      row.status || ''
+    ]);
+
+    const csvContent = [csvHeaders, ...csvRows]
+      .map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Weight_Capture_Log_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showToast('CSV Downloaded successfully!');
   };
 
   const handleOriginalConnect = async () => {
@@ -387,10 +551,39 @@ export default function WeightCapture({ racks = [] }) {
     showToast('Weighbridge disconnected.', 'info');
   };
 
+  const handleStartDemo = () => {
+    setMode('demo');
+    setConnecting(true);
+    setStable(false);
+    setTimeout(() => {
+      setConnected(true);
+      setConnecting(false);
+      setBaseWeight(30.250);
+      showToast('⚡ Demo Scale connected on COM3 (Simulated)');
+    }, 300);
+  };
+
+  const handleAutoFillDemo = () => {
+    const loc = generatedLocations[0]?.code || 'A1-R01';
+    setForm(prev => ({
+      ...prev,
+      materialName: 'YKK #5 Brass Zipper 28"',
+      category: 'ZIPPERS / TRIMS',
+      supplier: 'YKK India Pvt Ltd',
+      poNumber: 'PO-2026-008',
+      invoiceNo: 'INV-99214',
+      storeLocation: loc,
+      storeIncharge: 'Pooja (Demo)',
+      packets: '1',
+      unit: 'Pcs',
+      remarks: 'Demo Test Inward Entry'
+    }));
+    showToast('✨ Demo metadata autofilled! Ready for calibration.');
+  };
+
   const handleConnect = () => {
     if (mode === 'demo') {
-      setConnecting(true); setStable(false);
-      setTimeout(() => { setConnected(true); setConnecting(false); showToast('Demo connected on COM3 (Simulated)'); }, 1500);
+      handleStartDemo();
     } else {
       handleOriginalConnect();
     }
@@ -422,14 +615,21 @@ export default function WeightCapture({ racks = [] }) {
       showToast('Scale must be connected to weigh samples.', 'error');
       return;
     }
-    const currentWeight = parseFloat(liveWeight) || 0;
-    if (currentWeight < 0.010) {
-      showToast('Minimum weight required to register sample: 10g (0.010 KG)', 'error');
-      return;
+    let currentWeight = parseFloat(liveWeight) || 0;
+    // In Demo mode, if base weight is on a large bulk setting (> 1.0 KG), auto-simulate realistic sample weight
+    if (mode === 'demo' && currentWeight > 1.000) {
+      currentWeight = parseFloat(((qty * 10) / 1000).toFixed(3)); // e.g. 10 pcs = 0.100 KG (10g / pc)
+      setBaseWeight(currentWeight);
+      showToast(`⚡ Demo Sample Weight captured: ${currentWeight.toFixed(3)} KG (${qty} pcs = 10g/pc)`);
+    } else {
+      if (currentWeight < 0.010) {
+        showToast('Minimum weight required to register sample: 10g (0.010 KG)', 'error');
+        return;
+      }
+      showToast(`Weighed ${qty} pcs: captured ${currentWeight.toFixed(3)} KG`);
     }
     setSampleQty(qty);
     setSampleWeightKg(currentWeight);
-    showToast(`Weighed ${qty} pcs: captured ${currentWeight.toFixed(3)} KG`);
   };
 
   const handleCalibrateWPP = () => {
@@ -480,7 +680,7 @@ export default function WeightCapture({ racks = [] }) {
         barcodeId,
         invoiceNo: form.invoiceNo || 'N/A',
         location: finalLocation,
-        operator: form.storeIncharge || 'Ayush',
+        operator: form.storeIncharge || 'Paras',
         status: stable ? 'Stable' : 'Captured',
       };
       setCaptures(prev => [newEntry, ...prev]);
@@ -520,6 +720,7 @@ export default function WeightCapture({ racks = [] }) {
           pieces: pieces,
           packets: totalPackets,
           barcodeId: barcodeId,
+          entryMode: 'Weight Machine',
           status: stable ? 'Stable' : 'Captured',
           remarks: form.remarks,
         })
@@ -628,11 +829,179 @@ export default function WeightCapture({ racks = [] }) {
       setTimeout(() => setMetadataFlash(false), 2000);
       return;
     }
-    if (sampleWeightKg <= 0 || !wppLocked) {
-      showToast('⚠️ Please calibrate the sample piece weight first before saving!', 'error');
+    const wppVal = parseFloat(weightPerPiece) || 0;
+    if (wppVal <= 0) {
+      showToast('⚠️ Please enter or calibrate a valid Piece Weight (g/pc)!', 'error');
       return;
     }
+    let gw = parseFloat(grossWeight) || 0;
+    const tw = useTareWeight ? (parseFloat(tareWeight) || 0) : 0;
+
+    // If in Demo mode and gross weight is <= tare or zero, auto-apply demo bulk weight (30.250 KG)
+    if (mode === 'demo' && gw <= tw) {
+      gw = 30.250;
+      setBaseWeight(30.250);
+      setGrossWeight('30.250');
+      setLiveWeight('30.250');
+      setConnected(true);
+      setStable(true);
+      showToast('⚡ Auto-applied demo gross weight: 30.250 KG');
+    }
+
+    const netKg = gw - tw;
+    if (netKg <= 0) {
+      showToast('⚠️ Scale gross weight (' + gw.toFixed(2) + ' KG) is not greater than Tare Weight (' + tw.toFixed(2) + ' KG). Please select a weight preset (e.g. 30.25 KG)!', 'error');
+      return;
+    }
+    // If sample weight was not calibrated from a connected scale, auto-set sample weight from piece weight
+    if (sampleWeightKg <= 0) {
+      const autoSampleWeight = parseFloat(((sampleQty * wppVal) / 1000).toFixed(3));
+      setSampleWeightKg(autoSampleWeight);
+    }
+
+    // Check if Inward Approval is required (Excess > 3% or Duplicate Bill No)
+    if (inwardCheck && inwardCheck.requiresApproval) {
+      setApprovalModal(true);
+      return;
+    }
+
     setSaveDialog(true);
+  };
+
+  const handleSubmitApprovalRequest = async () => {
+    try {
+      setApprovalSubmitting(true);
+      const totalPackets = parseInt(form.packets) || 1;
+      const grossKg = parseFloat(grossWeight) || 0;
+      const tareKg = useTareWeight ? (parseFloat(tareWeight) || 0) : 0;
+      const netKg = parseFloat((grossKg - tareKg).toFixed(3));
+      const wppVal = parseFloat(weightPerPiece) || 10;
+      const autoSampleWeight = sampleWeightKg > 0 ? sampleWeightKg : parseFloat(((sampleQty * wppVal) / 1000).toFixed(3));
+      const finalLocation = getCombinedLocationSummary();
+      const barcodeId = `${form.materialCode}-A${String(totalPackets).padStart(2, '0')}`;
+      const reasonStr = (inwardCheck?.reasons || ['Incoming quantity exceeds PO requirement']).join(' | ');
+
+      const newEntry = {
+        id: captures.length + 1,
+        materialCode: form.materialCode,
+        time: now.toTimeString().slice(0, 8),
+        date: now.toLocaleDateString('en-IN'),
+        po: form.poNumber || 'N/A',
+        material: form.materialName,
+        weight: grossWeight,
+        netWeightKg: netKg,
+        wpp: weightPerPiece,
+        sampleQty: sampleQty,
+        sampleWeightKg: autoSampleWeight,
+        pieces,
+        packets: totalPackets,
+        unit: form.unit,
+        barcodeId,
+        invoiceNo: form.invoiceNo || 'N/A',
+        location: finalLocation,
+        operator: form.storeIncharge || currentUser?.name || 'Operator',
+        status: 'Pending Approval',
+        approvalStatus: 'Pending Approval',
+        remarks: `[Awaiting Excess Approval: ${reasonStr}] ${form.remarks || ''}`
+      };
+
+      setCaptures(prev => [newEntry, ...prev]);
+
+      // 1. Save directly into weight_capture table with approvalStatus = 'Pending Approval' (NOT added to stock)
+      const captureRes = await fetch(`${getBackendUrl()}/api/weight-capture`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          materialCode: form.materialCode,
+          materialName: form.materialName,
+          unit: form.unit,
+          category: form.category,
+          supplier: form.supplier,
+          lotNo: form.lotNo,
+          poNumber: form.poNumber,
+          invoiceNo: form.invoiceNo,
+          storeLocation: finalLocation,
+          storeIncharge: form.storeIncharge,
+          grossWeightKg: grossKg,
+          tareWeightKg: tareKg,
+          netWeightKg: netKg,
+          weightPerPieceG: wppVal,
+          sampleQty: sampleQty,
+          sampleWeightKg: autoSampleWeight,
+          pieces: pieces,
+          packets: totalPackets,
+          barcodeId: barcodeId,
+          entryMode: 'Weight Machine',
+          status: 'Pending Approval',
+          approvalStatus: 'Pending Approval',
+          remarks: `[Awaiting Excess Approval: ${reasonStr}] ${form.remarks || ''}`
+        })
+      });
+      const captureData = await captureRes.json();
+      if (captureData.success && captureData.id) {
+        setCaptures(prev => prev.map(item => item.materialCode === newEntry.materialCode ? { ...item, id: captureData.id } : item));
+      }
+
+      // 2. Also submit to approval requests for administrative overview
+      const payload = {
+        id: `INW-${Date.now()}`,
+        type: 'inward_approval',
+        status: 'pending',
+        requesterName: currentUser?.name || form.storeIncharge || 'Store Operator',
+        requesterRole: currentUser?.role || 'Store',
+        date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+        lotId: form.lotNo || form.poNumber || 'N/A',
+        pieces: pieces || 0,
+        personName: form.storeIncharge || currentUser?.name || 'Operator',
+        materialId: form.materialCode,
+        materialName: form.materialName,
+        reason: reasonStr,
+        items: [{
+          captureId: captureData?.id || null,
+          materialCode: form.materialCode,
+          materialName: form.materialName,
+          unit: form.unit,
+          category: form.category,
+          supplier: form.supplier,
+          lotNo: form.lotNo,
+          poNumber: form.poNumber,
+          invoiceNo: form.invoiceNo,
+          poQty: inwardCheck?.orderedQty || inwardCheck?.remainingQty || 0,
+          orderedQty: inwardCheck?.orderedQty || inwardCheck?.remainingQty || 0,
+          remainingQty: inwardCheck?.remainingQty || 0,
+          storeLocation: finalLocation,
+          storeIncharge: form.storeIncharge,
+          grossWeightKg: grossKg,
+          tareWeightKg: tareKg,
+          netWeightKg: netKg,
+          weightPerPieceG: wppVal,
+          sampleQty: parseInt(sampleQty, 10) || 10,
+          sampleWeightKg: autoSampleWeight,
+          pieces: pieces || 0,
+          packets: totalPackets,
+          barcodeId: barcodeId,
+          remarks: form.remarks || ''
+        }]
+      };
+
+      await fetch(`${getBackendUrl()}/api/approval-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const nextNum = nextCodeNum + 1;
+      setNextCodeNum(nextNum);
+      setForm(p => ({ ...p, packets: '', materialCode: `MT${nextNum}` }));
+
+      showToast('⚠️ Excess Inward logged as Pending Approval. Authorization required in PO Verification before adding to inventory!', 'success');
+      setApprovalModal(false);
+      handleClear();
+    } catch (err) {
+      showToast('Failed to submit approval request: ' + err.message, 'error');
+    } finally {
+      setApprovalSubmitting(false);
+    }
   };
 
 
@@ -767,7 +1136,7 @@ export default function WeightCapture({ racks = [] }) {
             <div style={{ width: '32px', height: '32px', background: '#10b981', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '12px' }}>A</div>
             <div>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>Operator</span>
-              <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>Ayush Kumar</span>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>Pooja</span>
             </div>
           </div>
 
@@ -1044,49 +1413,96 @@ export default function WeightCapture({ racks = [] }) {
 
             {/* Control buttons */}
             <div style={{ display: 'flex', gap: '10px', width: '100%' }}>
+              {connected ? (
+                <button
+                  type="button"
+                  onClick={handleDisconnect}
+                  style={{
+                    flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '700',
+                    border: 'none', background: '#ef4444', color: '#ffffff',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  <WifiOff size={14} /> Disconnect Scale
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={mode === 'demo' ? handleStartDemo : handleConnect}
+                  disabled={connecting}
+                  style={{
+                    flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '700',
+                    border: 'none',
+                    background: mode === 'demo' ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : '#3b82f6',
+                    color: '#ffffff',
+                    cursor: connecting ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                    transition: 'all 0.2s', boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                  }}
+                >
+                  {connecting ? 'Connecting...' : (mode === 'demo' ? '⚡ Start Demo Scale' : '🔌 Connect USB Scale')}
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={connected ? handleDisconnect : handleConnect}
+                onClick={() => {
+                  if (mode === 'demo') {
+                    // Switch to physical USB mode
+                    setMode('original');
+                    setConnected(false);
+                    setStable(false);
+                    setLiveWeight('00.000');
+                    showToast('Switched to physical USB Scale mode.');
+                  } else {
+                    // Switch to Demo Mode and auto-start live simulated weight
+                    setMode('demo');
+                    handleStartDemo();
+                  }
+                }}
                 style={{
                   flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '700',
-                  border: 'none', background: connected ? '#ef4444' : '#3b82f6', color: '#ffffff',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                  transition: 'all 0.2s'
+                  border: '1px solid #475569', background: mode === 'demo' ? '#1e293b' : '#334155', color: '#ffffff',
+                  cursor: 'pointer', transition: 'all 0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
                 }}
               >
-                {connected ? 'Disconnect' : 'Connect USB Scale'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode(mode === 'demo' ? 'original' : 'demo')}
-                style={{
-                  flex: 1, padding: '10px 14px', borderRadius: '8px', fontSize: '12px', fontWeight: '700',
-                  border: '1px solid #475569', background: '#334155', color: '#ffffff',
-                  cursor: 'pointer', transition: 'all 0.2s'
-                }}
-              >
-                {mode === 'demo' ? 'Demo Mode' : 'USB Mode'}
+                {mode === 'demo' ? '🎮 Demo Mode (Active)' : '🔌 Switch to Demo Mode'}
               </button>
             </div>
 
             {/* Quick Demo Simulator trigger if in demo mode */}
-            {mode === 'demo' && connected && (
+            {mode === 'demo' && (
               <div style={{ display: 'flex', gap: '6px', marginTop: '14px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                <span style={{ fontSize: '10px', color: '#94a3b8', width: '100%' }}>Simulate Weight Load:</span>
-                {[2, 15, 30.250, 45].map(wt => (
+                <span style={{ fontSize: '10.5px', color: '#94a3b8', width: '100%', fontWeight: '700' }}>Simulate Weight Load:</span>
+                {[
+                  { label: 'Sample (0.100 KG)', wt: 0.100 },
+                  { label: '5 KG', wt: 5.000 },
+                  { label: '15.25 KG', wt: 15.250 },
+                  { label: '30.25 KG', wt: 30.250 },
+                  { label: '50 KG', wt: 50.000 }
+                ].map(item => (
                   <button
-                    key={wt}
+                    key={item.label}
                     type="button"
                     onClick={() => {
-                      setBaseWeight(wt);
-                      setStable(false);
+                      setMode('demo');
+                      setConnected(true);
+                      setBaseWeight(item.wt);
+                      setGrossWeight(item.wt.toFixed(3));
+                      setLiveWeight(item.wt.toFixed(3));
+                      setStable(true);
+                      showToast(`Scale weight set: ${item.wt.toFixed(3)} KG`);
                     }}
                     style={{
-                      padding: '3px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '700',
-                      border: '1px solid #475569', background: '#1e293b', color: '#cbd5e1', cursor: 'pointer'
+                      padding: '4px 8px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700',
+                      border: Math.abs(baseWeight - item.wt) < 0.05 ? '1px solid #10b981' : '1px solid #475569',
+                      background: Math.abs(baseWeight - item.wt) < 0.05 ? 'rgba(16, 185, 129, 0.2)' : '#1e293b',
+                      color: Math.abs(baseWeight - item.wt) < 0.05 ? '#10b981' : '#cbd5e1',
+                      cursor: 'pointer', transition: 'all 0.15s ease'
                     }}
                   >
-                    {wt} KG
+                    {item.label}
                   </button>
                 ))}
               </div>
@@ -1334,9 +1750,98 @@ export default function WeightCapture({ racks = [] }) {
             transform: metadataFlash ? 'scale(1.01)' : 'scale(1)',
             transition: 'all 0.3s ease'
           }}>
-            <h3 style={{ fontSize: '15px', fontWeight: '900', margin: '0 0 18px 0', color: '#0f172a', letterSpacing: '0.2px' }}>
-              Roll / Item Metadata Details
-            </h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: '900', margin: 0, color: '#0f172a', letterSpacing: '0.2px' }}>
+                Roll / Item Metadata Details
+              </h3>
+              {mode === 'demo' && (
+                <button
+                  type="button"
+                  onClick={handleAutoFillDemo}
+                  style={{
+                    padding: '6px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '800',
+                    border: '1px solid #6366f1', background: 'rgba(99, 102, 241, 0.08)', color: '#4f46e5',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.16)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'rgba(99, 102, 241, 0.08)'; }}
+                >
+                  ⚡ Autofill Demo Details
+                </button>
+              )}
+            </div>
+
+            {/* Live PO Requirement, Duplicate Invoice & 3% Tolerance Status Card */}
+            {inwardCheck && (
+              <div style={{
+                marginBottom: '16px',
+                padding: '14px 16px',
+                borderRadius: '10px',
+                background: inwardCheck.requiresApproval
+                  ? 'rgba(239, 68, 68, 0.06)'
+                  : (inwardCheck.poFound ? 'rgba(16, 185, 129, 0.06)' : 'rgba(99, 102, 241, 0.05)'),
+                border: `1.5px solid ${inwardCheck.requiresApproval ? '#ef4444' : (inwardCheck.poFound ? '#10b981' : '#cbd5e1')}`
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      fontSize: '11px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.5px',
+                      color: inwardCheck.requiresApproval ? '#dc2626' : (inwardCheck.poFound ? '#059669' : '#4f46e5')
+                    }}>
+                      {inwardCheck.requiresApproval ? '⚠️ Admin Approval Required' : (inwardCheck.poFound ? '✅ PO Requirement Verified' : 'ℹ️ Inward Pre-Check')}
+                    </span>
+                    {checkingInward && <span style={{ fontSize: '11px', color: '#64748b' }}>Checking database...</span>}
+                  </div>
+                  {inwardCheck.poFound && (
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#475569' }}>
+                      Matched PO #{form.poNumber}
+                    </span>
+                  )}
+                </div>
+
+                {inwardCheck.poFound ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: inwardCheck.reasons?.length ? '10px' : '0' }}>
+                    <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>ORDERED QTY</div>
+                      <div style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>{inwardCheck.orderedQty.toLocaleString()} Pcs</div>
+                    </div>
+                    <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>ALREADY RECEIVED</div>
+                      <div style={{ fontSize: '14px', fontWeight: '800', color: '#059669' }}>{inwardCheck.receivedQty.toLocaleString()} Pcs</div>
+                    </div>
+                    <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>REMAINING NEEDED</div>
+                      <div style={{ fontSize: '14px', fontWeight: '800', color: inwardCheck.remainingQty <= 0 ? '#ef4444' : '#2563eb' }}>
+                        {inwardCheck.remainingQty?.toLocaleString()} Pcs
+                      </div>
+                    </div>
+                    <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>INCOMING SCALE QTY</div>
+                      <div style={{ fontSize: '14px', fontWeight: '800', color: inwardCheck.isExcess ? '#dc2626' : '#0f172a' }}>
+                        {pieces.toLocaleString()} Pcs {inwardCheck.isExcess && `(+${inwardCheck.excessPercent}%)`}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  form.poNumber && (
+                    <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
+                      PO #{form.poNumber} not found in database. Entry will be received as Ad-hoc / New stock.
+                    </div>
+                  )
+                )}
+
+                {inwardCheck.reasons && inwardCheck.reasons.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
+                    {inwardCheck.reasons.map((r, rIdx) => (
+                      <div key={rIdx} style={{ fontSize: '12px', fontWeight: '700', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>⚠️</span> {r}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' }}>
 
@@ -1434,7 +1939,7 @@ export default function WeightCapture({ racks = [] }) {
                   className="wcs-input"
                   value={form.storeIncharge}
                   onChange={setF('storeIncharge')}
-                  placeholder="e.g. Ayush Kumar"
+                  placeholder="e.g. Pooja"
                   style={{ height: '40px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
                 />
               </div>
@@ -1514,14 +2019,168 @@ export default function WeightCapture({ racks = [] }) {
                 style={{ paddingLeft: '36px', height: '38px', width: '220px', fontSize: '13px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}
               />
             </div>
-            <button style={{ border: '1.5px solid #cbd5e1', padding: '8px', borderRadius: '8px', background: '#ffffff', cursor: 'pointer', color: '#475569', display: 'flex', alignItems: 'center' }} title="Filter">
+            <button
+              style={{
+                border: showFilters ? '1.5px solid #3b82f6' : '1.5px solid #cbd5e1',
+                padding: '8px',
+                borderRadius: '8px',
+                background: showFilters ? 'rgba(59, 130, 246, 0.08)' : '#ffffff',
+                cursor: 'pointer',
+                color: showFilters ? '#3b82f6' : '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                transition: 'all 0.2s'
+              }}
+              onClick={() => setShowFilters(!showFilters)}
+              title="Toggle Filters"
+            >
               <Filter size={16} />
             </button>
-            <button style={{ border: '1.5px solid #cbd5e1', padding: '8px', borderRadius: '8px', background: '#ffffff', cursor: 'pointer', color: '#475569', display: 'flex', alignItems: 'center' }} onClick={() => showToast('Export Complete.')} title="Download CSV">
+            <button
+              style={{
+                border: '1.5px solid #cbd5e1',
+                padding: '8px',
+                borderRadius: '8px',
+                background: '#ffffff',
+                cursor: 'pointer',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center',
+                transition: 'all 0.2s'
+              }}
+              onClick={downloadCSV}
+              title="Download CSV"
+            >
               <Download size={16} />
             </button>
           </div>
         </div>
+
+        {/* Collapsible Filter Panel */}
+        {showFilters && (
+          <div style={{
+            background: '#f8fafc',
+            border: '1.5px solid #cbd5e1',
+            borderRadius: '10px',
+            padding: '16px',
+            marginBottom: '20px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            gap: '12px',
+            boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
+          }}>
+            <div>
+              <label className="wcs-label" style={{ fontSize: '11px', color: '#475569', marginBottom: '4px' }}>Category</label>
+              <select
+                className="wcs-input"
+                value={filterCategory}
+                onChange={e => { setFilterCategory(e.target.value); setPage(0); }}
+                style={{ height: '36px', fontSize: '13px', cursor: 'pointer', padding: '6px 10px' }}
+              >
+                <option value="">All Categories</option>
+                {filterOptions.categories.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="wcs-label" style={{ fontSize: '11px', color: '#475569', marginBottom: '4px' }}>PO Number</label>
+              <select
+                className="wcs-input"
+                value={filterPo}
+                onChange={e => { setFilterPo(e.target.value); setPage(0); }}
+                style={{ height: '36px', fontSize: '13px', cursor: 'pointer', padding: '6px 10px' }}
+              >
+                <option value="">All POs</option>
+                {filterOptions.pos.map(po => (
+                  <option key={po} value={po}>{po}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="wcs-label" style={{ fontSize: '11px', color: '#475569', marginBottom: '4px' }}>Location</label>
+              <select
+                className="wcs-input"
+                value={filterLocation}
+                onChange={e => { setFilterLocation(e.target.value); setPage(0); }}
+                style={{ height: '36px', fontSize: '13px', cursor: 'pointer', padding: '6px 10px' }}
+              >
+                <option value="">All Locations</option>
+                {filterOptions.locations.map(loc => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="wcs-label" style={{ fontSize: '11px', color: '#475569', marginBottom: '4px' }}>Operator</label>
+              <select
+                className="wcs-input"
+                value={filterOperator}
+                onChange={e => { setFilterOperator(e.target.value); setPage(0); }}
+                style={{ height: '36px', fontSize: '13px', cursor: 'pointer', padding: '6px 10px' }}
+              >
+                <option value="">All Operators</option>
+                {filterOptions.operators.map(op => (
+                  <option key={op} value={op}>{op}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="wcs-label" style={{ fontSize: '11px', color: '#475569', marginBottom: '4px' }}>Date</label>
+              <input
+                type="date"
+                className="wcs-input"
+                value={filterDate}
+                onChange={e => { setFilterDate(e.target.value); setPage(0); }}
+                style={{ height: '36px', fontSize: '13px', padding: '6px 10px' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterCategory('');
+                  setFilterPo('');
+                  setFilterLocation('');
+                  setFilterOperator('');
+                  setFilterDate('');
+                  setPage(0);
+                }}
+                style={{
+                  height: '36px',
+                  width: '100%',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: '8px',
+                  background: '#ffffff',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = '#fef2f2';
+                  e.currentTarget.style.borderColor = '#fca5a5';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = '#ffffff';
+                  e.currentTarget.style.borderColor = '#cbd5e1';
+                }}
+              >
+                Reset Filters
+              </button>
+            </div>
+          </div>
+        )}
 
         <div style={{ overflowX: 'auto', border: '1.5px solid #e2e8f0', borderRadius: '10px' }}>
           <table style={{ width: '100%', minWidth: '1180px', borderCollapse: 'collapse', textAlign: 'left' }}>
@@ -1537,6 +2196,7 @@ export default function WeightCapture({ racks = [] }) {
                   ['GROSS WEIGHT', 'weight'],
                   ['TOTAL PIECES', 'pieces'],
                   ['LOCATION', 'location'],
+                  ['STATUS', 'status'],
                   ['ACTIONS', null]
                 ].map(([col, field]) => (
                   <th
@@ -1556,7 +2216,7 @@ export default function WeightCapture({ racks = [] }) {
             <tbody>
               {paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No weight logs found in database.</td>
+                  <td colSpan="11" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No weight logs found in database.</td>
                 </tr>
               ) : (
                 paginatedData.map((row, idx) => (
@@ -1659,6 +2319,19 @@ export default function WeightCapture({ racks = [] }) {
                         </div>
                       </td>
 
+                      {/* STATUS (MANUALLY OR WEIGHT MACHINE) */}
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '5px',
+                          padding: '4px 10px', borderRadius: '12px', fontSize: '11.5px', fontWeight: '800',
+                          backgroundColor: (row.status === 'Manually' || row.status === 'Manual' || row.entryMode === 'Manually' || row.entryMode === 'Manual') ? '#eff6ff' : '#f0fdf4',
+                          color: (row.status === 'Manually' || row.status === 'Manual' || row.entryMode === 'Manually' || row.entryMode === 'Manual') ? '#2563eb' : '#059669',
+                          border: `1.5px solid ${(row.status === 'Manually' || row.status === 'Manual' || row.entryMode === 'Manually' || row.entryMode === 'Manual') ? '#bfdbfe' : '#bbf7d0'}`
+                        }}>
+                          {(row.status === 'Manually' || row.status === 'Manual' || row.entryMode === 'Manually' || row.entryMode === 'Manual') ? '📝 Manually' : '⚖️ Weight Machine'}
+                        </span>
+                      </td>
+
                       {/* ACTIONS */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <button
@@ -1679,7 +2352,7 @@ export default function WeightCapture({ racks = [] }) {
                     {/* EXPANDED ROW DETAILS */}
                     {expandedRow === row.id && (
                       <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan="10" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
+                        <td colSpan="11" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
                           <div style={{
                             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px',
                             background: '#ffffff', padding: '16px', borderRadius: '8px', border: '1.5px solid #cbd5e1'
@@ -1997,6 +2670,83 @@ export default function WeightCapture({ racks = [] }) {
               <button className="btn btn-secondary" onClick={() => setSaveDialog(false)} disabled={saving}>Cancel</button>
               <button className="btn btn-success" onClick={handleSave} disabled={saving} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                 {saving ? <div className="Spinner"></div> : <><CheckCircle2 size={16} /> Confirm Save</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── INWARD APPROVAL REQUIRED DIALOG ────────────────────────────── */}
+      {approvalModal && inwardCheck && (
+        <div className="modal-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div className="panel animate-scale" style={{ maxWidth: '520px', width: '100%', margin: '20px', padding: '24px', border: '2px solid #ef4444', borderRadius: '16px' }}>
+            <div className="panel-header" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="panel-title" style={{ margin: 0, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={22} color="#dc2626" /> Admin Approval Required
+              </h3>
+              <button onClick={() => setApprovalModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: '#475569', marginBottom: '16px', lineHeight: '1.5' }}>
+              This material inward cannot be saved directly because it violates one or more procurement safety rules:
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '18px' }}>
+              {inwardCheck.reasons.map((reason, idx) => (
+                <div key={idx} style={{
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  fontSize: '12.5px',
+                  fontWeight: '700',
+                  color: '#991b1b',
+                  display: 'flex',
+                  alignItems: 'start',
+                  gap: '8px'
+                }}>
+                  <span style={{ fontSize: '14px' }}>⚠️</span>
+                  <div>{reason}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ background: 'var(--bg-secondary)', padding: '14px', borderRadius: '8px', marginBottom: '20px', fontSize: '12px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div><span style={{ color: '#64748b' }}>Material:</span> <strong>{form.materialName}</strong></div>
+                <div><span style={{ color: '#64748b' }}>PO Number:</span> <strong>{form.poNumber || 'N/A'}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Supplier:</span> <strong>{form.supplier}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Bill / Invoice:</span> <strong>{form.invoiceNo}</strong></div>
+                <div><span style={{ color: '#64748b' }}>Incoming Quantity:</span> <strong style={{ color: '#2563eb' }}>{pieces.toLocaleString()} Pcs</strong></div>
+                {inwardCheck.poFound && (
+                  <div><span style={{ color: '#64748b' }}>Remaining Required:</span> <strong style={{ color: '#dc2626' }}>{inwardCheck.remainingQty?.toLocaleString()} Pcs</strong></div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              <button className="btn btn-secondary" onClick={() => setApprovalModal(false)} disabled={approvalSubmitting}>Cancel</button>
+
+              {currentUser?.role === 'Admin' && (
+                <button
+                  className="btn btn-warning"
+                  onClick={() => {
+                    setApprovalModal(false);
+                    setSaveDialog(true);
+                  }}
+                  style={{ fontWeight: '800' }}
+                >
+                  ⚡ Admin Override (Save Directly)
+                </button>
+              )}
+
+              <button
+                className="btn btn-primary"
+                onClick={handleSubmitApprovalRequest}
+                disabled={approvalSubmitting}
+                style={{ display: 'flex', gap: '6px', alignItems: 'center', fontWeight: '800' }}
+              >
+                {approvalSubmitting ? <div className="Spinner"></div> : <>📤 Submit to Approval Queue</>}
               </button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import { useState, useEffect } from 'react';
-import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer } from 'lucide-react';
+import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors } from 'lucide-react';
 
 export const getCleanImageUrl = (url) => {
   if (!url) return '';
@@ -236,15 +236,47 @@ const DEFAULT_ACCESSORY_BOM = [
   { name: 'Full Baju', status: 'No', detail: '', description: '', materialId: '' }
 ];
 
+const ALWAYS_REQUIRED_ACCESSORIES = ['Label', 'Tag', 'Dori'];
+
+const createDefaultBomItems = (accList = [], matList = [], currentBrand = '') => {
+  const mergedNames = [...new Set([...ALWAYS_REQUIRED_ACCESSORIES, ...(accList || [])])];
+  const bStr = (currentBrand || '').trim();
+  return mergedNames.map(name => {
+    const isAlwaysReq = ALWAYS_REQUIRED_ACCESSORIES.some(req => req.toLowerCase() === name.toLowerCase());
+    let defaultDesc = isAlwaysReq ? `${name} required` : '';
+    const lower = name.toLowerCase();
+    if (lower === 'label' || lower === 'sticker / label') {
+      defaultDesc = bStr ? `${bStr} Label` : 'Brand label required';
+    } else if (lower === 'tag') {
+      defaultDesc = bStr ? `${bStr} Tag` : 'Hang tag required';
+    } else if (lower.includes('dori')) {
+      defaultDesc = bStr ? `${bStr} Dori` : 'Dori required';
+    }
+    const item = {
+      name,
+      status: isAlwaysReq ? 'Yes' : 'No',
+      detail: isAlwaysReq ? '1' : '',
+      description: defaultDesc,
+      materialId: ''
+    };
+    item.materialId = findMatchingMaterialId(item, matList || []);
+    return item;
+  });
+};
+
 export default function DesignView({
   designs,
   materials,
   onAddDesign,
   currencySymbol = 'R',
   accessoriesList = [],
-  designersList = []
+  designersList = [],
+  onRedirectToTab,
+  prefilledLotNo,
+  setPrefilledLotNo
 }) {
   const [selectedDesignId, setSelectedDesignId] = useState(designs[0]?.id || null);
+  const [printingDesign, setPrintingDesign] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [editingDesignId, setEditingDesignId] = useState(null);
   const [submitStatus, setSubmitStatus] = useState('In Verification');
@@ -253,6 +285,26 @@ export default function DesignView({
   const [filterStatus, setFilterStatus] = useState('all');
   const [imageError, setImageError] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(true);
+
+  // Auto-handle prefilled lot number (from Undesigned Lots / OnlyCutting)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const lotFromUrl = urlParams.get('lot');
+    const targetLot = prefilledLotNo || lotFromUrl;
+
+    if (targetLot) {
+      setIsCreating(true);
+      setEditingDesignId(null);
+      setLotNo(targetLot);
+      // Small timeout to allow state to initialize
+      const timer = setTimeout(() => {
+        handleFetchLotData(targetLot, true);
+      }, 150);
+      if (setPrefilledLotNo) setPrefilledLotNo('');
+      return () => clearTimeout(timer);
+    }
+  }, [prefilledLotNo]);
+
 
   useEffect(() => {
     setImageError(false);
@@ -323,9 +375,27 @@ export default function DesignView({
     : sortedDesigns.filter(d => d.status.toLowerCase().trim() === filterStatus.toLowerCase().trim());
 
   const filteredDesigns = cleanSearchQuery
-    ? statusFiltered.filter(design =>
-        design.id.toLowerCase().includes(cleanSearchQuery)
-      )
+    ? statusFiltered.filter(design => {
+        const id = String(design.id || '').toLowerCase();
+        const lotNo2 = String(design.lotNo2 || '').toLowerCase();
+        const brand = String(design.brand || '').toLowerCase();
+        const style = String(design.style || '').toLowerCase();
+        const category = String(design.category || '').toLowerCase();
+        const fabric = String(design.fabricType || '').toLowerCase();
+        const designer = String(design.designer || '').toLowerCase();
+        const repeatAgainst = String(design.repeat_against || '').toLowerCase();
+
+        return (
+          id.includes(cleanSearchQuery) ||
+          (lotNo2 !== 'n/a' && lotNo2.includes(cleanSearchQuery)) ||
+          brand.includes(cleanSearchQuery) ||
+          style.includes(cleanSearchQuery) ||
+          category.includes(cleanSearchQuery) ||
+          fabric.includes(cleanSearchQuery) ||
+          designer.includes(cleanSearchQuery) ||
+          repeatAgainst.includes(cleanSearchQuery)
+        );
+      })
     : statusFiltered.slice(0, 10);
 
   // Auto-calculate next Lot No for preview in form
@@ -347,6 +417,26 @@ export default function DesignView({
   const [lotNo, setLotNo] = useState('');
   const [lotNo2, setLotNo2] = useState('');
   const [brand, setBrand] = useState('');
+
+  const handleBrandChange = (newBrand) => {
+    setBrand(newBrand);
+    const bStr = newBrand.trim();
+    setBomItems(prevBom =>
+      prevBom.map(item => {
+        const lower = item.name.toLowerCase();
+        if (lower === 'label' || lower === 'sticker / label') {
+          return { ...item, description: bStr ? `${bStr} Label` : 'Brand label required' };
+        }
+        if (lower === 'tag') {
+          return { ...item, description: bStr ? `${bStr} Tag` : 'Hang tag required' };
+        }
+        if (lower.includes('dori')) {
+          return { ...item, description: bStr ? `${bStr} Dori` : 'Dori required' };
+        }
+        return item;
+      })
+    );
+  };
   const [style, setStyle] = useState('');
   const [section, setSection] = useState('Men');
   const [season, setSeason] = useState('Summer');
@@ -362,16 +452,14 @@ export default function DesignView({
   const [fullBaju, setFullBaju] = useState('No');
 
   // New design BOM items state
-  const [bomItems, setBomItems] = useState(() =>
-    accessoriesList.map(name => ({ name, status: 'No', detail: '', description: '', materialId: '' }))
-  );
+  const [bomItems, setBomItems] = useState(() => createDefaultBomItems(accessoriesList, materials));
 
   const [showAddInline, setShowAddInline] = useState(false);
   const [newInlineName, setNewInlineName] = useState('');
   const [accessoryError, setAccessoryError] = useState('');
 
   const handleStartCreating = () => {
-    setBomItems(accessoriesList.map(name => ({ name, status: 'No', detail: '', description: '', materialId: '' })));
+    setBomItems(createDefaultBomItems(accessoriesList, materials));
     setIsCreating(true);
     setEditingDesignId(null);
     setShowAddInline(false);
@@ -413,7 +501,7 @@ export default function DesignView({
     setStyle('');
     setSection('Men');
     setSeason('Summer');
-    setBomItems(accessoriesList.map(name => ({ name, status: 'No', detail: '', description: '', materialId: '' })));
+    setBomItems(createDefaultBomItems(accessoriesList, materials));
   };
 
   const handleEditDraft = (design) => {
@@ -477,6 +565,7 @@ export default function DesignView({
   };
 
   const selectedDesign = designs.find(d => d.id === selectedDesignId) || sortedDesigns[0];
+  const printableDesign = printingDesign || selectedDesign || sortedDesigns[0];
 
 
   // Debounced auto-fetch for Lot No
@@ -600,7 +689,11 @@ export default function DesignView({
         return match ? match[0] : '1';
       };
 
+      const fetchedBrand = (data.brand || '').trim();
       const updatedBom = [
+        { name: 'Label', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Label` : 'Brand label required', materialId: '' },
+        { name: 'Tag', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Tag` : 'Hang tag required', materialId: '' },
+        { name: 'Dori', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Dori` : 'Dori required', materialId: '' },
         { name: 'Zip', status: isZip ? 'Yes' : 'No', detail: isZip ? '1' : '', description: isZip ? 'Zip required' : '', materialId: '' },
         { name: 'Button', status: 'No', detail: '', description: '', materialId: '' },
         { name: 'Elastic', status: isElastic ? 'Yes' : 'No', detail: isElastic ? extractInteger(data.bottomType) : '', description: isElastic ? data.bottomType : '', materialId: '' },
@@ -687,6 +780,7 @@ export default function DesignView({
 
     onAddDesign(newDesign);
     setSelectedDesignId(newDesign.id);
+    setPrintingDesign(newDesign);
 
     // Reset state
     setEditingDesignId(null);
@@ -708,7 +802,7 @@ export default function DesignView({
     setCollar('No');
     setBone('No');
     setFullBaju('No');
-    setBomItems(accessoriesList.map(name => ({ name, status: 'No', detail: '', description: '', materialId: '' })));
+    setBomItems(createDefaultBomItems(accessoriesList, materials));
     setImageUrl('');
     setLastFetchedLotNo('');
     setIsCreating(false);
@@ -725,14 +819,25 @@ export default function DesignView({
   return (
     <div className="animate-fade">
       {/* Title Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>Garment Design</h2>
-        {!isCreating && (
-          <button className="btn btn-primary" onClick={handleStartCreating}>
-            <PlusCircle size={16} />
-            Create Design Request
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
+        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700', margin: 0 }}>Garment Design</h2>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => onRedirectToTab ? onRedirectToTab('only_cutting') : (window.location.href = '/only-cutting')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Scissors size={15} />
+            <span>Only Cutting</span>
           </button>
-        )}
+          {!isCreating && (
+            <button className="btn btn-primary" onClick={handleStartCreating}>
+              <PlusCircle size={16} />
+              <span>Create Design Request</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {isCreating ? (
@@ -778,6 +883,16 @@ export default function DesignView({
                 >
                   <Database size={14} />
                   {isFetching ? 'Fetching...' : 'Fetch Sheet'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => onRedirectToTab ? onRedirectToTab('only_cutting') : (window.location.href = '/only-cutting')}
+                  title="Browse Undesigned Cutting Lots"
+                  style={{ padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', height: '38px', whiteSpace: 'nowrap' }}
+                >
+                  <Scissors size={14} />
+                  <span>Browse Lots</span>
                 </button>
               </div>
             </div>
@@ -851,7 +966,7 @@ export default function DesignView({
                   className="form-input"
                   placeholder="e.g. Zara, Nike, Adidas, custom"
                   value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
+                  onChange={(e) => handleBrandChange(e.target.value)}
                 />
               </div>
             </div>
@@ -896,19 +1011,22 @@ export default function DesignView({
 
               <div className="form-group">
                 <label className="form-label">Designer In-charge</label>
-                <select
+                <input
+                  type="text"
+                  list="designer-suggestions"
                   className="form-input"
+                  placeholder="e.g. Admin or enter designer name"
                   value={designer}
                   onChange={(e) => setDesigner(e.target.value)}
-                >
-                  {designersList.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                  {/* Fallback if current designer is not in the list */}
-                  {designer && !designersList.includes(designer) && (
-                    <option value={designer}>{designer}</option>
-                  )}
-                </select>
+                />
+                <datalist id="designer-suggestions">
+                  <option value="Admin" />
+                  {designersList
+                    .filter(name => !['sarah connor', 'michael scott'].includes(name.toLowerCase()))
+                    .map(name => (
+                      <option key={name} value={name} />
+                    ))}
+                </datalist>
               </div>
             </div>
 
@@ -1169,7 +1287,7 @@ export default function DesignView({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Search Lot No / Design ID..."
+                  placeholder="Search by Lot No, Brand, Style code, Category..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{ paddingLeft: '36px', height: '38px', fontSize: '13.5px' }}
@@ -1313,7 +1431,7 @@ export default function DesignView({
                 ))
               ) : (
                 <div style={{ padding: '24px', gridColumn: '1 / -1', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No designs found matching lot number.
+                  No designs found matching search criteria.
                 </div>
               )}
             </div>
@@ -1345,6 +1463,7 @@ export default function DesignView({
                       type="button"
                       className="btn btn-secondary btn-sm print-hide"
                       onClick={() => {
+                        setPrintingDesign(selectedDesign);
                         document.body.classList.add('print-techpack-mode');
                         window.print();
                       }}
@@ -1514,6 +1633,27 @@ export default function DesignView({
                     </span>
                   </div>
                   <div className="spec-item">
+                    <span className="spec-label">Label</span>
+                    <span className="spec-value" style={{
+                      fontWeight: '600',
+                      color: selectedDesign.bom?.find(b => b.name.toLowerCase() === 'label')?.status === 'Yes' ? 'var(--accent-color)' : 'var(--text-muted)'
+                    }}>{selectedDesign.bom?.find(b => b.name.toLowerCase() === 'label')?.status || 'Yes'}</span>
+                  </div>
+                  <div className="spec-item">
+                    <span className="spec-label">Tag</span>
+                    <span className="spec-value" style={{
+                      fontWeight: '600',
+                      color: selectedDesign.bom?.find(b => b.name.toLowerCase() === 'tag')?.status === 'Yes' ? 'var(--accent-color)' : 'var(--text-muted)'
+                    }}>{selectedDesign.bom?.find(b => b.name.toLowerCase() === 'tag')?.status || 'Yes'}</span>
+                  </div>
+                  <div className="spec-item">
+                    <span className="spec-label">Dori / Drawstring</span>
+                    <span className="spec-value" style={{
+                      fontWeight: '600',
+                      color: (selectedDesign.bom?.find(b => b.name.toLowerCase().includes('dori'))?.status === 'Yes' || selectedDesign.bom?.find(b => b.name.toLowerCase().includes('drawstring'))?.status === 'Yes') ? 'var(--accent-color)' : 'var(--text-muted)'
+                    }}>{selectedDesign.bom?.find(b => b.name.toLowerCase().includes('dori'))?.status || selectedDesign.bom?.find(b => b.name.toLowerCase().includes('drawstring'))?.status || 'Yes'}</span>
+                  </div>
+                  <div className="spec-item">
                     <span className="spec-label">Tape/Lace</span>
                     <span className="spec-value" style={{
                       fontWeight: '600',
@@ -1611,167 +1751,181 @@ export default function DesignView({
                   </div>
                 </div>
               </div>
-
-              {/* 2. PRINT-ONLY LAYOUT (Matches hand-drawn mockup exactly) */}
-              <div className="print-layout-container print-only-element">
-                <div className="print-header">
-                  <h2>Fashion Customization</h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-                    <div className="lot-badge">LOT NO: {selectedDesign.id}</div>
-                    {selectedDesign.repeat_against && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(90deg, #fef3c7, #fde68a)', border: '1.5px solid #f59e0b', borderRadius: '6px', padding: '4px 12px' }}>
-                        <span style={{ fontSize: '13px' }}>🔄</span>
-                        <span style={{ fontWeight: '900', fontSize: '10px', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Repeat Against Lot</span>
-                        <span style={{ fontWeight: '900', fontSize: '14px', color: '#b45309', letterSpacing: '1px' }}>#{selectedDesign.repeat_against}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="print-columns">
-                  {/* Left Column: Image */}
-                  <div className="print-image-col">
-                    {selectedDesign.imageUrl ? (
-                      <img
-                        src={getCleanImageUrl(selectedDesign.imageUrl)}
-                        alt={`Lot ${selectedDesign.id} design visual`}
-                      />
-                    ) : (
-                      <GarmentSketch category={selectedDesign.category} color={selectedDesign.colorCode} />
-                    )}
-                  </div>
-
-                  {/* Right Column: Accessories Detail */}
-                  <div className="print-accessories-col">
-                    <h3>Accessories Detail</h3>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {selectedDesign.bom && selectedDesign.bom.filter(item => String(item.status).toLowerCase() === 'yes').map((item, idx) => {
-                        const matchedMat = materials.find(m => m.id === item.materialId);
-                        return (
-                          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #cccccc', paddingBottom: '4px', fontSize: '13px' }}>
-                            <span style={{ fontWeight: '700' }}>
-                              {item.name} {item.detail && `(Qty: ${item.detail})`}
-                              {matchedMat && <span style={{ fontWeight: 'normal', color: 'var(--text-muted)', marginLeft: '6px' }}>[Map: {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' && `(${matchedMat.color})`}]</span>}
-                            </span>
-                            <span style={{ color: '#333333', fontWeight: '500' }}>{item.description || 'Required'}</span>
-                          </div>
-                        );
-                      })}
-                      {(!selectedDesign.bom || selectedDesign.bom.filter(item => String(item.status).toLowerCase() === 'yes').length === 0) && (
-                        <div style={{ color: '#888888', fontSize: '13px', fontStyle: 'italic', textAlign: 'center', marginTop: '20px' }}>
-                          No accessories required
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bottom Details Section */}
-                <div className="print-details-section">
-                  <div className="print-details-grid">
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Lot no</span>
-                      <span className="print-detail-value">{selectedDesign.id}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Secondary Lot</span>
-                      <span className="print-detail-value">{selectedDesign.lotNo2 || '—'}</span>
-                    </div>
-
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Brand</span>
-                      <span className="print-detail-value">{selectedDesign.brand || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Style</span>
-                      <span className="print-detail-value">{selectedDesign.style || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Section</span>
-                      <span className="print-detail-value">{selectedDesign.section || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Season</span>
-                      <span className="print-detail-value">{selectedDesign.season || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Designer</span>
-                      <span className="print-detail-value">{selectedDesign.designer || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Category</span>
-                      <span className="print-detail-value">{selectedDesign.category || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Primary Fabric</span>
-                      <span className="print-detail-value">{selectedDesign.fabricType || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Sizes</span>
-                      <span className="print-detail-value">{selectedDesign.targetSizes || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Status</span>
-                      <span className="print-detail-value">{selectedDesign.status || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Tape / Lace</span>
-                      <span className="print-detail-value">{selectedDesign.tapeLace || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Bottom Type</span>
-                      <span className="print-detail-value">{selectedDesign.bottomType || '—'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Zip</span>
-                      <span className="print-detail-value">{selectedDesign.zip || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Sticker</span>
-                      <span className="print-detail-value">{selectedDesign.sticker || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Button</span>
-                      <span className="print-detail-value">{selectedDesign.bom?.find(b => b.name.toLowerCase() === 'button')?.status || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Collar</span>
-                      <span className="print-detail-value">{selectedDesign.collar || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Bone</span>
-                      <span className="print-detail-value">{selectedDesign.bone || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Full Baju</span>
-                      <span className="print-detail-value">{selectedDesign.fullBaju || 'No'}</span>
-                    </div>
-                    <div className="print-detail-item">
-                      <span className="print-detail-label">Date Created</span>
-                      <span className="print-detail-value">{selectedDesign.date || '—'}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Signatures Section */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginTop: '55px',
-                  padding: '0 20px'
-                }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '220px' }}>
-                    <div style={{ borderBottom: '1.5px solid #000000', height: '40px' }}></div>
-                    <span style={{ fontWeight: '700', textAlign: 'center', marginTop: '6px', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em', color: '#000000' }}>Designer Sign</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', width: '220px' }}>
-                    <div style={{ borderBottom: '1.5px solid #000000', height: '40px' }}></div>
-                    <span style={{ fontWeight: '700', textAlign: 'center', marginTop: '6px', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em', color: '#000000' }}>Authority Sign</span>
-                  </div>
-                </div>
-              </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* 2. PRINT-ONLY LAYOUT (Always rendered at root level so print view never breaks) */}
+      {printableDesign && (
+        <div className="print-layout-container print-only-element">
+          <div className="print-header">
+            <h2>Fashion Customization</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+              <div className="lot-badge">LOT NO: {printableDesign.id}</div>
+              {printableDesign.repeat_against && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'linear-gradient(90deg, #fef3c7, #fde68a)', border: '1.5px solid #f59e0b', borderRadius: '6px', padding: '4px 12px' }}>
+                  <span style={{ fontSize: '13px' }}>🔄</span>
+                  <span style={{ fontWeight: '900', fontSize: '10px', color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Repeat Against Lot</span>
+                  <span style={{ fontWeight: '900', fontSize: '14px', color: '#b45309', letterSpacing: '1px' }}>#{printableDesign.repeat_against}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="print-columns">
+            {/* Left Column: Image */}
+            <div className="print-image-col">
+              {printableDesign.imageUrl ? (
+                <img
+                  src={getCleanImageUrl(printableDesign.imageUrl)}
+                  alt={`Lot ${printableDesign.id} design visual`}
+                />
+              ) : (
+                <GarmentSketch category={printableDesign.category} color={printableDesign.colorCode} />
+              )}
+            </div>
+
+            {/* Right Column: Accessories Detail */}
+            <div className="print-accessories-col">
+              <h3>Accessories Detail</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {printableDesign.bom && printableDesign.bom.filter(item => String(item.status).toLowerCase() === 'yes').map((item, idx) => {
+                  const matchedMat = materials.find(m => m.id === item.materialId);
+                  return (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px dashed #cccccc', paddingBottom: '4px', fontSize: '13px' }}>
+                      <span style={{ fontWeight: '700' }}>
+                        {item.name} {item.detail && `(Qty: ${item.detail})`}
+                        {matchedMat && <span style={{ fontWeight: 'normal', color: 'var(--text-muted)', marginLeft: '6px' }}>[Map: {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' && `(${matchedMat.color})`}]</span>}
+                      </span>
+                      <span style={{ color: '#333333', fontWeight: '500' }}>{item.description || 'Required'}</span>
+                    </div>
+                  );
+                })}
+                {(!printableDesign.bom || printableDesign.bom.filter(item => String(item.status).toLowerCase() === 'yes').length === 0) && (
+                  <div style={{ color: '#888888', fontSize: '13px', fontStyle: 'italic', textAlign: 'center', marginTop: '20px' }}>
+                    No accessories required
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Details Section */}
+          <div className="print-details-section">
+            <div className="print-details-grid">
+              <div className="print-detail-item">
+                <span className="print-detail-label">Lot no</span>
+                <span className="print-detail-value">{printableDesign.id}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Secondary Lot</span>
+                <span className="print-detail-value">{printableDesign.lotNo2 || '—'}</span>
+              </div>
+
+              <div className="print-detail-item">
+                <span className="print-detail-label">Brand</span>
+                <span className="print-detail-value">{printableDesign.brand || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Style</span>
+                <span className="print-detail-value">{printableDesign.style || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Section</span>
+                <span className="print-detail-value">{printableDesign.section || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Season</span>
+                <span className="print-detail-value">{printableDesign.season || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Designer</span>
+                <span className="print-detail-value">{printableDesign.designer || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Category</span>
+                <span className="print-detail-value">{printableDesign.category || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Primary Fabric</span>
+                <span className="print-detail-value">{printableDesign.fabricType || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Sizes</span>
+                <span className="print-detail-value">{printableDesign.targetSizes || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Status</span>
+                <span className="print-detail-value">{printableDesign.status || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Label</span>
+                <span className="print-detail-value">{printableDesign.bom?.find(b => b.name.toLowerCase() === 'label')?.status || 'Yes'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Tag</span>
+                <span className="print-detail-value">{printableDesign.bom?.find(b => b.name.toLowerCase() === 'tag')?.status || 'Yes'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Dori</span>
+                <span className="print-detail-value">{printableDesign.bom?.find(b => b.name.toLowerCase().includes('dori'))?.status || printableDesign.bom?.find(b => b.name.toLowerCase().includes('drawstring'))?.status || 'Yes'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Tape / Lace</span>
+                <span className="print-detail-value">{printableDesign.tapeLace || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Bottom Type</span>
+                <span className="print-detail-value">{printableDesign.bottomType || '—'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Zip</span>
+                <span className="print-detail-value">{printableDesign.zip || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Sticker</span>
+                <span className="print-detail-value">{printableDesign.sticker || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Button</span>
+                <span className="print-detail-value">{printableDesign.bom?.find(b => b.name.toLowerCase() === 'button')?.status || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Collar</span>
+                <span className="print-detail-value">{printableDesign.collar || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Bone</span>
+                <span className="print-detail-value">{printableDesign.bone || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Full Baju</span>
+                <span className="print-detail-value">{printableDesign.fullBaju || 'No'}</span>
+              </div>
+              <div className="print-detail-item">
+                <span className="print-detail-label">Date Created</span>
+                <span className="print-detail-value">{printableDesign.date || '—'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Signatures Section */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            marginTop: '55px',
+            padding: '0 20px'
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', width: '220px' }}>
+              <div style={{ borderBottom: '1.5px solid #000000', height: '40px' }}></div>
+              <span style={{ fontWeight: '700', textAlign: 'center', marginTop: '6px', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em', color: '#000000' }}>Designer Sign</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', width: '220px' }}>
+              <div style={{ borderBottom: '1.5px solid #000000', height: '40px' }}></div>
+              <span style={{ fontWeight: '700', textAlign: 'center', marginTop: '6px', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em', color: '#000000' }}>Authority Sign</span>
+            </div>
+          </div>
         </div>
       )}
     </div>

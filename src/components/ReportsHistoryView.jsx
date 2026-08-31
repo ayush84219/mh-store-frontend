@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { getBackendUrl } from '../utils/api';
 import { 
   TrendingUp, FileText, Calendar, DollarSign, Download, Printer, ClipboardList, 
-  Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers
+  Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
+  Scissors, AlertCircle, ExternalLink, RefreshCw
 } from 'lucide-react';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
@@ -130,47 +131,76 @@ export default function ReportsHistoryView({
   const [ptSearchQuery, setPtSearchQuery] = useState('');
   const [ptTypeFilter, setPtTypeFilter] = useState('all');
   const [ptStatusFilter, setPtStatusFilter] = useState('all');
+  const [ptMaterialFilter, setPtMaterialFilter] = useState('all');
   const [ptDateFilter, setPtDateFilter] = useState('all');
   const [ptSort, setPtSort] = useState('latest');
 
-  // Load audit data based on tab selection
+  // Undesigned Cutting Lots Report states
+  const [undesignedLots, setUndesignedLots] = useState([]);
+  const [loadingUndesigned, setLoadingUndesigned] = useState(false);
+  const [undesignedSearch, setUndesignedSearch] = useState('');
+  const [undesignedFabricFilter, setUndesignedFabricFilter] = useState('all');
+  const [undesignedSort, setUndesignedSort] = useState('latest');
+
+  // Auto-select first design lot if available
   useEffect(() => {
-    if (activeReportTab === 'designer_audits' || activeReportTab === 'po_tracking') {
-      fetch(`${getBackendUrl()}/api/design-history`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setDesignHistory(data))
-        .catch(err => console.error('Error fetching design history:', err));
+    if (!selectedLotId && designs.length > 0) {
+      setSelectedLotId(designs[0].id);
+    }
+  }, [designs, selectedLotId]);
 
-      fetch(`${getBackendUrl()}/api/zip-orders`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setZipOrders(data))
-        .catch(err => console.error('Error fetching zip orders:', err));
+  // Load audit data on mount and tab changes
+  useEffect(() => {
+    const backendUrl = getBackendUrl();
 
-      fetch(`${getBackendUrl()}/api/doori-orders`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setDooriOrders(data))
-        .catch(err => console.error('Error fetching doori orders:', err));
+    // Fetch design history
+    fetch(`${backendUrl}/api/design-history`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setDesignHistory(data))
+      .catch(err => console.error('Error fetching design history:', err));
 
-      fetch(`${getBackendUrl()}/api/scans`)
+    // Fetch zip orders
+    fetch(`${backendUrl}/api/zip-orders`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setZipOrders(data))
+      .catch(err => console.error('Error fetching zip orders:', err));
+
+    // Fetch doori orders
+    fetch(`${backendUrl}/api/doori-orders`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setDooriOrders(data))
+      .catch(err => console.error('Error fetching doori orders:', err));
+
+    // Fetch scans
+    fetch(`${backendUrl}/api/scans`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setScans(data))
+      .catch(err => console.error('Error fetching scans:', err));
+
+    // Fetch transfers
+    fetch(`${backendUrl}/api/transfers`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setTransfers(data))
+      .catch(err => console.error('Error fetching transfers:', err));
+
+    // Fetch weight captures
+    fetch(`${backendUrl}/api/weight-capture`)
+      .then(res => res.ok ? res.json() : { success: false, data: [] })
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+          setWeightCaptures(data.data);
+        }
+      })
+      .catch(err => console.error('Error fetching weight captures:', err));
+
+    // Fetch undesigned lots
+    if (activeReportTab === 'undesigned_lots') {
+      setLoadingUndesigned(true);
+      fetch(`${backendUrl}/api/reports/undesigned-cutting-lots`)
         .then(res => res.ok ? res.json() : [])
-        .then(data => setScans(data))
-        .catch(err => console.error('Error fetching scans:', err));
-    } else if (activeReportTab === 'store_audits') {
-      // Fetch transfers
-      fetch(`${getBackendUrl()}/api/transfers`)
-        .then(res => res.ok ? res.json() : [])
-        .then(data => setTransfers(data))
-        .catch(err => console.error('Error fetching transfers:', err));
-      
-      // Fetch weight captures
-      fetch(`${getBackendUrl()}/api/weight-capture`)
-        .then(res => res.ok ? res.json() : { success: false, data: [] })
-        .then(data => {
-          if (data.success && Array.isArray(data.data)) {
-            setWeightCaptures(data.data);
-          }
-        })
-        .catch(err => console.error('Error fetching weight captures:', err));
+        .then(data => setUndesignedLots(data))
+        .catch(err => console.error('Error fetching undesigned lots:', err))
+        .finally(() => setLoadingUndesigned(false));
     }
   }, [activeReportTab]);
 
@@ -366,7 +396,17 @@ export default function ReportsHistoryView({
 
     // 1. Normal POs
     (pos || []).forEach(po => {
-      const reqQty = po.items ? po.items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0) : 0;
+      let poMaterials = [];
+      if (po.items) {
+        try {
+          const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+          if (Array.isArray(itms)) {
+            poMaterials = itms.map(i => (i.name || i.description || i.item || '').trim()).filter(Boolean);
+          }
+        } catch (_) {}
+      }
+
+      const reqQty = po.items ? (typeof po.items === 'string' ? JSON.parse(po.items || '[]') : po.items).reduce((sum, item) => sum + (Number(item.qty) || 0), 0) : 0;
       const recQty = getReceivedQty(po.lotId || po.poNumber);
       
       const gateScan = findScan(po.lotId || po.poNumber, 'gate_entry');
@@ -380,6 +420,7 @@ export default function ReportsHistoryView({
         supplier: po.vendorName || '—',
         requestedQty: reqQty,
         receivedQty: recQty,
+        materials: poMaterials,
         gatePerson: gateScan ? gateScan.person_name : (po.gatePerson || '—'),
         gateDate: gateScan ? new Date(gateScan.scanned_at).toLocaleDateString() : (po.gateDate || '—'),
         receiver: recScan ? recScan.person_name : (po.receivedBy || '—'),
@@ -403,6 +444,7 @@ export default function ReportsHistoryView({
         supplier: z.Supplier_Name || '—',
         requestedQty: reqQty,
         receivedQty: recQty,
+        materials: ['Zipper', z.ch_fabric, z.Style].filter(Boolean),
         gatePerson: gateScan ? gateScan.person_name : (z.Gate_Entry_Person || '—'),
         gateDate: gateScan ? new Date(gateScan.scanned_at).toLocaleDateString() : (z.Gate_Entry_Date || '—'),
         receiver: recScan ? recScan.person_name : (z.Material_Received_By || '—'),
@@ -426,6 +468,7 @@ export default function ReportsHistoryView({
         supplier: d.Supplier_Name || '—',
         requestedQty: reqQty,
         receivedQty: recQty,
+        materials: ['Doori / Drawstring', d.ch_fabric, d.Style].filter(Boolean),
         gatePerson: gateScan ? gateScan.person_name : (d.Gate_Entry_Person || '—'),
         gateDate: gateScan ? new Date(gateScan.scanned_at).toLocaleDateString() : (d.Gate_Entry_Date || '—'),
         receiver: recScan ? recScan.person_name : (d.Material_Received_By || '—'),
@@ -443,10 +486,14 @@ export default function ReportsHistoryView({
           qty: 0,
           supplier: s.supplier_name,
           person: s.person_name,
-          date: s.scanned_at
+          date: s.scanned_at,
+          materials: []
         };
       }
       rgpGroup[key].qty += (Number(s.quantity) || 0);
+      if (s.material_name && !rgpGroup[key].materials.includes(s.material_name)) {
+        rgpGroup[key].materials.push(s.material_name);
+      }
     });
 
     Object.keys(rgpGroup).forEach(lotNo => {
@@ -465,6 +512,7 @@ export default function ReportsHistoryView({
         supplier: group.supplier || '—',
         requestedQty: group.qty, // Sent out
         receivedQty: recQty, // Returned back
+        materials: group.materials.length > 0 ? group.materials : ['Fabric / Trim'],
         gatePerson: group.person || '—', // Dispatcher
         gateDate: new Date(group.date).toLocaleDateString(), // Dispatch date
         receiver: returnScan ? returnScan.person_name : '—', // Receiver back
@@ -474,6 +522,20 @@ export default function ReportsHistoryView({
 
     return list;
   };
+
+  // Extract unique materials across all PO tracking items
+  const uniquePtMaterials = React.useMemo(() => {
+    const list = getPoTrackingList();
+    const set = new Set();
+    list.forEach(item => {
+      if (Array.isArray(item.materials)) {
+        item.materials.forEach(m => {
+          if (m && String(m).trim()) set.add(String(m).trim());
+        });
+      }
+    });
+    return Array.from(set).sort();
+  }, [pos, zipOrders, dooriOrders, scans, weightCaptures]);
 
   // Filtered Sourcing & PO Tracking
   const filteredPtList = sortByDate(
@@ -485,7 +547,8 @@ export default function ReportsHistoryView({
         String(item.lotId).toLowerCase().includes(query) ||
         (item.supplier || '').toLowerCase().includes(query) ||
         (item.gatePerson || '').toLowerCase().includes(query) ||
-        (item.receiver || '').toLowerCase().includes(query)
+        (item.receiver || '').toLowerCase().includes(query) ||
+        (Array.isArray(item.materials) && item.materials.some(m => String(m).toLowerCase().includes(query)))
       );
 
       // 2. Type Filter
@@ -502,11 +565,16 @@ export default function ReportsHistoryView({
 
       const matchesStatus = ptStatusFilter === 'all' || status === ptStatusFilter;
 
-      // 4. Date Filter
+      // 4. Material Filter
+      const matchesMaterial = ptMaterialFilter === 'all' || (
+        Array.isArray(item.materials) && item.materials.some(m => String(m).toLowerCase() === ptMaterialFilter.toLowerCase())
+      );
+
+      // 5. Date Filter
       const dateToCheck = item.receivedDate !== '—' ? item.receivedDate : item.gateDate;
       const matchesDate = ptDateFilter === 'all' || applyDateFilter(dateToCheck, ptDateFilter);
 
-      return matchesSearch && matchesType && matchesStatus && matchesDate;
+      return matchesSearch && matchesType && matchesStatus && matchesMaterial && matchesDate;
     }),
     'receivedDate',
     ptSort
@@ -623,6 +691,27 @@ export default function ReportsHistoryView({
         >
           <Truck size={14} />
           <span>PO Sourcing Tracking</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('undesigned_lots')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '600',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'undesigned_lots' ? 'var(--accent-color)' : 'transparent',
+            color: activeReportTab === 'undesigned_lots' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <Scissors size={14} />
+          <span>Undesigned Cutting Lots ({undesignedLots.length || 0})</span>
         </button>
       </div>
 
@@ -1378,6 +1467,16 @@ export default function ReportsHistoryView({
                 <option value="pending">Pending</option>
               </select>
               <select
+                value={ptMaterialFilter}
+                onChange={(e) => setPtMaterialFilter(e.target.value)}
+                style={styles.select}
+              >
+                <option value="all">🧵 All Materials</option>
+                {uniquePtMaterials.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <select
                 value={ptDateFilter}
                 onChange={(e) => setPtDateFilter(e.target.value)}
                 style={styles.select}
@@ -1395,10 +1494,10 @@ export default function ReportsHistoryView({
                 <option value="latest">⬇ Latest First</option>
                 <option value="oldest">⬆ Oldest First</option>
               </select>
-              {(ptSearchQuery || ptTypeFilter !== 'all' || ptStatusFilter !== 'all' || ptDateFilter !== 'all' || ptSort !== 'latest') && (
+              {(ptSearchQuery || ptTypeFilter !== 'all' || ptStatusFilter !== 'all' || ptMaterialFilter !== 'all' || ptDateFilter !== 'all' || ptSort !== 'latest') && (
                 <button
                   className="btn btn-secondary btn-sm"
-                  onClick={() => { setPtSearchQuery(''); setPtTypeFilter('all'); setPtStatusFilter('all'); setPtDateFilter('all'); setPtSort('latest'); }}
+                  onClick={() => { setPtSearchQuery(''); setPtTypeFilter('all'); setPtStatusFilter('all'); setPtMaterialFilter('all'); setPtDateFilter('all'); setPtSort('latest'); }}
                   style={{ ...styles.btn, padding: '0 12px' }}
                 >
                   Reset
@@ -1853,6 +1952,293 @@ export default function ReportsHistoryView({
           </div>
         </div>
       )}
+
+      {/* ── 5. UNDESIGNED CUTTING LOTS REPORT ── */}
+      {activeReportTab === 'undesigned_lots' && (
+        <div className="animate-scale">
+          {/* Header Summary Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '20px' }}>
+            <div className="card" style={{ padding: '16px', borderLeft: '4px solid var(--accent-color)', backgroundColor: 'var(--bg-secondary)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Lots Pending Design</span>
+              <h3 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>
+                {undesignedLots.length}
+              </h3>
+            </div>
+            <div className="card" style={{ padding: '16px', borderLeft: '4px solid #10b981', backgroundColor: 'var(--bg-secondary)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Total Cutting Pieces</span>
+              <h3 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: '800', color: '#10b981' }}>
+                {undesignedLots.reduce((sum, l) => sum + (parseInt(l.Cutting_Qty) || 0), 0).toLocaleString()}
+              </h3>
+            </div>
+            <div className="card" style={{ padding: '16px', borderLeft: '4px solid #f59e0b', backgroundColor: 'var(--bg-secondary)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Unique Fabrics</span>
+              <h3 style={{ margin: '6px 0 0 0', fontSize: '24px', fontWeight: '800', color: '#f59e0b' }}>
+                {new Set(undesignedLots.map(l => (l.Fabric || '').trim()).filter(Boolean)).size}
+              </h3>
+            </div>
+          </div>
+
+          {/* Filter and Search Bar */}
+          <div className="panel print-hide" style={{ marginBottom: '20px', padding: '16px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: '12px', flex: '1 1 300px', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', flex: '1 1 200px' }}>
+                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search Lot Number, Style, Fabric, Party..."
+                    style={{ paddingLeft: '36px', width: '100%', height: '38px' }}
+                    value={undesignedSearch}
+                    onChange={(e) => setUndesignedSearch(e.target.value)}
+                  />
+                </div>
+                <select
+                  className="form-input"
+                  style={{ height: '38px', minWidth: '160px' }}
+                  value={undesignedFabricFilter}
+                  onChange={(e) => setUndesignedFabricFilter(e.target.value)}
+                >
+                  <option value="all">All Fabrics</option>
+                  {Array.from(new Set(undesignedLots.map(l => (l.Fabric || '').trim()).filter(Boolean))).slice(0, 30).map(f => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+                <select
+                  className="form-input"
+                  style={{ height: '38px', minWidth: '140px' }}
+                  value={undesignedSort}
+                  onChange={(e) => setUndesignedSort(e.target.value)}
+                >
+                  <option value="latest">Latest First</option>
+                  <option value="oldest">Oldest First</option>
+                  <option value="qty_desc">Highest Qty</option>
+                  <option value="qty_asc">Lowest Qty</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px' }}
+                  onClick={() => {
+                    setLoadingUndesigned(true);
+                    fetch(`${getBackendUrl()}/api/reports/undesigned-cutting-lots`)
+                      .then(res => res.ok ? res.json() : [])
+                      .then(data => setUndesignedLots(data))
+                      .finally(() => setLoadingUndesigned(false));
+                  }}
+                >
+                  <RefreshCw size={14} />
+                  <span>Refresh</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px' }}
+                  onClick={() => {
+                    const csvContent = "data:text/csv;charset=utf-8," + 
+                      ["Lot Number,Fabric,Garment Type,Style,Shades,Sizes,Cutting Qty,Date,Supervisor"]
+                      .concat(undesignedLots.map(l => 
+                        `"${l.Lot_Number}","${l.Fabric || ''}","${l.Garment_Type || ''}","${l.Style || ''}","${(l.Shades || '').replace(/"/g, '""')}","${l.Sizes || ''}","${l.Cutting_Qty || 0}","${l.Date_of_Issue || ''}","${l.Supervisor || ''}"`
+                      )).join("\n");
+                    const encodedUri = encodeURI(csvContent);
+                    const link = document.createElement("a");
+                    link.setAttribute("href", encodedUri);
+                    link.setAttribute("download", `undesigned_cutting_lots_${new Date().toISOString().slice(0,10)}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                  }}
+                >
+                  <Download size={14} />
+                  <span>Export CSV</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Undesigned Lots Table */}
+          <div className="panel" style={{ overflowX: 'auto', padding: 0 }}>
+            {loadingUndesigned ? (
+              <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px auto' }} />
+                <p>Loading undesigned cutting lots...</p>
+              </div>
+            ) : (
+              (() => {
+                const filtered = undesignedLots.filter(l => {
+                  const q = undesignedSearch.toLowerCase().trim();
+                  const matchesSearch = !q || 
+                    String(l.Lot_Number || '').toLowerCase().includes(q) ||
+                    String(l.Fabric || '').toLowerCase().includes(q) ||
+                    String(l.Style || '').toLowerCase().includes(q) ||
+                    String(l.Party_Name || '').toLowerCase().includes(q) ||
+                    String(l.Garment_Type || '').toLowerCase().includes(q);
+
+                  const matchesFabric = undesignedFabricFilter === 'all' || 
+                    String(l.Fabric || '').toLowerCase().trim() === undesignedFabricFilter.toLowerCase().trim();
+
+                  return matchesSearch && matchesFabric;
+                }).sort((a, b) => {
+                  if (undesignedSort === 'latest') return Number(b.id) - Number(a.id);
+                  if (undesignedSort === 'oldest') return Number(a.id) - Number(b.id);
+                  if (undesignedSort === 'qty_desc') return (Number(b.Cutting_Qty) || 0) - (Number(a.Cutting_Qty) || 0);
+                  if (undesignedSort === 'qty_asc') return (Number(a.Cutting_Qty) || 0) - (Number(b.Cutting_Qty) || 0);
+                  return 0;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <AlertCircle size={28} style={{ margin: '0 auto 12px auto', opacity: 0.5 }} />
+                      <p>No undesigned cutting lots match your search or filter.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-primary)' }}>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Lot Number</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Fabric & Garment Type</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Style</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Colors / Shades</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Sizes</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700', textAlign: 'right' }}>Cutting Qty</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700' }}>Issue Date</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '700', textAlign: 'center' }}>Direct Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((lot, idx) => (
+                        <tr 
+                          key={lot.id || idx} 
+                          style={{ 
+                            borderBottom: '1px solid var(--border-color)',
+                            transition: 'background-color 0.15s'
+                          }}
+                          className="table-row-hover"
+                        >
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ 
+                              display: 'inline-block',
+                              padding: '3px 8px', 
+                              backgroundColor: 'rgba(99, 102, 241, 0.12)', 
+                              color: 'var(--accent-color)', 
+                              borderRadius: '6px',
+                              fontWeight: '700',
+                              fontSize: '13px'
+                            }}>
+                              #{lot.Lot_Number}
+                            </span>
+                            {lot.Brand && (
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                                {lot.Brand}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <strong style={{ color: 'var(--text-main)' }}>{lot.Fabric || '—'}</strong>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>
+                              {lot.Garment_Type || 'Garment'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', maxWidth: '200px' }}>
+                            <span style={{ color: 'var(--text-main)', fontWeight: '500' }}>{lot.Style || '—'}</span>
+                            {lot.Party_Name && (
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>
+                                Party: {lot.Party_Name}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px', maxWidth: '220px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-main)', wordBreak: 'break-word' }}>
+                              {lot.Shades || '—'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                              {lot.Sizes || '—'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                            <span style={{ fontWeight: '700', color: 'var(--success)', fontSize: '14px' }}>
+                              {lot.Cutting_Qty ? Number(lot.Cutting_Qty).toLocaleString() : '0'}
+                            </span>
+                            <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>pcs</span>
+                          </td>
+                          <td style={{ padding: '12px 16px' }}>
+                            <span style={{ fontSize: '12px', color: 'var(--text-main)' }}>
+                              {lot.Date_of_Issue || '—'}
+                            </span>
+                            {lot.Supervisor && (
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)' }}>
+                                By: {lot.Supervisor}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                              <a
+                                href={`/design?lot=${encodeURIComponent(lot.Lot_Number)}`}
+                                className="btn btn-primary"
+                                style={{
+                                  padding: '5px 10px',
+                                  fontSize: '11px',
+                                  textDecoration: 'none',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  borderRadius: '5px'
+                                }}
+                              >
+                                <ExternalLink size={11} />
+                                <span>Create Design</span>
+                              </a>
+                              <a
+                                href={`/zip-po?lot=${encodeURIComponent(lot.Lot_Number)}`}
+                                className="btn btn-secondary"
+                                style={{
+                                  padding: '5px 8px',
+                                  fontSize: '11px',
+                                  textDecoration: 'none',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  borderRadius: '5px'
+                                }}
+                              >
+                                Zip PO
+                              </a>
+                              <a
+                                href={`/dori-po?lot=${encodeURIComponent(lot.Lot_Number)}`}
+                                className="btn btn-secondary"
+                                style={{
+                                  padding: '5px 8px',
+                                  fontSize: '11px',
+                                  textDecoration: 'none',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  borderRadius: '5px'
+                                }}
+                              >
+                                Dori PO
+                              </a>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

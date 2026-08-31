@@ -1279,21 +1279,44 @@ body.dark-theme .notification-toast {
   }
 
   /* Scoped rules for Tech Spec Sheet BOM Printing */
-  body.print-techpack-mode .animate-fade>div:first-of-type,
-  /* title bar */
-  body.print-techpack-mode .split-view>div:first-of-type,
-  /* design list */
-  body.print-techpack-mode .panel:not(.techspec-panel) {
+  body.print-techpack-mode .sidebar,
+  body.print-techpack-mode .top-header,
+  body.print-techpack-mode .modal-overlay,
+  body.print-techpack-mode .theme-toggle,
+  body.print-techpack-mode .screen-only-element,
+  body.print-techpack-mode .page-container > header,
+  body.print-techpack-mode .animate-fade > *:not(.print-layout-container) {
     display: none !important;
   }
 
-  body.print-techpack-mode .split-view {
+  body.print-techpack-mode {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  body.print-techpack-mode .page-container,
+  body.print-techpack-mode .main-content,
+  body.print-techpack-mode .app-container,
+  body.print-techpack-mode .animate-fade {
     display: block !important;
     width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
   }
 
-  body.print-techpack-mode .techspec-panel {
-    display: none !important;
+  body.print-techpack-mode .print-layout-container {
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    z-index: 99999 !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
   body.print-techpack-mode .custom-table-container,
@@ -1302,27 +1325,6 @@ body.dark-theme .notification-toast {
     height: auto !important;
     overflow: visible !important;
     page-break-inside: avoid !important;
-  }
-
-  body.print-techpack-mode .design-image-container {
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    height: 420px !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    border: 1px solid #000000 !important;
-    border-radius: 6px !important;
-    margin-bottom: 24px !important;
-    padding: 12px !important;
-    background-color: #ffffff !important;
-    page-break-inside: avoid !important;
-  }
-
-  body.print-techpack-mode .design-image-container img {
-    max-height: 100% !important;
-    max-width: 100% !important;
-    object-fit: contain !important;
   }
 }
 

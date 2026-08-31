@@ -3,16 +3,96 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileText, PlusCircle, Trash2, Download, RefreshCw,
   CheckCircle, AlertTriangle, Play, Settings, X, Search,
-  Briefcase, Truck, Award, UserCheck, Shield, ChevronDown, History
+  Briefcase, Truck, Award, UserCheck, Shield, ChevronDown, History,
+  ChevronLeft, ChevronRight, Layers
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
+
+// ─── Reusable Pagination Bar ──────────────────────────────────────────────────
+const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5, 10, 20, 50, 100] }) => {
+  const totalPages = Math.max(1, Math.ceil(totalItems / rpp));
+  const cur = Math.min(page, totalPages - 1);
+  const start = totalItems === 0 ? 0 : cur * rpp + 1;
+  const end = Math.min(totalItems, (cur + 1) * rpp);
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 16px',
+      borderTop: '1.5px solid var(--border-color)',
+      backgroundColor: 'var(--bg-secondary)',
+      flexWrap: 'wrap',
+      gap: '10px',
+      fontSize: '12.5px',
+      color: 'var(--text-muted)'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span>Showing <strong style={{ color: 'var(--text-main)' }}>{start}–{end}</strong> of <strong style={{ color: 'var(--text-main)' }}>{totalItems}</strong> PO records</span>
+        <span style={{ color: 'var(--border-color)' }}>|</span>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <span>Rows:</span>
+          <select
+            value={rpp}
+            onChange={(e) => {
+              setRpp(Number(e.target.value));
+              setPage(0);
+            }}
+            style={{
+              padding: '3px 8px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--bg-primary)',
+              color: 'var(--text-main)',
+              fontSize: '12px',
+              cursor: 'pointer'
+            }}
+          >
+            {rppOptions.map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={cur === 0}
+          onClick={() => setPage(p => Math.max(0, p - 1))}
+          style={{ padding: '4px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '3px', opacity: cur === 0 ? 0.45 : 1, cursor: cur === 0 ? 'not-allowed' : 'pointer' }}
+        >
+          <ChevronLeft size={13} />
+          <span>Prev</span>
+        </button>
+
+        <span style={{ padding: '3px 10px', fontWeight: '700', color: 'var(--accent-color)', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '11.5px' }}>
+          Page {cur + 1} / {totalPages}
+        </span>
+
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={cur >= totalPages - 1}
+          onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+          style={{ padding: '4px 10px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '3px', opacity: cur >= totalPages - 1 ? 0.45 : 1, cursor: cur >= totalPages - 1 ? 'not-allowed' : 'pointer' }}
+        >
+          <span>Next</span>
+          <ChevronRight size={13} />
+        </button>
+      </div>
+    </div>
+  );
+};
 
 /** =========================
  * CONFIG
  * ========================= */
 const WEB_APP_BASE = "";
-const SHEET_ID = "13ArpFOD7idmpv7QIRJQkD-tfswtkH6rNnEANtv2M7Ek";
+const SHEET_ID = "1fKSwGBIpzWEFk566WRQ4bzQ0anJlmasoY8TwrTLQHXI";
 const RANGE_A1 = "Index!A:C";
 const API_KEY = "";
 const PO_DATA_RANGE = "PO_Items!A:I";
@@ -75,7 +155,7 @@ function generateNextPoNumber(existingPoNumbers) {
   }
 
   if (parsedNumbers.length === 0) {
-    return 'PO-11000';
+    return 'PO-11001';
   }
 
   const maxNum = Math.max(...parsedNumbers);
@@ -494,9 +574,9 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
       const supBodyW = wSup - supPad * 2;
       const supLines = [
         payload.supplierName || "",
-        ...wrap(payload.supplierAddress || "", supBodyW),
-        ...(payload.supplierPhone ? [`Phone: ${payload.supplierPhone}`] : []),
-        ...(payload.supplierEmail ? [`Email: ${payload.supplierEmail}`] : []),
+        // ...wrap(payload.supplierAddress || "", supBodyW),
+        // ...(payload.supplierPhone ? [`Phone: ${payload.supplierPhone}`] : []),
+        // ...(payload.supplierEmail ? [`Email: ${payload.supplierEmail}`] : []),
       ];
       const supH = 22 + supLines.filter(Boolean).length * 12 + 16;
 
@@ -1099,7 +1179,124 @@ export default function GeneratePOView({
 
   const [poViewMode, setPoViewMode] = useState('create');
   const [poSearchQuery, setPoSearchQuery] = useState('');
+  const [poStatusFilter, setPoStatusFilter] = useState('all');
+  const [poMaterialFilter, setPoMaterialFilter] = useState('all');
+  const [poHistoryPage, setPoHistoryPage] = useState(0);
+  const [poHistoryRpp, setPoHistoryRpp] = useState(10);
   const [historyLogs, setHistoryLogs] = useState([]);
+  const [livePOs, setLivePOs] = useState(Array.isArray(pos) ? pos : []);
+  const [loadingLivePOs, setLoadingLivePOs] = useState(false);
+  const [backendMaterialsList, setBackendMaterialsList] = useState([]);
+
+  // Reset pagination when filter criteria change
+  useEffect(() => {
+    setPoHistoryPage(0);
+  }, [poSearchQuery, poStatusFilter, poMaterialFilter]);
+
+  // Compute filtered PO history records
+  const filteredHistoryPOs = useMemo(() => {
+    const targetList = livePOs.length > 0 ? livePOs : (pos || []);
+    return targetList.filter(po => {
+      const q = poSearchQuery.toLowerCase().trim();
+      const s = (po.status || 'Sent to Vendor').toLowerCase();
+      
+      let matchesStatus = true;
+      if (poStatusFilter === 'pending approval') {
+        matchesStatus = s.includes('pending approval') || (s.includes('pending') && s.includes('app'));
+      } else if (poStatusFilter === 'completed') {
+        matchesStatus = s === 'completed' || s === 'received done';
+      } else if (poStatusFilter === 'partially received') {
+        matchesStatus = s.includes('partially') || s.includes('partial');
+      } else if (poStatusFilter === 'sent to vendor') {
+        matchesStatus = s.includes('sent') || s.includes('vendor') || s.includes('draft') || s.includes('active') || s.includes('issued');
+      }
+
+      let matchesMaterial = true;
+      if (poMaterialFilter !== 'all') {
+        const filterMatLower = poMaterialFilter.toLowerCase();
+        let found = false;
+        if (po.items) {
+          try {
+            const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+            if (Array.isArray(itms)) {
+              found = itms.some(i => (i.name || i.description || i.item || '').toLowerCase() === filterMatLower);
+            }
+          } catch (_) {}
+        }
+        matchesMaterial = found;
+      }
+
+      let matchesSearch = true;
+      if (q) {
+        const cleanQ = q.replace(/^po-?/i, '').trim();
+        const poNum = String(po.poNumber || '').toLowerCase();
+        const cleanPoNum = poNum.replace(/^po-?/i, '').trim();
+        const vName = String(po.vendorName || '').toLowerCase();
+        const dName = String(po.designName || '').toLowerCase();
+        const dCat = String(po.designCategory || '').toLowerCase();
+
+        let itemNames = '';
+        if (po.items) {
+          try {
+            const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+            itemNames = Array.isArray(itms) ? itms.map(i => (i.name || i.description || i.item || '')).join(' ').toLowerCase() : '';
+          } catch (_) {}
+        }
+
+        matchesSearch = 
+          poNum.includes(q) || 
+          (cleanQ && cleanPoNum.includes(cleanQ)) ||
+          vName.includes(q) || 
+          dName.includes(q) || 
+          dCat.includes(q) || 
+          itemNames.includes(q);
+      }
+
+      return matchesStatus && matchesMaterial && matchesSearch;
+    });
+  }, [livePOs, pos, poSearchQuery, poStatusFilter, poMaterialFilter]);
+
+  // Compute paginated slice of PO records
+  const paginatedHistoryPOs = useMemo(() => {
+    const start = poHistoryPage * poHistoryRpp;
+    return filteredHistoryPOs.slice(start, start + poHistoryRpp);
+  }, [filteredHistoryPOs, poHistoryPage, poHistoryRpp]);
+
+  const fetchLivePOs = async () => {
+    try {
+      setLoadingLivePOs(true);
+      const [posRes, matRes] = await Promise.all([
+        fetch(`${getBackendUrl()}/api/pos`),
+        fetch(`${getBackendUrl()}/api/pos/materials`).catch(() => null)
+      ]);
+      if (posRes.ok) {
+        const data = await posRes.json();
+        if (Array.isArray(data)) {
+          setLivePOs(data);
+        }
+      }
+      if (matRes && matRes.ok) {
+        const mData = await matRes.json();
+        if (mData.success && Array.isArray(mData.materials)) {
+          setBackendMaterialsList(mData.materials);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch live POs:', err);
+    } finally {
+      setLoadingLivePOs(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLivePOs();
+  }, [poViewMode]);
+
+  useEffect(() => {
+    if (Array.isArray(pos) && pos.length > 0) {
+      setLivePOs(pos);
+    }
+  }, [pos]);
 
   const handleLoadPOFromHistory = async (poNumberStr) => {
     setSearchPoNumber(poNumberStr);
@@ -1112,12 +1309,36 @@ export default function GeneratePOView({
       if (res.ok) {
         const po = await res.json();
         if (po) {
-          setSupplierName(po.vendorName || "");
-          setSupplierEmail(po.vendorEmail || "");
-          setSupplierAddress(po.vendorAddress || "");
+          const targetPo = po.poNumber || poNumberStr.trim();
+          handleRegeneratePoNumber();
 
-          if (po.date) setOrderDate(po.date.split(' ')[0]);
-          if (po.deliveryDate) setExpectedDate(po.deliveryDate.split(' ')[0]);
+          const vName = po.vendorName || "";
+          setSupplierName(vName);
+          const matchedVendor = vendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
+          if (matchedVendor) {
+            setSelectedVendorId(String(matchedVendor.id));
+          }
+
+          if (po.date) {
+            const parts = po.date.split(' ');
+            setOrderDate(parts[0]);
+            if (parts[1]) setOrderTime(parts[1].slice(0, 5));
+          }
+          if (po.deliveryDate) {
+            const dparts = po.deliveryDate.split(' ');
+            setExpectedDate(dparts[0]);
+            if (dparts[1]) setExpectedTime(dparts[1].slice(0, 5));
+          }
+
+          if (po.remarks) setRemarks(po.remarks);
+          if (po.requisitionRaisedBy) setRequisitionRaisedBy(po.requisitionRaisedBy);
+          if (po.preparedBy) setPreparedBy(po.preparedBy);
+          if (po.approvedBy) setApprovedBy(po.approvedBy);
+
+          if (po.tax !== undefined && po.tax !== null) {
+            setGstEnabled(parseFloat(po.tax) > 0);
+            if (po.taxRate) setGstPercentage(parseFloat(po.taxRate));
+          }
 
           if (po.items) {
             let poRows = [];
@@ -1128,29 +1349,31 @@ export default function GeneratePOView({
                 poRows = JSON.parse(po.items || '[]');
               } catch (_) { }
             }
-            setRows(poRows.map(item => {
-              const isMySQL = item.name !== undefined;
-              const desc = isMySQL ? (item.name || "") : (item.description || item.item || "");
+            if (poRows.length > 0) {
+              setRows(poRows.map(item => {
+                const isMySQL = item.name !== undefined;
+                const desc = isMySQL ? (item.name || "") : (item.description || item.item || "");
 
-              let dept = "";
-              if (desc) {
-                const matched = sheetRows.find(r => r.item && r.item.toLowerCase().trim() === desc.toLowerCase().trim());
-                if (matched) dept = matched.dept || "";
-              }
-              if (!dept) dept = item.department || item.dept || "Trims";
+                let dept = "";
+                if (desc) {
+                  const matched = sheetRows.find(r => r.item && r.item.toLowerCase().trim() === desc.toLowerCase().trim());
+                  if (matched) dept = matched.dept || "";
+                }
+                if (!dept) dept = item.department || item.dept || "Trims";
 
-              return {
-                department: dept,
-                description: desc,
-                shade: isMySQL ? (item.description || "") : (item.shade || ""),
-                uom: isMySQL ? (item.unit || "") : (item.uom || ""),
-                qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
-                rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
-              };
-            }));
+                return {
+                  department: dept,
+                  description: desc,
+                  shade: isMySQL ? (item.description || "") : (item.shade || ""),
+                  uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
+                  qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
+                  rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
+                };
+              }));
+            }
           }
-          setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, poNumberStr);
-          alert(`Successfully loaded PO ${poNumberStr} into active editor.`);
+          setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, targetPo);
+          alert(`Successfully loaded PO ${targetPo} into active editor.`);
         }
       }
     } catch (err) {
@@ -1189,9 +1412,9 @@ export default function GeneratePOView({
         gstPercentage: po.taxRate || 18,
       },
       supplierName: po.vendorName || '',
-      supplierAddress: po.vendorAddress || '',
-      supplierEmail: po.vendorEmail || '',
-      supplierPhone: '',
+      // supplierAddress: po.vendorAddress || '',
+      // supplierEmail: po.vendorEmail || '',
+      // supplierPhone: '',
       rows: poRows.map((r, i) => {
         const isMySQLFormat = r.name !== undefined;
         return {
@@ -1275,15 +1498,17 @@ export default function GeneratePOView({
     return logs;
   };
 
-  const [poNumber, setPoNumber] = useState("PO-11000");
+  const [poNumber, setPoNumber] = useState(() => {
+    return generateNextPoNumber(Array.isArray(pos) ? pos.map(p => p.poNumber) : []);
+  });
   const [orderDate, setOrderDate] = useState(todayISO());
   const [orderTime, setOrderTime] = useState(nowTime());
   const [expectedDate, setExpectedDate] = useState("");
   const [expectedTime, setExpectedTime] = useState("");
   const [supplierName, setSupplierName] = useState("");
-  const [supplierAddress, setSupplierAddress] = useState("");
-  const [supplierEmail, setSupplierEmail] = useState("");
-  const [supplierPhone, setSupplierPhone] = useState("");
+  // const [supplierAddress, setSupplierAddress] = useState("");
+  // const [supplierEmail, setSupplierEmail] = useState("");
+  // const [supplierPhone, setSupplierPhone] = useState("");
   const [rows, setRows] = useState([blankRow()]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSupervisorDialog, setShowSupervisorDialog] = useState(false);
@@ -1365,7 +1590,7 @@ export default function GeneratePOView({
   const [sheetError, setSheetError] = useState("");
 
   const [selectedDesignId, setSelectedDesignId] = useState('');
-  const [selectedVendorId, setSelectedVendorId] = useState(vendors[0]?.id || '');
+  const [selectedVendorId, setSelectedVendorId] = useState('');
   const [poMode, setPoMode] = useState('lot'); // 'lot' | 'normal'
 
   const handlePoModeChange = (mode) => {
@@ -1380,24 +1605,68 @@ export default function GeneratePOView({
   const [leftActiveTab, setLeftActiveTab] = useState('specs');
 
   // Load PO numbers and sheet config
+  // Immediately fetch authoritative next unique PO number on mount
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/pos/next-number`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && data.nextPoNumber) {
+          setPoNumber(data.nextPoNumber);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     loadAvailablePONumbers();
   }, [pos]);
 
   async function loadAvailablePONumbers(newlyAddedPoNo = null) {
     try {
-      const sheetsPoNumbers = await fetchAllPONumbers(SHEET_ID, API_KEY);
-      // Map local MySQL POs
-      const localPoNumbers = Array.isArray(pos) ? pos.map(p => p.poNumber || '') : [];
-      // Combine them
-      const combined = Array.from(new Set([...sheetsPoNumbers, ...localPoNumbers]));
-      if (newlyAddedPoNo && !combined.includes(newlyAddedPoNo)) {
-        combined.push(newlyAddedPoNo);
+      // 1. Fetch server's authoritative next PO number
+      let serverNextPo = null;
+      try {
+        const sRes = await fetch(`${getBackendUrl()}/api/pos/next-number`);
+        const sData = await sRes.json();
+        if (sData.success && sData.nextPoNumber) {
+          serverNextPo = sData.nextPoNumber;
+        }
+      } catch (_) {}
+
+      // 2. Fetch only already generated POs from database
+      let dbPoNumbers = [];
+      try {
+        const pRes = await fetch(`${getBackendUrl()}/api/pos`);
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          if (Array.isArray(pData)) {
+            dbPoNumbers = pData
+              .map(p => (p.poNumber || '').trim())
+              .filter(Boolean);
+          }
+        }
+      } catch (_) {}
+
+      // Map local MySQL POs if passed via props
+      const localPoNumbers = Array.isArray(pos) ? pos.map(p => (p.poNumber || '').trim()) : [];
+
+      // Combine ONLY already generated PO numbers
+      const combined = Array.from(new Set([...dbPoNumbers, ...localPoNumbers].filter(Boolean)));
+      if (newlyAddedPoNo && !combined.includes(newlyAddedPoNo.trim())) {
+        combined.push(newlyAddedPoNo.trim());
       }
 
-      setAvailablePONumbers(combined.sort().reverse());
+      // Sort properly descending by number
+      combined.sort((a, b) => {
+        const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+        return numB - numA;
+      });
+
+      setAvailablePONumbers(combined);
       if (!prefilledPoData) {
-        setPoNumber(generateNextPoNumber(combined));
+        const localNext = generateNextPoNumber(combined);
+        setPoNumber(serverNextPo || localNext);
       }
     } catch (e) {
       console.warn("Could not load PO numbers list:", e);
@@ -1422,8 +1691,20 @@ export default function GeneratePOView({
     }
   }, [prefilledPoData, setPrefilledPoData]);
 
+  const handleRegeneratePoNumber = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/pos/next-number`);
+      const data = await res.json();
+      if (data.success && data.nextPoNumber) {
+        setPoNumber(data.nextPoNumber);
+        return;
+      }
+    } catch (_) {}
+    setPoNumber(generateNextPoNumber(availablePONumbers));
+  };
+
   const makeUniquePoNumber = () => {
-    return generateNextPoNumber(availablePONumbers);
+    handleRegeneratePoNumber();
   };
 
   // Approved Design autofill mapping
@@ -1452,13 +1733,15 @@ export default function GeneratePOView({
   // Vendor profiles autofill mapping
   const handleVendorChange = (vendorId) => {
     setSelectedVendorId(vendorId);
-    if (!vendorId) return;
-    const vendor = vendors.find(v => v.id === vendorId);
-    if (vendor) {
-      setSupplierName(vendor.name || "");
-      setSupplierAddress(vendor.address || "");
-      setSupplierEmail(vendor.email || "");
-      setSupplierPhone("");
+    if (!vendorId) {
+      setSupplierName("");
+      return;
+    }
+    const vendor = vendors.find(v => String(v.id) === String(vendorId) || String(v.name) === String(vendorId));
+    if (vendor && vendor.name) {
+      setSupplierName(vendor.name);
+    } else {
+      setSupplierName(vendorId);
     }
   };
 
@@ -1572,9 +1855,9 @@ export default function GeneratePOView({
       gstPercentage: gstEnabled ? gstPercentage : 0,
     },
     supplierName,
-    supplierAddress,
-    supplierEmail,
-    supplierPhone,
+    // supplierAddress,
+    // supplierEmail,
+    // supplierPhone,
     rows: rows.map((r, i) => ({
       line: i + 1,
       department: r.department,
@@ -1588,26 +1871,23 @@ export default function GeneratePOView({
     totals,
   });
 
-  const resetForm = () => {
-    setPoNumber(prev => {
-      const match = prev ? prev.match(/\d+/) : null;
-      const currentNum = match ? parseInt(match[0], 10) : 1000;
-      const parsedNumbers = availablePONumbers.map(poStr => {
-        const m = poStr ? poStr.match(/\d+/) : null;
-        return m ? parseInt(m[0], 10) : 0;
-      });
-      const maxNum = parsedNumbers.length > 0 ? Math.max(...parsedNumbers) : 1000;
-      const nextNum = Math.max(currentNum, maxNum) + 1;
-      return `PO-${nextNum}`;
-    });
+  const resetForm = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/pos/next-number`);
+      const data = await res.json();
+      if (data.success && data.nextPoNumber) {
+        setPoNumber(data.nextPoNumber);
+      } else {
+        setPoNumber(generateNextPoNumber(availablePONumbers));
+      }
+    } catch (_) {
+      setPoNumber(generateNextPoNumber(availablePONumbers));
+    }
     setOrderDate(todayISO());
     setOrderTime(nowTime());
     setExpectedDate("");
     setExpectedTime("");
     setSupplierName("");
-    setSupplierAddress("");
-    setSupplierEmail("");
-    setSupplierPhone("");
     setRows([blankRow()]);
     setSelectedDesignId("");
     setPoMode("lot");
@@ -1624,29 +1904,59 @@ export default function GeneratePOView({
     setSavedApprovedNames(getLocalStorageItem(LOCAL_STORAGE_KEYS.APPROVED_NAMES, DEFAULT_APPROVED_NAMES));
   };
 
-  // Google Sheets load handler
+  // Google Sheets & Database load handler
   const handleLoadPO = async () => {
     if (!searchPoNumber.trim()) return setLoadError("Please enter a PO number");
     setIsLoadingPO(true);
     setLoadError("");
+    const targetPoNum = searchPoNumber.trim();
     try {
       // 1. Try local database first
       let loadedFromLocal = false;
       try {
         const backendUrl = getBackendUrl();
-        const res = await fetch(`${backendUrl}/api/pos/${encodeURIComponent(searchPoNumber.trim())}`);
+        const res = await fetch(`${backendUrl}/api/pos/${encodeURIComponent(targetPoNum)}`);
         if (res.ok) {
           const po = await res.json();
           if (po) {
-            setSupplierName(po.vendorName || "");
-            setSupplierEmail(po.vendorEmail || "");
-            setSupplierAddress(po.vendorAddress || "");
+            handleRegeneratePoNumber();
+            const vName = po.vendorName || "";
+            setSupplierName(vName);
+            const matchedVendor = vendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
+            if (matchedVendor) {
+              setSelectedVendorId(String(matchedVendor.id));
+            }
 
-            if (po.date) setOrderDate(po.date);
-            if (po.deliveryDate) setExpectedDate(po.deliveryDate);
+            if (po.date) {
+              const parts = po.date.split(' ');
+              setOrderDate(parts[0]);
+              if (parts[1]) setOrderTime(parts[1].slice(0, 5));
+            }
+            if (po.deliveryDate) {
+              const dparts = po.deliveryDate.split(' ');
+              setExpectedDate(dparts[0]);
+              if (dparts[1]) setExpectedTime(dparts[1].slice(0, 5));
+            }
 
-            if (po.items && Array.isArray(po.items)) {
-              setRows(po.items.map(item => {
+            if (po.remarks) setRemarks(po.remarks);
+            if (po.requisitionRaisedBy) setRequisitionRaisedBy(po.requisitionRaisedBy);
+            if (po.preparedBy) setPreparedBy(po.preparedBy);
+            if (po.approvedBy) setApprovedBy(po.approvedBy);
+
+            if (po.tax !== undefined && po.tax !== null) {
+              setGstEnabled(parseFloat(po.tax) > 0);
+              if (po.taxRate) setGstPercentage(parseFloat(po.taxRate));
+            }
+
+            let poRows = [];
+            if (Array.isArray(po.items)) {
+              poRows = po.items;
+            } else if (typeof po.items === 'string') {
+              try { poRows = JSON.parse(po.items); } catch (_) { poRows = []; }
+            }
+
+            if (poRows.length > 0) {
+              setRows(poRows.map((item, idx) => {
                 const isMySQL = item.name !== undefined;
                 const desc = isMySQL ? (item.name || "") : (item.description || item.item || "");
 
@@ -1659,14 +1969,15 @@ export default function GeneratePOView({
                   }
                 }
                 if (!dept) {
-                  dept = item.department || item.dept || "Trims"; // fallback
+                  dept = item.department || item.dept || "Trims";
                 }
 
                 return {
+                  line: item.line || (idx + 1),
                   department: dept,
                   description: desc,
                   shade: isMySQL ? (item.description || "") : (item.shade || ""),
-                  uom: isMySQL ? (item.unit || "") : (item.uom || ""),
+                  uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
                   qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
                   rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
                 };
@@ -1674,8 +1985,8 @@ export default function GeneratePOView({
             }
 
             loadedFromLocal = true;
-            setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, searchPoNumber);
-            alert(`Successfully loaded PO ${searchPoNumber} from local database.`);
+            setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, targetPoNum);
+            alert(`Successfully loaded PO ${targetPoNum} into active editor.`);
             setShowLoadDialog(false);
           }
         }
@@ -1685,24 +1996,28 @@ export default function GeneratePOView({
 
       // 2. Fallback to Google Sheets if local DB fetch didn't load it
       if (!loadedFromLocal) {
-        const poData = await fetchPODataByNumber(searchPoNumber, SHEET_ID, API_KEY);
+        const poData = await fetchPODataByNumber(targetPoNum, SHEET_ID, API_KEY);
         if (poData && poData.length > 0) {
-          const loadedRows = poData.map(item => ({
-            department: item.department || "",
+          handleRegeneratePoNumber();
+          const loadedRows = poData.map((item, idx) => ({
+            line: idx + 1,
+            department: item.department || "Trims",
             description: item.description || "",
             shade: "",
-            uom: item.uom || "",
+            uom: item.uom || "PCS",
             qty: item.qty || 0,
             rate: item.rate || 0
           }));
           setRows(loadedRows);
-          setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, searchPoNumber);
-          alert(`Successfully loaded PO ${searchPoNumber} from sheets.`);
+          setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, targetPoNum);
+          alert(`Successfully loaded PO ${targetPoNum} from sheets.`);
           setShowLoadDialog(false);
+        } else {
+          setLoadError(`PO ${targetPoNum} not found in database or Google Sheets.`);
         }
       }
-    } catch (e) {
-      setLoadError(e.message || "Failed to load PO data.");
+    } catch (err) {
+      setLoadError("Failed to load PO: " + err.message);
     } finally {
       setIsLoadingPO(false);
     }
@@ -1736,8 +2051,8 @@ export default function GeneratePOView({
         id: `PO${Math.floor(1000 + Math.random() * 9000)}`,
         poNumber: payload.meta.poNumber,
         vendorName: payload.supplierName,
-        vendorEmail: payload.supplierEmail,
-        vendorAddress: payload.supplierAddress,
+        // vendorEmail: payload.supplierEmail,
+        // vendorAddress: payload.supplierAddress,
         designName: selectedDesignId ? designs.find(d => d.id === selectedDesignId)?.name : 'Custom PO',
         designCategory: selectedDesignId ? designs.find(d => d.id === selectedDesignId)?.category : 'N/A',
         items: mappedItemsForMySQL,
@@ -2165,7 +2480,7 @@ export default function GeneratePOView({
                       >
                         <option value="">-- Choose Vendor --</option>
                         {vendors.map(v => (
-                          <option key={v.id} value={v.id}>{v.name} ({v.materialsJoined || 'Trims'})</option>
+                          <option key={v.id} value={String(v.id)}>{v.name} ({v.materialsJoined || 'Trims'})</option>
                         ))}
                       </select>
                     </div>
@@ -2179,14 +2494,15 @@ export default function GeneratePOView({
                         className="form-input"
                         value={poNumber}
                         onChange={e => setPoNumber(e.target.value)}
-                        style={{ flex: 1, borderRadius: '8px' }}
+                        style={{ flex: 1, borderRadius: '8px', fontWeight: '800', color: '#0f172a' }}
                         required
                       />
                       <button
+                        type="button"
                         className="btn btn-secondary"
-                        onClick={() => setPoNumber(makeUniquePoNumber())}
+                        onClick={handleRegeneratePoNumber}
                         style={{ padding: '0 12px', height: '40px', borderRadius: '8px' }}
-                        title="Regenerate Reference"
+                        title="Generate Fresh Unique Reference"
                       >
                         <RefreshCw size={16} />
                       </button>
@@ -2254,30 +2570,38 @@ export default function GeneratePOView({
               {leftActiveTab === 'supplier' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                   <div>
-                    <label className="FormLabel">Supplier Name *</label>
+                    <label className="FormLabel">Choose From Saved Vendor Profiles</label>
+                    <select
+                      className="FilterSelect"
+                      value={selectedVendorId}
+                      onChange={e => handleVendorChange(e.target.value)}
+                      style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '8px' }}
+                    >
+                      <option value="">-- Choose Saved Vendor --</option>
+                      {vendors.map(v => (
+                        <option key={v.id} value={String(v.id)}>{v.name} ({v.materialsJoined || 'Trims'})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="FormLabel">Supplier / Vendor Name *</label>
                     <input
                       type="text"
                       className="form-input"
                       placeholder="Enter Supplier Name"
                       value={supplierName}
-                      onChange={e => setSupplierName(e.target.value)}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setSupplierName(val);
+                        const matched = vendors.find(v => (v.name || '').toLowerCase() === val.trim().toLowerCase());
+                        setSelectedVendorId(matched ? matched.id : '');
+                      }}
                       style={{ borderRadius: '8px' }}
                       required
                     />
-                  </div>
-                  <div>
-                    <label className="FormLabel">Supplier Address</label>
-                    <input type="text" className="form-input" placeholder="Enter Supplier Address" value={supplierAddress} onChange={e => setSupplierAddress(e.target.value)} style={{ borderRadius: '8px' }} />
-                  </div>
-                  <div className="po-grid-2">
-                    <div>
-                      <label className="FormLabel">Email Address</label>
-                      <input type="email" className="form-input" placeholder="supplier@example.com" value={supplierEmail} onChange={e => setSupplierEmail(e.target.value)} style={{ borderRadius: '8px' }} />
-                    </div>
-                    <div>
-                      <label className="FormLabel">Phone Number</label>
-                      <input type="text" className="form-input" placeholder="Phone details" value={supplierPhone} onChange={e => setSupplierPhone(e.target.value)} style={{ borderRadius: '8px' }} />
-                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                      💡 This supplier name connects directly to the Live Paper Preview and Generated PDF PO Header.
+                    </span>
                   </div>
                 </div>
               )}
@@ -2337,7 +2661,10 @@ export default function GeneratePOView({
               <div style={{ display: 'flex', gap: '8px', marginTop: '20px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
                 <button
                   className="btn btn-secondary"
-                  onClick={() => setShowLoadDialog(true)}
+                  onClick={() => {
+                    loadAvailablePONumbers();
+                    setShowLoadDialog(true);
+                  }}
                   style={{ flex: 1, height: '40px', borderRadius: '8px' }}
                 >
                   <Search size={16} /> Load PO
@@ -2379,8 +2706,8 @@ export default function GeneratePOView({
                   </div>
                   <div className="paper-meta-col" style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '20px' }}>
                     <div><strong>Supplier:</strong> {supplierName || 'N/A'}</div>
-                    {supplierAddress && <div><strong>Address:</strong> {supplierAddress}</div>}
-                    {supplierPhone && <div><strong>Contact:</strong> {supplierPhone}</div>}
+                    {/* {supplierAddress && <div><strong>Address:</strong> {supplierAddress}</div>}
+                    {supplierPhone && <div><strong>Contact:</strong> {supplierPhone}</div>} */}
                   </div>
                 </div>
                 {/* Toggle controls paper options */}
@@ -2691,18 +3018,78 @@ export default function GeneratePOView({
               </p>
             </div>
 
-            <div style={{ position: 'relative', width: '300px' }}>
-              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                <Search size={16} />
-              </span>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="Search by PO#, Vendor, Design..."
-                value={poSearchQuery}
-                onChange={e => setPoSearchQuery(e.target.value)}
-                style={{ paddingLeft: '36px', width: '100%', borderRadius: '8px', height: '38px' }}
-              />
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={fetchLivePOs}
+                disabled={loadingLivePOs}
+                style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700' }}
+                title="Refresh Live PO Records"
+              >
+                <RefreshCw size={14} className={loadingLivePOs ? 'spin' : ''} />
+                <span>{loadingLivePOs ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+
+              <select
+                className="FilterSelect"
+                value={poStatusFilter}
+                onChange={e => setPoStatusFilter(e.target.value)}
+                style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)' }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending approval">⏳ Pending Approval</option>
+                <option value="completed">✔ Completed</option>
+                <option value="partially received">📦 Partial Inward</option>
+                <option value="sent to vendor">Sent to Vendor</option>
+              </select>
+
+              {(() => {
+                const targetList = livePOs.length > 0 ? livePOs : (pos || []);
+                const matSet = new Set(backendMaterialsList);
+                targetList.forEach(po => {
+                  if (po.items) {
+                    try {
+                      const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                      if (Array.isArray(itms)) {
+                        itms.forEach(i => {
+                          const n = (i.name || i.description || i.item || '').trim();
+                          if (n) matSet.add(n);
+                        });
+                      }
+                    } catch (_) {}
+                  }
+                });
+                const uniqueMats = Array.from(matSet).filter(Boolean).sort();
+
+                return (
+                  <select
+                    className="FilterSelect"
+                    value={poMaterialFilter}
+                    onChange={e => setPoMaterialFilter(e.target.value)}
+                    style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)', maxWidth: '180px' }}
+                  >
+                    <option value="all">🧵 All Materials</option>
+                    {uniqueMats.map(mat => (
+                      <option key={mat} value={mat}>{mat}</option>
+                    ))}
+                  </select>
+                );
+              })()}
+
+              <div style={{ position: 'relative', width: '260px' }}>
+                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                  <Search size={16} />
+                </span>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Filter by Material, PO, Vendor..."
+                  value={poSearchQuery}
+                  onChange={e => setPoSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '36px', width: '100%', borderRadius: '8px', height: '38px' }}
+                />
+              </div>
             </div>
           </div>
 
@@ -2720,28 +3107,16 @@ export default function GeneratePOView({
                 </tr>
               </thead>
               <tbody>
-                {(() => {
-                  const filtered = pos.filter(po => {
-                    const q = poSearchQuery.toLowerCase().trim();
-                    if (!q) return true;
-                    return (
-                      (po.poNumber || '').toLowerCase().includes(q) ||
-                      (po.vendorName || '').toLowerCase().includes(q) ||
-                      (po.designName || '').toLowerCase().includes(q)
-                    );
-                  });
-
-                  if (filtered.length === 0) {
-                    return (
-                      <tr>
-                        <td colSpan="7" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                          No Purchase Order logs found.
-                        </td>
-                      </tr>
-                    );
-                  }
-
-                  return filtered.map(po => {
+                {filteredHistoryPOs.length === 0 ? (
+                  <tr>
+                    <td colSpan="7" style={{ padding: '28px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-main)', marginBottom: '4px' }}>No Purchase Order logs found</div>
+                      <div style={{ fontSize: '11.5px' }}>No purchase orders match your filter criteria or search query.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedHistoryPOs.map(po => {
+                    const isPendingApproval = po.status === 'Pending Approval';
                     return (
                       <tr key={po.id} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background 0.15s' }}>
                         <td style={{ padding: '12px 10px', fontWeight: '700', color: 'var(--accent-color)' }}>{po.poNumber}</td>
@@ -2761,11 +3136,26 @@ export default function GeneratePOView({
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                           <span style={{
-                            padding: '3px 8px', borderRadius: '20px', fontSize: '10px', fontWeight: '700',
-                            backgroundColor: po.status === 'Received Done' || po.status === 'Completed' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(99, 102, 241, 0.12)',
-                            color: po.status === 'Received Done' || po.status === 'Completed' ? '#10b981' : 'var(--accent-color)'
+                            padding: '4px 10px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '800',
+                            backgroundColor:
+                              isPendingApproval
+                                ? '#fef3c7'
+                                : (po.status === 'Completed' || po.status === 'Received Done'
+                                ? 'rgba(16, 185, 129, 0.12)'
+                                : po.status === 'Partially Received'
+                                ? 'rgba(245, 158, 11, 0.12)'
+                                : 'rgba(99, 102, 241, 0.12)'),
+                            color:
+                              isPendingApproval
+                                ? '#b45309'
+                                : (po.status === 'Completed' || po.status === 'Received Done'
+                                ? '#10b981'
+                                : po.status === 'Partially Received'
+                                ? '#f59e0b'
+                                : 'var(--accent-color)'),
+                            border: isPendingApproval ? '1px solid #fde68a' : 'none'
                           }}>
-                            {po.status || 'Sent to Vendor'}
+                            {isPendingApproval ? '⏳ Pending Approval' : (po.status || 'Sent to Vendor')}
                           </span>
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>
@@ -2792,11 +3182,19 @@ export default function GeneratePOView({
                         </td>
                       </tr>
                     );
-                  });
-                })()}
+                  })
+                )}
               </tbody>
             </table>
           </div>
+          <PaginationBar
+            page={poHistoryPage}
+            setPage={setPoHistoryPage}
+            rpp={poHistoryRpp}
+            setRpp={setPoHistoryRpp}
+            totalItems={filteredHistoryPOs.length}
+            rppOptions={[5, 10, 20, 50, 100]}
+          />
         </div>
       )}
 
@@ -2817,8 +3215,8 @@ export default function GeneratePOView({
                 style={{ width: '100%', marginBottom: '12px', borderRadius: '8px', padding: '8px 12px', border: '1.5px solid var(--border-color)', backgroundColor: '#fff' }}
               >
                 <option value="">-- Choose PO --</option>
-                {availablePONumbers.map(no => (
-                  <option key={no} value={no}>{no}</option>
+                {Array.from(new Set(availablePONumbers)).map((no, idx) => (
+                  <option key={`${no}-${idx}`} value={no}>{no}</option>
                 ))}
               </select>
 

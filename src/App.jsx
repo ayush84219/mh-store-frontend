@@ -1,5 +1,6 @@
 import { getBackendUrl } from './utils/api';
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Layers3, CheckSquare, FileText,
   Layers, BarChart3, Settings as SettingsIcon, Sun, Moon,
@@ -28,27 +29,29 @@ import ScannerLogsView from './components/ScannerLogsView';
 import FabricRgpForm from './components/rgp';
 import ReDownloadView from './components/ReDownloadView';
 import WeightCapture from './components/WeightCapture';
+import ManuallyWeightCapture from './components/ManuallyWeightCapture';
 import MaterialTransferView from './components/MaterialTransferView';
 import POVerificationView from './components/POVerificationView';
 import WarehouseLocationView from './components/WarehouseLocationView';
+import OnlyCutting from './components/OnlyCutting';
 
 // Default Mock Data Arrays
 const initialMaterials = [
-  { id: 'MT1008', name: 'COTTON', category: 'DYEING', stock: 1987, unit: 'Pcs', cost: 0, threshold: 50, color: 'hall 1 rack 2 (8 pkts), hall 2 rack 3 (2 pkts)', packets: 10 },
-  { id: 'MT1009', name: 'ZIP', category: 'DYEING', stock: 2097, unit: 'Pcs', cost: 0, threshold: 50, color: 'HALL 3 RACK 7', packets: 20 },
-  { id: 'MT1010', name: 'BUTTON', category: 'DYEING', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'HALL 3 RACK 4', packets: 5 },
-  { id: 'MT1011', name: 'fabric', category: 'Dyeing', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'hall 3 rack 8', packets: 7 },
-  { id: 'MT1012', name: 'BUTTON', category: 'button', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'HALL 3 RACK 4', packets: 5 },
-  { id: 'MT1013', name: 'lastic', category: 'Zipper', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'HALL 3 RACK 9', packets: 5 },
-  { id: 'MT1014', name: 'zip', category: 'zip', stock: 2225, unit: 'Pcs', cost: 0, threshold: 50, color: 'hall 4', packets: 10 },
-  { id: 'MT1015', name: 'lastic', category: 'lastic', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'HALL 3 RACK 9', packets: 5 },
-  { id: 'MT1016', name: 'zip', category: 'zip', stock: 2285, unit: 'Pcs', cost: 0, threshold: 50, color: 'hall 5 rack 1', packets: 8 },
-  { id: 'M1302', name: 'Organic Cotton Fabric Roll', category: 'Fabric', stock: 2400, unit: 'meters', cost: 25.00, threshold: 200, color: 'Pure White' },
-  { id: 'M1303', name: 'Indigo Denim Raw Roll', category: 'Fabric', stock: 850, unit: 'meters', cost: 45.00, threshold: 150, color: 'Raw Deep Indigo' },
-  { id: 'M1304', name: 'YKK Brass Zippers (15cm)', category: 'Trim', stock: 150, unit: 'pieces', cost: 2.50, threshold: 200, color: 'Matte Gold' },
-  { id: 'M1305', name: 'Polyester Thread Spool', category: 'Trim', stock: 45, unit: 'rolls', cost: 8.00, threshold: 50, color: 'Neutral Gray' },
-  { id: 'M1306', name: 'Metal Rivets (Pack of 100)', category: 'Trim', stock: 60, unit: 'pieces', cost: 5.00, threshold: 20, color: 'Silver Metallic' },
-  { id: 'M1307', name: 'Printed Satin Brand Labels', category: 'Accessory', stock: 500, unit: 'pieces', cost: 0.80, threshold: 100, color: 'Glossy White' }
+  { id: 'MT1008', name: 'COTTON', category: 'DYEING', stock: 1987, unit: 'Pcs', cost: 0, threshold: 50, color: 'White', location: 'hall 1 rack 2 (8 pkts), hall 2 rack 3 (2 pkts)', packets: 10 },
+  { id: 'MT1009', name: 'ZIP', category: 'DYEING', stock: 2097, unit: 'Pcs', cost: 0, threshold: 50, color: 'Blue', location: 'HALL 3 RACK 7', packets: 20 },
+  { id: 'MT1010', name: 'BUTTON', category: 'DYEING', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'Red', location: 'HALL 3 RACK 4', packets: 5 },
+  { id: 'MT1011', name: 'fabric', category: 'Dyeing', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'Black', location: 'hall 3 rack 8', packets: 7 },
+  { id: 'MT1012', name: 'BUTTON', category: 'button', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'Gold', location: 'HALL 3 RACK 4', packets: 5 },
+  { id: 'MT1013', name: 'lastic', category: 'Zipper', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'White', location: 'HALL 3 RACK 9', packets: 5 },
+  { id: 'MT1014', name: 'zip', category: 'zip', stock: 2225, unit: 'Pcs', cost: 0, threshold: 50, color: 'Black', location: 'hall 4', packets: 10 },
+  { id: 'MT1015', name: 'lastic', category: 'lastic', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'Silver', location: 'HALL 3 RACK 9', packets: 5 },
+  { id: 'MT1016', name: 'zip', category: 'zip', stock: 2285, unit: 'Pcs', cost: 0, threshold: 50, color: 'Grey', location: 'hall 5 rack 1', packets: 8 },
+  { id: 'M1302', name: 'Organic Cotton Fabric Roll', category: 'Fabric', stock: 2400, unit: 'meters', cost: 25.00, threshold: 200, color: 'Pure White', location: 'Main Store' },
+  { id: 'M1303', name: 'Indigo Denim Raw Roll', category: 'Fabric', stock: 850, unit: 'meters', cost: 45.00, threshold: 150, color: 'Raw Deep Indigo', location: 'Main Store' },
+  { id: 'M1304', name: 'YKK Brass Zippers (15cm)', category: 'Trim', stock: 150, unit: 'pieces', cost: 2.50, threshold: 200, color: 'Matte Gold', location: 'Main Store' },
+  { id: 'M1305', name: 'Polyester Thread Spool', category: 'Trim', stock: 45, unit: 'rolls', cost: 8.00, threshold: 50, color: 'Neutral Gray', location: 'Main Store' },
+  { id: 'M1306', name: 'Metal Rivets (Pack of 100)', category: 'Trim', stock: 60, unit: 'pieces', cost: 5.00, threshold: 20, color: 'Silver Metallic', location: 'Main Store' },
+  { id: 'M1307', name: 'Printed Satin Brand Labels', category: 'Accessory', stock: 500, unit: 'pieces', cost: 0.80, threshold: 100, color: 'Glossy White', location: 'Main Store' }
 ];
 
 const initialDesigns = [
@@ -58,7 +61,7 @@ const initialDesigns = [
     lotNo2: 'MH-4458',
     brand: 'Zara',
     category: 'JACKET',
-    designer: 'Sarah Connor',
+    designer: 'Admin',
     fabricType: 'Raw Denim Cotton 100%',
     targetSizes: 'S, M, L, XL',
     colorCode: '#1e40af',
@@ -97,7 +100,7 @@ const initialDesigns = [
     lotNo2: 'MH-4459',
     brand: 'Nike',
     category: 'T-SHIRT COLLAR',
-    designer: 'Michael Scott',
+    designer: 'Admin',
     fabricType: 'Pima Cotton Pique',
     targetSizes: 'M, L, XL',
     colorCode: '#059669',
@@ -136,7 +139,7 @@ const initialDesigns = [
     lotNo2: 'MH-4460',
     brand: 'H&M',
     category: 'LOWER',
-    designer: 'Sarah Connor',
+    designer: 'Admin',
     fabricType: 'Pure Linen Weave',
     targetSizes: 'S, M, L',
     colorCode: '#d97706',
@@ -221,6 +224,7 @@ const hasTabAccess = (tabName, role) => {
       'history',
       'scanner_logs',
       'weight_capture',
+      'manually_weight_capture',
       'material_issue',
       'return_material',
       'material_details',
@@ -230,7 +234,8 @@ const hasTabAccess = (tabName, role) => {
       'settings',
       'approval_queue',
       'po_verification',
-      're_download'
+      're_download',
+      'only_cutting'
     ].includes(tabName);
   }
   if (panel === 'designer') {
@@ -246,13 +251,16 @@ const hasTabAccess = (tabName, role) => {
       'scanner_logs',
       'po_verification',
       'warehouse_locations',
-      'approval_queue'
+      'approval_queue',
+      'only_cutting',
+      'material_details'
     ].includes(tabName);
   }
   if (panel === 'store') {
     return [
       'dashboard',
       'weight_capture',
+      'manually_weight_capture',
       'material_issue',
       'return_material',
       'material_details',
@@ -263,17 +271,59 @@ const hasTabAccess = (tabName, role) => {
       'po_verification',
       'approval_queue',
       'rgp',
-      'generate_po'
+      'generate_po',
+      'only_cutting'
     ].includes(tabName);
   }
   return false;
 };
 
+const TAB_ROUTES = {
+  dashboard: '/dashboard',
+  design: '/design',
+  material_verification: '/material-verification',
+  material_issue: '/material-issue',
+  return_material: '/return-material',
+  generate_po: '/generate-po',
+  re_download: '/re-download',
+  zip_po: '/zip-po',
+  dori_po: '/dori-po',
+  material_details: '/material-details',
+  reports_history: '/reports-history',
+  settings: '/settings',
+  approval_queue: '/approval-queue',
+  history: '/history',
+  scanner_logs: '/scanner-logs',
+  rgp: '/rgp',
+  weight_capture: '/weight-capture',
+  manually_weight_capture: '/manually-weight-capture',
+  material_transfer: '/material-transfer',
+  warehouse_locations: '/warehouse-locations',
+  po_verification: '/po-verification',
+  only_cutting: '/only-cutting',
+};
+
+const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
+  acc[path] = tab;
+  return acc;
+}, { '/': 'dashboard', '/material-detail': 'material_details' });
+
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [currentUser, setCurrentUser] = useState(null);
   const [isVerifyingToken, setIsVerifyingToken] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+
+  const activeTab = PATH_TO_TAB[location.pathname] || 'dashboard';
+
+  const setActiveTab = (tabName) => {
+    const targetPath = TAB_ROUTES[tabName] || '/dashboard';
+    if (location.pathname !== targetPath) {
+      navigate(targetPath);
+    }
+  };
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [designMenuOpen, setDesignMenuOpen] = useState(true);
   const [adminDesignMenuOpen, setAdminDesignMenuOpen] = useState(true);
@@ -361,28 +411,62 @@ export default function App() {
   // Vendors — backed by database
   const [vendors, setVendors] = useState(initialVendors);
 
+  const settingsHydratedRef = useRef(false);
+
+  // Warehouse Halls/Zones configuration state
+  const [halls, setHalls] = useState(() => {
+    const saved = localStorage.getItem('warehouse_halls');
+    return saved ? JSON.parse(saved) : ['Hall 1'];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('warehouse_halls', JSON.stringify(halls));
+    if (settingsHydratedRef.current) {
+      fetch(`${getBackendUrl()}/api/settings/warehouse_halls`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: halls })
+      }).catch(() => {});
+    }
+  }, [halls]);
+
   // Warehouse Racks configuration state
   const [racks, setRacks] = useState(() => {
     const saved = localStorage.getItem('warehouse_racks');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', code: 'A', name: 'Rack A', shelves: 3, levels: 2, warehouse: 'Main Warehouse' },
-      { id: '2', code: 'B', name: 'Rack B', shelves: 3, levels: 2, warehouse: 'Main Warehouse' },
-      { id: '3', code: 'C', name: 'Rack C', shelves: 3, levels: 2, warehouse: 'Dyeing Store' }
-    ];
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      // Check if it is the old default demo data
+      const isDemo = Array.isArray(parsed) && parsed.length === 3 &&
+        parsed.some(r => r.code === 'A' || r.code === 'B' || r.code === 'C');
+      if (isDemo) {
+        return [];
+      }
+      return parsed;
+    } catch (e) {
+      return [];
+    }
   });
 
   useEffect(() => {
     localStorage.setItem('warehouse_racks', JSON.stringify(racks));
+    if (settingsHydratedRef.current) {
+      fetch(`${getBackendUrl()}/api/settings/warehouse_racks`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: racks })
+      }).catch(() => {});
+    }
   }, [racks]);
 
   // Accessories & designers — backed by database (settings table)
   const [accessoriesList, setAccessoriesList] = useState([
-    'Zip', 'Button', 'Elastic', 'Tape / Lace', 'Rib', 'Collar',
+    'Label', 'Tag', 'Dori', 'Zip', 'Button', 'Elastic', 'Tape / Lace', 'Rib', 'Collar',
     'Sticker / Label', 'Thread', 'Pocket', 'Drawstring / Nara',
     'Hook, buckle, velcro', 'Interlining / fusing', 'Bone', 'Full Baju'
   ]);
 
-  const [designersList, setDesignersList] = useState(['Sarah Connor', 'Michael Scott', 'Admin']);
+  const [designersList, setDesignersList] = useState(['Admin']);
 
   // Settings & Themes
   const [currencySymbol, setCurrencySymbol] = useState(() => {
@@ -719,39 +803,43 @@ export default function App() {
     prevRequestsRef.current = approvalRequests;
   }, [approvalRequests, currentUser]);
 
-  // Fetch purchase orders from database on mount
+  // Fetch purchase orders from database with periodic sync
   useEffect(() => {
     const fetchPOs = async () => {
       try {
         const res = await fetch(`${getBackendUrl()}/api/pos`);
         if (res.ok) {
           const data = await res.json();
-          if (data.length > 0) setPOs(data);
+          if (Array.isArray(data)) setPOs(data);
         }
       } catch (err) {
         console.error('Failed to fetch POs from DB:', err);
       }
     };
     fetchPOs();
+    const poInterval = setInterval(fetchPOs, 5000);
+    return () => clearInterval(poInterval);
   }, []);
 
-  // Fetch vendors from database on mount
+  // Fetch vendors from database with periodic sync
   useEffect(() => {
     const fetchVendors = async () => {
       try {
         const res = await fetch(`${getBackendUrl()}/api/vendors`);
         if (res.ok) {
           const data = await res.json();
-          if (data.length > 0) setVendors(data);
+          if (Array.isArray(data)) setVendors(data);
         }
       } catch (err) {
         console.error('Failed to fetch vendors from DB:', err);
       }
     };
     fetchVendors();
+    const vendorInterval = setInterval(fetchVendors, 10000);
+    return () => clearInterval(vendorInterval);
   }, []);
 
-  // Fetch settings (accessories & designers lists) from database on mount
+  // Fetch settings (accessories & designers lists, warehouse halls & racks) from database with periodic sync
   useEffect(() => {
     const fetchSettings = async () => {
       try {
@@ -760,14 +848,24 @@ export default function App() {
           const data = await res.json();
           if (data.accessoriesList && data.accessoriesList.length > 0)
             setAccessoriesList(data.accessoriesList);
-          if (data.designersList && data.designersList.length > 0)
-            setDesignersList(data.designersList);
+          if (data.designersList && data.designersList.length > 0) {
+            const cleaned = data.designersList.filter(d => !['sarah connor', 'michael scott'].includes(String(d).toLowerCase().trim()));
+            setDesignersList(cleaned.length > 0 ? (cleaned.includes('Admin') ? cleaned : ['Admin', ...cleaned]) : ['Admin']);
+          }
+          if (data.warehouseHalls && data.warehouseHalls.length > 0)
+            setHalls(data.warehouseHalls);
+          if (data.warehouseRacks && data.warehouseRacks.length > 0)
+            setRacks(data.warehouseRacks);
         }
       } catch (err) {
         console.error('Failed to fetch settings from DB:', err);
+      } finally {
+        settingsHydratedRef.current = true;
       }
     };
     fetchSettings();
+    const settingsInterval = setInterval(fetchSettings, 10000);
+    return () => clearInterval(settingsInterval);
   }, []);
 
   // Fetch issue logs from database on mount
@@ -1176,6 +1274,24 @@ export default function App() {
       } catch (err) {
         console.error('Failed to update design status:', err);
       }
+    } else if (req.type === 'inward_approval') {
+      // Execute the material capture and stock update
+      const inwardData = req.items?.[0] || req.items || {};
+      try {
+        await fetch(`${getBackendUrl()}/api/weight-capture`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(inwardData)
+        });
+        fetchMaterials();
+      } catch (inwErr) {
+        console.error('Failed to execute inward on approval:', inwErr);
+      }
+      setToast({
+        message: `Inward receipt of "${req.materialName}" (${req.pieces} pcs) by ${req.requesterName} has been approved and added to inventory.`,
+        type: 'success'
+      });
+      setTimeout(() => setToast(null), 5000);
     }
 
     const formattedTime = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -1294,7 +1410,9 @@ export default function App() {
       'Sticker / Label', 'Thread', 'Pocket', 'Drawstring / Nara',
       'Hook, buckle, velcro', 'Interlining / fusing', 'Bone', 'Full Baju'
     ]);
-    setDesignersList(['Sarah Connor', 'Michael Scott', 'Admin']);
+    setDesignersList(['Admin']);
+    setRacks([]);
+    setHalls(['Hall 1']);
     localStorage.clear();
     setToast({
       type: 'success',
@@ -1729,7 +1847,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['design', 'material_verification', 'rgp', 'zip_po', 'dori_po', 'generate_po', 'history', 'scanner_logs'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['design', 'material_verification', 'material_details', 'rgp', 'zip_po', 'dori_po', 'generate_po', 'history', 'scanner_logs', 'only_cutting'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => setAdminDesignMenuOpen(!adminDesignMenuOpen)}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
@@ -1746,6 +1864,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => setActiveTab('material_verification')}>
                       <span className="sidebar-text">Stock Accessories</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                      <span className="sidebar-text">Material Detail</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
                       <span className="sidebar-text">Returnable Gate Pass</span>
@@ -1765,6 +1886,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => setActiveTab('scanner_logs')}>
                       <span className="sidebar-text">Scanner Log</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                      <span className="sidebar-text">Only Cutting</span>
+                    </li>
                   </ul>
                 )}
               </>
@@ -1774,7 +1898,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => setAdminStoreMenuOpen(!adminStoreMenuOpen)}
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
@@ -1787,7 +1911,10 @@ export default function App() {
                 {adminStoreMenuOpen && (
                   <ul className="sidebar-submenu">
                     <li className={`sidebar-subitem ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('weight_capture')}>
-                      <span className="sidebar-text">Material Add</span>
+                      <span className="sidebar-text">Material Add (Scale)</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('manually_weight_capture')}>
+                      <span className="sidebar-text">Manual Material Add</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => setActiveTab('material_issue')}>
                       <span className="sidebar-text">Material Issue</span>
@@ -1819,6 +1946,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => setActiveTab('po_verification')}>
                       <span className="sidebar-text">PO Verification</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                      <span className="sidebar-text">Only Cutting</span>
+                    </li>
                   </ul>
                 )}
               </>
@@ -1834,6 +1964,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => setActiveTab('material_verification')}>
                   <CheckSquare size={18} />
                   <span className="sidebar-text">Stock Accessories</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                  <Layers size={18} />
+                  <span className="sidebar-text">Material Detail</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
                   <Truck size={18} />
@@ -1863,6 +1997,10 @@ export default function App() {
                   <CheckCircle size={18} />
                   <span className="sidebar-text">PO Verification</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                  <Scissors size={18} />
+                  <span className="sidebar-text">Only Cutting</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => setActiveTab('approval_queue')} style={{ position: 'relative' }}>
                   <Shield size={18} />
                   <span className="sidebar-text">My Requests</span>
@@ -1885,7 +2023,11 @@ export default function App() {
               <>
                 <li className={`sidebar-item ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('weight_capture')}>
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>
-                  <span className="sidebar-text">Material Add</span>
+                  <span className="sidebar-text">Material Add (Scale)</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('manually_weight_capture')}>
+                  <Layers size={18} />
+                  <span className="sidebar-text">Manual Material Add</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => setActiveTab('material_issue')}>
                   <ClipboardList size={18} />
@@ -1926,6 +2068,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => setActiveTab('po_verification')}>
                   <CheckCircle size={18} />
                   <span className="sidebar-text">PO Verification</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                  <Scissors size={18} />
+                  <span className="sidebar-text">Only Cutting</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => setActiveTab('approval_queue')} style={{ position: 'relative' }}>
                   <Shield size={18} />
@@ -2031,7 +2177,8 @@ export default function App() {
               {activeTab === 'generate_po' && 'Generate PO'}
               {activeTab === 'history' && 'Production Work'}
               {activeTab === 'scanner_logs' && 'Scanner Log'}
-              {activeTab === 'weight_capture' && 'Material Add'}
+              {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
+              {activeTab === 'manually_weight_capture' && 'Manual Material Inward Entry'}
               {activeTab === 'material_issue' && 'Material Issue'}
               {activeTab === 'return_material' && 'Return Material'}
               {activeTab === 'material_details' && 'Material Detail'}
@@ -2041,6 +2188,7 @@ export default function App() {
               {activeTab === 'settings' && 'Setting'}
               {activeTab === 'approval_queue' && (currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests')}
               {activeTab === 'po_verification' && 'PO Verification'}
+              {activeTab === 'only_cutting' && 'Only Cutting (Not Designed)'}
             </h1>
           </div>
 
@@ -2247,6 +2395,9 @@ export default function App() {
               currencySymbol={currencySymbol}
               accessoriesList={accessoriesList}
               designersList={designersList}
+              onRedirectToTab={handleRedirectToTab}
+              prefilledLotNo={prefilledLotNo}
+              setPrefilledLotNo={setPrefilledLotNo}
             />
           )}
 
@@ -2339,6 +2490,28 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'only_cutting' && (
+            <OnlyCutting
+              currentUser={currentUser}
+              role={currentUser?.role}
+              onNavigateToDesign={(lotNo) => {
+                setPrefilledLotNo(lotNo);
+                setActiveTab('design');
+              }}
+              onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
+              onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
+              onNavigateToMaterialIssue={(lotNo) => {
+                setPrefilledLotNo(lotNo);
+                setActiveTab('material_issue');
+              }}
+              onNavigateToStockAccessories={(lotNo) => {
+                setPrefilledLotNo(lotNo);
+                setActiveTab('material_verification');
+              }}
+              onRedirectToTab={handleRedirectToTab}
+            />
+          )}
+
           {activeTab === 'settings' && currentUser?.role === 'Admin' && (
             <SettingsView
               vendors={vendors}
@@ -2361,6 +2534,8 @@ export default function App() {
               onUpdateMaterial={handleUpdateMaterial}
               racks={racks}
               setRacks={setRacks}
+              halls={halls}
+              setHalls={setHalls}
             />
           )}
 
@@ -2399,7 +2574,11 @@ export default function App() {
           )}
 
           {activeTab === 'weight_capture' && currentUser && (
-            <WeightCapture racks={racks} />
+            <WeightCapture racks={racks} currentUser={currentUser} />
+          )}
+
+          {activeTab === 'manually_weight_capture' && currentUser && (
+            <ManuallyWeightCapture racks={racks} currentUser={currentUser} />
           )}
 
           {activeTab === 'material_transfer' && currentUser && (
@@ -2407,7 +2586,7 @@ export default function App() {
           )}
 
           {activeTab === 'warehouse_locations' && (
-            <WarehouseLocationView racks={racks} materials={materials} />
+            <WarehouseLocationView racks={racks} materials={materials} halls={halls} onNavigate={setActiveTab} />
           )}
 
           {activeTab === 'po_verification' && (

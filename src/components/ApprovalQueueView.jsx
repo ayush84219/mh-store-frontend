@@ -47,6 +47,7 @@ export default function ApprovalQueueView({
   const deleteCount = userRequests.filter(r => r.type === 'material_delete').length;
   const issueCount = userRequests.filter(r => r.type === 'material_issue').length;
   const designVerificationCount = userRequests.filter(r => r.type === 'design_verification').length;
+  const inwardCount = userRequests.filter(r => r.type === 'inward_approval').length;
 
   // List of unique requesters for dropdown filter
   const uniqueRequesters = [...new Set(userRequests.map(r => r.requesterName).filter(Boolean))];
@@ -97,6 +98,25 @@ export default function ApprovalQueueView({
         shade: design?.colorCode || 'N/A', // Color Code
         store: design?.category || 'N/A', // Category
         availableStock: design?.quantity ? `${design.quantity} pcs` : 'N/A' // Qty
+      };
+    }
+
+    if (req.type === 'inward_approval') {
+      const inwardItem = req.items?.[0] || req.items || {};
+      let poQtyVal = inwardItem.poQty || inwardItem.orderedQty || null;
+      if (!poQtyVal && req.reason) {
+        const match = req.reason.match(/remaining needed\s+([\d,]+)/i) || req.reason.match(/needed\s+([\d,]+)/i) || req.reason.match(/required\s+([\d,]+)/i);
+        if (match) poQtyVal = parseInt(match[1].replace(/,/g, ''), 10);
+      }
+
+      return {
+        materialId: req.materialId || inwardItem.materialCode || 'N/A',
+        lotNumber: req.lotId || inwardItem.poNumber || 'N/A',
+        poQty: poQtyVal ? `${Number(poQtyVal).toLocaleString()} Pcs` : 'As per PO',
+        poQtyRaw: poQtyVal ? Number(poQtyVal) : null,
+        shade: inwardItem.supplier ? `${inwardItem.supplier}` : 'N/A',
+        store: inwardItem.storeLocation || 'Main Store',
+        availableStock: `${(req.pieces || inwardItem.pieces || 0).toLocaleString()} Pcs (Incoming)`
       };
     }
 
@@ -255,7 +275,7 @@ export default function ApprovalQueueView({
 
   const handleApprove = (req) => {
     setConfirmModal({
-      message: `Are you sure you want to approve this ${req.type === 'material_issue' ? 'material issue' : req.type === 'design_verification' ? 'design verification' : 'material delete'} request from ${req.requesterName}?`,
+      message: `Are you sure you want to approve this ${req.type === 'inward_approval' ? 'material inward' : (req.type === 'material_issue' ? 'material issue' : req.type === 'design_verification' ? 'design verification' : 'material delete')} request from ${req.requesterName}?`,
       onConfirm: () => onApprove(req.id)
     });
   };
@@ -1266,6 +1286,7 @@ export default function ApprovalQueueView({
         <div className="filter-select-wrapper">
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)}>
             <option value="all">Request Type</option>
+            <option value="inward_approval">Inward Approval</option>
             <option value="material_issue">Material Issue</option>
             <option value="material_delete">Delete Request</option>
             <option value="design_verification">Design Verification</option>
@@ -1357,14 +1378,14 @@ export default function ApprovalQueueView({
             Issue Requests ({issueCount})
           </button>
 
-          {/* Design Verification Requests */}
+          {/* Inward Approval Requests */}
           <button
-            className={`pill-toggle-btn verification-pill ${filterStatus === 'all' && filterType === 'design_verification' ? 'active-state' : ''}`}
-            onClick={() => { setFilterStatus('all'); setFilterType('design_verification'); }}
+            className={`pill-toggle-btn issue-pill ${filterStatus === 'all' && filterType === 'inward_approval' ? 'active-state' : ''}`}
+            onClick={() => { setFilterStatus('all'); setFilterType('inward_approval'); }}
             style={{ display: 'flex', alignItems: 'center' }}
           >
             <span className="bullet-dot" />
-            Design Verifications ({designVerificationCount})
+            Inward Approvals ({inwardCount})
           </button>
         </div>
 
@@ -1435,18 +1456,22 @@ export default function ApprovalQueueView({
                   {/* Column 2: Title and tags */}
                   <div className="card-title-col">
                     <span className={`type-badge ${req.type} ${req.isReissue ? 'reissue' : ''}`}>
-                      {req.type === 'material_issue'
-                        ? (req.isReissue ? 'Re-Issue Request' : 'Issue Request')
-                        : req.type === 'design_verification'
-                          ? 'Design Verification'
-                          : 'Delete Request'}
+                      {req.type === 'inward_approval'
+                        ? 'Inward Approval'
+                        : (req.type === 'material_issue'
+                          ? (req.isReissue ? 'Re-Issue Request' : 'Issue Request')
+                          : req.type === 'design_verification'
+                            ? 'Design Verification'
+                            : 'Delete Request')}
                     </span>
                     <h4 className="card-item-title">
-                      {req.type === 'material_issue'
-                        ? (req.isReissue ? `Material Re-Issue — Lot ${req.lotId}` : `Material Issue — Lot ${req.lotId}`)
-                        : req.type === 'design_verification'
-                          ? `Design Verification — Lot ${req.lotId}`
-                          : req.materialName}
+                      {req.type === 'inward_approval'
+                        ? `Material Inward (${req.pieces?.toLocaleString()} pcs) — ${req.materialName}`
+                        : (req.type === 'material_issue'
+                          ? (req.isReissue ? `Material Re-Issue — Lot ${req.lotId}` : `Material Issue — Lot ${req.lotId}`)
+                          : req.type === 'design_verification'
+                            ? `Design Verification — Lot ${req.lotId}`
+                            : req.materialName)}
                     </h4>
                     <div className="card-pills-row">
                       <span className="card-pill-tag code-tag">{matDetails.materialId}</span>
@@ -1469,17 +1494,23 @@ export default function ApprovalQueueView({
 
                   {/* Column 3: Material Details Box */}
                   <div className="card-details-box">
-                    <h5>{req.type === 'design_verification' ? 'Design Details' : 'Material Details'}</h5>
+                    <h5>{req.type === 'design_verification' ? 'Design Details' : (req.type === 'inward_approval' ? 'Inward PO Details' : 'Material Details')}</h5>
                     <div className="details-box-row">
                       <span>{req.type === 'design_verification' ? 'Style Code' : 'Material ID'}</span>
                       <strong>{matDetails.materialId}</strong>
                     </div>
                     <div className="details-box-row">
-                      <span>Lot Number</span>
-                      <strong>{matDetails.lotNumber}</strong>
+                      <span>{req.type === 'inward_approval' ? 'PO Number' : 'Lot Number'}</span>
+                      <strong style={{ color: req.type === 'inward_approval' ? 'var(--accent-color)' : 'inherit' }}>{matDetails.lotNumber}</strong>
                     </div>
+                    {req.type === 'inward_approval' && (
+                      <div className="details-box-row">
+                        <span>PO Required Qty</span>
+                        <strong style={{ color: '#1e40af', fontWeight: '800' }}>{matDetails.poQty}</strong>
+                      </div>
+                    )}
                     <div className="details-box-row">
-                      <span>{req.type === 'design_verification' ? 'Color Swatch' : 'Shade'}</span>
+                      <span>{req.type === 'design_verification' ? 'Color Swatch' : (req.type === 'inward_approval' ? 'Supplier' : 'Shade')}</span>
                       {req.type === 'design_verification' && matDetails.shade !== 'N/A' ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: matDetails.shade, border: '1px solid var(--border-color)' }} />
@@ -1494,14 +1525,14 @@ export default function ApprovalQueueView({
                       <strong>{matDetails.store}</strong>
                     </div>
                     <div className="details-box-row">
-                      <span>{req.type === 'design_verification' ? 'Order Qty' : 'Available Stock'}</span>
-                      <strong>{matDetails.availableStock}</strong>
+                      <span>{req.type === 'design_verification' ? 'Order Qty' : (req.type === 'inward_approval' ? 'Incoming Qty' : 'Available Stock')}</span>
+                      <strong style={{ color: req.type === 'inward_approval' ? '#d97706' : 'inherit' }}>{matDetails.availableStock}</strong>
                     </div>
                   </div>
 
                   {/* Column 4: Reason Box */}
                   <div className="card-reason-col">
-                    <h5>{req.type === 'design_verification' ? 'Design Reference' : (req.type === 'material_issue' ? 'Reason for Issue' : 'Reason for Deletion')}</h5>
+                    <h5>{req.type === 'inward_approval' ? 'Approval Justification / Rule Violations' : (req.type === 'design_verification' ? 'Design Reference' : (req.type === 'material_issue' ? 'Reason for Issue' : 'Reason for Deletion'))}</h5>
                     <p style={{ fontStyle: req.reason ? 'normal' : 'italic' }}>
                       {req.reason ? `"${req.reason}"` : 'No justification details provided.'}
                     </p>
@@ -1674,6 +1705,67 @@ export default function ApprovalQueueView({
                     </div>
                   </div>
                 )}
+
+                {/* Collapsible Inward Details Table (for inward approval requests) */}
+                {isExpanded && req.type === 'inward_approval' && (
+                  <div className="card-expanded-table-container">
+                    <h5 className="expanded-table-title">Inward Material Verification & Procurement Parameters</h5>
+                    {(() => {
+                      const inwardItem = req.items?.[0] || req.items || {};
+                      let parsedPoQty = inwardItem.poQty || inwardItem.orderedQty || null;
+                      if (!parsedPoQty && req.reason) {
+                        const match = req.reason.match(/remaining needed\s+([\d,]+)/i) || req.reason.match(/needed\s+([\d,]+)/i) || req.reason.match(/required\s+([\d,]+)/i);
+                        if (match) parsedPoQty = parseInt(match[1].replace(/,/g, ''), 10);
+                      }
+                      const poQtyStr = parsedPoQty ? `${Number(parsedPoQty).toLocaleString()} Pcs` : 'As per PO';
+                      const incomingPcs = req.pieces || inwardItem.pieces || 0;
+                      const extraQty = parsedPoQty ? (incomingPcs - Number(parsedPoQty)) : 0;
+                      const extraStr = extraQty > 0 ? `+${extraQty.toLocaleString()} Pcs Extra` : (extraQty === 0 ? 'Exact Match' : `${Math.abs(extraQty).toLocaleString()} Pcs Short`);
+
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                            gap: '10px',
+                            background: 'var(--bg-primary)',
+                            padding: '12px 14px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)'
+                          }}>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Material Code:</span> <div style={{ fontWeight: '800', fontFamily: 'monospace' }}>{inwardItem.materialCode || req.materialId}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Material Name:</span> <div style={{ fontWeight: '800' }}>{inwardItem.materialName || req.materialName}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Supplier / Vendor:</span> <div style={{ fontWeight: '800', color: 'var(--accent-color)' }}>{inwardItem.supplier || 'N/A'}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Bill / Invoice No:</span> <div style={{ fontWeight: '800' }}>{inwardItem.invoiceNo || 'N/A'}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PO Reference:</span> <div style={{ fontWeight: '800', color: 'var(--accent-color)' }}>{inwardItem.poNumber || req.lotId || 'N/A'}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>PO Required / Ordered Qty:</span> <div style={{ fontWeight: '900', color: '#1e40af' }}>{poQtyStr}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Total Incoming:</span> <div style={{ fontWeight: '900', color: '#2563eb' }}>{incomingPcs.toLocaleString()} {inwardItem.unit || 'Pcs'}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Extra / Balance Status:</span> <div style={{ fontWeight: '900', color: extraQty > 0 ? '#8b5cf6' : '#10b981' }}>{extraStr}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Assigned Location:</span> <div style={{ fontWeight: '800', color: '#10b981' }}>{inwardItem.storeLocation || 'Main Store'}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Packets:</span> <div style={{ fontWeight: '800' }}>{inwardItem.packets || 1} Pkts</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Gross / Net Weight:</span> <div style={{ fontWeight: '800' }}>{inwardItem.grossWeightKg || 0} / {inwardItem.netWeightKg || 0} KG</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Piece Weight:</span> <div style={{ fontWeight: '800' }}>{inwardItem.weightPerPieceG || 10} g/pc</div></div>
+                          </div>
+
+                          {req.reason && (
+                            <div style={{
+                              padding: '10px 14px',
+                              borderRadius: '8px',
+                              background: 'rgba(239, 68, 68, 0.08)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              color: '#991b1b',
+                              fontSize: '12px',
+                              fontWeight: '700'
+                            }}>
+                              <span style={{ marginRight: '6px' }}>⚠️ Violation / Flag:</span>
+                              {req.reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1777,9 +1869,10 @@ export default function ApprovalQueueView({
             </div>
             <div style={{ textAlign: 'right' }}>
               <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                {printRequest.type === 'material_issue' ? 'Material Requisition & Issue Slip' :
-                  printRequest.type === 'design_verification' ? 'Design Verification Requisition' :
-                    'Material Deletion Authorization'}
+                {printRequest.type === 'inward_approval' ? 'Material Inward Receipt Authorization' :
+                  printRequest.type === 'material_issue' ? 'Material Requisition & Issue Slip' :
+                    printRequest.type === 'design_verification' ? 'Design Verification Requisition' :
+                      'Material Deletion Authorization'}
               </h3>
               <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Request ID: #{printRequest.id}</span>
             </div>
@@ -1787,7 +1880,7 @@ export default function ApprovalQueueView({
 
           {/* Info grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 20px', padding: '12px', border: '1px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '12px' }}>
-            <div><strong>Request Type:</strong> {printRequest.type === 'material_issue' ? 'Material Issue' : printRequest.type === 'design_verification' ? 'Design Verification' : 'Material Deletion'}</div>
+            <div><strong>Request Type:</strong> {printRequest.type === 'inward_approval' ? 'Inward Approval' : (printRequest.type === 'material_issue' ? 'Material Issue' : printRequest.type === 'design_verification' ? 'Design Verification' : 'Material Deletion')}</div>
             <div><strong>Status:</strong> {printRequest.status.toUpperCase()}</div>
             <div><strong>Lot Number:</strong> Lot {printRequest.lotId || 'N/A'}</div>
             <div><strong>Submitted Date:</strong> {printRequest.date}</div>

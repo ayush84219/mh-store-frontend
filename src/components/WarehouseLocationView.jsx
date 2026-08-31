@@ -1,91 +1,287 @@
+import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Database, Search, Bell, Clock, Shield, ArrowLeftRight, 
-  CheckCircle, AlertTriangle, Layers, FileText, ChevronRight, X, Plus, LogOut, ChevronDown 
+import {
+  Database, Search, Bell, Clock, Shield, ArrowLeftRight,
+  CheckCircle, AlertTriangle, Layers, FileText, ChevronRight, X, Plus, LogOut, ChevronDown
 } from 'lucide-react';
 
-export default function WarehouseLocationView({ racks = [], materials = [] }) {
+export default function WarehouseLocationView({ racks = [], materials = [], halls = [], onNavigate }) {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  
+  const [dbLocations, setDbLocations] = useState([]);
+  const [captures, setCaptures] = useState([]);
+  const [loading, setLoading] = useState(false);
+
   // Search & Filters State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedRack, setSelectedRack] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
 
-  // Dynamically calculate slot locations based on configured racks and live inventory materials
+  useEffect(() => {
+    const fetchLiveLocations = async () => {
+      try {
+        setLoading(true);
+        const [locRes, capRes] = await Promise.all([
+          fetch(`${getBackendUrl()}/api/warehouse-locations`).catch(() => null),
+          fetch(`${getBackendUrl()}/api/weight-capture`).catch(() => null)
+        ]);
+        if (locRes && locRes.ok) {
+          const lData = await locRes.json();
+          const list = Array.isArray(lData) ? lData : (lData.data || []);
+          setDbLocations(list);
+        }
+        if (capRes && capRes.ok) {
+          const cData = await capRes.json();
+          setCaptures(cData.data || (Array.isArray(cData) ? cData : []));
+        }
+      } catch (err) {
+        console.warn("Could not fetch warehouse locations from DB:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchLiveLocations();
+    const interval = setInterval(fetchLiveLocations, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  /**
+   * Helper to parse how many packets of a material are stored in a specific location string.
+   * Handles multi-location strings like "Hall 1 - Rack 2 (8 pkts), Hall 1 - Rack 3 (2 pkts)"
+   */
+  const getPacketsInLocation = (m, locCode) => {
+    const locStr = String(m.location || '').trim();
+    const pktsTotal = Math.max(1, Number(m.packets) || 1);
+    if (!locStr) return 0;
+    
+    const parts = locStr.split(',');
+    let count = 0;
+    const cleanTarget = locCode.toLowerCase().replace(/^(hall|warehouse)\s*\d+\s*[-–]?\s*/i, '').trim();
+
+    parts.forEach(part => {
+      const cleanPart = part.trim().toLowerCase();
+      // Remove packet quantity annotation "(X pkts)" for clean string comparison
+      const pureLoc = cleanPart.replace(/\(\d+\s*pkts?\)/i, '').trim();
+      
+      const isMatch = pureLoc === locCode.toLowerCase() || 
+                      pureLoc === `rack ${locCode.toLowerCase()}` ||
+                      (cleanTarget && (pureLoc === cleanTarget || pureLoc === `rack ${cleanTarget}`));
+                      
+      if (isMatch) {
+        const match = cleanPart.match(/\((\d+)\s*pkt/);
+        if (match) {
+          count += parseInt(match[1], 10) || 1;
+        } else {
+          count += pktsTotal;
+        }
+      }
+    });
+    return count;
+  };
+
+  /**
+   * Dynamically calculate slot locations based on:
+   * 1. Official warehouse_locations DB table (Primary single source of truth)
+   * 2. Configured racks from Settings
+   * 3. Discovered locations from Materials inventory (normalized to avoid loose single-digit duplicates)
+   */
   const locations = React.useMemo(() => {
-    const list = [];
-    racks.forEach(rack => {
-      for (let s = 1; s <= rack.shelves; s++) {
-        for (let l = 1; l <= rack.levels; l++) {
-          const slotNum = (s - 1) * rack.levels + l;
-          const code = `${rack.code}${slotNum < 10 ? '0' + slotNum : slotNum}`;
-          
-          // Cross-reference with materials list.
-          // A material's location is stored in its 'color' property.
-          const matchedMat = materials.find(m => {
-            const mLoc = String(m.color || '').toLowerCase();
-            return mLoc === code.toLowerCase() || 
-                   mLoc.includes(`rack ${rack.code.toLowerCase()} shelf ${s}`) ||
-                   mLoc.includes(`${code.toLowerCase()} `) ||
-                   mLoc.endsWith(code.toLowerCase());
-          });
+    const slotMap = new Map(); // key -> slotObj
 
-          let status = 'Empty';
-          let qty = 0;
-          let unit = 'PCS';
-          let materialName = '';
-          let poNumber = '';
-          let lotNumber = '';
-          let weight = '0 kg';
-          let storeIncharge = '';
-          let lastUpdated = '';
+    // Helper: Normalize raw location strings like "1", "Rack 1", "Hall 1 - Rack 1" to unified format
+    const normalizeSlotCode = (rawCode) => {
+      const trimmed = String(rawCode || '').trim();
+      if (!trimmed || trimmed === 'N/A' || trimmed === 'null') return null;
+      
+      // If it's just a raw number (e.g. "1", "2"), map to "Hall 1 - Rack X"
+      if (/^\d+$/.test(trimmed)) {
+        return `HALL 1 - RACK ${trimmed}`;
+      }
+      // If it's "Rack X", map to "Hall 1 - Rack X"
+      if (/^rack\s*\d+$/i.test(trimmed)) {
+        const num = trimmed.replace(/^rack\s*/i, '');
+        return `HALL 1 - RACK ${num}`;
+      }
+      return trimmed.toUpperCase();
+    };
 
-          if (matchedMat) {
-            status = matchedMat.stock > 1000 ? 'Occupied' : (matchedMat.stock > 0 ? 'Picking' : 'Reserved');
-            qty = matchedMat.stock;
-            unit = matchedMat.unit || 'Pcs';
-            materialName = matchedMat.name;
-            poNumber = `PO-2026-${matchedMat.id.slice(-4)}`;
-            lotNumber = `Lot 62${matchedMat.id.slice(-3)}`;
-            weight = `${Math.round(matchedMat.stock * 0.05)} kg`;
-            storeIncharge = 'amit';
-            lastUpdated = '2026-07-07 12:00';
+    // 1. Add official locations from warehouse_locations DB table as primary source of truth
+    dbLocations.forEach(d => {
+      const rawCode = String(d.code || d.id || '').trim();
+      const codeKey = normalizeSlotCode(rawCode);
+      if (!codeKey) return;
+      
+      slotMap.set(codeKey, {
+        code: d.code || codeKey,
+        rack: d.code || codeKey,
+        warehouse: d.warehouse || 'Hall 1',
+        capacity: Number(d.capacity) || 10
+      });
+    });
+
+    // 2. Add configured racks from settings if not already in DB
+    racks.forEach(r => {
+      const rawCode = String(r.code || '').trim();
+      const codeKey = normalizeSlotCode(rawCode);
+      if (!codeKey) return;
+      
+      if (!slotMap.has(codeKey)) {
+        slotMap.set(codeKey, {
+          code: r.code || codeKey,
+          rack: r.code || codeKey,
+          warehouse: r.warehouse || 'Hall 1',
+          capacity: Number(r.capacity) || 10
+        });
+      }
+    });
+
+    // 3. Add locations discovered from materials inventory (normalized to prevent double cards)
+    materials.forEach(m => {
+      const locStr = String(m.location || '').trim();
+      if (!locStr || locStr === 'N/A' || locStr === 'null') return;
+      const parts = locStr.split(',');
+      parts.forEach(p => {
+        const clean = p.replace(/\(\d+\s*pkts?\)/i, '').trim();
+        const codeKey = normalizeSlotCode(clean);
+        if (!codeKey) return;
+        
+        if (!slotMap.has(codeKey)) {
+          let wh = 'Hall 1';
+          const whMatch = clean.match(/(hall|warehouse)\s*(\d+)/i);
+          if (whMatch) {
+            wh = `Hall ${whMatch[2]}`;
+          } else if (clean.toLowerCase().includes('store')) {
+            wh = 'Main Store';
           }
+          slotMap.set(codeKey, {
+            code: clean,
+            rack: clean,
+            warehouse: wh,
+            capacity: 10
+          });
+        }
+      });
+    });
 
-          list.push({
-            code,
-            rack: rack.code,
-            shelf: String(s),
-            level: String(l),
-            warehouse: rack.warehouse,
-            status,
-            qty,
-            unit,
-            materialName,
-            poNumber,
-            lotNumber,
-            weight,
-            storeIncharge,
-            lastUpdated
+    // 4. If default halls are defined, ensure default rack slots exist for visualizer
+    const defaultHalls = halls.length > 0 ? halls : ['Hall 1', 'Main Store'];
+    defaultHalls.forEach(hallName => {
+      const existingInHall = Array.from(slotMap.values()).filter(s => (s.warehouse || '').toLowerCase() === String(hallName).toLowerCase());
+      if (existingInHall.length === 0 && hallName.toLowerCase().includes('hall')) {
+        for (let i = 1; i <= 9; i++) {
+          const rackCode = `${String(hallName).toUpperCase()} - RACK ${i}`;
+          slotMap.set(rackCode, {
+            code: rackCode,
+            rack: `Rack ${i}`,
+            warehouse: hallName,
+            capacity: 10
           });
         }
       }
     });
-    return list;
-  }, [racks, materials]);
+
+    // Cross-reference all slots with materials and captures using exact location matching
+    const result = [];
+    slotMap.forEach((slot, codeKey) => {
+      const code = slot.code || codeKey;
+      const capacity = slot.capacity || 10;
+      const cleanSlot = String(code).toLowerCase().trim();
+      const normSlotKey = normalizeSlotCode(code)?.toLowerCase();
+      
+      // Match materials stored in this specific slot (prevent loose substring matches)
+      const matchedMaterials = (materials || []).filter(m => {
+        const mLoc = String(m.location || '').toLowerCase();
+        if (!mLoc) return false;
+        
+        const mParts = mLoc.split(',').map(p => p.replace(/\(\d+\s*pkts?\)/i, '').trim());
+        return mParts.some(p => {
+          const normP = normalizeSlotCode(p)?.toLowerCase();
+          return p === cleanSlot || normP === normSlotKey;
+        });
+      });
+
+      // Match captures logged to this slot
+      const matchedCaptures = (captures || []).filter(c => {
+        const cLoc = String(c.storeLocation || '').toLowerCase().trim();
+        if (!cLoc) return false;
+        const normC = normalizeSlotCode(cLoc)?.toLowerCase();
+        return cLoc === cleanSlot || normC === normSlotKey;
+      });
+
+      let currentPackets = 0;
+      let totalQty = 0;
+      let totalWeightKg = 0;
+      let unit = 'Pcs';
+      let materialNames = [];
+      let poNumbers = [];
+      let lotNumbers = [];
+      let storeIncharges = [];
+      let lastUpdated = '';
+
+      matchedMaterials.forEach(m => {
+        const pkts = getPacketsInLocation(m, code);
+        const totalPkts = Math.max(1, Number(m.packets) || 1);
+        const mLoc = String(m.location || '').toLowerCase();
+        const effectivePkts = Math.min(totalPkts, pkts > 0 ? pkts : (mLoc.includes(String(code).toLowerCase()) ? totalPkts : 1));
+        currentPackets += effectivePkts;
+        totalQty += Math.round((Number(m.stock) / totalPkts) * effectivePkts);
+        unit = m.unit || 'Pcs';
+        materialNames.push(m.color && m.color !== 'Default' ? `${m.name} (${m.color})` : m.name);
+        if (m.poNumber && m.poNumber !== 'N/A') poNumbers.push(m.poNumber);
+        lotNumbers.push(`Lot #${m.id}`);
+      });
+
+      matchedCaptures.forEach(c => {
+        totalWeightKg += Number(c.netWeightKg) || 0;
+        if (c.storeIncharge && !storeIncharges.includes(c.storeIncharge)) {
+          storeIncharges.push(c.storeIncharge);
+        }
+        if (c.capturedAt) {
+          lastUpdated = new Date(c.capturedAt).toLocaleString('en-GB');
+        }
+      });
+
+      let status = 'Empty';
+      if (currentPackets >= capacity) {
+        status = 'Occupied';
+      } else if (currentPackets > 0) {
+        status = 'Picking';
+      } else {
+        status = 'Empty';
+      }
+
+      result.push({
+        code,
+        rack: slot.rack,
+        warehouse: slot.warehouse || 'Hall 1',
+        capacity,
+        currentPackets,
+        status,
+        qty: totalQty,
+        unit,
+        materialName: materialNames.join(', ') || 'None',
+        matchedMaterials,
+        poNumber: poNumbers[0] || (matchedMaterials[0] ? `PO-2026-${matchedMaterials[0].id}` : 'N/A'),
+        lotNumber: lotNumbers[0] || 'N/A',
+        weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : `${Math.round(totalQty * 0.05)} kg`,
+        storeIncharge: storeIncharges[0] || 'Store Team',
+        lastUpdated: lastUpdated || '2026-08-22'
+      });
+    });
+
+    return result.sort((a, b) => (a.warehouse || '').localeCompare(b.warehouse || '') || (a.code || '').localeCompare(b.code || '', undefined, { numeric: true }));
+  }, [racks, dbLocations, materials, captures, halls]);
 
   // Extract unique warehouses and racks dynamically
   const warehouses = React.useMemo(() => {
-    return ['All', ...new Set(racks.map(r => r.warehouse))];
-  }, [racks]);
+    return ['All', ...new Set(locations.map(r => r.warehouse))];
+  }, [locations]);
 
   const uniqueRacks = React.useMemo(() => {
-    return ['All', ...new Set(racks.map(r => r.code))];
-  }, [racks]);
+    return ['All', ...new Set(locations.map(r => r.rack))];
+  }, [locations]);
 
   // Stats Card Calculations
   const stats = {
@@ -109,12 +305,12 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
   };
 
   const filteredLocations = locations.filter(loc => {
-    const matchesSearch = loc.code.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const matchesSearch = loc.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (loc.materialName && loc.materialName.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesWarehouse = selectedWarehouse === 'All' || loc.warehouse === selectedWarehouse;
     const matchesRack = selectedRack === 'All' || loc.rack === selectedRack;
     const matchesStatus = selectedStatus === 'All' || loc.status === selectedStatus;
-    
+
     return matchesSearch && matchesWarehouse && matchesRack && matchesStatus;
   });
 
@@ -133,7 +329,7 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
       {/* Filters & Actions Panel */}
       <div className="panel" style={{ marginBottom: '24px' }}>
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
-          
+
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', flex: 1, minWidth: '300px' }}>
             {/* Search Location */}
             <div style={{ position: 'relative', width: '220px' }}>
@@ -322,21 +518,38 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
                   {loc.qty > 0 ? `${loc.qty} ${loc.unit}` : 'Empty Slot'}
                 </div>
 
-                <div style={{
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  color: getStatusColor(loc.status),
-                  textTransform: 'uppercase',
-                  marginTop: 'auto',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px'
-                }}>
-                  {loc.status === 'Empty' && '🟢 Free'}
-                  {loc.status === 'Occupied' && '🔴 Full'}
-                  {loc.status === 'Reserved' && '🟡 Reserved'}
-                  {loc.status === 'Picking' && '🟣 Picking'}
-                </div>
+                {/* Storage Utilization Bar */}
+                {loc.status !== 'Empty' && (
+                  <div style={{ marginTop: 'auto' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--text-muted)', marginBottom: '3px', fontWeight: '700' }}>
+                      <span>Utilized</span>
+                      <span>{loc.currentPackets} / {loc.capacity} Pkts ({Math.round((loc.currentPackets / loc.capacity) * 100)}%)</span>
+                    </div>
+                    <div style={{ width: '100%', height: '6px', backgroundColor: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        width: `${Math.min(100, Math.round((loc.currentPackets / loc.capacity) * 100))}%`, 
+                        height: '100%', 
+                        backgroundColor: getStatusColor(loc.status),
+                        borderRadius: '3px'
+                      }} />
+                    </div>
+                  </div>
+                )}
+
+                {loc.status === 'Empty' && (
+                  <div style={{
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    color: getStatusColor(loc.status),
+                    textTransform: 'uppercase',
+                    marginTop: 'auto',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    🟢 Free (0 / {loc.capacity} Pkts)
+                  </div>
+                )}
               </motion.div>
             ))}
           </div>
@@ -428,40 +641,51 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
 
               {/* Drawer Scrollable Content */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '24px' }}>
-                
-                {/* Physical Position Specs */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
+
+                {/* Physical Position Specs & Capacity */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '24px' }}>
                   <div style={{ border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
                     <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Rack</div>
                     <div style={{ fontSize: '15px', fontWeight: '800', marginTop: '4px' }}>{selectedLocation.rack}</div>
                   </div>
                   <div style={{ border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Shelf</div>
-                    <div style={{ fontSize: '15px', fontWeight: '800', marginTop: '4px' }}>{selectedLocation.shelf}</div>
-                  </div>
-                  <div style={{ border: '1px solid var(--border-color)', padding: '10px', borderRadius: '8px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Level</div>
-                    <div style={{ fontSize: '15px', fontWeight: '800', marginTop: '4px' }}>{selectedLocation.level}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Capacity</div>
+                    <div style={{ fontSize: '15px', fontWeight: '800', marginTop: '4px' }}>{selectedLocation.capacity} Pkts</div>
                   </div>
                 </div>
 
                 {/* Storage Status Overview */}
                 <div style={{
-                  padding: '12px 16px',
+                  padding: '16px',
                   borderRadius: '10px',
                   backgroundColor: `${getStatusColor(selectedLocation.status)}10`,
                   borderLeft: `4px solid ${getStatusColor(selectedLocation.status)}`,
-                  marginBottom: '24px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
+                  marginBottom: '24px'
                 }}>
-                  <span style={{ fontSize: '13px', fontWeight: '700', color: getStatusColor(selectedLocation.status) }}>
-                    Status: {selectedLocation.status}
-                  </span>
-                  <span style={{ fontSize: '14px', fontWeight: '800' }}>
-                    {selectedLocation.qty} {selectedLocation.unit}
-                  </span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: getStatusColor(selectedLocation.status) }}>
+                      Status: {selectedLocation.status}
+                    </span>
+                    <span style={{ fontSize: '14px', fontWeight: '800' }}>
+                      {selectedLocation.qty} {selectedLocation.unit}
+                    </span>
+                  </div>
+                  
+                  {/* Utilization gauge in drawer */}
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: '600' }}>
+                      <span>Space Utilization:</span>
+                      <span>{selectedLocation.currentPackets} / {selectedLocation.capacity} Packets ({Math.round((selectedLocation.currentPackets / selectedLocation.capacity) * 100)}%)</span>
+                    </div>
+                    <div style={{ width: '100%', height: '8px', backgroundColor: 'var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ 
+                        width: `${Math.min(100, Math.round((selectedLocation.currentPackets / selectedLocation.capacity) * 100))}%`, 
+                        height: '100%', 
+                        backgroundColor: getStatusColor(selectedLocation.status),
+                        borderRadius: '4px'
+                      }} />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Material Details Block */}
@@ -470,7 +694,7 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
                     <h4 style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '700', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', margin: 0 }}>
                       STORED MATERIAL METADATA
                     </h4>
-                    
+
                     <div>
                       <label style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', display: 'block', marginBottom: '2px' }}>Material Name</label>
                       <div style={{ fontSize: '14px', fontWeight: '700' }}>{selectedLocation.materialName}</div>
@@ -514,45 +738,337 @@ export default function WarehouseLocationView({ racks = [], materials = [] }) {
 
               {/* Drawer Footer Actions */}
               <div style={{
-                padding: '20px 24px',
+                padding: '24px',
                 borderTop: '1px solid var(--border-color)',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
+                gap: '16px',
                 backgroundColor: 'var(--bg-secondary)'
               }}>
-                <button 
-                  className="btn" 
-                  style={{ width: '100%', padding: '10px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-                  onClick={() => alert(`Issuing material from location ${selectedLocation.code}`)}
-                >
-                  <Plus size={16} />
-                  Issue Material
-                </button>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '10px', fontSize: '13px', fontWeight: '600' }}
-                    onClick={() => alert(`Receiving material at location ${selectedLocation.code}`)}
+                <h4 style={{ 
+                  fontSize: '11px', 
+                  color: 'var(--text-muted)', 
+                  fontWeight: '700', 
+                  textTransform: 'uppercase', 
+                  letterSpacing: '0.08em',
+                  margin: '0 0 4px 0' 
+                }}>
+                  Location Actions
+                </h4>
+                
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px'
+                }}>
+                  {/* Action 1: Issue Material */}
+                  <div
+                    onClick={() => {
+                      if (onNavigate) onNavigate('material_issue');
+                      else alert(`Issuing material from location ${selectedLocation.code}`);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      backgroundColor: 'transparent',
+                      userSelect: 'none',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                      e.currentTarget.style.borderColor = 'var(--border-color)';
+                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--accent-color)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'translateX(3px)';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.borderColor = 'transparent';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--text-main)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'none';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'none';
+                    }}
                   >
-                    Receive Stock
-                  </button>
-                  <button 
-                    className="btn btn-secondary" 
-                    style={{ padding: '10px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}
-                    onClick={() => alert(`Transferring stock from location ${selectedLocation.code}`)}
+                    <div 
+                      className="action-icon-wrapper"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        color: 'var(--accent-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: '12px',
+                        transition: 'transform 0.2s ease',
+                        flexShrink: 0
+                      }}
+                    >
+                      <Plus size={16} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div 
+                        className="action-title"
+                        style={{ 
+                          fontSize: '13px', 
+                          fontWeight: '600', 
+                          color: 'var(--text-main)', 
+                          transition: 'color 0.2s ease',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: '3px'
+                        }}
+                      >
+                        Issue Material
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Deduct stock from {selectedLocation.code}
+                      </div>
+                    </div>
+                    <ChevronRight 
+                      className="action-chevron"
+                      size={14} 
+                      style={{ color: 'var(--text-muted)', transition: 'transform 0.2s ease', marginLeft: '8px' }} 
+                    />
+                  </div>
+
+                  {/* Action 2: Receive Stock */}
+                  <div
+                    onClick={() => {
+                      if (onNavigate) onNavigate('weight_capture');
+                      else alert(`Receiving material at location ${selectedLocation.code}`);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      backgroundColor: 'transparent',
+                      userSelect: 'none',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                      e.currentTarget.style.borderColor = 'var(--border-color)';
+                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--accent-color)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'translateX(3px)';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.borderColor = 'transparent';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--text-main)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'none';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'none';
+                    }}
                   >
-                    <ArrowLeftRight size={14} />
-                    Transfer
-                  </button>
+                    <div 
+                      className="action-icon-wrapper"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        color: '#10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: '12px',
+                        transition: 'transform 0.2s ease',
+                        flexShrink: 0
+                      }}
+                    >
+                      <Plus size={16} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div 
+                        className="action-title"
+                        style={{ 
+                          fontSize: '13px', 
+                          fontWeight: '600', 
+                          color: 'var(--text-main)', 
+                          transition: 'color 0.2s ease',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: '3px'
+                        }}
+                      >
+                        Receive Stock
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Scan and add new stock to {selectedLocation.code}
+                      </div>
+                    </div>
+                    <ChevronRight 
+                      className="action-chevron"
+                      size={14} 
+                      style={{ color: 'var(--text-muted)', transition: 'transform 0.2s ease', marginLeft: '8px' }} 
+                    />
+                  </div>
+
+                  {/* Action 3: Transfer */}
+                  <div
+                    onClick={() => {
+                      if (onNavigate) onNavigate('material_transfer');
+                      else alert(`Transferring stock from location ${selectedLocation.code}`);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      backgroundColor: 'transparent',
+                      userSelect: 'none',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                      e.currentTarget.style.borderColor = 'var(--border-color)';
+                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--accent-color)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'translateX(3px)';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.borderColor = 'transparent';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--text-main)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'none';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'none';
+                    }}
+                  >
+                    <div 
+                      className="action-icon-wrapper"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        color: '#f59e0b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: '12px',
+                        transition: 'transform 0.2s ease',
+                        flexShrink: 0
+                      }}
+                    >
+                      <ArrowLeftRight size={14} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div 
+                        className="action-title"
+                        style={{ 
+                          fontSize: '13px', 
+                          fontWeight: '600', 
+                          color: 'var(--text-main)', 
+                          transition: 'color 0.2s ease',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: '3px'
+                        }}
+                      >
+                        Transfer
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        Move materials to another location
+                      </div>
+                    </div>
+                    <ChevronRight 
+                      className="action-chevron"
+                      size={14} 
+                      style={{ color: 'var(--text-muted)', transition: 'transform 0.2s ease', marginLeft: '8px' }} 
+                    />
+                  </div>
+
+                  {/* Action 4: View Location Transaction Logs */}
+                  <div
+                    onClick={() => {
+                      if (onNavigate) onNavigate('scanner_logs');
+                      else alert(`Displaying transaction log history for ${selectedLocation.code}`);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '10px 12px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      backgroundColor: 'transparent',
+                      userSelect: 'none',
+                      border: '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                      e.currentTarget.style.borderColor = 'var(--border-color)';
+                      e.currentTarget.style.boxShadow = 'var(--shadow-sm)';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--accent-color)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'translateX(3px)';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'scale(1.05)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                      e.currentTarget.style.borderColor = 'transparent';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.querySelector('.action-title').style.color = 'var(--text-main)';
+                      e.currentTarget.querySelector('.action-chevron').style.transform = 'none';
+                      e.currentTarget.querySelector('.action-icon-wrapper').style.transform = 'none';
+                    }}
+                  >
+                    <div 
+                      className="action-icon-wrapper"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                        color: 'var(--accent-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginRight: '12px',
+                        transition: 'transform 0.2s ease',
+                        flexShrink: 0
+                      }}
+                    >
+                      <FileText size={14} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div 
+                        className="action-title"
+                        style={{ 
+                          fontSize: '13px', 
+                          fontWeight: '600', 
+                          color: 'var(--text-main)', 
+                          transition: 'color 0.2s ease',
+                          textDecoration: 'underline',
+                          textUnderlineOffset: '3px'
+                        }}
+                      >
+                        View Location Transaction Logs
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        History of changes for {selectedLocation.code}
+                      </div>
+                    </div>
+                    <ChevronRight 
+                      className="action-chevron"
+                      size={14} 
+                      style={{ color: 'var(--text-muted)', transition: 'transform 0.2s ease', marginLeft: '8px' }} 
+                    />
+                  </div>
                 </div>
-                <button 
-                  className="btn btn-secondary" 
-                  style={{ width: '100%', padding: '10px', fontSize: '13px', fontWeight: '600', border: 'none', background: 'transparent', textDecoration: 'underline' }}
-                  onClick={() => alert(`Displaying transaction log history for ${selectedLocation.code}`)}
-                >
-                  View Location Transaction Logs
-                </button>
               </div>
             </motion.div>
           </>

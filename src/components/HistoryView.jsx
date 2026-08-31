@@ -239,6 +239,13 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     return list;
   }, [lotOptions, designs, pos, searchQuery, typeFilter, ageSort, dateFilter]);
 
+  // Auto-select first lot so timeline is immediately active and not blank
+  useEffect(() => {
+    if (!selectedLotId && filteredLotsList.length > 0) {
+      setSelectedLotId(filteredLotsList[0].id);
+    }
+  }, [filteredLotsList, selectedLotId]);
+
   const resolvedLotId = useMemo(() => {
     if (!selectedLotId) return '';
     const cleanId = String(selectedLotId).trim().toUpperCase();
