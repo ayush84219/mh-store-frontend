@@ -2,83 +2,8 @@ import { getBackendUrl } from '../utils/api';
 import { useState, useEffect } from 'react';
 import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors } from 'lucide-react';
 
-export const getCleanImageUrl = (url) => {
-  if (!url) return '';
-  let fileId = '';
-  const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const idParamMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-
-  if (fileDMatch && fileDMatch[1]) {
-    fileId = fileDMatch[1];
-  } else if (idParamMatch && idParamMatch[1]) {
-    fileId = idParamMatch[1];
-  }
-
-  if (fileId) {
-    return `${getBackendUrl()}/api/image-proxy?url=${encodeURIComponent(url)}`;
-  }
-  return url;
-};
-
-
-export const getGoogleDrivePreviewUrl = (url) => {
-  if (!url) return '';
-  let fileId = '';
-  const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const idParamMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-
-  if (fileDMatch && fileDMatch[1]) {
-    fileId = fileDMatch[1];
-  } else if (idParamMatch && idParamMatch[1]) {
-    fileId = idParamMatch[1];
-  }
-
-  if (fileId) {
-    return `https://drive.google.com/file/d/${fileId}/preview`;
-  }
-  return url;
-};
-
-export const formatDesignTime = (createdAtStr) => {
-  if (!createdAtStr) return '';
-  try {
-    const d = new Date(createdAtStr);
-    if (isNaN(d.getTime())) return '';
-    const day = String(d.getDate()).padStart(2, '0');
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${day}/${month}/${year} ${hours}:${minutes}`;
-  } catch (e) {
-    return '';
-  }
-};
-
-
-export const GARMENT_CATEGORIES = [
-  "T-SHIRT R/N",
-  "T-SHIRT COLLAR",
-  "LOWER",
-  "SWEATSHIRT R/N",
-  "SWEATSHIRT HOODIE",
-  "SWEATSHIRT COLLAR",
-  "WINDCHEATER",
-  "JACKET",
-  "TRACK SUIT",
-  "SHIRT",
-  "SWEATSHIRT",
-  "T-SHIRT",
-  "JOGGER",
-  "SANDOW",
-  "NIKKER",
-  "DROPSHOULDER",
-  "TRACK SUIT + SHIRT",
-  "TRACK SUIT + T-SHIRT",
-  "TRACKSUIT + LOWER",
-  "TS - UPPER",
-  "TS - LOWER"
-];
+import { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES } from '../utils/designHelpers';
+export { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES };
 
 export const findMatchingMaterialId = (bomItem, materials) => {
   const detailLower = (bomItem.detail || '').toLowerCase();
@@ -265,8 +190,8 @@ const createDefaultBomItems = (accList = [], matList = [], currentBrand = '') =>
 };
 
 export default function DesignView({
-  designs,
-  materials,
+  designs = [],
+  materials = [],
   onAddDesign,
   currencySymbol = 'R',
   accessoriesList = [],
@@ -275,7 +200,7 @@ export default function DesignView({
   prefilledLotNo,
   setPrefilledLotNo
 }) {
-  const [selectedDesignId, setSelectedDesignId] = useState(designs[0]?.id || null);
+  const [selectedDesignId, setSelectedDesignId] = useState(designs?.[0]?.id || null);
   const [printingDesign, setPrintingDesign] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
   const [editingDesignId, setEditingDesignId] = useState(null);
@@ -313,7 +238,7 @@ export default function DesignView({
 
   // Set default selected Lot to the latest one if not already set or invalid
   useEffect(() => {
-    if (designs.length > 0) {
+    if (designs && designs.length > 0) {
       const sorted = [...designs].sort((a, b) => {
         const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
         const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -325,7 +250,7 @@ export default function DesignView({
         if (!isNaN(numA) && !isNaN(numB)) {
           return numB - numA;
         }
-        return b.id.localeCompare(a.id);
+        return (b.id || '').localeCompare(a.id || '');
       });
       if (!selectedDesignId || !designs.some(d => d.id === selectedDesignId)) {
         setSelectedDesignId(sorted[0]?.id);
@@ -338,7 +263,7 @@ export default function DesignView({
   const [fetchMessage, setFetchMessage] = useState({ type: '', text: '' });
   const [lastFetchedLotNo, setLastFetchedLotNo] = useState('');
 
-  const sortedDesigns = [...designs].sort((a, b) => {
+  const sortedDesigns = [...(designs || [])].sort((a, b) => {
     if (sortBy === 'latest') {
       const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
       const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;

@@ -6,11 +6,11 @@ const API_BASE_URL = `${getBackendUrl()}/api/auth`;
 
 export default function AuthView({ onLoginSuccess }) {
   const [activeTab, setActiveTab] = useState('login');
-  
+
   // Login State
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  
+
   // Register State
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
@@ -19,7 +19,7 @@ export default function AuthView({ onLoginSuccess }) {
   const [regRole, setRegRole] = useState('Designer');
   const [adminCode, setAdminCode] = useState('');
   const [securityCode, setSecurityCode] = useState('');
-  
+
   // UI Helpers
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
@@ -75,7 +75,7 @@ export default function AuthView({ onLoginSuccess }) {
 
       setSuccess('Login successful! Redirecting...');
       localStorage.setItem('gpdms_jwt_token', data.token);
-      
+
       setTimeout(() => {
         onLoginSuccess(data.user);
       }, 800);
@@ -141,7 +141,7 @@ export default function AuthView({ onLoginSuccess }) {
 
       setSuccess('Registration successful! You can now log in.');
       const tempEmail = regEmail;
-      
+
       // Clear fields
       setRegName('');
       setRegEmail('');
@@ -196,16 +196,16 @@ export default function AuthView({ onLoginSuccess }) {
 
         {/* Tab Selection */}
         <div className="auth-tabs">
-          <button 
-            type="button" 
+          <button
+            type="button"
             className={`auth-tab ${activeTab === 'login' ? 'active' : ''}`}
             onClick={() => handleTabChange('login')}
             disabled={loading}
           >
             Login
           </button>
-          <button 
-            type="button" 
+          <button
+            type="button"
             className={`auth-tab ${activeTab === 'register' ? 'active' : ''}`}
             onClick={() => handleTabChange('register')}
             disabled={loading}
@@ -241,13 +241,13 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Mail size={18} />
                 </span>
-                <input 
-                  type="email" 
-                  className="form-input" 
+                <input
+                  type="email"
+                  className="form-input"
                   placeholder="e.g. name@gpdms.com"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
               </div>
@@ -259,17 +259,17 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Lock size={18} />
                 </span>
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  className="form-input" 
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="form-input"
                   placeholder="••••••••"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="auth-input-icon-right"
                   onClick={() => setShowPassword(!showPassword)}
                   disabled={loading}
@@ -298,13 +298,13 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <User size={18} />
                 </span>
-                <input 
-                  type="text" 
-                  className="form-input" 
+                <input
+                  type="text"
+                  className="form-input"
                   placeholder="e.g. John Doe"
                   value={regName}
                   onChange={(e) => setRegName(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
               </div>
@@ -316,13 +316,13 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Mail size={18} />
                 </span>
-                <input 
-                  type="email" 
-                  className="form-input" 
+                <input
+                  type="email"
+                  className="form-input"
                   placeholder="e.g. john@gpdms.com"
                   value={regEmail}
                   onChange={(e) => setRegEmail(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
               </div>
@@ -330,7 +330,7 @@ export default function AuthView({ onLoginSuccess }) {
 
             <div className="form-group">
               <label className="form-label">Professional Role</label>
-              <select 
+              <select
                 className="form-input"
                 value={regRole}
                 onChange={(e) => { setRegRole(e.target.value); setAdminCode(''); }}
@@ -383,17 +383,17 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Lock size={18} />
                 </span>
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  className="form-input" 
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="form-input"
                   placeholder="At least 6 characters"
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
-                <button 
-                  type="button" 
+                <button
+                  type="button"
                   className="auth-input-icon-right"
                   onClick={() => setShowPassword(!showPassword)}
                   disabled={loading}
@@ -416,13 +416,13 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Lock size={18} />
                 </span>
-                <input 
-                  type={showPassword ? "text" : "password"} 
-                  className="form-input" 
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="form-input"
                   placeholder="Re-enter password"
                   value={regConfirmPassword}
                   onChange={(e) => setRegConfirmPassword(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                 />
               </div>
@@ -434,13 +434,13 @@ export default function AuthView({ onLoginSuccess }) {
                 <span className="auth-input-icon-left">
                   <Lock size={18} style={{ color: 'var(--accent-color)' }} />
                 </span>
-                <input 
-                  type="password" 
-                  className="form-input" 
+                <input
+                  type="password"
+                  className="form-input"
                   placeholder="Enter signup security code"
                   value={securityCode}
                   onChange={(e) => setSecurityCode(e.target.value)}
-                  required 
+                  required
                   disabled={loading}
                   style={{ borderColor: 'var(--accent-color)' }}
                 />

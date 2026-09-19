@@ -34,29 +34,49 @@ export default function SettingsView({
   const [vendorError, setVendorError] = useState('');
 
   // Google Sheets Sync States
+  const [googleSheetUrl, setGoogleSheetUrl] = useState('');
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
   const [syncError, setSyncError] = useState('');
 
-  const handleSyncGoogleSheets = async () => {
+  // Load active Google Sheet URL on mount
+  React.useEffect(() => {
+    fetch(`${getBackendUrl()}/api/sheet-config`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.url) {
+          setGoogleSheetUrl(data.url);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveAndSyncSheet = async (overrideUrl = null) => {
     setSyncLoading(true);
     setSyncResult(null);
     setSyncError('');
+    const targetUrl = overrideUrl || googleSheetUrl;
     try {
-      const res = await fetch(`${getBackendUrl()}/api/sync-google-sheets`, {
+      const res = await fetch(`${getBackendUrl()}/api/sheet-config`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl })
       });
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Failed to sync Google Sheets');
       }
-      setSyncResult(data);
+      setSyncResult(data.syncResult || data);
+      if (data.url) setGoogleSheetUrl(data.url);
     } catch (err) {
       setSyncError(err.message || 'Error syncing Google Sheets');
     } finally {
       setSyncLoading(false);
     }
+  };
+
+  const handleSyncGoogleSheets = async () => {
+    handleSaveAndSyncSheet(googleSheetUrl);
   };
 
   // Raw Materials Catalog Management States
@@ -72,279 +92,6 @@ export default function SettingsView({
   const [matColor, setMatColor] = useState('');
   const [matLocation, setMatLocation] = useState('');
   const [matError, setMatError] = useState('');
-
-  // Halls management states
-  const [newHallName, setNewHallName] = useState('');
-  const [hallError, setHallError] = useState('');
-
-  // Racks management states
-  const [rackName, setRackName] = useState('');
-  const [rackCode, setRackCode] = useState('');
-  const [rackWarehouse, setRackWarehouse] = useState(halls[0] || 'Hall 1');
-  const [rackCapacity, setRackCapacity] = useState('10');
-  const [rackError, setRackError] = useState('');
-
-  React.useEffect(() => {
-    if (halls && halls.length > 0 && !halls.includes(rackWarehouse)) {
-      setRackWarehouse(halls[0]);
-    }
-  }, [halls, rackWarehouse]);
-
-  const [dbSyncStatus, setDbSyncStatus] = useState('');
-
-  const syncRacksToDatabase = async (racksList) => {
-    try {
-      setDbSyncStatus('Saving to Database...');
-      // 1. Bulk save directly to warehouse_locations table
-      if (racksList && racksList.length > 0) {
-        await fetch(`${getBackendUrl()}/api/warehouse-locations/bulk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(racksList)
-        });
-      }
-      // 2. Save settings
-      const res = await fetch(`${getBackendUrl()}/api/settings/warehouse_racks`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: racksList })
-      });
-      if (res.ok) {
-        setDbSyncStatus('✓ Synced to Database');
-        setTimeout(() => setDbSyncStatus(''), 3000);
-      } else {
-        setDbSyncStatus('❌ Sync Error');
-      }
-    } catch (err) {
-      console.error('Failed to sync warehouse locations to DB:', err);
-      setDbSyncStatus('❌ DB Connection Error');
-    }
-  };
-
-  const handleAddHall = async (e) => {
-    e.preventDefault();
-    const nameClean = newHallName.trim();
-    if (!nameClean) {
-      setHallError('Hall name is required');
-      return;
-    }
-    if (halls.some(h => h.toLowerCase() === nameClean.toLowerCase())) {
-      setHallError(`Hall "${nameClean}" already exists`);
-      return;
-    }
-    setHallError('');
-    const updatedHalls = [...halls, nameClean];
-    setHalls(updatedHalls);
-    setNewHallName('');
-    try {
-      await fetch(`${getBackendUrl()}/api/settings/warehouse_halls`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ value: updatedHalls })
-      });
-    } catch (err) {
-      console.error('Failed to save hall to DB:', err);
-    }
-  };
-
-  const handleDeleteHall = async (hallName) => {
-    if (racks.some(r => r.warehouse === hallName)) {
-      alert(`Cannot delete "${hallName}" because it is currently assigned to one or more racks.`);
-      return;
-    }
-    if (window.confirm(`Are you sure you want to delete hall "${hallName}"?`)) {
-      const updatedHalls = halls.filter(h => h !== hallName);
-      setHalls(updatedHalls);
-      try {
-        await fetch(`${getBackendUrl()}/api/settings/warehouse_halls`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: updatedHalls })
-        });
-      } catch (err) {
-        console.error('Failed to delete hall from DB:', err);
-      }
-    }
-  };
-
-  const handleClearAllRacks = () => {
-    if (window.confirm('Are you sure you want to delete ALL configured racks? This cannot be undone.')) {
-      setRacks([]);
-      syncRacksToDatabase([]);
-      alert('All racks cleared and deleted from database successfully.');
-    }
-  };
-
-  const handleQuickGenerateRacks = () => {
-    if (!rackWarehouse) {
-      alert('Please select or add a Hall first.');
-      return;
-    }
-    const cap = parseInt(rackCapacity, 10) || 10;
-    if (window.confirm(`Are you sure you want to quick-generate Racks 1-150 in "${rackWarehouse}" with a capacity of ${cap} packets? This will replace any existing Racks 1-150 in "${rackWarehouse}".`)) {
-      const generated = [];
-      const timestamp = Date.now();
-      for (let i = 1; i <= 150; i++) {
-        generated.push({
-          id: `gen-${rackWarehouse}-${i}-${timestamp}`,
-          code: String(i),
-          name: `Rack ${i}`,
-          warehouse: rackWarehouse,
-          capacity: cap
-        });
-      }
-      // Filter out existing Rack 1-150 in this specific hall
-      const existingFiltered = racks.filter(
-        r => !(r.warehouse === rackWarehouse && parseInt(r.code, 10) >= 1 && parseInt(r.code, 10) <= 150)
-      );
-      const updatedRacks = [...existingFiltered, ...generated];
-      setRacks(updatedRacks);
-      syncRacksToDatabase(updatedRacks);
-      alert(`Successfully generated Racks 1-150 in "${rackWarehouse}" and saved to database!`);
-    }
-  };
-
-  const handleAddRack = async (e) => {
-    e.preventDefault();
-    if (!rackName.trim() || !rackCode.trim()) {
-      setRackError('Rack Name and Code are required');
-      return;
-    }
-    const codeClean = rackCode.trim().toUpperCase();
-    if (racks.some(r => r.code === codeClean && r.warehouse === rackWarehouse)) {
-      setRackError(`Rack Code "${codeClean}" already exists in "${rackWarehouse}"`);
-      return;
-    }
-    setRackError('');
-
-    const newRack = {
-      id: String(Date.now()),
-      code: codeClean,
-      name: rackName.trim(),
-      warehouse: rackWarehouse,
-      capacity: parseInt(rackCapacity, 10) || 10
-    };
-
-    const updatedRacks = [...racks, newRack];
-    setRacks(updatedRacks);
-
-    // Direct POST to /api/warehouse-locations
-    try {
-      await fetch(`${getBackendUrl()}/api/warehouse-locations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newRack.id,
-          code: `${newRack.warehouse} - ${newRack.name || `Rack ${newRack.code}`}`,
-          warehouse: newRack.warehouse,
-          capacity: newRack.capacity
-        })
-      });
-    } catch (postErr) {
-      console.warn("Direct /api/warehouse-locations post error:", postErr);
-    }
-    syncRacksToDatabase(updatedRacks);
-
-    setRackName('');
-    setRackCode('');
-  };
-
-  const handleDeleteRack = (rackId) => {
-    if (window.confirm('Are you sure you want to delete this rack? All associated locations will be removed.')) {
-      const updatedRacks = racks.filter(r => r.id !== rackId);
-      setRacks(updatedRacks);
-      syncRacksToDatabase(updatedRacks);
-    }
-  };
-
-  const handleAddVendor = (e) => {
-    e.preventDefault();
-    if (!vendorName.trim() || !vendorEmail.trim()) {
-      setVendorError('Please enter vendor name and email');
-      return;
-    }
-    setVendorError('');
-
-    const newVendor = {
-      id: `V${Math.floor(100 + Math.random() * 900)}`,
-      name: vendorName,
-      email: vendorEmail,
-      address: vendorAddress || 'Textile Hub Industrial Area',
-      materialsJoined
-    };
-
-    onAddVendor(newVendor);
-
-    // Reset Form
-    setVendorName('');
-    setVendorEmail('');
-    setVendorAddress('');
-    setMaterialsJoined('Fabrics & Trims');
-    setIsAddingVendor(false);
-  };
-
-  const handleUpdateSubmit = (e) => {
-    e.preventDefault();
-    if (!matName.trim()) {
-      setMatError('Material name is required');
-      return;
-    }
-    if (parseFloat(matCost) < 0 || isNaN(parseFloat(matCost))) {
-      setMatError('Unit cost must be a positive number');
-      return;
-    }
-    if (parseFloat(matStock) < 0 || isNaN(parseFloat(matStock))) {
-      setMatError('Stock level must be a positive number');
-      return;
-    }
-
-    const updated = {
-      ...editingMaterial,
-      name: matName.trim(),
-      category: matCategory,
-      stock: parseFloat(matStock),
-      unit: matUnit,
-      cost: parseFloat(matCost),
-      threshold: parseFloat(matThreshold) || 50,
-      color: matColor.trim() || 'Default',
-      location: matLocation.trim() || 'Main Store'
-    };
-
-    onUpdateMaterial(updated);
-    setEditingMaterial(null);
-  };
-
-  const handleAddMatSubmit = (e) => {
-    e.preventDefault();
-    if (!matName.trim()) {
-      setMatError('Material name is required');
-      return;
-    }
-    if (parseFloat(matCost) < 0 || isNaN(parseFloat(matCost))) {
-      setMatError('Unit cost must be a positive number');
-      return;
-    }
-    if (parseFloat(matStock) < 0 || isNaN(parseFloat(matStock))) {
-      setMatError('Stock level must be a positive number');
-      return;
-    }
-
-    const newMat = {
-      id: `M${Math.floor(1000 + Math.random() * 9000)}`,
-      name: matName.trim(),
-      category: matCategory,
-      stock: parseFloat(matStock),
-      unit: matUnit,
-      cost: parseFloat(matCost),
-      threshold: parseFloat(matThreshold) || 50,
-      color: matColor.trim() || 'Default',
-      location: matLocation.trim() || 'Main Store',
-      barcodes: []
-    };
-
-    onAddMaterial(newMat);
-    setIsAddingMaterial(false);
-  };
 
   // Filter materials based on Search input
   const filteredMaterials = (materials || []).filter(m => {
@@ -362,337 +109,12 @@ export default function SettingsView({
     <div className="animate-fade">
       <div style={{ marginBottom: '24px' }}>
         <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>System Settings & Configurations</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Manage textile vendors, configure currency symbols, default VAT configurations, and system reset utilities.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Manage textile accessories catalog, designers directory, suppliers, Google Sheets integration, and system reset utilities.</p>
       </div>
 
       <div className="split-view" style={{ gridTemplateColumns: '0.9fr 1.1fr' }}>
         {/* Left Column: System Configurations */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* General configs */}
-          <div className="panel" style={{ marginBottom: 0 }}>
-            <div className="panel-header">
-              <h3 className="panel-title">
-                <Globe size={18} className="text-accent" />
-                Regional Configurations
-              </h3>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">System Currency Representation</label>
-              <select
-                className="form-input"
-                value={currencySymbol}
-                onChange={(e) => setCurrencySymbol(e.target.value)}
-              >
-                <option value="R">R (South African Rand - ZAR)</option>
-                <option value="$">$ (US Dollar - USD)</option>
-                <option value="₹">₹ (Indian Rupee - INR)</option>
-                <option value="€">€ (Euro - EUR)</option>
-                <option value="£">£ (Pound Sterling - GBP)</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Default Tax Surcharge Rate (%)</label>
-              <input
-                type="number"
-                className="form-input"
-                value={defaultTax}
-                min="0"
-                max="100"
-                onChange={(e) => setDefaultTax(Number(e.target.value))}
-              />
-            </div>
-          </div>
-                  {/* Warehouse Halls Configuration */}
-          <div className="panel" style={{ marginBottom: 0 }}>
-            <div className="panel-header">
-              <h3 className="panel-title">
-                <Globe size={18} className="text-accent" />
-                Warehouse Halls / Zones ({halls.length})
-              </h3>
-            </div>
-            
-            <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '12px' }}>
-              Define halls, zones, or store rooms. These will be available for rack layout assignments.
-            </p>
-
-            {/* List of active halls */}
-            <div style={{ 
-              maxHeight: '150px', 
-              overflowY: 'auto', 
-              border: '1px solid var(--border-color)', 
-              borderRadius: 'var(--border-radius-md)', 
-              padding: '8px',
-              backgroundColor: 'var(--bg-primary)',
-              marginBottom: '12px'
-            }}>
-              {halls.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '12px', textAlign: 'center' }}>
-                  No halls configured. Add one below.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {halls.map((hall) => (
-                    <div 
-                      key={hall} 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'space-between', 
-                        padding: '6px 10px', 
-                        backgroundColor: 'var(--bg-secondary)', 
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-color)',
-                        fontSize: '12px'
-                      }}
-                    >
-                      <span style={{ fontWeight: '700' }}>{hall}</span>
-                      <button 
-                        type="button"
-                        onClick={() => handleDeleteHall(hall)}
-                        style={{
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--danger)',
-                          cursor: 'pointer',
-                          padding: '4px'
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <form onSubmit={handleAddHall} style={{ display: 'flex', gap: '8px' }}>
-              <input 
-                type="text" 
-                placeholder="e.g. Hall 2"
-                className="form-input" 
-                style={{ height: '32px', fontSize: '12px', flex: 1 }}
-                value={newHallName} 
-                onChange={(e) => setNewHallName(e.target.value)} 
-              />
-              <button 
-                type="submit" 
-                className="btn btn-secondary" 
-                style={{ height: '32px', fontSize: '12px', padding: '0 12px' }}
-              >
-                Add Hall
-              </button>
-            </form>
-            {hallError && (
-              <div style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: '600', marginTop: '6px' }}>
-                ⚠️ {hallError}
-              </div>
-            )}
-          </div>
-
-          {/* Warehouse Rack Location Configurations */}
-          <div className="panel" style={{ marginBottom: 0 }}>
-            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 className="panel-title" style={{ margin: 0 }}>
-                <Package size={18} className="text-accent" />
-                Warehouse Racks Configuration ({racks.length})
-              </h3>
-              {dbSyncStatus && (
-                <span style={{
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  backgroundColor: dbSyncStatus.includes('✓') ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
-                  color: dbSyncStatus.includes('✓') ? '#10b981' : 'var(--accent-color)'
-                }}>
-                  {dbSyncStatus}
-                </span>
-              )}
-            </div>
-            
-            <p style={{ color: 'var(--text-muted)', fontSize: '12px', marginBottom: '12px' }}>
-              Define warehouse layout racks. Racks represent physical stock slots.
-            </p>
-
-            {/* List of active racks */}
-            <div style={{ 
-              maxHeight: '180px', 
-              overflowY: 'auto', 
-              border: '1px solid var(--border-color)', 
-              borderRadius: 'var(--border-radius-md)', 
-              padding: '8px',
-              backgroundColor: 'var(--bg-primary)',
-              marginBottom: '12px'
-            }}>
-              {racks.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '12px', textAlign: 'center' }}>
-                  No racks configured. Add or generate racks below.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {racks.map((rack) => (
-                    <div 
-                      key={rack.id} 
-                      style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        justifyContent: 'space-between', 
-                        padding: '6px 10px', 
-                        backgroundColor: 'var(--bg-secondary)', 
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-color)',
-                        fontSize: '12px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                        <span style={{ fontWeight: '700' }}>{rack.name} ({rack.code})</span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                          {rack.warehouse} • Capacity: {rack.capacity || 10} Packets
-                        </span>
-                      </div>
-                      <button 
-                        type="button"
-                        onClick={() => handleDeleteRack(rack.id)}
-                        style={{
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--danger)',
-                          cursor: 'pointer',
-                          padding: '4px'
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Add Rack Form */}
-            <form onSubmit={handleAddRack} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '11px', marginBottom: '2px' }}>Rack Name</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. Rack 1"
-                    className="form-input" 
-                    style={{ height: '32px', fontSize: '12px' }}
-                    value={rackName} 
-                    onChange={(e) => setRackName(e.target.value)} 
-                  />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '11px', marginBottom: '2px' }}>Rack Code (Prefix)</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. 1"
-                    className="form-input" 
-                    style={{ height: '32px', fontSize: '12px' }}
-                    maxLength="5"
-                    value={rackCode} 
-                    onChange={(e) => setRackCode(e.target.value)} 
-                  />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr', gap: '8px' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '11px', marginBottom: '2px' }}>Warehouse Location / Hall</label>
-                  <select
-                    className="form-input"
-                    style={{ height: '32px', fontSize: '12px' }}
-                    value={rackWarehouse}
-                    onChange={(e) => setRackWarehouse(e.target.value)}
-                  >
-                    {halls.map(hall => (
-                      <option key={hall} value={hall}>{hall}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label" style={{ fontSize: '11px', marginBottom: '2px' }}>Capacity (Pkts)</label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    className="form-input" 
-                    style={{ height: '32px', fontSize: '12px' }}
-                    value={rackCapacity} 
-                    onChange={(e) => setRackCapacity(e.target.value)} 
-                  />
-                </div>
-              </div>
-
-              {rackError && (
-                <div style={{ fontSize: '11px', color: 'var(--danger)', fontWeight: '600' }}>
-                  ⚠️ {rackError}
-                </div>
-              )}
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1.1fr', gap: '8px', marginTop: '4px' }}>
-                <button 
-                  type="submit" 
-                  className="btn btn-secondary" 
-                  style={{ 
-                    height: '32px', 
-                    fontSize: '11px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    gap: '4px',
-                    padding: '0 4px'
-                  }}
-                >
-                  <PlusCircle size={13} />
-                  <span>Add Rack</span>
-                </button>
-                
-                <button 
-                  type="button" 
-                  onClick={handleQuickGenerateRacks}
-                  className="btn btn-secondary" 
-                  style={{ 
-                    height: '32px', 
-                    fontSize: '11px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    gap: '4px',
-                    borderColor: 'var(--accent-color)',
-                    color: 'var(--accent-color)',
-                    padding: '0 4px'
-                  }}
-                >
-                  <PlusCircle size={13} />
-                  <span>Generate 1-150</span>
-                </button>
-
-                <button 
-                  type="button" 
-                  onClick={handleClearAllRacks}
-                  className="btn btn-secondary" 
-                  style={{ 
-                    height: '32px', 
-                    fontSize: '11px', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    gap: '4px',
-                    borderColor: 'var(--danger)',
-                    color: 'var(--danger)',
-                    padding: '0 4px'
-                  }}
-                >
-                  <Trash2 size={13} />
-                  <span>Clear All Racks</span>
-                </button>
-              </div>
-            </form>
-          </div>
-
           {/* Garment Accessories Catalog Configurations */}
           <div className="panel" style={{ marginBottom: 0 }}>
             <div className="panel-header">
@@ -872,17 +294,41 @@ export default function SettingsView({
           </div>
 
           {/* Google Sheets Data Sync Panel */}
-          <div className="panel" style={{ marginBottom: 0, border: '1px solid var(--accent-color)', backgroundColor: 'var(--bg-primary)' }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)' }}>
+          <div className="panel" style={{ marginBottom: 0, border: '1.5px solid var(--accent-color)', backgroundColor: 'var(--bg-primary)' }}>
+            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 className="panel-title" style={{ color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <FileSpreadsheet size={18} className="text-accent" />
-                Google Sheets Data Synchronization
+                Google Sheets Manager (1-Click Switcher)
               </h3>
             </div>
 
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-              Synchronize all cutting lots, fabric orders, and style metadata from the central Google Spreadsheet into the local MySQL database. Auto-sync also runs on server startup and every 15 minutes.
+            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: '1.4' }}>
+              Paste any Google Spreadsheet URL or Sheet ID below to switch data sources instantly. Clicking <strong>Save & Sync Sheet Now</strong> will clear old cached data and download all lots and styles directly into your MySQL database.
             </p>
+
+            {/* Google Sheet URL / ID Input */}
+            <div className="form-group" style={{ marginBottom: '12px' }}>
+              <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>Active Google Sheet URL or Sheet ID</span>
+                <button
+                  type="button"
+                  onClick={() => setGoogleSheetUrl('https://docs.google.com/spreadsheets/d/13ArpFOD7idmpv7QIRJQkD-tfswtkH6rNnEANtv2M7Ek/export?format=csv&gid=0')}
+                  style={{ background: 'none', border: 'none', color: 'var(--accent-color)', fontSize: '11px', fontWeight: '600', cursor: 'pointer', padding: 0 }}
+                >
+                  Reset to Default Sheet
+                </button>
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="https://docs.google.com/spreadsheets/d/your-sheet-id/... or paste Sheet ID"
+                  value={googleSheetUrl}
+                  onChange={(e) => setGoogleSheetUrl(e.target.value)}
+                  style={{ height: '38px', fontSize: '12.5px', fontFamily: 'monospace' }}
+                />
+              </div>
+            </div>
 
             {syncError && (
               <div className="auth-alert error" style={{ padding: '8px 12px', marginBottom: '12px', display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px' }}>
@@ -914,20 +360,23 @@ export default function SettingsView({
             <button
               type="button"
               className="btn btn-primary"
-              onClick={handleSyncGoogleSheets}
-              disabled={syncLoading}
+              onClick={() => handleSaveAndSyncSheet(googleSheetUrl)}
+              disabled={syncLoading || !googleSheetUrl.trim()}
               style={{
                 width: '100%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                height: '38px',
-                fontSize: '13px'
+                height: '40px',
+                fontSize: '13.5px',
+                fontWeight: '700',
+                borderRadius: '8px',
+                boxShadow: 'var(--shadow-sm)'
               }}
             >
-              <RefreshCw size={15} className={syncLoading ? 'animate-spin' : ''} />
-              <span>{syncLoading ? 'Syncing Google Sheets to Database...' : 'Sync Google Sheets to Database Now'}</span>
+              <RefreshCw size={16} className={syncLoading ? 'animate-spin' : ''} />
+              <span>{syncLoading ? 'Switching & Syncing Google Sheet...' : 'Save & Sync Google Sheet Now (1-Click)'}</span>
             </button>
           </div>
 

@@ -1,39 +1,43 @@
 import { getBackendUrl } from './utils/api';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Layers3, CheckSquare, FileText,
   Layers, BarChart3, Settings as SettingsIcon, Sun, Moon,
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
-  History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu
+  History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
+  PanelLeftClose, PanelLeftOpen, PanelLeft
 } from 'lucide-react';
 import './App.css';
 
-// Import Views
-import DashboardView from './components/DashboardView';
-import DesignView, { GARMENT_CATEGORIES, getCleanImageUrl } from './components/DesignView';
-import MaterialVerificationView from './components/MaterialVerificationView';
-import MaterialIssueView from './components/MaterialIssueView';
-import GeneratePOView from './components/GeneratePOView';
-import MaterialDetailsView from './components/MaterialDetailsView';
-import ReportsHistoryView from './components/ReportsHistoryView';
-import SettingsView from './components/SettingsView';
-import AuthView from './components/AuthView';
-import ApprovalQueueView from './components/ApprovalQueueView';
-import ReturnMaterialView from './components/ReturnMaterialView';
-import PuneetZip from './components/pogenerate';
-import HistoryView from './components/HistoryView';
-import PublicScanView from './components/PublicScanView';
-import ScannerLogsView from './components/ScannerLogsView';
-import FabricRgpForm from './components/rgp';
-import ReDownloadView from './components/ReDownloadView';
-import WeightCapture from './components/WeightCapture';
-import ManuallyWeightCapture from './components/ManuallyWeightCapture';
-import MaterialTransferView from './components/MaterialTransferView';
-import POVerificationView from './components/POVerificationView';
-import WarehouseLocationView from './components/WarehouseLocationView';
-import OnlyCutting from './components/OnlyCutting';
+// Import helper functions and constants
+import { GARMENT_CATEGORIES, getCleanImageUrl } from './utils/designHelpers';
+
+// Code-split heavy views with React.lazy for instant initial page loading & smaller initial bundle
+const DashboardView = lazy(() => import('./components/DashboardView'));
+const DesignView = lazy(() => import('./components/DesignView'));
+const MaterialVerificationView = lazy(() => import('./components/MaterialVerificationView'));
+const MaterialIssueView = lazy(() => import('./components/MaterialIssueView'));
+const GeneratePOView = lazy(() => import('./components/GeneratePOView'));
+const MaterialDetailsView = lazy(() => import('./components/MaterialDetailsView'));
+const ReportsHistoryView = lazy(() => import('./components/ReportsHistoryView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
+const AuthView = lazy(() => import('./components/AuthView'));
+const ApprovalQueueView = lazy(() => import('./components/ApprovalQueueView'));
+const ReturnMaterialView = lazy(() => import('./components/ReturnMaterialView'));
+const PuneetZip = lazy(() => import('./components/pogenerate'));
+const HistoryView = lazy(() => import('./components/HistoryView'));
+const PublicScanView = lazy(() => import('./components/PublicScanView'));
+const ScannerLogsView = lazy(() => import('./components/ScannerLogsView'));
+const FabricRgpForm = lazy(() => import('./components/rgp'));
+const ReDownloadView = lazy(() => import('./components/ReDownloadView'));
+const WeightCapture = lazy(() => import('./components/WeightCapture'));
+const ManuallyWeightCapture = lazy(() => import('./components/ManuallyWeightCapture'));
+const MaterialTransferView = lazy(() => import('./components/MaterialTransferView'));
+const POVerificationView = lazy(() => import('./components/POVerificationView'));
+const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationView'));
+const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 
 // Default Mock Data Arrays
 const initialMaterials = [
@@ -177,7 +181,7 @@ const initialDesigns = [
 const initialPOs = [
   {
     id: 'PO1301',
-    poNumber: 'PO-83421',
+    poNumber: 'PO-11000',
     vendorName: 'YKK Trim Solutions',
     vendorEmail: 'sales@ykk-trims.com',
     vendorAddress: 'Industrial Block C, Mumbai',
@@ -325,6 +329,46 @@ export default function App() {
     }
   };
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('mh_sidebar_collapsed') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    if (window.innerWidth < 768) {
+      setIsSidebarOpen(prev => !prev);
+    } else {
+      setIsSidebarCollapsed(prev => {
+        const next = !prev;
+        try {
+          localStorage.setItem('mh_sidebar_collapsed', next ? 'true' : 'false');
+        } catch (e) {}
+        return next;
+      });
+    }
+  };
+
+  const handleTabClick = (tabName) => {
+    setActiveTab(tabName);
+    if (window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   const [designMenuOpen, setDesignMenuOpen] = useState(true);
   const [adminDesignMenuOpen, setAdminDesignMenuOpen] = useState(true);
   const [adminStoreMenuOpen, setAdminStoreMenuOpen] = useState(true);
@@ -416,7 +460,13 @@ export default function App() {
   // Warehouse Halls/Zones configuration state
   const [halls, setHalls] = useState(() => {
     const saved = localStorage.getItem('warehouse_halls');
-    return saved ? JSON.parse(saved) : ['Hall 1'];
+    if (!saved) return ['Main Store'];
+    try {
+      const parsed = JSON.parse(saved);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : ['Main Store'];
+    } catch {
+      return ['Main Store'];
+    }
   });
 
   useEffect(() => {
@@ -430,19 +480,22 @@ export default function App() {
     }
   }, [halls]);
 
-  // Warehouse Racks configuration state
+  // Warehouse Racks configuration state (manually configured locations only)
   const [racks, setRacks] = useState(() => {
     const saved = localStorage.getItem('warehouse_racks');
     if (!saved) return [];
     try {
       const parsed = JSON.parse(saved);
-      // Check if it is the old default demo data
-      const isDemo = Array.isArray(parsed) && parsed.length === 3 &&
-        parsed.some(r => r.code === 'A' || r.code === 'B' || r.code === 'C');
-      if (isDemo) {
-        return [];
+      if (Array.isArray(parsed)) {
+        // Purge any legacy 350-item default seeded racks
+        const isLegacyDemo = parsed.length > 50 || parsed.some(r => String(r.id || '').startsWith('rack-hall-'));
+        if (isLegacyDemo) {
+          localStorage.setItem('warehouse_racks', JSON.stringify([]));
+          return [];
+        }
+        return parsed;
       }
-      return parsed;
+      return [];
     } catch (e) {
       return [];
     }
@@ -1601,18 +1654,24 @@ export default function App() {
   // If we are viewing a scanned QR code URL, bypass login/token check and render PublicScanView directly
   if (scanAction) {
     return (
-      <PublicScanView
-        initialAction={scanAction}
-        initialLot={scanLot || ''}
-        initialPoType={scanPoType || ''}
-        onBackToLogin={() => {
-          // Clear query params so we go to normal login screen
-          window.history.replaceState({}, document.title, window.location.pathname);
-          setScanAction(null);
-          setScanLot(null);
-          setScanPoType(null);
-        }}
-      />
+      <Suspense fallback={
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-main, #0f172a)' }}>
+          <div className="spinner" style={{ width: '36px', height: '36px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--accent-color, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}></div>
+        </div>
+      }>
+        <PublicScanView
+          initialAction={scanAction}
+          initialLot={scanLot || ''}
+          initialPoType={scanPoType || ''}
+          onBackToLogin={() => {
+            // Clear query params so we go to normal login screen
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setScanAction(null);
+            setScanLot(null);
+            setScanPoType(null);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -1752,7 +1811,11 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <>
+      <Suspense fallback={
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-main, #0f172a)' }}>
+          <div className="spinner" style={{ width: '36px', height: '36px', border: '3px solid rgba(255,255,255,0.1)', borderTopColor: 'var(--accent-color, #6366f1)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}></div>
+        </div>
+      }>
         {/* Floating Theme Toggle on Login Screen */}
         <button
           className="theme-toggle auth-theme-toggle"
@@ -1763,12 +1826,12 @@ export default function App() {
           {isDarkTheme ? <Sun size={20} /> : <Moon size={20} />}
         </button>
         <AuthView onLoginSuccess={setCurrentUser} />
-      </>
+      </Suspense>
     );
   }
 
   return (
-    <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''}`}>
+    <div className={`app-container ${isSidebarOpen ? 'sidebar-open' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {/* Toast Notification */}
       {toast && (
         <div
@@ -1810,24 +1873,37 @@ export default function App() {
         />
       )}
       {/* Sidebar Navigation */}
-      <aside className="sidebar">
-        <div className="sidebar-logo" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <Layers3 size={28} style={{ color: 'var(--accent-color)' }} />
+      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-logo">
+          <div
+            className="sidebar-brand-group"
+            onClick={() => isSidebarCollapsed && toggleSidebar()}
+            style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: isSidebarCollapsed ? 'pointer' : 'default', overflow: 'hidden' }}
+            title={isSidebarCollapsed ? "Click to expand sidebar" : "MH STORE"}
+          >
+            <Layers3 size={28} style={{ color: 'var(--accent-color)', flexShrink: 0 }} />
             <span className="sidebar-logo-text">MH STORE</span>
           </div>
-          <button
-            className="mobile-sidebar-close"
-            onClick={() => setIsSidebarOpen(false)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#ffffff',
-              cursor: 'pointer'
-            }}
-          >
-            <X size={20} />
-          </button>
+          <div className="sidebar-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button
+              type="button"
+              className="sidebar-collapse-toggle-btn desktop-only"
+              onClick={toggleSidebar}
+              title={isSidebarCollapsed ? "Expand Sidebar (Ctrl+B)" : "Collapse Sidebar (Ctrl+B)"}
+              aria-label={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+            <button
+              type="button"
+              className="mobile-sidebar-close"
+              onClick={() => setIsSidebarOpen(false)}
+              title="Close Sidebar"
+              aria-label="Close Sidebar"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         <nav style={{ flexGrow: 1 }}>
@@ -1836,7 +1912,8 @@ export default function App() {
             {hasTabAccess('dashboard', currentUser?.role) && (
               <li
                 className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-                onClick={() => setActiveTab('dashboard')}
+                onClick={() => handleTabClick('dashboard')}
+                title="Dashboard Overview"
               >
                 <LayoutDashboard size={18} />
                 <span className="sidebar-text">Dashboard</span>
@@ -1848,45 +1925,51 @@ export default function App() {
               <>
                 <li
                   className={`sidebar-item ${['design', 'material_verification', 'material_details', 'rgp', 'zip_po', 'dori_po', 'generate_po', 'history', 'scanner_logs', 'only_cutting'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
-                  onClick={() => setAdminDesignMenuOpen(!adminDesignMenuOpen)}
+                  onClick={() => {
+                    if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                    setAdminDesignMenuOpen(!adminDesignMenuOpen);
+                  }}
+                  title="Design Panel"
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <Scissors size={18} />
                     <span className="sidebar-text">Design Panel</span>
                   </div>
-                  {adminDesignMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  <span className="sidebar-arrow-icon">
+                    {adminDesignMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </span>
                 </li>
                 {adminDesignMenuOpen && (
                   <ul className="sidebar-submenu">
-                    <li className={`sidebar-subitem ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>
+                    <li className={`sidebar-subitem ${activeTab === 'design' ? 'active' : ''}`} onClick={() => handleTabClick('design')} title="Below of Material">
                       <span className="sidebar-text">Below of Material</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => setActiveTab('material_verification')}>
+                    <li className={`sidebar-subitem ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                       <span className="sidebar-text">Stock Accessories</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                    <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                       <span className="sidebar-text">Material Detail</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
+                    <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                       <span className="sidebar-text">Returnable Gate Pass</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { setActiveTab('zip_po'); setPrefilledPoType('zip'); }}>
+                    <li className={`sidebar-subitem ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { handleTabClick('zip_po'); setPrefilledPoType('zip'); }} title="Zip Purcharge Orders">
                       <span className="sidebar-text">Zip Purcharge Orders</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'dori_po' ? 'active' : ''}`} onClick={() => { setActiveTab('dori_po'); setPrefilledPoType('dori'); }}>
+                    <li className={`sidebar-subitem ${activeTab === 'dori_po' ? 'active' : ''}`} onClick={() => { handleTabClick('dori_po'); setPrefilledPoType('dori'); }} title="Dori Purcharge Orders">
                       <span className="sidebar-text">Dori Purcharge Orders</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => setActiveTab('generate_po')}>
+                    <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                    <li className={`sidebar-subitem ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                       <span className="sidebar-text">Production Work</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => setActiveTab('scanner_logs')}>
+                    <li className={`sidebar-subitem ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => handleTabClick('scanner_logs')} title="Scanner Log">
                       <span className="sidebar-text">Scanner Log</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => handleTabClick('only_cutting')} title="Only Cutting">
                       <span className="sidebar-text">Only Cutting</span>
                     </li>
                   </ul>
@@ -1899,54 +1982,60 @@ export default function App() {
               <>
                 <li
                   className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
-                  onClick={() => setAdminStoreMenuOpen(!adminStoreMenuOpen)}
+                  onClick={() => {
+                    if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+                    setAdminStoreMenuOpen(!adminStoreMenuOpen);
+                  }}
+                  title="Store Panel"
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                     <Layers size={18} />
                     <span className="sidebar-text">Store Panel</span>
                   </div>
-                  {adminStoreMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  <span className="sidebar-arrow-icon">
+                    {adminStoreMenuOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </span>
                 </li>
                 {adminStoreMenuOpen && (
                   <ul className="sidebar-submenu">
-                    <li className={`sidebar-subitem ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('weight_capture')}>
+                    <li className={`sidebar-subitem ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('weight_capture')} title="Material Add (Scale)">
                       <span className="sidebar-text">Material Add (Scale)</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('manually_weight_capture')}>
+                    <li className={`sidebar-subitem ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                       <span className="sidebar-text">Manual Material Add</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => setActiveTab('material_issue')}>
+                    <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                       <span className="sidebar-text">Material Issue</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => setActiveTab('return_material')}>
+                    <li className={`sidebar-subitem ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => handleTabClick('return_material')} title="Return Material">
                       <span className="sidebar-text">Return Material</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                    <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                       <span className="sidebar-text">Material Detail</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_transfer' ? 'active' : ''}`} onClick={() => setActiveTab('material_transfer')}>
+                    <li className={`sidebar-subitem ${activeTab === 'material_transfer' ? 'active' : ''}`} onClick={() => handleTabClick('material_transfer')} title="Material Transfer">
                       <span className="sidebar-text">Material Transfer</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'warehouse_locations' ? 'active' : ''}`} onClick={() => setActiveTab('warehouse_locations')}>
+                    <li className={`sidebar-subitem ${activeTab === 'warehouse_locations' ? 'active' : ''}`} onClick={() => handleTabClick('warehouse_locations')} title="Warehouse Locations">
                       <span className="sidebar-text">Warehouse Locations</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
+                    <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                       <span className="sidebar-text">Returnable Gate Pass</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => setActiveTab('generate_po')}>
+                    <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                    <li className={`sidebar-subitem ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                       <span className="sidebar-text">Production Work</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => setActiveTab('scanner_logs')}>
+                    <li className={`sidebar-subitem ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => handleTabClick('scanner_logs')} title="Scanner Log">
                       <span className="sidebar-text">Scanner Log</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => setActiveTab('po_verification')}>
+                    <li className={`sidebar-subitem ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => handleTabClick('po_verification')} title="PO Verification">
                       <span className="sidebar-text">PO Verification</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                    <li className={`sidebar-subitem ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => handleTabClick('only_cutting')} title="Only Cutting">
                       <span className="sidebar-text">Only Cutting</span>
                     </li>
                   </ul>
@@ -1957,51 +2046,51 @@ export default function App() {
             {/* DESIGNER PANEL ITEMS (FLAT LIST) */}
             {currentUser?.role !== 'Admin' && getRolePanel(currentUser?.role) === 'designer' && (
               <>
-                <li className={`sidebar-item ${activeTab === 'design' ? 'active' : ''}`} onClick={() => setActiveTab('design')}>
+                <li className={`sidebar-item ${activeTab === 'design' ? 'active' : ''}`} onClick={() => handleTabClick('design')} title="Below of Material">
                   <Scissors size={18} />
                   <span className="sidebar-text">Below of Material</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => setActiveTab('material_verification')}>
+                <li className={`sidebar-item ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                   <CheckSquare size={18} />
                   <span className="sidebar-text">Stock Accessories</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                   <Layers size={18} />
                   <span className="sidebar-text">Material Detail</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
+                <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                   <Truck size={18} />
                   <span className="sidebar-text">Returnable Gate Pass</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { setActiveTab('zip_po'); setPrefilledPoType('zip'); }}>
+                <li className={`sidebar-item ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { handleTabClick('zip_po'); setPrefilledPoType('zip'); }} title="Zip Purcharge Orders">
                   <FileText size={18} />
                   <span className="sidebar-text">Zip Purcharge Orders</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'dori_po' ? 'active' : ''}`} onClick={() => { setActiveTab('dori_po'); setPrefilledPoType('dori'); }}>
+                <li className={`sidebar-item ${activeTab === 'dori_po' ? 'active' : ''}`} onClick={() => { handleTabClick('dori_po'); setPrefilledPoType('dori'); }} title="Dori Purcharge Orders">
                   <FileText size={18} />
                   <span className="sidebar-text">Dori Purcharge Orders</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => setActiveTab('generate_po')}>
+                <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
                   <span className="sidebar-text">Production Work</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => setActiveTab('scanner_logs')}>
+                <li className={`sidebar-item ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => handleTabClick('scanner_logs')} title="Scanner Log">
                   <QrCode size={18} />
                   <span className="sidebar-text">Scanner Log</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => setActiveTab('po_verification')}>
+                <li className={`sidebar-item ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => handleTabClick('po_verification')} title="PO Verification">
                   <CheckCircle size={18} />
                   <span className="sidebar-text">PO Verification</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => handleTabClick('only_cutting')} title="Only Cutting">
                   <Scissors size={18} />
                   <span className="sidebar-text">Only Cutting</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => setActiveTab('approval_queue')} style={{ position: 'relative' }}>
+                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => handleTabClick('approval_queue')} style={{ position: 'relative' }} title="My Requests">
                   <Shield size={18} />
                   <span className="sidebar-text">My Requests</span>
                   {approvalRequests.filter(r => r.requesterName === currentUser?.name && r.status === 'pending').length > 0 && (
@@ -2021,59 +2110,59 @@ export default function App() {
             {/* STORE ROOM PANEL ITEMS (FLAT LIST) */}
             {currentUser?.role !== 'Admin' && getRolePanel(currentUser?.role) === 'store' && (
               <>
-                <li className={`sidebar-item ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('weight_capture')}>
+                <li className={`sidebar-item ${activeTab === 'weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('weight_capture')} title="Material Add (Scale)">
                   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" y1="22" x2="4" y2="15" /></svg>
                   <span className="sidebar-text">Material Add (Scale)</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => setActiveTab('manually_weight_capture')}>
+                <li className={`sidebar-item ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                   <Layers size={18} />
                   <span className="sidebar-text">Manual Material Add</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => setActiveTab('material_issue')}>
+                <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                   <ClipboardList size={18} />
                   <span className="sidebar-text">Material Issue</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => setActiveTab('return_material')}>
+                <li className={`sidebar-item ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => handleTabClick('return_material')} title="Return Material">
                   <RotateCcw size={18} />
                   <span className="sidebar-text">Return Material</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => setActiveTab('material_details')}>
+                <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                   <Layers size={18} />
                   <span className="sidebar-text">Material Detail</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'material_transfer' ? 'active' : ''}`} onClick={() => setActiveTab('material_transfer')}>
+                <li className={`sidebar-item ${activeTab === 'material_transfer' ? 'active' : ''}`} onClick={() => handleTabClick('material_transfer')} title="Material Transfer">
                   <ArrowLeftRight size={18} />
                   <span className="sidebar-text">Material Transfer</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'warehouse_locations' ? 'active' : ''}`} onClick={() => setActiveTab('warehouse_locations')}>
+                <li className={`sidebar-item ${activeTab === 'warehouse_locations' ? 'active' : ''}`} onClick={() => handleTabClick('warehouse_locations')} title="Warehouse Locations">
                   <Layers size={18} />
                   <span className="sidebar-text">Warehouse Locations</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => setActiveTab('rgp')}>
+                <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                   <Truck size={18} />
                   <span className="sidebar-text">Returnable Gate Pass</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => setActiveTab('generate_po')}>
+                <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
                   <span className="sidebar-text">Production Work</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => setActiveTab('scanner_logs')}>
+                <li className={`sidebar-item ${activeTab === 'scanner_logs' ? 'active' : ''}`} onClick={() => handleTabClick('scanner_logs')} title="Scanner Log">
                   <QrCode size={18} />
                   <span className="sidebar-text">Scanner Log</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => setActiveTab('po_verification')}>
+                <li className={`sidebar-item ${activeTab === 'po_verification' ? 'active' : ''}`} onClick={() => handleTabClick('po_verification')} title="PO Verification">
                   <CheckCircle size={18} />
                   <span className="sidebar-text">PO Verification</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => setActiveTab('only_cutting')}>
+                <li className={`sidebar-item ${activeTab === 'only_cutting' ? 'active' : ''}`} onClick={() => handleTabClick('only_cutting')} title="Only Cutting">
                   <Scissors size={18} />
                   <span className="sidebar-text">Only Cutting</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => setActiveTab('approval_queue')} style={{ position: 'relative' }}>
+                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => handleTabClick('approval_queue')} style={{ position: 'relative' }} title="My Requests">
                   <Shield size={18} />
                   <span className="sidebar-text">My Requests</span>
                   {approvalRequests.filter(r => r.requesterName === currentUser?.name && r.status === 'pending').length > 0 && (
@@ -2093,23 +2182,23 @@ export default function App() {
             {/* ADMIN-SPECIFIC GLOBAL ITEMS */}
             {currentUser?.role === 'Admin' && (
               <>
-                <li className={`sidebar-item ${activeTab === 'reports_history' ? 'active' : ''}`} onClick={() => setActiveTab('reports_history')}>
+                <li className={`sidebar-item ${activeTab === 'reports_history' ? 'active' : ''}`} onClick={() => handleTabClick('reports_history')} title="Report and History">
                   <BarChart3 size={18} />
                   <span className="sidebar-text">Report and History</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => setActiveTab('settings')}>
+                <li className={`sidebar-item ${activeTab === 'settings' ? 'active' : ''}`} onClick={() => handleTabClick('settings')} title="Setting">
                   <SettingsIcon size={18} />
                   <span className="sidebar-text">Setting</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 're_download' ? 'active' : ''}`} onClick={() => setActiveTab('re_download')}>
+                <li className={`sidebar-item ${activeTab === 're_download' ? 'active' : ''}`} onClick={() => handleTabClick('re_download')} title="Re-Download Options">
                   <Download size={18} />
                   <span className="sidebar-text">Re-Download Options</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+                <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
                   <span className="sidebar-text">Production Work</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => setActiveTab('approval_queue')} style={{ position: 'relative' }}>
+                <li className={`sidebar-item ${activeTab === 'approval_queue' ? 'active' : ''}`} onClick={() => handleTabClick('approval_queue')} style={{ position: 'relative' }} title="Approval Queue">
                   <Shield size={18} />
                   <span className="sidebar-text">Approval Queue</span>
                   {approvalRequests.filter(r => r.status === 'pending').length > 0 && (
@@ -2133,9 +2222,10 @@ export default function App() {
             className="theme-toggle"
             style={{ width: '100%', borderRadius: 'var(--border-radius-md)', display: 'flex', gap: '8px', color: '#fff' }}
             onClick={() => setIsDarkTheme(!isDarkTheme)}
+            title={isDarkTheme ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
           >
             {isDarkTheme ? <Sun size={18} /> : <Moon size={18} />}
-            <span style={{ fontSize: '13px', fontWeight: 'bold' }}>{isDarkTheme ? 'Light Theme' : 'Dark Theme'}</span>
+            <span className="sidebar-text" style={{ fontSize: '13px', fontWeight: 'bold' }}>{isDarkTheme ? 'Light Theme' : 'Dark Theme'}</span>
           </button>
           <button
             className="theme-toggle"
@@ -2153,43 +2243,41 @@ export default function App() {
       <main className="main-content">
         {/* Top Header */}
         <header className="top-header">
-          <button
-            className="mobile-menu-toggle"
-            onClick={() => setIsSidebarOpen(true)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-main)',
-              cursor: 'pointer',
-              marginRight: '12px'
-            }}
-          >
-            <Menu size={24} />
-          </button>
-          <div className="header-title-container">
-            <h1>
-              {activeTab === 'dashboard' && 'Dashboard Overview'}
-              {activeTab === 'design' && 'Below of Material'}
-              {activeTab === 'material_verification' && 'Stock Accessories'}
-              {activeTab === 'rgp' && 'Returnable Gate Pass'}
-              {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
-              {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
-              {activeTab === 'generate_po' && 'Generate PO'}
-              {activeTab === 'history' && 'Production Work'}
-              {activeTab === 'scanner_logs' && 'Scanner Log'}
-              {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
-              {activeTab === 'manually_weight_capture' && 'Manual Material Inward Entry'}
-              {activeTab === 'material_issue' && 'Material Issue'}
-              {activeTab === 'return_material' && 'Return Material'}
-              {activeTab === 'material_details' && 'Material Detail'}
-              {activeTab === 'material_transfer' && 'Material Transfer'}
-              {activeTab === 'warehouse_locations' && 'Warehouse Locations'}
-              {activeTab === 'reports_history' && 'Report and History'}
-              {activeTab === 'settings' && 'Setting'}
-              {activeTab === 'approval_queue' && (currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests')}
-              {activeTab === 'po_verification' && 'PO Verification'}
-              {activeTab === 'only_cutting' && 'Only Cutting (Not Designed)'}
-            </h1>
+          <div className="header-left-cluster" style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <button
+              type="button"
+              className="sidebar-toggle-btn"
+              onClick={toggleSidebar}
+              title={isSidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+              aria-label="Toggle sidebar"
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+            </button>
+            <div className="header-title-container">
+              <h1>
+                {activeTab === 'dashboard' && 'Dashboard Overview'}
+                {activeTab === 'design' && 'Below of Material'}
+                {activeTab === 'material_verification' && 'Stock Accessories'}
+                {activeTab === 'rgp' && 'Returnable Gate Pass'}
+                {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
+                {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
+                {activeTab === 'generate_po' && 'Generate PO'}
+                {activeTab === 'history' && 'Production Work'}
+                {activeTab === 'scanner_logs' && 'Scanner Log'}
+                {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
+                {activeTab === 'manually_weight_capture' && 'Manual Material Inward Entry'}
+                {activeTab === 'material_issue' && 'Material Issue'}
+                {activeTab === 'return_material' && 'Return Material'}
+                {activeTab === 'material_details' && 'Material Detail'}
+                {activeTab === 'material_transfer' && 'Material Transfer'}
+                {activeTab === 'warehouse_locations' && 'Warehouse Locations'}
+                {activeTab === 'reports_history' && 'Report and History'}
+                {activeTab === 'settings' && 'Setting'}
+                {activeTab === 'approval_queue' && (currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests')}
+                {activeTab === 'po_verification' && 'PO Verification'}
+                {activeTab === 'only_cutting' && 'Only Cutting (Not Designed)'}
+              </h1>
+            </div>
           </div>
 
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
@@ -2375,223 +2463,244 @@ export default function App() {
 
         {/* Content Wrapper */}
         <div className="page-container">
-          {activeTab === 'dashboard' && (
-            <DashboardView
-              stats={getStats()}
-              transactions={getTransactions()}
-              designs={designs}
-              onNavigate={setActiveTab}
-              onOpenNewDesignModal={() => setIsNewDesignModalOpen(true)}
-              currencySymbol={currencySymbol}
-              role={currentUser?.role}
-            />
-          )}
+          <Suspense fallback={
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '60px 20px',
+              color: 'var(--text-muted, #64748b)'
+            }}>
+              <div className="spinner" style={{
+                width: '32px',
+                height: '32px',
+                border: '3px solid rgba(99, 102, 241, 0.2)',
+                borderTopColor: 'var(--accent-color, #6366f1)',
+                borderRadius: '50%',
+                animation: 'spin 0.8s linear infinite',
+                marginBottom: '14px'
+              }}></div>
+              <span style={{ fontSize: '13px', fontWeight: '600' }}>Loading module...</span>
+            </div>
+          }>
+            {activeTab === 'dashboard' && (
+              <DashboardView
+                stats={getStats()}
+                transactions={getTransactions()}
+                designs={designs}
+                onNavigate={setActiveTab}
+                onOpenNewDesignModal={() => setIsNewDesignModalOpen(true)}
+                currencySymbol={currencySymbol}
+                role={currentUser?.role}
+              />
+            )}
 
-          {activeTab === 'design' && (
-            <DesignView
-              designs={designs}
-              materials={materials}
-              onAddDesign={handleAddDesign}
-              currencySymbol={currencySymbol}
-              accessoriesList={accessoriesList}
-              designersList={designersList}
-              onRedirectToTab={handleRedirectToTab}
-              prefilledLotNo={prefilledLotNo}
-              setPrefilledLotNo={setPrefilledLotNo}
-            />
-          )}
+            {activeTab === 'design' && (
+              <DesignView
+                designs={designs}
+                materials={materials}
+                onAddDesign={handleAddDesign}
+                currencySymbol={currencySymbol}
+                accessoriesList={accessoriesList}
+                designersList={designersList}
+                onRedirectToTab={handleRedirectToTab}
+                prefilledLotNo={prefilledLotNo}
+                setPrefilledLotNo={setPrefilledLotNo}
+              />
+            )}
 
+            {activeTab === 'material_verification' && (
+              <MaterialVerificationView
+                designs={designs}
+                materials={materials}
+                vendors={vendors}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+                onRedirectToTab={handleRedirectToTab}
+                onRedirectToZipPO={handleRedirectToZipPO}
+                onRedirectToPO={handleRedirectToPO}
+                onRedirectToRGP={handleRedirectToRGP}
+              />
+            )}
 
-          {activeTab === 'material_verification' && (
-            <MaterialVerificationView
-              designs={designs}
-              materials={materials}
-              vendors={vendors}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-              onRedirectToTab={handleRedirectToTab}
-              onRedirectToZipPO={handleRedirectToZipPO}
-              onRedirectToPO={handleRedirectToPO}
-              onRedirectToRGP={handleRedirectToRGP}
-            />
-          )}
+            {activeTab === 'material_issue' && (
+              <MaterialIssueView
+                designs={designs}
+                materials={materials}
+                onIssueMaterials={handleIssueMaterials}
+                onReturnMaterials={handleReturnMaterials}
+                issueLogs={issueLogs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+                onSubmitApproval={handleSubmitApprovalRequest}
+                onRedirectToZipPO={handleRedirectToZipPO}
+              />
+            )}
 
-          {activeTab === 'material_issue' && (
-            <MaterialIssueView
-              designs={designs}
-              materials={materials}
-              onIssueMaterials={handleIssueMaterials}
-              onReturnMaterials={handleReturnMaterials}
-              issueLogs={issueLogs}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-              onSubmitApproval={handleSubmitApprovalRequest}
-              onRedirectToZipPO={handleRedirectToZipPO}
-            />
-          )}
+            {activeTab === 'return_material' && (
+              <ReturnMaterialView
+                designs={designs}
+                materials={materials}
+                onReturnMaterials={handleReturnMaterials}
+                issueLogs={issueLogs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+              />
+            )}
 
-          {activeTab === 'return_material' && (
-            <ReturnMaterialView
-              designs={designs}
-              materials={materials}
-              onReturnMaterials={handleReturnMaterials}
-              issueLogs={issueLogs}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-            />
-          )}
+            {activeTab === 'generate_po' && (
+              <GeneratePOView
+                designs={designs}
+                vendors={vendors}
+                pos={pos}
+                onAddPO={handleAddPO}
+                currencySymbol={currencySymbol}
+                prefilledPoData={prefilledPoData}
+                setPrefilledPoData={setPrefilledPoData}
+                materials={materials}
+              />
+            )}
 
-          {activeTab === 'generate_po' && (
-            <GeneratePOView
-              designs={designs}
-              vendors={vendors}
-              pos={pos}
-              onAddPO={handleAddPO}
-              currencySymbol={currencySymbol}
-              prefilledPoData={prefilledPoData}
-              setPrefilledPoData={setPrefilledPoData}
-              materials={materials}
-            />
-          )}
+            {activeTab === 're_download' && (
+              <ReDownloadView
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+              />
+            )}
 
-          {activeTab === 're_download' && (
-            <ReDownloadView
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-            />
-          )}
+            {activeTab === 'zip_po' && (
+              <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="zip" />
+            )}
 
-          {activeTab === 'zip_po' && (
-            <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="zip" />
-          )}
+            {activeTab === 'dori_po' && (
+              <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="dori" />
+            )}
 
-          {activeTab === 'dori_po' && (
-            <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="dori" />
-          )}
+            {activeTab === 'material_details' && (
+              <MaterialDetailsView
+                materials={materials}
+                onAddMaterial={handleAddMaterial}
+                onDeleteMaterial={handleDeleteMaterial}
+                onUpdateMaterial={handleUpdateMaterial}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+                onSubmitApproval={handleSubmitApprovalRequest}
+              />
+            )}
 
-          {activeTab === 'material_details' && (
-            <MaterialDetailsView
-              materials={materials}
-              onAddMaterial={handleAddMaterial}
-              onDeleteMaterial={handleDeleteMaterial}
-              onUpdateMaterial={handleUpdateMaterial}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-              onSubmitApproval={handleSubmitApprovalRequest}
-            />
-          )}
+            {activeTab === 'reports_history' && (
+              <ReportsHistoryView
+                pos={pos}
+                designs={designs}
+                issueLogs={issueLogs}
+                currencySymbol={currencySymbol}
+              />
+            )}
 
-          {activeTab === 'reports_history' && (
-            <ReportsHistoryView
-              pos={pos}
-              designs={designs}
-              issueLogs={issueLogs}
-              currencySymbol={currencySymbol}
-            />
-          )}
+            {activeTab === 'only_cutting' && (
+              <OnlyCutting
+                currentUser={currentUser}
+                role={currentUser?.role}
+                onNavigateToDesign={(lotNo) => {
+                  setPrefilledLotNo(lotNo);
+                  setActiveTab('design');
+                }}
+                onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
+                onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
+                onNavigateToMaterialIssue={(lotNo) => {
+                  setPrefilledLotNo(lotNo);
+                  setActiveTab('material_issue');
+                }}
+                onNavigateToStockAccessories={(lotNo) => {
+                  setPrefilledLotNo(lotNo);
+                  setActiveTab('material_verification');
+                }}
+                onRedirectToTab={handleRedirectToTab}
+              />
+            )}
 
-          {activeTab === 'only_cutting' && (
-            <OnlyCutting
-              currentUser={currentUser}
-              role={currentUser?.role}
-              onNavigateToDesign={(lotNo) => {
-                setPrefilledLotNo(lotNo);
-                setActiveTab('design');
-              }}
-              onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
-              onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
-              onNavigateToMaterialIssue={(lotNo) => {
-                setPrefilledLotNo(lotNo);
-                setActiveTab('material_issue');
-              }}
-              onNavigateToStockAccessories={(lotNo) => {
-                setPrefilledLotNo(lotNo);
-                setActiveTab('material_verification');
-              }}
-              onRedirectToTab={handleRedirectToTab}
-            />
-          )}
+            {activeTab === 'settings' && currentUser?.role === 'Admin' && (
+              <SettingsView
+                vendors={vendors}
+                onAddVendor={handleAddVendor}
+                onDeleteVendor={handleDeleteVendor}
+                currencySymbol={currencySymbol}
+                setCurrencySymbol={setCurrencySymbol}
+                defaultTax={defaultTax}
+                setDefaultTax={setDefaultTax}
+                onResetDatabase={handleResetDatabase}
+                accessoriesList={accessoriesList}
+                onAddAccessory={handleAddAccessory}
+                onDeleteAccessory={handleDeleteAccessory}
+                designersList={designersList}
+                onAddDesigner={handleAddDesigner}
+                onDeleteDesigner={handleDeleteDesigner}
+                materials={materials}
+                onAddMaterial={handleAddMaterial}
+                onDeleteMaterial={handleDeleteMaterial}
+                onUpdateMaterial={handleUpdateMaterial}
+                racks={racks}
+                setRacks={setRacks}
+                halls={halls}
+                setHalls={setHalls}
+              />
+            )}
 
-          {activeTab === 'settings' && currentUser?.role === 'Admin' && (
-            <SettingsView
-              vendors={vendors}
-              onAddVendor={handleAddVendor}
-              onDeleteVendor={handleDeleteVendor}
-              currencySymbol={currencySymbol}
-              setCurrencySymbol={setCurrencySymbol}
-              defaultTax={defaultTax}
-              setDefaultTax={setDefaultTax}
-              onResetDatabase={handleResetDatabase}
-              accessoriesList={accessoriesList}
-              onAddAccessory={handleAddAccessory}
-              onDeleteAccessory={handleDeleteAccessory}
-              designersList={designersList}
-              onAddDesigner={handleAddDesigner}
-              onDeleteDesigner={handleDeleteDesigner}
-              materials={materials}
-              onAddMaterial={handleAddMaterial}
-              onDeleteMaterial={handleDeleteMaterial}
-              onUpdateMaterial={handleUpdateMaterial}
-              racks={racks}
-              setRacks={setRacks}
-              halls={halls}
-              setHalls={setHalls}
-            />
-          )}
+            {activeTab === 'approval_queue' && currentUser && (
+              <ApprovalQueueView
+                approvalRequests={approvalRequests}
+                onApprove={handleApproveRequest}
+                onReject={handleRejectRequest}
+                materials={materials}
+                designs={designs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+              />
+            )}
 
-          {activeTab === 'approval_queue' && currentUser && (
-            <ApprovalQueueView
-              approvalRequests={approvalRequests}
-              onApprove={handleApproveRequest}
-              onReject={handleRejectRequest}
-              materials={materials}
-              designs={designs}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-            />
-          )}
+            {activeTab === 'history' && currentUser && (
+              <HistoryView
+                designs={designs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+              />
+            )}
 
-          {activeTab === 'history' && currentUser && (
-            <HistoryView
-              designs={designs}
-              currencySymbol={currencySymbol}
-              currentUser={currentUser}
-            />
-          )}
+            {activeTab === 'scanner_logs' && currentUser && (
+              <ScannerLogsView currencySymbol={currencySymbol} />
+            )}
 
-          {activeTab === 'scanner_logs' && currentUser && (
-            <ScannerLogsView currencySymbol={currencySymbol} />
-          )}
+            {activeTab === 'rgp' && currentUser && (
+              <FabricRgpForm
+                onSubmit={(payload) => console.log('RGP submitted:', payload)}
+                onBack={() => setActiveTab('dashboard')}
+                prefilledRgpData={prefilledRgpData}
+                setPrefilledRgpData={setPrefilledRgpData}
+                currentUser={currentUser}
+              />
+            )}
 
-          {activeTab === 'rgp' && currentUser && (
-            <FabricRgpForm
-              onSubmit={(payload) => console.log('RGP submitted:', payload)}
-              onBack={() => setActiveTab('dashboard')}
-              prefilledRgpData={prefilledRgpData}
-              setPrefilledRgpData={setPrefilledRgpData}
-              currentUser={currentUser}
-            />
-          )}
+            {activeTab === 'weight_capture' && currentUser && (
+              <WeightCapture racks={racks} currentUser={currentUser} />
+            )}
 
-          {activeTab === 'weight_capture' && currentUser && (
-            <WeightCapture racks={racks} currentUser={currentUser} />
-          )}
+            {activeTab === 'manually_weight_capture' && currentUser && (
+              <ManuallyWeightCapture racks={racks} currentUser={currentUser} />
+            )}
 
-          {activeTab === 'manually_weight_capture' && currentUser && (
-            <ManuallyWeightCapture racks={racks} currentUser={currentUser} />
-          )}
+            {activeTab === 'material_transfer' && currentUser && (
+              <MaterialTransferView currentUser={currentUser} />
+            )}
 
-          {activeTab === 'material_transfer' && currentUser && (
-            <MaterialTransferView currentUser={currentUser} />
-          )}
+            {activeTab === 'warehouse_locations' && (
+              <WarehouseLocationView racks={racks} materials={materials} halls={halls} onNavigate={setActiveTab} />
+            )}
 
-          {activeTab === 'warehouse_locations' && (
-            <WarehouseLocationView racks={racks} materials={materials} halls={halls} onNavigate={setActiveTab} />
-          )}
-
-          {activeTab === 'po_verification' && (
-            <POVerificationView currencySymbol={currencySymbol} currentUser={currentUser} />
-          )}
+            {activeTab === 'po_verification' && (
+              <POVerificationView currencySymbol={currencySymbol} currentUser={currentUser} />
+            )}
+          </Suspense>
         </div>
       </main>
 

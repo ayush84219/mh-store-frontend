@@ -1,12 +1,21 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getBackendUrl } from '../utils/api';
+import { getCleanImageUrl } from '../utils/designHelpers';
+import useDebounce from '../utils/useDebounce';
 import {
   Package, Save, RefreshCw, Download, Search, Filter,
   MapPin, User, ChevronDown, ChevronRight, CheckCircle2,
-  AlertTriangle, X, Printer, Menu, Edit3, Layers, FileText
+  AlertTriangle, X, Printer, Menu, Edit3, Layers, FileText,
+  Camera, Upload, Image as ImageIcon, Eye
 } from 'lucide-react';
 
 const BASE_CODE = 1000;
+
+const MATERIAL_OPTIONS = [
+  '18L Metal Button', 'YKK Zipper 20cm', 'Elastic Tape 2cm', 'Hook & Eye Set',
+  'Drawstring Cord', 'Snap Button 15mm', 'Velcro Tape 2cm', 'Satin Ribbon',
+  'Toggle Button', 'Lace Trim 1cm', 'D-Ring 25mm', 'Rivets 10mm',
+];
 
 const parseMTNum = (code) => {
   const m = String(code || '').match(/MT(\d+)/);
@@ -20,20 +29,68 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('success');
 
-  // Dynamic slot options from the racks configuration
+  const [liveLocations, setLiveLocations] = useState([]);
+
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`);
+        if (res.ok) {
+          const json = await res.json();
+          const items = Array.isArray(json) ? json : (json.data || []);
+          if (items.length > 0) {
+            setLiveLocations(items);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    fetchLocations();
+  }, []);
+
+  // Dynamic slot options from the racks configuration or live locations
   const generatedLocations = useMemo(() => {
-    const list = [];
-    racks.forEach(rack => {
-      const displayLabel = rack.warehouse && rack.code.includes(rack.warehouse) ? rack.code : `${rack.warehouse} - Rack ${rack.code}`;
-      list.push({ code: displayLabel, label: displayLabel, rawCode: rack.code, warehouse: rack.warehouse });
-    });
-    return list;
-  }, [racks]);
+    const slotMap = new Map();
+    const source = (racks && racks.length > 0) ? racks : liveLocations;
+
+    if (source && source.length > 0) {
+      source.forEach(rack => {
+        const warehouse = rack.warehouse || 'Hall 1';
+        const rawCode = String(rack.code || '').trim();
+        const displayLabel = rack.warehouse && rawCode.includes(rack.warehouse)
+          ? rawCode
+          : `${warehouse} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
+        if (!slotMap.has(displayLabel)) {
+          slotMap.set(displayLabel, {
+            code: displayLabel,
+            label: displayLabel,
+            rawCode: rawCode,
+            warehouse: warehouse
+          });
+        }
+      });
+    }
+
+    // Fallback if neither racks nor live locations have returned data yet
+    if (slotMap.size === 0) {
+      ['Hall 1', 'Hall 2', 'Hall 3'].forEach(hall => {
+        const count = hall === 'Hall 1' ? 150 : 100;
+        for (let i = 1; i <= count; i++) {
+          const label = `${hall} - Rack ${i}`;
+          slotMap.set(label, { code: label, label, rawCode: String(i), warehouse: hall });
+        }
+      });
+    }
+
+    return Array.from(slotMap.values());
+  }, [racks, liveLocations]);
 
   const [now, setNow] = useState(new Date());
   const [page, setPage] = useState(0);
   const [rpp, setRpp] = useState(10);
   const [q, setQ] = useState('');
+  const debouncedQ = useDebounce(q, 300);
   const [orderBy, setOrderBy] = useState('id');
   const [order, setOrder] = useState('desc');
   const [showFilters, setShowFilters] = useState(false);
@@ -73,63 +130,13 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     invoiceNo: '',
     storeLocation: '',
     storeIncharge: currentUser?.name || 'Pooja',
+    imageUrl: '',
     remarks: '',
   });
 
+  const [previewModalImage, setPreviewModalImage] = useState(null);
   const [metadataFlash, setMetadataFlash] = useState(false);
-
-  // Inward PO Requirement, Duplicate Bill & 3% Tolerance State
-  const [inwardCheck, setInwardCheck] = useState(null);
-  const [checkingInward, setCheckingInward] = useState(false);
-  const [approvalModal, setApprovalModal] = useState(false);
-  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
-
   const numPieces = parseInt(form.pieces, 10) || 0;
-
-  // Live Inward Pre-Check Effect
-  useEffect(() => {
-    let active = true;
-    const po = (form.poNumber || '').trim();
-    const mat = (form.materialName || '').trim();
-    const sup = (form.supplier || '').trim();
-    const inv = (form.invoiceNo || '').trim();
-    const pcs = numPieces;
-
-    if (!po && !mat && !sup && !inv) {
-      setInwardCheck(null);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      try {
-        setCheckingInward(true);
-        const res = await fetch(`${getBackendUrl()}/api/inward/check-eligibility`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            poNumber: po,
-            materialName: mat,
-            supplier: sup,
-            invoiceNo: inv,
-            incomingQty: pcs
-          })
-        });
-        const data = await res.json();
-        if (active && data.success) {
-          setInwardCheck(data);
-        }
-      } catch (err) {
-        console.warn('Inward eligibility check failed:', err);
-      } finally {
-        if (active) setCheckingInward(false);
-      }
-    }, 400);
-
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [form.poNumber, form.materialName, form.supplier, form.invoiceNo, numPieces]);
 
   const areDetailsFilled = () => {
     return (
@@ -170,7 +177,18 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   };
 
   // Fetch captures log and highest material code from DB on mount
+  const [dbMaterials, setDbMaterials] = useState([]);
+
   useEffect(() => {
+    fetch(`${getBackendUrl()}/api/materials`)
+      .then(r => r.json())
+      .then(mats => {
+        if (Array.isArray(mats)) {
+          setDbMaterials(mats);
+        }
+      })
+      .catch(() => {});
+
     fetch(`${getBackendUrl()}/api/weight-capture`)
       .then(r => r.json())
       .then(res => {
@@ -192,6 +210,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             invoiceNo: item.invoiceNo || 'N/A',
             location: item.storeLocation || 'Main Store',
             operator: item.storeIncharge || 'Pooja',
+            imageUrl: item.imageUrl || '',
             entryMode: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
             status: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
             approvalStatus: item.approvalStatus || 'Approved'
@@ -209,8 +228,37 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           }
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
+
+  // Autocomplete suggestions for Material Name & Category
+  const materialSuggestions = useMemo(() => {
+    const set = new Set();
+    (captures || []).forEach(c => {
+      const n = c.material || c.materialName;
+      if (n && n.trim()) set.add(n.trim());
+    });
+    (dbMaterials || []).forEach(m => {
+      if (m.name && m.name.trim()) set.add(m.name.trim());
+    });
+    MATERIAL_OPTIONS.forEach(p => set.add(p));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [captures, dbMaterials]);
+
+  const categorySuggestions = useMemo(() => {
+    const set = new Set();
+    (captures || []).forEach(c => {
+      if (c.category && c.category.trim()) set.add(c.category.trim().toUpperCase());
+    });
+    (dbMaterials || []).forEach(m => {
+      if (m.category && m.category.trim()) set.add(m.category.trim().toUpperCase());
+    });
+    [
+      'ZIPPERS', 'BUTTONS', 'ELASTICS', 'TRIMS', 'FABRICS', 'ACCESSORIES',
+      'LABELS', 'PACKAGING', 'THREADS', 'CORDS', 'BUCKLES', 'RIVETS', 'TAPES', 'HOOKS'
+    ].forEach(p => set.add(p));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [captures, dbMaterials]);
 
   // Clock
   useEffect(() => {
@@ -274,6 +322,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       invoiceNo: 'INV-99214',
       storeLocation: loc,
       storeIncharge: currentUser?.name || 'Pooja',
+      imageUrl: 'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=400&auto=format&fit=crop&q=60',
       pieces: '3000',
       packets: '10',
       unit: 'Pcs',
@@ -287,11 +336,6 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       showToast('⚠️ Please fill in all required metadata fields and a valid quantity before saving!', 'error');
       setMetadataFlash(true);
       setTimeout(() => setMetadataFlash(false), 2000);
-      return;
-    }
-
-    if (inwardCheck && inwardCheck.requiresApproval) {
-      setApprovalModal(true);
       return;
     }
 
@@ -322,6 +366,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         invoiceNo: form.invoiceNo || 'N/A',
         location: finalLocation,
         operator: form.storeIncharge || currentUser?.name || 'Operator',
+        imageUrl: form.imageUrl || '',
         entryMode: 'Manually',
         status: 'Manually',
       };
@@ -332,7 +377,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
       const nextNum = nextCodeNum + 1;
       setNextCodeNum(nextNum);
-      setForm(p => ({ ...p, pieces: '', packets: '1', remarks: '', materialCode: `MT${nextNum}` }));
+      setForm(p => ({ ...p, pieces: '', packets: '1', imageUrl: '', remarks: '', materialCode: `MT${nextNum}` }));
 
       showToast(`✅ Manual Material Inward Saved: ${totalPieces.toLocaleString()} ${form.unit}`);
 
@@ -351,6 +396,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           invoiceNo: form.invoiceNo,
           storeLocation: finalLocation,
           storeIncharge: form.storeIncharge,
+          imageUrl: form.imageUrl || '',
           grossWeightKg: 0,
           tareWeightKg: 0,
           netWeightKg: 0,
@@ -372,7 +418,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             setCaptures(prev => prev.map(item => item.materialCode === newEntry.materialCode ? { ...item, id: res.id } : item));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
 
       // Send to print service if online
       if (printerStatus === 'online') {
@@ -416,139 +462,9 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               else sendNext();
             }
           };
-        } catch (_) {}
+        } catch (_) { }
       }
     }, 400);
-  };
-
-  const handleSubmitApprovalRequest = async () => {
-    try {
-      setApprovalSubmitting(true);
-      const totalPackets = parseInt(form.packets, 10) || 1;
-      const totalPieces = parseInt(form.pieces, 10) || 0;
-      const finalLocation = getCombinedLocationSummary();
-      const barcodeId = `${form.materialCode}-A${String(totalPackets).padStart(2, '0')}`;
-      const reasonStr = (inwardCheck?.reasons || ['Incoming quantity exceeds PO requirement']).join(' | ');
-
-      const newEntry = {
-        id: captures.length + 1,
-        materialCode: form.materialCode,
-        time: now.toTimeString().slice(0, 8),
-        date: now.toLocaleDateString('en-IN'),
-        po: form.poNumber || 'N/A',
-        material: form.materialName,
-        weight: '0.000',
-        netWeightKg: 0,
-        pieces: totalPieces,
-        packets: totalPackets,
-        unit: form.unit,
-        barcodeId,
-        invoiceNo: form.invoiceNo || 'N/A',
-        location: finalLocation,
-        operator: form.storeIncharge || currentUser?.name || 'Operator',
-        entryMode: 'Manually',
-        status: 'Pending Approval',
-        approvalStatus: 'Pending Approval',
-        remarks: `[Awaiting Excess Approval: ${reasonStr}] ${form.remarks || ''}`
-      };
-
-      setCaptures(prev => [newEntry, ...prev]);
-
-      const captureRes = await fetch(`${getBackendUrl()}/api/weight-capture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          materialCode: form.materialCode,
-          materialName: form.materialName,
-          unit: form.unit,
-          category: form.category,
-          supplier: form.supplier,
-          lotNo: form.lotNo,
-          poNumber: form.poNumber,
-          invoiceNo: form.invoiceNo,
-          storeLocation: finalLocation,
-          storeIncharge: form.storeIncharge,
-          grossWeightKg: 0,
-          tareWeightKg: 0,
-          netWeightKg: 0,
-          weightPerPieceG: 0,
-          sampleQty: 0,
-          sampleWeightKg: 0,
-          pieces: totalPieces,
-          packets: totalPackets,
-          barcodeId: barcodeId,
-          entryMode: 'Manually',
-          status: 'Pending Approval',
-          approvalStatus: 'Pending Approval',
-          remarks: `[Awaiting Excess Approval: ${reasonStr}] ${form.remarks || ''}`
-        })
-      });
-      const captureData = await captureRes.json();
-      if (captureData.success && captureData.id) {
-        setCaptures(prev => prev.map(item => item.materialCode === newEntry.materialCode ? { ...item, id: captureData.id } : item));
-      }
-
-      // Submit to approval requests
-      const payload = {
-        id: `INW-${Date.now()}`,
-        type: 'inward_approval',
-        status: 'pending',
-        requesterName: currentUser?.name || form.storeIncharge || 'Store Operator',
-        requesterRole: currentUser?.role || 'Store',
-        date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-        lotId: form.lotNo || form.poNumber || 'N/A',
-        pieces: totalPieces,
-        personName: form.storeIncharge || currentUser?.name || 'Operator',
-        materialId: form.materialCode,
-        materialName: form.materialName,
-        reason: reasonStr,
-        items: [{
-          captureId: captureData?.id || null,
-          materialCode: form.materialCode,
-          materialName: form.materialName,
-          unit: form.unit,
-          category: form.category,
-          supplier: form.supplier,
-          lotNo: form.lotNo,
-          poNumber: form.poNumber,
-          invoiceNo: form.invoiceNo,
-          poQty: inwardCheck?.orderedQty || inwardCheck?.remainingQty || 0,
-          orderedQty: inwardCheck?.orderedQty || inwardCheck?.remainingQty || 0,
-          remainingQty: inwardCheck?.remainingQty || 0,
-          storeLocation: finalLocation,
-          storeIncharge: form.storeIncharge,
-          grossWeightKg: 0,
-          tareWeightKg: 0,
-          netWeightKg: 0,
-          weightPerPieceG: 0,
-          sampleQty: 0,
-          sampleWeightKg: 0,
-          pieces: totalPieces,
-          packets: totalPackets,
-          barcodeId: barcodeId,
-          entryMode: 'Manually',
-          remarks: form.remarks || ''
-        }]
-      };
-
-      await fetch(`${getBackendUrl()}/api/approval-requests`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const nextNum = nextCodeNum + 1;
-      setNextCodeNum(nextNum);
-      setForm(p => ({ ...p, pieces: '', packets: '1', remarks: '', materialCode: `MT${nextNum}` }));
-
-      showToast('⚠️ Excess Inward logged as Pending Approval.', 'success');
-      setApprovalModal(false);
-      handleClear();
-    } catch (err) {
-      showToast('Failed to submit approval request: ' + err.message, 'error');
-    } finally {
-      setApprovalSubmitting(false);
-    }
   };
 
   const handleClear = () => {
@@ -560,6 +476,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       invoiceNo: '',
       pieces: '',
       packets: '1',
+      imageUrl: '',
       remarks: ''
     }));
     showToast('Cleared inputs.', 'info');
@@ -655,7 +572,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   }, [captures]);
 
   const filteredCaptures = useMemo(() => {
-    const ql = q.toLowerCase();
+    const ql = debouncedQ.toLowerCase();
     return captures
       .filter(r => {
         const matchesQ = !ql ||
@@ -680,7 +597,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         if (av > bv) return order === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [captures, q, orderBy, order, filterCategory, filterPo, filterLocation, filterOperator, filterDate]);
+  }, [captures, debouncedQ, orderBy, order, filterCategory, filterPo, filterLocation, filterOperator, filterDate]);
 
   const paginatedData = useMemo(() => {
     const start = page * rpp;
@@ -959,89 +876,39 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           </button>
         </div>
 
-        {/* Live PO Requirement, Duplicate Invoice & 3% Tolerance Status Card */}
-        {inwardCheck && (
-          <div style={{
-            marginBottom: '20px',
-            padding: '14px 16px',
-            borderRadius: '10px',
-            background: inwardCheck.requiresApproval
-              ? 'rgba(239, 68, 68, 0.06)'
-              : (inwardCheck.poFound ? 'rgba(16, 185, 129, 0.06)' : 'rgba(99, 102, 241, 0.05)'),
-            border: `1.5px solid ${inwardCheck.requiresApproval ? '#ef4444' : (inwardCheck.poFound ? '#10b981' : '#cbd5e1')}`
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  fontSize: '11px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.5px',
-                  color: inwardCheck.requiresApproval ? '#dc2626' : (inwardCheck.poFound ? '#059669' : '#4f46e5')
-                }}>
-                  {inwardCheck.requiresApproval ? '⚠️ Admin Approval Required' : (inwardCheck.poFound ? '✅ PO Requirement Verified' : 'ℹ️ Inward Pre-Check')}
-                </span>
-                {checkingInward && <span style={{ fontSize: '11px', color: '#64748b' }}>Checking database...</span>}
-              </div>
-              {inwardCheck.poFound && (
-                <span style={{ fontSize: '11px', fontWeight: '700', color: '#475569' }}>
-                  Matched PO #{form.poNumber}
-                </span>
-              )}
-            </div>
-
-            {inwardCheck.poFound ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px', marginBottom: inwardCheck.reasons?.length ? '10px' : '0' }}>
-                <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>ORDERED QTY</div>
-                  <div style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>{inwardCheck.orderedQty.toLocaleString()} Pcs</div>
-                </div>
-                <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>ALREADY RECEIVED</div>
-                  <div style={{ fontSize: '14px', fontWeight: '800', color: '#059669' }}>{inwardCheck.receivedQty.toLocaleString()} Pcs</div>
-                </div>
-                <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>REMAINING NEEDED</div>
-                  <div style={{ fontSize: '14px', fontWeight: '800', color: inwardCheck.remainingQty <= 0 ? '#ef4444' : '#2563eb' }}>
-                    {inwardCheck.remainingQty?.toLocaleString()} Pcs
-                  </div>
-                </div>
-                <div style={{ background: '#fff', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>INCOMING MANUAL QTY</div>
-                  <div style={{ fontSize: '14px', fontWeight: '800', color: inwardCheck.isExcess ? '#dc2626' : '#0f172a' }}>
-                    {numPieces.toLocaleString()} Pcs {inwardCheck.isExcess && `(+${inwardCheck.excessPercent}%)`}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              form.poNumber && (
-                <div style={{ fontSize: '12px', color: '#64748b', fontStyle: 'italic' }}>
-                  PO #{form.poNumber} not found in database. Entry will be received as Ad-hoc / New stock.
-                </div>
-              )
-            )}
-
-            {inwardCheck.reasons && inwardCheck.reasons.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
-                {inwardCheck.reasons.map((r, rIdx) => (
-                  <div key={rIdx} style={{ fontSize: '12px', fontWeight: '700', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>⚠️</span> {r}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
 
           <div className="form-group">
-            <label className="wcs-label">Material Name <span style={{ color: '#ef4444' }}>*</span></label>
+            <label className="wcs-label">
+              Material Name <span style={{ color: '#ef4444' }}>*</span>
+            </label>
             <input
               type="text"
               className="wcs-input"
               value={form.materialName}
-              onChange={setF('materialName')}
-              placeholder="e.g. YKK Brass Zipper"
-              style={{ height: '40px' }}
+              onChange={e => {
+                const val = e.target.value;
+                setForm(prev => {
+                  const matched = (dbMaterials || []).find(m => m.name && m.name.toLowerCase() === val.trim().toLowerCase())
+                               || (captures || []).find(c => (c.material || c.materialName) && (c.material || c.materialName).toLowerCase() === val.trim().toLowerCase());
+                  const newCat = (!prev.category.trim() && matched?.category) ? matched.category.toUpperCase() : prev.category;
+                  return {
+                    ...prev,
+                    materialName: val,
+                    category: newCat
+                  };
+                });
+              }}
+              list="manual-material-suggestions"
+              placeholder="e.g. YKK Brass Zipper (type to search)"
+              autoComplete="on"
+              style={{ height: '40px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
             />
+            <datalist id="manual-material-suggestions">
+              {materialSuggestions.map((name, idx) => (
+                <option key={idx} value={name} />
+              ))}
+            </datalist>
           </div>
 
           <div className="form-group">
@@ -1056,15 +923,24 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           </div>
 
           <div className="form-group">
-            <label className="wcs-label">Category <span style={{ color: '#ef4444' }}>*</span></label>
+            <label className="wcs-label">
+              Category <span style={{ color: '#ef4444' }}>*</span>
+            </label>
             <input
               type="text"
               className="wcs-input"
               value={form.category}
               onChange={setF('category')}
-              placeholder="e.g. ZIPPERS / TRIMS"
-              style={{ height: '40px' }}
+              list="manual-category-suggestions"
+              placeholder="e.g. ZIPPERS / TRIMS (type or select)"
+              autoComplete="on"
+              style={{ height: '40px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
             />
+            <datalist id="manual-category-suggestions">
+              {categorySuggestions.map((cat, idx) => (
+                <option key={idx} value={cat} />
+              ))}
+            </datalist>
           </div>
 
           <div className="form-group">
@@ -1160,6 +1036,9 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               style={{ height: '40px', cursor: 'pointer' }}
             >
               <option value="">-- Select Configured Location Slot --</option>
+              {form.storeLocation && !generatedLocations.some(l => l.code === form.storeLocation || l.label === form.storeLocation) && (
+                <option value={form.storeLocation}>{form.storeLocation} (Current)</option>
+              )}
               {generatedLocations.map(loc => (
                 <option key={loc.code} value={loc.code}>{loc.label}</option>
               ))}
@@ -1176,6 +1055,101 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               placeholder="e.g. Pooja"
               style={{ height: '40px' }}
             />
+          </div>
+
+          {/* Material Photo / Image (Optional) */}
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="wcs-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Camera size={14} style={{ color: '#3b82f6' }} /> Material Photo / Image <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 'normal' }}>(Optional)</span>
+              </label>
+              {form.imageUrl && (
+                <button
+                  type="button"
+                  onClick={() => setForm(p => ({ ...p, imageUrl: '' }))}
+                  style={{
+                    background: 'none', border: 'none', color: '#ef4444',
+                    fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: '4px'
+                  }}
+                >
+                  <X size={13} /> Remove Image
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: form.imageUrl ? '1fr 140px' : '1fr', gap: '14px', alignItems: 'start' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* File Upload / Drag Drop Area */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      padding: '8px 14px', borderRadius: '8px', border: '1.5px dashed #cbd5e1',
+                      background: '#f8fafc', color: '#334155', fontSize: '12.5px', fontWeight: '700',
+                      cursor: 'pointer', transition: 'all 0.2s', flexShrink: 0
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = '#3b82f6'; e.currentTarget.style.background = 'rgba(59, 130, 246, 0.05)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.background = '#f8fafc'; }}
+                  >
+                    <Upload size={14} style={{ color: '#3b82f6' }} /> Choose Photo / File
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (ev) => {
+                            setForm(p => ({ ...p, imageUrl: ev.target.result }));
+                            showToast('📷 Material image attached successfully!');
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                  </label>
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '600' }}>or paste Image link:</span>
+                </div>
+
+                <input
+                  type="text"
+                  className="wcs-input"
+                  placeholder="Paste image URL or Google Drive link (optional)..."
+                  value={form.imageUrl || ''}
+                  onChange={setF('imageUrl')}
+                  style={{ height: '38px', fontSize: '13px' }}
+                />
+              </div>
+
+              {/* Live Preview Box */}
+              {form.imageUrl && (
+                <div style={{
+                  width: '140px', height: '90px', borderRadius: '8px',
+                  border: '1.5px solid #cbd5e1', background: '#f8fafc',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  overflow: 'hidden', position: 'relative', cursor: 'pointer'
+                }}
+                  onClick={() => setPreviewModalImage(form.imageUrl)}
+                  title="Click to zoom image"
+                >
+                  <img
+                    src={getCleanImageUrl(form.imageUrl)}
+                    alt="Material preview"
+                    style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                  <div style={{
+                    position: 'absolute', bottom: '3px', right: '3px',
+                    background: 'rgba(0,0,0,0.6)', color: '#fff',
+                    borderRadius: '4px', padding: '2px 4px', fontSize: '9px', fontWeight: '700'
+                  }}>
+                    Zoom 🔍
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -1396,6 +1370,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                 {[
                   ['# / CODE', 'materialCode'],
+                  ['IMAGE', null],
                   ['TIME', 'time'],
                   ['PO NUMBER', 'po'],
                   ['MATERIAL NAME', 'material'],
@@ -1422,7 +1397,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             <tbody>
               {paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No inward logs found in database.</td>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No inward logs found in database.</td>
                 </tr>
               ) : (
                 paginatedData.map((row, idx) => (
@@ -1436,6 +1411,41 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: '900', color: '#3b82f6', fontSize: '13px' }}>#{row.id}</div>
                         <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', fontFamily: 'monospace', marginTop: '2px' }}>{row.materialCode}</div>
+                      </td>
+
+                      {/* IMAGE */}
+                      <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                        {row.imageUrl ? (
+                          <div
+                            onClick={() => setPreviewModalImage(row.imageUrl)}
+                            style={{
+                              width: '38px', height: '38px', borderRadius: '6px',
+                              border: '1px solid #cbd5e1', overflow: 'hidden',
+                              background: '#f8fafc', cursor: 'pointer', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center',
+                              transition: 'transform 0.15s'
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
+                            title="Click to view material photo"
+                          >
+                            <img
+                              src={getCleanImageUrl(row.imageUrl)}
+                              alt="Material thumbnail"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={(e) => { e.target.style.display = 'none'; }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{
+                            width: '38px', height: '38px', borderRadius: '6px',
+                            border: '1px dashed #cbd5e1', background: '#f8fafc',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            color: '#94a3b8'
+                          }} title="No image uploaded">
+                            <Camera size={15} />
+                          </div>
+                        )}
                       </td>
 
                       {/* TIME */}
@@ -1532,7 +1542,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                     {/* EXPANDED ROW DETAILS */}
                     {expandedRow === row.id && (
                       <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan="9" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
+                        <td colSpan="10" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
                           <div style={{
                             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px',
                             background: '#ffffff', padding: '16px', borderRadius: '8px', border: '1.5px solid #cbd5e1'
@@ -1785,77 +1795,57 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         </div>
       )}
 
-      {/* ── INWARD APPROVAL REQUIRED DIALOG ── */}
-      {approvalModal && inwardCheck && (
-        <div className="modal-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
-          <div className="panel animate-scale" style={{ maxWidth: '520px', width: '100%', margin: '20px', padding: '24px', border: '2px solid #ef4444', borderRadius: '16px' }}>
-            <div className="panel-header" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 className="panel-title" style={{ margin: 0, color: '#dc2626', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <AlertTriangle size={22} color="#dc2626" /> Admin Approval Required
+      {/* ── IMAGE ENLARGED PREVIEW MODAL ─────────────────────────────── */}
+      {previewModalImage && (
+        <div
+          className="modal-overlay"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, background: 'rgba(0,0,0,0.75)' }}
+          onClick={() => setPreviewModalImage(null)}
+        >
+          <div
+            className="panel animate-scale"
+            style={{
+              maxWidth: '650px', width: '90%', padding: '20px',
+              borderRadius: '12px', background: '#ffffff',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+              position: 'relative', display: 'flex', flexDirection: 'column', gap: '14px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                📷 Material Photo Preview
               </h3>
-              <button onClick={() => setApprovalModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
-            </div>
-
-            <p style={{ fontSize: '13px', color: '#475569', marginBottom: '16px', lineHeight: '1.5' }}>
-              This manual material inward cannot be saved directly because it violates one or more procurement safety rules:
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '18px' }}>
-              {inwardCheck.reasons.map((reason, idx) => (
-                <div key={idx} style={{
-                  background: 'rgba(239, 68, 68, 0.08)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                  fontSize: '12.5px',
-                  fontWeight: '700',
-                  color: '#991b1b',
-                  display: 'flex',
-                  alignItems: 'start',
-                  gap: '8px'
-                }}>
-                  <span style={{ fontSize: '14px' }}>⚠️</span>
-                  <div>{reason}</div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ background: 'var(--bg-secondary)', padding: '14px', borderRadius: '8px', marginBottom: '20px', fontSize: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <div><span style={{ color: '#64748b' }}>Material:</span> <strong>{form.materialName}</strong></div>
-                <div><span style={{ color: '#64748b' }}>PO Number:</span> <strong>{form.poNumber || 'N/A'}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Supplier:</span> <strong>{form.supplier}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Bill / Invoice:</span> <strong>{form.invoiceNo}</strong></div>
-                <div><span style={{ color: '#64748b' }}>Incoming Quantity:</span> <strong style={{ color: '#2563eb' }}>{numPieces.toLocaleString()} {form.unit}</strong></div>
-                {inwardCheck.poFound && (
-                  <div><span style={{ color: '#64748b' }}>Remaining Required:</span> <strong style={{ color: '#dc2626' }}>{inwardCheck.remainingQty?.toLocaleString()} Pcs</strong></div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button className="btn btn-secondary" onClick={() => setApprovalModal(false)} disabled={approvalSubmitting}>Cancel</button>
-
-              {currentUser?.role === 'Admin' && (
-                <button
-                  className="btn btn-warning"
-                  onClick={() => {
-                    setApprovalModal(false);
-                    setSaveDialog(true);
-                  }}
-                  style={{ fontWeight: '800' }}
-                >
-                  ⚡ Admin Override (Save Directly)
-                </button>
-              )}
-
               <button
-                className="btn btn-primary"
-                onClick={handleSubmitApprovalRequest}
-                disabled={approvalSubmitting}
-                style={{ display: 'flex', gap: '6px', alignItems: 'center', fontWeight: '800' }}
+                type="button"
+                onClick={() => setPreviewModalImage(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
               >
-                {approvalSubmitting ? <div className="Spinner"></div> : <>📤 Submit to Approval Queue</>}
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{
+              width: '100%', maxHeight: '450px', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              background: '#f8fafc', borderRadius: '8px', overflow: 'hidden', padding: '10px'
+            }}>
+              <img
+                src={getCleanImageUrl(previewModalImage)}
+                alt="Material preview enlarged"
+                style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '6px' }}
+                onError={(e) => { e.target.alt = 'Image failed to load'; }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPreviewModalImage(null)}
+                style={{ fontWeight: '700', padding: '8px 16px' }}
+              >
+                Close Preview
               </button>
             </div>
           </div>

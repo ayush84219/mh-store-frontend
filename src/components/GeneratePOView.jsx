@@ -92,7 +92,7 @@ const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5
  * CONFIG
  * ========================= */
 const WEB_APP_BASE = "";
-const SHEET_ID = "1fKSwGBIpzWEFk566WRQ4bzQ0anJlmasoY8TwrTLQHXI";
+const SHEET_ID = "13ArpFOD7idmpv7QIRJQkD-tfswtkH6rNnEANtv2M7Ek";
 const RANGE_A1 = "Index!A:C";
 const API_KEY = "";
 const PO_DATA_RANGE = "PO_Items!A:I";
@@ -1199,7 +1199,7 @@ export default function GeneratePOView({
     return targetList.filter(po => {
       const q = poSearchQuery.toLowerCase().trim();
       const s = (po.status || 'Sent to Vendor').toLowerCase();
-      
+
       let matchesStatus = true;
       if (poStatusFilter === 'pending approval') {
         matchesStatus = s.includes('pending approval') || (s.includes('pending') && s.includes('app'));
@@ -1221,7 +1221,7 @@ export default function GeneratePOView({
             if (Array.isArray(itms)) {
               found = itms.some(i => (i.name || i.description || i.item || '').toLowerCase() === filterMatLower);
             }
-          } catch (_) {}
+          } catch (_) { }
         }
         matchesMaterial = found;
       }
@@ -1240,15 +1240,15 @@ export default function GeneratePOView({
           try {
             const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
             itemNames = Array.isArray(itms) ? itms.map(i => (i.name || i.description || i.item || '')).join(' ').toLowerCase() : '';
-          } catch (_) {}
+          } catch (_) { }
         }
 
-        matchesSearch = 
-          poNum.includes(q) || 
+        matchesSearch =
+          poNum.includes(q) ||
           (cleanQ && cleanPoNum.includes(cleanQ)) ||
-          vName.includes(q) || 
-          dName.includes(q) || 
-          dCat.includes(q) || 
+          vName.includes(q) ||
+          dName.includes(q) ||
+          dCat.includes(q) ||
           itemNames.includes(q);
       }
 
@@ -1614,7 +1614,7 @@ export default function GeneratePOView({
           setPoNumber(data.nextPoNumber);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -1631,7 +1631,7 @@ export default function GeneratePOView({
         if (sData.success && sData.nextPoNumber) {
           serverNextPo = sData.nextPoNumber;
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // 2. Fetch only already generated POs from database
       let dbPoNumbers = [];
@@ -1645,7 +1645,7 @@ export default function GeneratePOView({
               .filter(Boolean);
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // Map local MySQL POs if passed via props
       const localPoNumbers = Array.isArray(pos) ? pos.map(p => (p.poNumber || '').trim()) : [];
@@ -1699,7 +1699,7 @@ export default function GeneratePOView({
         setPoNumber(data.nextPoNumber);
         return;
       }
-    } catch (_) {}
+    } catch (_) { }
     setPoNumber(generateNextPoNumber(availablePONumbers));
   };
 
@@ -3057,7 +3057,7 @@ export default function GeneratePOView({
                           if (n) matSet.add(n);
                         });
                       }
-                    } catch (_) {}
+                    } catch (_) { }
                   }
                 });
                 const uniqueMats = Array.from(matSet).filter(Boolean).sort();
@@ -3141,18 +3141,18 @@ export default function GeneratePOView({
                               isPendingApproval
                                 ? '#fef3c7'
                                 : (po.status === 'Completed' || po.status === 'Received Done'
-                                ? 'rgba(16, 185, 129, 0.12)'
-                                : po.status === 'Partially Received'
-                                ? 'rgba(245, 158, 11, 0.12)'
-                                : 'rgba(99, 102, 241, 0.12)'),
+                                  ? 'rgba(16, 185, 129, 0.12)'
+                                  : po.status === 'Partially Received'
+                                    ? 'rgba(245, 158, 11, 0.12)'
+                                    : 'rgba(99, 102, 241, 0.12)'),
                             color:
                               isPendingApproval
                                 ? '#b45309'
                                 : (po.status === 'Completed' || po.status === 'Received Done'
-                                ? '#10b981'
-                                : po.status === 'Partially Received'
-                                ? '#f59e0b'
-                                : 'var(--accent-color)'),
+                                  ? '#10b981'
+                                  : po.status === 'Partially Received'
+                                    ? '#f59e0b'
+                                    : 'var(--accent-color)'),
                             border: isPendingApproval ? '1px solid #fde68a' : 'none'
                           }}>
                             {isPendingApproval ? '⏳ Pending Approval' : (po.status || 'Sent to Vendor')}

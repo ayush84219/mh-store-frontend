@@ -4,10 +4,13 @@ import {
   Search, Printer, Barcode, ChevronDown, ChevronUp, ChevronLeft, ChevronRight,
   Trash2, ClipboardCheck, CheckCircle, Activity, FileText, QrCode, Truck,
   Scissors, RotateCcw, Download, ExternalLink, ShieldCheck, CheckCircle2,
-  PackageCheck, Package, Box, Tag, Filter, RefreshCw, Hash
+  PackageCheck, Package, Box, Tag, Filter, RefreshCw, Hash,
+  Camera, Upload, Eye, Image as ImageIcon, X
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { getBackendUrl } from '../utils/api';
+import { getCleanImageUrl } from '../utils/designHelpers';
+import useDebounce from '../utils/useDebounce';
 
 // ─── Pagination Bar Component ──────────────────────────────────────────────────
 const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5, 10, 20, 50, 100] }) => {
@@ -176,12 +179,14 @@ export default function MaterialDetailsView({
   const isAdmin = currentUser?.role === 'Admin';
   const [isAdding, setIsAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 300);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(0);
   const [rpp, setRpp] = useState(10);
   const [expandedMaterialId, setExpandedMaterialId] = useState(null);
   const [printQueue, setPrintQueue] = useState(null);
+  const [previewModalImage, setPreviewModalImage] = useState(null);
 
   // Custom UI Dialog & Validation States
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm, isDanger }
@@ -719,20 +724,36 @@ export default function MaterialDetailsView({
     window.print();
   };
 
-  // Extract unique material categories
+  // Extract unique material categories with casing normalization
   const categoriesList = useMemo(() => {
-    const set = new Set();
+    const map = new Map();
     (materials || []).forEach(m => {
-      if (m && m.category) set.add(String(m.category).trim());
+      if (m && m.category) {
+        const raw = String(m.category).trim();
+        if (raw) {
+          const key = raw.toLowerCase();
+          if (!map.has(key)) {
+            // Capitalize appropriately: e.g. "Fabric" -> "Fabric", "ZIP" / "zip" -> "Zip", "zippers / trims" -> "Zippers / Trims"
+            const formatted = raw
+              .split('/')
+              .map(part => {
+                const p = part.trim();
+                return p.length <= 3 ? p.toUpperCase() : p.charAt(0).toUpperCase() + p.slice(1).toLowerCase();
+              })
+              .join(' / ');
+            map.set(key, formatted);
+          }
+        }
+      }
     });
-    return Array.from(set).filter(Boolean).sort();
+    return Array.from(map.values()).sort();
   }, [materials]);
 
   // Filtered materials
   const filteredMaterials = useMemo(() => {
     return (materials || []).filter(m => {
       if (!m) return false;
-      const query = searchQuery.toLowerCase().trim();
+      const query = debouncedSearchQuery.toLowerCase().trim();
       const matchesSearch = !query || (
         String(m.id || '').toLowerCase().includes(query) ||
         String(m.name || '').toLowerCase().includes(query) ||
@@ -744,7 +765,7 @@ export default function MaterialDetailsView({
       );
 
       const matchesCategory = selectedCategory === 'all' ||
-        String(m.category || '').toLowerCase() === selectedCategory.toLowerCase();
+        String(m.category || '').trim().toLowerCase() === selectedCategory.toLowerCase();
 
       const numStock = Number(m.stock) || 0;
       const numThresh = Number(m.threshold) || 50;
@@ -759,12 +780,12 @@ export default function MaterialDetailsView({
 
       return matchesSearch && matchesCategory && matchesStatus;
     });
-  }, [materials, searchQuery, selectedCategory, statusFilter]);
+  }, [materials, debouncedSearchQuery, selectedCategory, statusFilter]);
 
   // Reset page when filters change
   useEffect(() => {
     setPage(0);
-  }, [searchQuery, selectedCategory, statusFilter]);
+  }, [debouncedSearchQuery, selectedCategory, statusFilter]);
 
   // Paginated materials
   const paginatedMaterials = useMemo(() => {
@@ -806,6 +827,29 @@ export default function MaterialDetailsView({
   const [threshold, setThreshold] = useState(50);
   const [color, setColor] = useState('');
   const [location, setLocation] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageInputMode, setImageInputMode] = useState('upload'); // 'upload' | 'url'
+  const [imageUploading, setImageUploading] = useState(false);
+
+  const handleImageFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image size exceeds 10MB limit. Please select a smaller photo.');
+      return;
+    }
+    setImageUploading(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setImageUrl(event.target.result || '');
+      setImageUploading(false);
+    };
+    reader.onerror = () => {
+      alert('Failed to read image file.');
+      setImageUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleExcelExport = () => {
     // Structure data for Excel sheet
@@ -873,6 +917,7 @@ export default function MaterialDetailsView({
       threshold: Number(threshold),
       color: color.trim() || 'Default',
       location: location.trim() || 'Main Store',
+      imageUrl: imageUrl.trim() || undefined,
       barcodes: generatedBarcodes
     };
 
@@ -885,50 +930,25 @@ export default function MaterialDetailsView({
     setThreshold(50);
     setColor('');
     setLocation('');
+    setImageUrl('');
     setIsAdding(false);
   };
 
   return (
     <div className="animate-fade">
-      {/* Delete Request Success Banner */}
-      {deleteRequestSuccess && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '10px',
-          padding: '14px 16px', marginBottom: '20px',
-          backgroundColor: 'var(--success-light)', color: 'var(--success)',
-          borderRadius: 'var(--border-radius-md)', border: '1px solid rgba(16,185,129,0.2)',
-          fontWeight: '600', fontSize: '13px'
-        }}>
-          <CheckCircle size={18} />
-          <span>{deleteRequestSuccess}</span>
-        </div>
-      )}
-      {/* Role Banner for normal users */}
-      {!isAdmin && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: '10px',
-          padding: '10px 14px', marginBottom: '16px',
-          backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)',
-          borderRadius: 'var(--border-radius-sm)', border: '1px solid rgba(99,102,241,0.2)',
-          fontSize: '12px', fontWeight: '600'
-        }}>
-          <AlertCircle size={15} />
-          <span>Material deletions require Admin approval. Clicking Delete will submit a request to your Admin.</span>
-        </div>
-      )}
       {/* Title Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700', margin: '0 0 4px 0' }}>Raw Materials Inventory</h2>
+          <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700', margin: '0 0 4px 0', letterSpacing: '-0.02em' }}>Raw Materials Inventory</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>Monitor textile fabrics, buttons, zippers, trims, and stock across warehouse locations.</p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }} className="print-hide">
-          <button className="btn btn-secondary" onClick={handleExcelExport} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button className="btn btn-secondary" onClick={handleExcelExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}>
             <FileSpreadsheet size={16} style={{ color: '#10b981' }} />
             <span>Export to Excel</span>
           </button>
-          <button className="btn btn-secondary" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button className="btn btn-secondary" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}>
             <Printer size={16} style={{ color: 'var(--accent-color)' }} />
             <span>Print Inventory</span>
           </button>
@@ -938,59 +958,63 @@ export default function MaterialDetailsView({
       {/* KPI Overview Summary Cards */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
         gap: '14px',
-        marginBottom: '20px'
+        marginBottom: '22px'
       }}>
         <div style={{
-          backgroundColor: 'var(--bg-secondary)', border: '1.5px solid var(--border-color)',
-          borderRadius: 'var(--border-radius-md)', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px'
+          backgroundColor: 'var(--bg-primary)', border: '1.5px solid var(--border-color)',
+          borderRadius: '12px', padding: '16px 18px', display: 'flex', alignItems: 'center', gap: '14px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'transform 0.15s ease, box-shadow 0.15s ease'
         }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: 'var(--accent-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Layers size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Materials</div>
-            <div style={{ fontSize: '20px', fontWeight: '900', color: 'var(--text-main)' }}>{metrics.total} Items</div>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Total Materials</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>{metrics.total} Items</div>
           </div>
         </div>
 
         <div style={{
-          backgroundColor: 'var(--bg-secondary)', border: '1.5px solid var(--border-color)',
-          borderRadius: 'var(--border-radius-md)', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px'
+          backgroundColor: 'var(--bg-primary)', border: '1.5px solid var(--border-color)',
+          borderRadius: '12px', padding: '16px 18px', display: 'flex', alignItems: 'center', gap: '14px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'transform 0.15s ease, box-shadow 0.15s ease'
         }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <CheckCircle2 size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>In-Stock Optimal</div>
-            <div style={{ fontSize: '20px', fontWeight: '900', color: '#10b981' }}>{metrics.inStock} Items</div>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>In-Stock Optimal</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#10b981', marginTop: '2px' }}>{metrics.inStock} Items</div>
           </div>
         </div>
 
         <div style={{
-          backgroundColor: 'var(--bg-secondary)', border: '1.5px solid var(--border-color)',
-          borderRadius: 'var(--border-radius-md)', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px'
+          backgroundColor: 'var(--bg-primary)', border: '1.5px solid var(--border-color)',
+          borderRadius: '12px', padding: '16px 18px', display: 'flex', alignItems: 'center', gap: '14px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'transform 0.15s ease, box-shadow 0.15s ease'
         }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <AlertCircle size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Low Stock Alert</div>
-            <div style={{ fontSize: '20px', fontWeight: '900', color: '#f59e0b' }}>{metrics.lowStock} Items</div>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Low Stock Alert</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#f59e0b', marginTop: '2px' }}>{metrics.lowStock} Items</div>
           </div>
         </div>
 
         <div style={{
-          backgroundColor: 'var(--bg-secondary)', border: '1.5px solid var(--border-color)',
-          borderRadius: 'var(--border-radius-md)', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '14px'
+          backgroundColor: 'var(--bg-primary)', border: '1.5px solid var(--border-color)',
+          borderRadius: '12px', padding: '16px 18px', display: 'flex', alignItems: 'center', gap: '14px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)', transition: 'transform 0.15s ease, box-shadow 0.15s ease'
         }}>
-          <div style={{ width: '42px', height: '42px', borderRadius: '10px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <div style={{ width: '44px', height: '44px', borderRadius: '12px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <TrendingDown size={22} />
           </div>
           <div>
-            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Zero Stock / Pending</div>
-            <div style={{ fontSize: '20px', fontWeight: '900', color: '#ef4444' }}>{metrics.zeroStock} Items</div>
+            <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Zero Stock / Pending</div>
+            <div style={{ fontSize: '22px', fontWeight: '800', color: '#ef4444', marginTop: '2px' }}>{metrics.zeroStock} Items</div>
           </div>
         </div>
       </div>
@@ -1118,6 +1142,114 @@ export default function MaterialDetailsView({
               </div>
             </div>
 
+            {/* Image / Photo Attachment (Optional) */}
+            <div style={{
+              marginTop: '6px',
+              marginBottom: '16px',
+              padding: '14px 16px',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1.5px dashed var(--border-color)',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', color: 'var(--text-main)', margin: 0 }}>
+                  <Camera size={15} style={{ color: 'var(--accent-color)' }} />
+                  <span>Material Photo / Sample Image</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}>(Optional)</span>
+                </label>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setImageInputMode('upload')}
+                    style={{
+                      padding: '3px 10px', fontSize: '11px', fontWeight: '700', borderRadius: '4px', cursor: 'pointer',
+                      border: imageInputMode === 'upload' ? '1px solid var(--accent-color)' : '1px solid var(--border-color)',
+                      backgroundColor: imageInputMode === 'upload' ? 'var(--accent-light)' : 'var(--bg-primary)',
+                      color: imageInputMode === 'upload' ? 'var(--accent-color)' : 'var(--text-muted)'
+                    }}
+                  >
+                    Upload File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImageInputMode('url')}
+                    style={{
+                      padding: '3px 10px', fontSize: '11px', fontWeight: '700', borderRadius: '4px', cursor: 'pointer',
+                      border: imageInputMode === 'url' ? '1px solid var(--accent-color)' : '1px solid var(--border-color)',
+                      backgroundColor: imageInputMode === 'url' ? 'var(--accent-light)' : 'var(--bg-primary)',
+                      color: imageInputMode === 'url' ? 'var(--accent-color)' : 'var(--text-muted)'
+                    }}
+                  >
+                    Paste URL / Drive Link
+                  </button>
+                </div>
+              </div>
+
+              {imageInputMode === 'upload' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                  <label style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '6px',
+                    padding: '8px 14px', borderRadius: '6px',
+                    backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                    cursor: 'pointer', fontSize: '12px', fontWeight: '700', color: 'var(--text-main)'
+                  }}>
+                    <Upload size={14} style={{ color: 'var(--accent-color)' }} />
+                    <span>{imageUploading ? 'Loading...' : 'Choose Image File'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageFileUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Supported: JPG, PNG, WEBP (Max 10MB)</span>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Paste image link or Google Drive direct link here..."
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  style={{ fontSize: '12px' }}
+                />
+              )}
+
+              {/* Image Preview if provided */}
+              {imageUrl && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px', padding: '8px 12px', borderRadius: '6px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <img
+                    src={getCleanImageUrl(imageUrl)}
+                    alt="Sample Preview"
+                    style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '6px', border: '1px solid var(--border-color)', cursor: 'pointer' }}
+                    onClick={() => setPreviewModalImage(imageUrl)}
+                  />
+                  <div style={{ flex: 1, overflow: 'hidden' }}>
+                    <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>Photo Attached</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                      {imageUrl.startsWith('data:image') ? 'Base64 Local Image Upload' : imageUrl}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setPreviewModalImage(imageUrl)}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px', fontSize: '11px' }}
+                  >
+                    <Eye size={12} /> View
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setImageUrl('')}
+                    style={{ color: 'var(--danger)', padding: '4px 8px', fontSize: '11px' }}
+                  >
+                    <X size={12} /> Remove
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setIsAdding(false)}>Cancel</button>
               <button type="submit" className="btn btn-primary">Catalog Material</button>
@@ -1201,47 +1333,86 @@ export default function MaterialDetailsView({
           </div>
         </div>
 
-        {/* Category & Status Filter Pills */}
+        {/* Category & Status Filter Pills Toolbar */}
         <div style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '10px 16px',
+          padding: '12px 18px',
           backgroundColor: 'var(--bg-secondary)',
           borderBottom: '1px solid var(--border-color)',
           flexWrap: 'wrap',
-          gap: '10px'
+          gap: '12px'
         }}>
           {/* Category Tabs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Filter size={12} /> Category:
+            <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginRight: '2px' }}>
+              <Filter size={13} style={{ color: 'var(--accent-color)' }} /> Category:
             </span>
             <button
               onClick={() => setSelectedCategory('all')}
               style={{
-                padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
                 border: selectedCategory === 'all' ? '1.5px solid var(--accent-color)' : '1px solid var(--border-color)',
                 backgroundColor: selectedCategory === 'all' ? 'var(--accent-color)' : 'var(--bg-primary)',
-                color: selectedCategory === 'all' ? '#ffffff' : 'var(--text-main)'
+                color: selectedCategory === 'all' ? '#ffffff' : 'var(--text-main)',
+                boxShadow: selectedCategory === 'all' ? '0 2px 6px rgba(99, 102, 241, 0.25)' : 'none'
               }}
             >
-              All ({materials.length})
+              <span>All</span>
+              <span style={{
+                fontSize: '10.5px',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                backgroundColor: selectedCategory === 'all' ? 'rgba(255,255,255,0.25)' : 'var(--bg-secondary)',
+                color: selectedCategory === 'all' ? '#ffffff' : 'var(--text-muted)',
+                fontWeight: '800'
+              }}>
+                {materials.length}
+              </span>
             </button>
             {categoriesList.map(cat => {
-              const count = materials.filter(m => String(m.category || '').toLowerCase() === cat.toLowerCase()).length;
+              const count = materials.filter(m => String(m.category || '').trim().toLowerCase() === cat.toLowerCase()).length;
+              const isSelected = selectedCategory.toLowerCase() === cat.toLowerCase();
               return (
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
                   style={{
-                    padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
-                    border: selectedCategory.toLowerCase() === cat.toLowerCase() ? '1.5px solid var(--accent-color)' : '1px solid var(--border-color)',
-                    backgroundColor: selectedCategory.toLowerCase() === cat.toLowerCase() ? 'var(--accent-color)' : 'var(--bg-primary)',
-                    color: selectedCategory.toLowerCase() === cat.toLowerCase() ? '#ffffff' : 'var(--text-main)'
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    fontSize: '11.5px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    transition: 'all 0.15s ease',
+                    border: isSelected ? '1.5px solid var(--accent-color)' : '1px solid var(--border-color)',
+                    backgroundColor: isSelected ? 'var(--accent-color)' : 'var(--bg-primary)',
+                    color: isSelected ? '#ffffff' : 'var(--text-main)',
+                    boxShadow: isSelected ? '0 2px 6px rgba(99, 102, 241, 0.25)' : 'none'
                   }}
                 >
-                  {cat} ({count})
+                  <span>{cat}</span>
+                  <span style={{
+                    fontSize: '10.5px',
+                    padding: '1px 6px',
+                    borderRadius: '10px',
+                    backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--bg-secondary)',
+                    color: isSelected ? '#ffffff' : 'var(--text-muted)',
+                    fontWeight: '800'
+                  }}>
+                    {count}
+                  </span>
                 </button>
               );
             })}
@@ -1249,14 +1420,19 @@ export default function MaterialDetailsView({
 
           {/* Status Tabs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)' }}>Status:</span>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', marginRight: '2px' }}>Status:</span>
             <button
               onClick={() => setStatusFilter('all')}
               style={{
-                padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
                 border: statusFilter === 'all' ? '1.5px solid var(--text-main)' : '1px solid var(--border-color)',
                 backgroundColor: statusFilter === 'all' ? 'var(--bg-primary)' : 'transparent',
-                color: 'var(--text-main)'
+                color: 'var(--text-main)',
+                boxShadow: statusFilter === 'all' ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
               }}
             >
               All
@@ -1264,35 +1440,62 @@ export default function MaterialDetailsView({
             <button
               onClick={() => setStatusFilter('in_stock')}
               style={{
-                padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
                 border: statusFilter === 'in_stock' ? '1.5px solid #10b981' : '1px solid var(--border-color)',
-                backgroundColor: statusFilter === 'in_stock' ? 'rgba(16, 185, 129, 0.12)' : 'transparent',
-                color: '#10b981'
+                backgroundColor: statusFilter === 'in_stock' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                color: '#10b981',
+                boxShadow: statusFilter === 'in_stock' ? '0 1px 4px rgba(16, 185, 129, 0.2)' : 'none'
               }}
             >
-              In Stock ({metrics.inStock})
+              <span>In Stock</span>
+              <span style={{ fontSize: '10.5px', fontWeight: '800', opacity: 0.9 }}>({metrics.inStock})</span>
             </button>
             <button
               onClick={() => setStatusFilter('low_stock')}
               style={{
-                padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
                 border: statusFilter === 'low_stock' ? '1.5px solid #f59e0b' : '1px solid var(--border-color)',
-                backgroundColor: statusFilter === 'low_stock' ? 'rgba(245, 158, 11, 0.12)' : 'transparent',
-                color: '#f59e0b'
+                backgroundColor: statusFilter === 'low_stock' ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
+                color: '#f59e0b',
+                boxShadow: statusFilter === 'low_stock' ? '0 1px 4px rgba(245, 158, 11, 0.2)' : 'none'
               }}
             >
-              Low Stock ({metrics.lowStock})
+              <span>Low Stock</span>
+              <span style={{ fontSize: '10.5px', fontWeight: '800', opacity: 0.9 }}>({metrics.lowStock})</span>
             </button>
             <button
               onClick={() => setStatusFilter('zero_stock')}
               style={{
-                padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
                 border: statusFilter === 'zero_stock' ? '1.5px solid #ef4444' : '1px solid var(--border-color)',
-                backgroundColor: statusFilter === 'zero_stock' ? 'rgba(239, 68, 68, 0.12)' : 'transparent',
-                color: '#ef4444'
+                backgroundColor: statusFilter === 'zero_stock' ? 'rgba(239, 68, 68, 0.15)' : 'transparent',
+                color: '#ef4444',
+                boxShadow: statusFilter === 'zero_stock' ? '0 1px 4px rgba(239, 68, 68, 0.2)' : 'none'
               }}
             >
-              Zero / Pending ({metrics.zeroStock})
+              <span>Zero / Pending</span>
+              <span style={{ fontSize: '10.5px', fontWeight: '800', opacity: 0.9 }}>({metrics.zeroStock})</span>
             </button>
           </div>
         </div>
@@ -1300,24 +1503,25 @@ export default function MaterialDetailsView({
         <div className="custom-table-container">
           <table className="custom-table">
             <thead>
-              <tr>
-                <th style={{ width: '120px' }}>Item ID</th>
-                <th>Material Details</th>
-                <th>Category</th>
-                <th>Color / Shade</th>
-                <th>Storage Rack</th>
-                <th>PO & Bill Ref</th>
-                <th style={{ textAlign: 'center' }}>Stock Quantity</th>
-                <th style={{ textAlign: 'center' }}>Status</th>
-                <th className="print-hide" style={{ textAlign: 'right', width: '100px' }}>Actions</th>
+              <tr style={{ borderBottom: '1.5px solid var(--border-color)' }}>
+                <th style={{ width: '130px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item ID</th>
+                <th style={{ width: '65px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Photo</th>
+                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Material Details</th>
+                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</th>
+                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Color / Shade</th>
+                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Storage Rack</th>
+                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>PO & Bill Ref</th>
+                <th style={{ textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Stock Quantity</th>
+                <th style={{ textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status</th>
+                <th className="print-hide" style={{ textAlign: 'right', width: '90px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan="9" style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                    <Layers size={32} style={{ margin: '0 auto 8px auto', opacity: 0.4 }} />
-                    <div style={{ fontWeight: '700', fontSize: '14px', color: 'var(--text-main)' }}>No Materials Found</div>
+                  <td colSpan="10" style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                    <Layers size={36} style={{ margin: '0 auto 10px auto', opacity: 0.35, color: 'var(--accent-color)' }} />
+                    <div style={{ fontWeight: '700', fontSize: '14.5px', color: 'var(--text-main)' }}>No Materials Found</div>
                     <div style={{ fontSize: '12px', marginTop: '4px' }}>No raw materials match the current filters or search term.</div>
                   </td>
                 </tr>
@@ -1328,39 +1532,87 @@ export default function MaterialDetailsView({
                   const isLow = numStock <= numThresh && numStock > 0;
                   const isZero = numStock <= 0;
                   const percentage = Math.min((numStock / (numThresh * 3.5)) * 100, 100);
-                  const barColor = isZero ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
+                  const barColor = isZero ? '#ef4444' : isLow ? '#f59e0b' : '#10b981';
                   const barcodes = getMaterialBarcodes(m);
 
                   return (
                     <React.Fragment key={m.id}>
-                      <tr>
+                      <tr style={{ transition: 'background-color 0.15s ease' }}>
                         <td 
                           style={{ fontWeight: 'bold', cursor: 'pointer' }}
                           onClick={() => setExpandedMaterialId(expandedMaterialId === m.id ? null : m.id)}
                           title="Click to view/print item barcodes"
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            {expandedMaterialId === m.id ? <ChevronUp size={14} style={{ color: 'var(--accent-color)' }} /> : <ChevronDown size={14} />}
-                            <span style={{ fontFamily: 'monospace', color: 'var(--accent-color)', fontWeight: '800' }}>{m.id}</span>
-                            <Barcode size={14} style={{ color: 'var(--accent-color)', opacity: 0.8 }} />
+                            {expandedMaterialId === m.id ? <ChevronUp size={15} style={{ color: 'var(--accent-color)' }} /> : <ChevronDown size={15} style={{ color: 'var(--text-muted)' }} />}
+                            <span style={{ fontFamily: 'monospace', color: 'var(--accent-color)', fontWeight: '800', fontSize: '13px' }}>{m.id}</span>
+                            <Barcode size={14} style={{ color: 'var(--accent-color)', opacity: 0.75 }} />
                           </div>
                         </td>
-                        <td>
-                          <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)' }}>{m.name}</strong>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Threshold: {m.threshold} {m.unit}</span>
+                        <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 4px' }}>
+                          {m.imageUrl ? (
+                            <div
+                              onClick={(e) => { e.stopPropagation(); setPreviewModalImage(m.imageUrl); }}
+                              style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '8px',
+                                border: '1.5px solid var(--border-color)',
+                                overflow: 'hidden',
+                                cursor: 'pointer',
+                                margin: '0 auto',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: 'var(--bg-secondary)',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                                transition: 'transform 0.15s ease'
+                              }}
+                              title="Click to view full photo"
+                              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
+                              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                            >
+                              <img
+                                src={getCleanImageUrl(m.imageUrl)}
+                                alt={m.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                            </div>
+                          ) : (
+                            <div style={{
+                              width: '38px',
+                              height: '38px',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--bg-secondary)',
+                              border: '1px dashed var(--border-color)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              margin: '0 auto',
+                              color: 'var(--text-muted)'
+                            }} title="No photo uploaded">
+                              <ImageIcon size={16} style={{ opacity: 0.35 }} />
+                            </div>
+                          )}
                         </td>
                         <td>
-                          <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontSize: '11px' }}>
+                          <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)', fontWeight: '700' }}>{m.name}</strong>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>Threshold: {m.threshold} {m.unit}</span>
+                        </td>
+                        <td>
+                          <span className="status-badge" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '6px' }}>
                             {m.category || 'Accessory'}
                           </span>
                         </td>
                         <td 
                           style={{
-                            maxWidth: '120px',
+                            maxWidth: '130px',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
-                            fontSize: '12px'
+                            fontSize: '12px',
+                            fontWeight: '500'
                           }} 
                           title={m.color || 'Default'}
                         >
@@ -1368,7 +1620,7 @@ export default function MaterialDetailsView({
                         </td>
                         <td 
                           style={{
-                            maxWidth: '160px',
+                            maxWidth: '170px',
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -1377,8 +1629,9 @@ export default function MaterialDetailsView({
                           title={m.location || 'Main Store'}
                         >
                           <span style={{
-                            padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: '600',
-                            backgroundColor: 'rgba(99, 102, 241, 0.08)', color: 'var(--accent-color)', border: '1px solid rgba(99, 102, 241, 0.2)'
+                            padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '600',
+                            backgroundColor: 'rgba(99, 102, 241, 0.08)', color: 'var(--accent-color)', border: '1px solid rgba(99, 102, 241, 0.2)',
+                            display: 'inline-flex', alignItems: 'center', gap: '3px'
                           }}>
                             📍 {m.location || 'Main Store'}
                           </span>
@@ -1396,80 +1649,64 @@ export default function MaterialDetailsView({
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <strong style={{ fontSize: '14px', color: isZero ? '#ef4444' : isLow ? '#f59e0b' : 'var(--text-main)' }}>
+                          <strong style={{ fontSize: '14.5px', color: isZero ? '#ef4444' : isLow ? '#f59e0b' : 'var(--text-main)' }}>
                             {numStock.toLocaleString()}
-                          </strong> <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{m.unit}</span>
-                          <div className="stock-progress-bar" style={{ width: '80px', margin: '4px auto 0 auto' }}>
+                          </strong> <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: '600' }}>{m.unit}</span>
+                          <div className="stock-progress-bar" style={{ width: '84px', height: '5px', borderRadius: '3px', margin: '4px auto 0 auto', backgroundColor: 'var(--bg-secondary)' }}>
                             <div
                               className="stock-progress-fill"
-                              style={{ width: `${Math.max(5, percentage)}%`, backgroundColor: barColor }}
+                              style={{ width: `${Math.max(5, percentage)}%`, backgroundColor: barColor, borderRadius: '3px', height: '100%' }}
                             />
                           </div>
                         </td>
 
                         <td style={{ textAlign: 'center' }}>
                           {isZero ? (
-                            <span className="status-badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '10.5px', fontWeight: '800' }}>
+                            <span className="status-badge" style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.25)', fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '6px' }}>
                               Zero Stock
                             </span>
                           ) : isLow ? (
-                            <span className="status-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.2)', fontSize: '10.5px', fontWeight: '800' }}>
+                            <span className="status-badge" style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.25)', fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '6px' }}>
                               Low Stock
                             </span>
                           ) : (
-                            <span className="status-badge verified" style={{ fontSize: '10.5px', fontWeight: '800' }}>
+                            <span className="status-badge verified" style={{ fontSize: '11px', fontWeight: '800', padding: '3px 8px', borderRadius: '6px' }}>
                               In Stock
                             </span>
                           )}
                         </td>
                         <td className="print-hide" style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                             <button
                               type="button"
                               className="btn btn-secondary btn-xs"
                               onClick={() => handleOpenTraceability(m)}
                               style={{
-                                padding: '4px 8px',
+                                padding: '5px 10px',
                                 backgroundColor: 'var(--accent-light)',
                                 border: '1px solid var(--accent-color)',
                                 color: 'var(--accent-color)',
-                                borderRadius: '4px',
+                                borderRadius: '6px',
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '3px',
+                                gap: '4px',
                                 fontWeight: '700',
-                                fontSize: '11px'
+                                fontSize: '11.5px',
+                                boxShadow: '0 1px 2px rgba(99, 102, 241, 0.12)',
+                                transition: 'all 0.15s ease'
                               }}
                               title={`Trace lifecycle & movement history for ${m.name}`}
                             >
-                              <Activity size={12} />
+                              <Activity size={13} />
                               <span>Trace</span>
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-xs"
-                              onClick={() => handleDeleteClick(m)}
-                              style={{
-                                padding: '4px 6px',
-                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                border: '1px solid rgba(239, 68, 68, 0.2)',
-                                color: 'var(--danger)',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center'
-                              }}
-                              title="Delete Material"
-                            >
-                              <Trash2 size={12} />
                             </button>
                           </div>
                         </td>
                       </tr>
                       {expandedMaterialId === m.id && (
                         <tr>
-                          <td colSpan="9" style={{ padding: '16px', backgroundColor: 'var(--bg-primary)' }}>
+                          <td colSpan="10" style={{ padding: '16px', backgroundColor: 'var(--bg-primary)' }}>
                             <div style={{ 
                               backgroundColor: 'var(--bg-secondary)', 
                               border: '1px solid var(--border-color)', 
@@ -1952,18 +2189,48 @@ export default function MaterialDetailsView({
           <div className="modal-content animate-scale" style={{ maxWidth: '960px', width: '95%', maxHeight: '90vh', overflowY: 'auto', padding: '24px' }}>
             {/* Modal Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-color)', paddingBottom: '16px', marginBottom: '20px' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: '800' }}>
-                    {traceModalData.material.id}
-                  </span>
-                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>
-                    {traceModalData.material.name}
-                  </h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                {traceModalData.material.imageUrl ? (
+                  <div
+                    onClick={() => setPreviewModalImage(traceModalData.material.imageUrl)}
+                    style={{
+                      width: '56px', height: '56px', borderRadius: '8px',
+                      border: '2px solid var(--accent-color)', overflow: 'hidden',
+                      cursor: 'pointer', flexShrink: 0, boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+                      backgroundColor: 'var(--bg-secondary)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                    title="Click to zoom material photo"
+                  >
+                    <img
+                      src={getCleanImageUrl(traceModalData.material.imageUrl)}
+                      alt={traceModalData.material.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{
+                    width: '56px', height: '56px', borderRadius: '8px',
+                    backgroundColor: 'var(--bg-secondary)', border: '1.5px dashed var(--border-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    color: 'var(--text-muted)'
+                  }}>
+                    <ImageIcon size={24} style={{ opacity: 0.4 }} />
+                  </div>
+                )}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: '800' }}>
+                      {traceModalData.material.id}
+                    </span>
+                    <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>
+                      {traceModalData.material.name}
+                    </h3>
+                  </div>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                    Category: <strong>{traceModalData.material.category}</strong> • Storage Location: <strong>{traceModalData.material.location || 'Main Store'}</strong> • Unit: <strong>{traceModalData.material.unit}</strong>
+                  </p>
                 </div>
-                <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
-                  Category: <strong>{traceModalData.material.category}</strong> • Storage Location: <strong>{traceModalData.material.location || 'Main Store'}</strong> • Unit: <strong>{traceModalData.material.unit}</strong>
-                </p>
               </div>
 
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -2139,10 +2406,31 @@ export default function MaterialDetailsView({
                           </span>
                         </div>
                         {traceModalData.traceInfo.captures.map((c, idx) => (
-                          <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted)', padding: '6px 0', borderTop: idx > 0 ? '1px solid var(--border-color)' : 'none' }}>
-                            <div>• Invoice: <strong>{c.invoiceNo || 'N/A'}</strong> (PO: <strong>{c.poNumber || 'N/A'}</strong>) | Supplier: <strong>{c.supplier || 'N/A'}</strong></div>
-                            <div>• Captured: <strong>{c.pieces} pcs</strong> ({c.packets || 1} pkts) • Gross: {c.grossWeightKg}kg / Net: {c.netWeightKg}kg • Operator: <strong>{c.storeIncharge || 'Pooja'}</strong></div>
-                            <div>• Location: <span style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>📍 {c.storeLocation || 'Main Store'}</span> • Status: <strong style={{ color: '#047857' }}>{c.approvalStatus || 'Approved'}</strong></div>
+                          <div key={idx} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '8px 0', borderTop: idx > 0 ? '1px solid var(--border-color)' : 'none' }}>
+                            {c.imageUrl && (
+                              <div
+                                onClick={() => setPreviewModalImage(c.imageUrl)}
+                                style={{
+                                  width: '44px', height: '44px', borderRadius: '6px',
+                                  border: '1.5px solid var(--border-color)', overflow: 'hidden',
+                                  cursor: 'pointer', flexShrink: 0,
+                                  backgroundColor: 'var(--bg-primary)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}
+                                title="Click to view inward capture photo"
+                              >
+                                <img
+                                  src={getCleanImageUrl(c.imageUrl)}
+                                  alt="Inward capture"
+                                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                />
+                              </div>
+                            )}
+                            <div style={{ flex: 1, fontSize: '12px', color: 'var(--text-muted)' }}>
+                              <div>• Invoice: <strong>{c.invoiceNo || 'N/A'}</strong> (PO: <strong>{c.poNumber || 'N/A'}</strong>) | Supplier: <strong>{c.supplier || 'N/A'}</strong></div>
+                              <div>• Captured: <strong>{c.pieces} pcs</strong> ({c.packets || 1} pkts) • Gross: {c.grossWeightKg}kg / Net: {c.netWeightKg}kg • Operator: <strong>{c.storeIncharge || 'Pooja'}</strong></div>
+                              <div>• Location: <span style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>📍 {c.storeLocation || 'Main Store'}</span> • Status: <strong style={{ color: '#047857' }}>{c.approvalStatus || 'Approved'}</strong></div>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -2321,6 +2609,63 @@ export default function MaterialDetailsView({
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── IMAGE ENLARGED PREVIEW MODAL ─────────────────────────────── */}
+      {previewModalImage && (
+        <div
+          className="modal-overlay"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, background: 'rgba(0,0,0,0.75)' }}
+          onClick={() => setPreviewModalImage(null)}
+        >
+          <div
+            className="panel animate-scale"
+            style={{
+              maxWidth: '650px', width: '90%', padding: '20px',
+              borderRadius: '12px', background: '#ffffff',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+              position: 'relative', display: 'flex', flexDirection: 'column', gap: '14px'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                📷 Material Photo Preview
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreviewModalImage(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{
+              width: '100%', maxHeight: '450px', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              background: '#f8fafc', borderRadius: '8px', overflow: 'hidden', padding: '10px'
+            }}>
+              <img
+                src={getCleanImageUrl(previewModalImage)}
+                alt="Material preview enlarged"
+                style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '6px' }}
+                onError={(e) => { e.target.alt = 'Image failed to load'; }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setPreviewModalImage(null)}
+                style={{ fontWeight: '700', padding: '8px 16px' }}
+              >
+                Close Preview
+              </button>
+            </div>
           </div>
         </div>
       )}
