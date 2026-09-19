@@ -637,7 +637,10 @@ export default function App() {
         'print-techpack-mode',
         'print-single-issue-slip-mode',
         'print-issue-logs-mode',
-        'print-po-mode'
+        'print-po-mode',
+        'print-barcodes-only',
+        'print-approval-request-mode',
+        'print-issue-preview-mode'
       );
     };
     window.addEventListener('afterprint', handleAfterPrint);

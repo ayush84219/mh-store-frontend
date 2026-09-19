@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, RefreshCw, CheckCircle2, FileSpreadsheet } from 'lucide-react';
-import { getBackendUrl } from '../utils/api';
+import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search } from 'lucide-react';
 
 export default function SettingsView({
   vendors,
@@ -33,51 +32,7 @@ export default function SettingsView({
   const [materialsJoined, setMaterialsJoined] = useState('Fabrics & Trims');
   const [vendorError, setVendorError] = useState('');
 
-  // Google Sheets Sync States
-  const [googleSheetUrl, setGoogleSheetUrl] = useState('');
-  const [syncLoading, setSyncLoading] = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
-  const [syncError, setSyncError] = useState('');
 
-  // Load active Google Sheet URL on mount
-  React.useEffect(() => {
-    fetch(`${getBackendUrl()}/api/sheet-config`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.url) {
-          setGoogleSheetUrl(data.url);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleSaveAndSyncSheet = async (overrideUrl = null) => {
-    setSyncLoading(true);
-    setSyncResult(null);
-    setSyncError('');
-    const targetUrl = overrideUrl || googleSheetUrl;
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/sheet-config`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl })
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to sync Google Sheets');
-      }
-      setSyncResult(data.syncResult || data);
-      if (data.url) setGoogleSheetUrl(data.url);
-    } catch (err) {
-      setSyncError(err.message || 'Error syncing Google Sheets');
-    } finally {
-      setSyncLoading(false);
-    }
-  };
-
-  const handleSyncGoogleSheets = async () => {
-    handleSaveAndSyncSheet(googleSheetUrl);
-  };
 
   // Raw Materials Catalog Management States
   const [editingMaterial, setEditingMaterial] = useState(null);
@@ -293,92 +248,7 @@ export default function SettingsView({
             </form>
           </div>
 
-          {/* Google Sheets Data Sync Panel */}
-          <div className="panel" style={{ marginBottom: 0, border: '1.5px solid var(--accent-color)', backgroundColor: 'var(--bg-primary)' }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3 className="panel-title" style={{ color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <FileSpreadsheet size={18} className="text-accent" />
-                Google Sheets Manager (1-Click Switcher)
-              </h3>
-            </div>
 
-            <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: '1.4' }}>
-              Paste any Google Spreadsheet URL or Sheet ID below to switch data sources instantly. Clicking <strong>Save & Sync Sheet Now</strong> will clear old cached data and download all lots and styles directly into your MySQL database.
-            </p>
-
-            {/* Google Sheet URL / ID Input */}
-            <div className="form-group" style={{ marginBottom: '12px' }}>
-              <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>Active Google Sheet URL or Sheet ID</span>
-                <button
-                  type="button"
-                  onClick={() => setGoogleSheetUrl('https://docs.google.com/spreadsheets/d/13ArpFOD7idmpv7QIRJQkD-tfswtkH6rNnEANtv2M7Ek/export?format=csv&gid=0')}
-                  style={{ background: 'none', border: 'none', color: 'var(--accent-color)', fontSize: '11px', fontWeight: '600', cursor: 'pointer', padding: 0 }}
-                >
-                  Reset to Default Sheet
-                </button>
-              </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="https://docs.google.com/spreadsheets/d/your-sheet-id/... or paste Sheet ID"
-                  value={googleSheetUrl}
-                  onChange={(e) => setGoogleSheetUrl(e.target.value)}
-                  style={{ height: '38px', fontSize: '12.5px', fontFamily: 'monospace' }}
-                />
-              </div>
-            </div>
-
-            {syncError && (
-              <div className="auth-alert error" style={{ padding: '8px 12px', marginBottom: '12px', display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px' }}>
-                <ShieldAlert size={15} style={{ flexShrink: 0 }} />
-                <span>{syncError}</span>
-              </div>
-            )}
-
-            {syncResult && (
-              <div style={{
-                padding: '10px 12px',
-                marginBottom: '12px',
-                borderRadius: 'var(--border-radius-sm)',
-                backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                border: '1px solid #10b981',
-                color: '#047857',
-                fontSize: '12px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}>
-                <CheckCircle2 size={16} style={{ color: '#10b981', flexShrink: 0 }} />
-                <div>
-                  <strong>Sync Succeeded:</strong> Inserted {syncResult.inserted || 0} new lots, updated {syncResult.updated || 0} records (Processed {syncResult.totalProcessed || syncResult.total || 0} rows).
-                </div>
-              </div>
-            )}
-
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={() => handleSaveAndSyncSheet(googleSheetUrl)}
-              disabled={syncLoading || !googleSheetUrl.trim()}
-              style={{
-                width: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                height: '40px',
-                fontSize: '13.5px',
-                fontWeight: '700',
-                borderRadius: '8px',
-                boxShadow: 'var(--shadow-sm)'
-              }}
-            >
-              <RefreshCw size={16} className={syncLoading ? 'animate-spin' : ''} />
-              <span>{syncLoading ? 'Switching & Syncing Google Sheet...' : 'Save & Sync Google Sheet Now (1-Click)'}</span>
-            </button>
-          </div>
 
           {/* Database maintenance */}
           <div className="panel" style={{ border: '1px solid var(--danger)', backgroundColor: 'var(--danger-light)', marginBottom: 0 }}>

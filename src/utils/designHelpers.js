@@ -1,31 +1,44 @@
 import { getBackendUrl } from './api';
 
 export const getCleanImageUrl = (url) => {
-  if (!url) return '';
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('data:image')) return trimmed; // Base64 image
+  if (trimmed.includes('/api/image-proxy?url=')) return trimmed; // Already proxied
+
   let fileId = '';
-  const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const idParamMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  const fileDMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  const driveDMatch = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
 
   if (fileDMatch && fileDMatch[1]) {
     fileId = fileDMatch[1];
+  } else if (driveDMatch && driveDMatch[1]) {
+    fileId = driveDMatch[1];
   } else if (idParamMatch && idParamMatch[1]) {
     fileId = idParamMatch[1];
   }
 
   if (fileId) {
-    return `${getBackendUrl()}/api/image-proxy?url=${encodeURIComponent(url)}`;
+    return `${getBackendUrl()}/api/image-proxy?url=${encodeURIComponent(trimmed)}`;
   }
-  return url;
+  return trimmed;
 };
 
 export const getGoogleDrivePreviewUrl = (url) => {
-  if (!url) return '';
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
   let fileId = '';
-  const fileDMatch = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const idParamMatch = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  const fileDMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  const driveDMatch = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  const idParamMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
 
   if (fileDMatch && fileDMatch[1]) {
     fileId = fileDMatch[1];
+  } else if (driveDMatch && driveDMatch[1]) {
+    fileId = driveDMatch[1];
   } else if (idParamMatch && idParamMatch[1]) {
     fileId = idParamMatch[1];
   }
@@ -33,7 +46,7 @@ export const getGoogleDrivePreviewUrl = (url) => {
   if (fileId) {
     return `https://drive.google.com/file/d/${fileId}/preview`;
   }
-  return url;
+  return trimmed;
 };
 
 export const formatDesignTime = (createdAtStr) => {
@@ -62,6 +75,8 @@ export const GARMENT_CATEGORIES = [
   "WINDCHEATER",
   "JACKET",
   "TRACK SUIT",
+  "TRACK SUIT UPPER",
+  "TRACK SUIT LOWER",
   "SHIRT",
   "SWEATSHIRT",
   "T-SHIRT",

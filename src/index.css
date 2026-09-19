@@ -1412,15 +1412,48 @@ body.dark-theme .notification-toast {
   }
 
   /* Scoped rules for Raw Materials Inventory Printing */
-  body.print-materials-mode .animate-fade>div:first-of-type,
-  /* title bar */
-  body.print-materials-mode .panel:not(.materials-panel) {
+  body.print-materials-mode .sidebar,
+  body.print-materials-mode .top-header,
+  body.print-materials-mode .mobile-sidebar-close,
+  body.print-materials-mode .sidebar-overlay,
+  body.print-materials-mode .modal-overlay,
+  body.print-materials-mode .local-notification-toast,
+  body.print-materials-mode .notification-toast,
+  body.print-materials-mode .theme-toggle,
+  body.print-materials-mode .screen-only-element,
+  body.print-materials-mode .page-container > header,
+  body.print-materials-mode .animate-fade > *:not(.materials-inventory-print-layout),
+  body.print-materials-mode .print-hide {
     display: none !important;
   }
 
-  body.print-materials-mode .materials-panel {
+  body.print-materials-mode {
+    background-color: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  body.print-materials-mode .page-container,
+  body.print-materials-mode .main-content,
+  body.print-materials-mode .app-container,
+  body.print-materials-mode .animate-fade {
     display: block !important;
     width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body.print-materials-mode .materials-inventory-print-layout {
+    display: block !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    border: 2px solid #000000 !important;
+    border-radius: 6px !important;
+    padding: 16px 20px !important;
+    margin: 0 auto !important;
   }
 
   /* Scoped rules for Tech Spec Sheet BOM Printing */
@@ -1747,7 +1780,8 @@ body.dark-theme .custom-dropdown-menu {
 }
 
 .single-issue-print-slip,
-.approval-request-print-layout {
+.approval-request-print-layout,
+.materials-inventory-print-layout {
   display: none;
 }
 
@@ -1889,7 +1923,7 @@ body.dark-theme .custom-dropdown-menu {
    ========================================================================== */
 
 /* 🖥️ Desktop (1440px+) */
-@media (min-width: 1440px) {
+@media screen and (min-width: 1440px) {
   .app-container:not(.sidebar-collapsed) {
     grid-template-columns: 260px 1fr !important;
   }
@@ -1912,7 +1946,7 @@ body.dark-theme .custom-dropdown-menu {
 }
 
 /* 💻 Laptop (1024px–1439px) */
-@media (min-width: 1024px) and (max-width: 1439px) {
+@media screen and (min-width: 1024px) and (max-width: 1439px) {
   .app-container:not(.sidebar-collapsed) {
     grid-template-columns: 240px 1fr !important;
   }
@@ -1935,7 +1969,7 @@ body.dark-theme .custom-dropdown-menu {
 }
 
 /* 📱 Tablet (768px–1023px) */
-@media (min-width: 768px) and (max-width: 1023px) {
+@media screen and (min-width: 768px) and (max-width: 1023px) {
   .app-container:not(.sidebar-collapsed) {
     grid-template-columns: 220px 1fr !important;
   }
@@ -1966,7 +2000,7 @@ body.dark-theme .custom-dropdown-menu {
 }
 
 /* 📱 Mobile (320px–767px) */
-@media (min-width: 320px) and (max-width: 767px) {
+@media screen and (min-width: 320px) and (max-width: 767px) {
   .desktop-only {
     display: none !important;
   }
@@ -2088,25 +2122,25 @@ body.dark-theme .custom-dropdown-menu {
   margin-top: 16px;
 }
 
-@media (min-width: 1440px) {
+@media screen and (min-width: 1440px) {
   .warehouse-grid-layout {
     grid-template-columns: repeat(8, 1fr);
   }
 }
 
-@media (min-width: 1024px) and (max-width: 1439px) {
+@media screen and (min-width: 1024px) and (max-width: 1439px) {
   .warehouse-grid-layout {
     grid-template-columns: repeat(6, 1fr);
   }
 }
 
-@media (min-width: 768px) and (max-width: 1023px) {
+@media screen and (min-width: 768px) and (max-width: 1023px) {
   .warehouse-grid-layout {
     grid-template-columns: repeat(4, 1fr);
   }
 }
 
-@media (max-width: 767px) {
+@media screen and (max-width: 767px) {
   .warehouse-grid-layout {
     grid-template-columns: repeat(2, 1fr);
   }

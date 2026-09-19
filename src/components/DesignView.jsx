@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import { useState, useEffect } from 'react';
-import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors } from 'lucide-react';
+import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink } from 'lucide-react';
 
 import { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES } from '../utils/designHelpers';
 export { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES };
@@ -210,6 +210,7 @@ export default function DesignView({
   const [filterStatus, setFilterStatus] = useState('all');
   const [imageError, setImageError] = useState(false);
   const [isImageLoading, setIsImageLoading] = useState(true);
+  const [formImageError, setFormImageError] = useState(false);
 
   // Auto-handle prefilled lot number (from Undesigned Lots / OnlyCutting)
   useEffect(() => {
@@ -390,6 +391,7 @@ export default function DesignView({
     setShowAddInline(false);
     setNewInlineName('');
     setImageUrl('');
+    setFormImageError(false);
     setLastFetchedLotNo('');
     // Reset values to defaults
     setCategory('T-SHIRT R/N');
@@ -412,6 +414,7 @@ export default function DesignView({
     setShowAddInline(false);
     setNewInlineName('');
     setImageUrl('');
+    setFormImageError(false);
     setLastFetchedLotNo('');
     // Reset values to defaults
     setCategory('T-SHIRT R/N');
@@ -445,6 +448,7 @@ export default function DesignView({
     setSeason(design.season);
     setBomItems(design.bom || []);
     setImageUrl(design.imageUrl || '');
+    setFormImageError(false);
     setIsCreating(true);
   };
 
@@ -530,8 +534,8 @@ export default function DesignView({
       if (data.fabric) setFabricType(data.fabric);
       if (data.quantity) setQuantity(Number(data.quantity) || 100);
 
-      const cleanedUrl = getCleanImageUrl(data.imageUrl || '');
-      setImageUrl(cleanedUrl);
+      setImageUrl(data.imageUrl || '');
+      setFormImageError(false);
 
       // Standardize/Match Garment Category
       if (data.garmentType) {
@@ -541,6 +545,8 @@ export default function DesignView({
         );
         if (matchedCategory) {
           setCategory(matchedCategory);
+        } else if (data.garmentType.trim()) {
+          setCategory(data.garmentType.trim());
         }
       }
 
@@ -856,18 +862,69 @@ export default function DesignView({
               border: '1.5px solid var(--border-color)',
               overflow: 'hidden',
               backgroundColor: '#f8fafc',
+              padding: '14px 18px',
               display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              height: '200px',
-              padding: '10px'
+              flexDirection: 'column',
+              gap: '10px'
             }}>
-              <img
-                src={getCleanImageUrl(imageUrl)}
-                alt="Garment Design Preview"
-                style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <ImageIcon size={14} className="text-accent" />
+                  Garment Visual Preview
+                </span>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {imageUrl.startsWith('http') && (
+                    <a
+                      href={imageUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn btn-secondary btn-sm"
+                      style={{ fontSize: '11px', padding: '3px 8px', height: 'auto', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    >
+                      <ExternalLink size={11} />
+                      <span>Original Link</span>
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setImageUrl(''); setFormImageError(false); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '11px', cursor: 'pointer', padding: '2px 6px' }}
+                    title="Remove Visual"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div style={{
+                width: '100%',
+                height: '190px',
+                borderRadius: 'var(--border-radius-sm)',
+                backgroundColor: '#ffffff',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                overflow: 'hidden',
+                position: 'relative'
+              }}>
+                {!formImageError ? (
+                  <img
+                    src={getCleanImageUrl(imageUrl)}
+                    alt="Garment Design Preview"
+                    style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'contain' }}
+                    onError={() => setFormImageError(true)}
+                  />
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', color: 'var(--text-muted)' }}>
+                    <ImageOff size={24} />
+                    <span style={{ fontSize: '12px', fontWeight: '500' }}>Could not render inline preview</span>
+                    <a href={imageUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                      Click to open image in new tab ↗
+                    </a>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
