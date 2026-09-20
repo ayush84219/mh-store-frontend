@@ -636,6 +636,7 @@ export default function App() {
         'print-materials-mode',
         'print-techpack-mode',
         'print-single-issue-slip-mode',
+        'print-lot-audit-mode',
         'print-issue-logs-mode',
         'print-po-mode',
         'print-barcodes-only',
@@ -1909,7 +1910,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav style={{ flexGrow: 1 }}>
+        <nav className="sidebar-nav">
           <ul className="sidebar-menu">
             {/* Dashboard */}
             {hasTabAccess('dashboard', currentUser?.role) && (

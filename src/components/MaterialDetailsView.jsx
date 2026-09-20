@@ -1506,16 +1506,16 @@ export default function MaterialDetailsView({
           <table className="custom-table">
             <thead>
               <tr style={{ borderBottom: '1.5px solid var(--border-color)' }}>
-                <th style={{ width: '130px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item ID</th>
-                <th style={{ width: '65px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Photo</th>
-                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Material Details</th>
-                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</th>
-                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Color / Shade</th>
-                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Storage Rack</th>
-                <th style={{ fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>PO & Bill Ref</th>
-                <th style={{ textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Stock Quantity</th>
-                <th style={{ textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status</th>
-                <th className="print-hide" style={{ textAlign: 'right', width: '90px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Actions</th>
+                <th style={{ width: '130px', minWidth: '110px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item ID</th>
+                <th style={{ width: '65px', minWidth: '55px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Photo</th>
+                <th style={{ minWidth: '160px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Material Details</th>
+                <th style={{ minWidth: '100px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</th>
+                <th style={{ minWidth: '100px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Color / Shade</th>
+                <th style={{ minWidth: '160px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Storage Rack</th>
+                <th style={{ minWidth: '130px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>PO & Bill Ref</th>
+                <th style={{ minWidth: '115px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Stock Quantity</th>
+                <th style={{ minWidth: '100px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Status</th>
+                <th className="print-hide" style={{ textAlign: 'right', width: '90px', minWidth: '90px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -1620,33 +1620,54 @@ export default function MaterialDetailsView({
                         >
                           {m.color || 'Default'}
                         </td>
-                        <td 
-                          style={{
-                            maxWidth: '170px',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            fontSize: '12px'
-                          }} 
-                          title={m.location || 'Main Store'}
-                        >
-                          <span style={{
-                            padding: '3px 8px', borderRadius: '6px', fontSize: '11.5px', fontWeight: '600',
-                            backgroundColor: 'rgba(99, 102, 241, 0.08)', color: 'var(--accent-color)', border: '1px solid rgba(99, 102, 241, 0.2)',
-                            display: 'inline-flex', alignItems: 'center', gap: '3px'
-                          }}>
-                            📍 {m.location || 'Main Store'}
-                          </span>
+                        <td style={{ minWidth: '160px', fontSize: '12px' }}>
+                          {(() => {
+                            const raw = (m.location || 'Main Store').trim().replace(/^[\s,]+|[\s,]+$/g, '');
+                            const parts = raw.split(',').map(s => s.trim().replace(/^[\s,]+|[\s,]+$/g, '')).filter(Boolean);
+                            const locList = parts.length > 0 ? parts : ['Main Store'];
+
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                                {locList.map((loc, lIdx) => (
+                                  <span
+                                    key={lIdx}
+                                    style={{
+                                      padding: '3px 9px',
+                                      borderRadius: '6px',
+                                      fontSize: '11.5px',
+                                      fontWeight: '600',
+                                      backgroundColor: 'rgba(99, 102, 241, 0.08)',
+                                      color: 'var(--accent-color)',
+                                      border: '1px solid rgba(99, 102, 241, 0.2)',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                    title={loc}
+                                  >
+                                    📍 {loc}
+                                  </span>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11.5px' }}>
+                        <td style={{ minWidth: '130px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11.5px' }}>
                             {m.poNumber && m.poNumber !== 'N/A' ? (
-                              <span style={{ fontWeight: '700', color: 'var(--text-main)' }}>PO: {m.poNumber}</span>
+                              <div style={{ fontWeight: '700', color: 'var(--text-main)', display: 'inline-flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '800' }}>PO:</span>
+                                <span style={{ fontFamily: 'monospace', fontSize: '12px', letterSpacing: '0.01em' }}>{m.poNumber}</span>
+                              </div>
                             ) : (
-                              <span style={{ color: 'var(--text-muted)' }}>Direct / No PO</span>
+                              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Direct / No PO</span>
                             )}
                             {m.invoiceNo && m.invoiceNo !== 'N/A' && (
-                              <span style={{ color: 'var(--text-muted)', fontSize: '10.5px' }}>Inv: {m.invoiceNo}</span>
+                              <div style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '800' }}>Inv:</span>
+                                <span style={{ fontFamily: 'monospace', fontSize: '11px' }}>{m.invoiceNo}</span>
+                              </div>
                             )}
                           </div>
                         </td>
@@ -2816,13 +2837,13 @@ export default function MaterialDetailsView({
                       {m.color || 'Default'}
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 6px', fontWeight: '600' }}>
-                      📍 {m.location || 'Main Store'}
+                      📍 {(m.location || 'Main Store').trim().replace(/^[\s,]+|[\s,]+$/g, '')}
                     </td>
-                    <td style={{ border: '1px solid #000000', padding: '5px 6px', fontSize: '9.5px' }}>
+                    <td style={{ border: '1px solid #000000', padding: '5px 6px', fontSize: '9.5px', whiteSpace: 'nowrap' }}>
                       {m.poNumber && m.poNumber !== 'N/A' ? (
                         <div><strong>PO:</strong> {m.poNumber}</div>
                       ) : (
-                        <div>Direct / No PO</div>
+                        <div style={{ color: '#666' }}>Direct / No PO</div>
                       )}
                       {m.invoiceNo && m.invoiceNo !== 'N/A' && (
                         <div style={{ color: '#555555' }}>Inv: {m.invoiceNo}</div>

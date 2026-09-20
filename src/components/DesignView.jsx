@@ -154,39 +154,91 @@ const DEFAULT_ACCESSORY_BOM = [
   { name: 'Sticker / Label', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Thread', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Pocket', status: 'No', detail: '', description: '', materialId: '' },
-  { name: 'Drawstring / Nara', status: 'No', description: '', detail: '', materialId: '' },
+  { name: 'Drawstring / Nara', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Hook, buckle, velcro', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Interlining / fusing', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Bone', status: 'No', detail: '', description: '', materialId: '' },
   { name: 'Full Baju', status: 'No', detail: '', description: '', materialId: '' }
 ];
 
-const ALWAYS_REQUIRED_ACCESSORIES = ['Label', 'Tag', 'Dori'];
+const isSheetValueYes = (val) => {
+  if (val === undefined || val === null) return false;
+  const s = String(val).trim().toUpperCase();
+  if (!s || ['NO', 'N', 'NONE', 'N/A', 'NA', 'FALSE', '-', '0'].includes(s)) {
+    return false;
+  }
+  return true;
+};
 
-const createDefaultBomItems = (accList = [], matList = [], currentBrand = '') => {
-  const mergedNames = [...new Set([...ALWAYS_REQUIRED_ACCESSORIES, ...(accList || [])])];
-  const bStr = (currentBrand || '').trim();
-  return mergedNames.map(name => {
-    const isAlwaysReq = ALWAYS_REQUIRED_ACCESSORIES.some(req => req.toLowerCase() === name.toLowerCase());
-    let defaultDesc = isAlwaysReq ? `${name} required` : '';
-    const lower = name.toLowerCase();
-    if (lower === 'label' || lower === 'sticker / label') {
-      defaultDesc = bStr ? `${bStr} Label` : 'Brand label required';
-    } else if (lower === 'tag') {
-      defaultDesc = bStr ? `${bStr} Tag` : 'Hang tag required';
-    } else if (lower.includes('dori')) {
-      defaultDesc = bStr ? `${bStr} Dori` : 'Dori required';
-    }
-    const item = {
-      name,
-      status: isAlwaysReq ? 'Yes' : 'No',
-      detail: isAlwaysReq ? '1' : '',
-      description: defaultDesc,
-      materialId: ''
-    };
-    item.materialId = findMatchingMaterialId(item, matList || []);
-    return item;
-  });
+const extractInteger = (str) => {
+  if (!str) return '1';
+  const match = String(str).match(/\d+/);
+  return match ? match[0] : '1';
+};
+
+const getSheetDescription = (val, defaultFallback = '') => {
+  if (!val) return defaultFallback;
+  const s = String(val).trim();
+  const upper = s.toUpperCase();
+  if (['YES', 'Y', 'TRUE', '1'].includes(upper)) {
+    return defaultFallback;
+  }
+  return s;
+};
+
+const getAccessorySheetValue = (accName, lotData) => {
+  if (!lotData) return '';
+  const norm = (accName || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (norm.includes('zip')) return lotData.zip;
+  if (norm.includes('button')) return lotData.button;
+  if (norm.includes('collar')) return lotData.collar;
+  if (norm.includes('tapelace') || norm.includes('tape') || norm.includes('lace')) return lotData.tapeLace;
+  if (norm.includes('bone') || norm.includes('piping')) return lotData.bone;
+  if (norm.includes('fullbaju') || norm.includes('baju') || norm.includes('sleeve')) return lotData.fullBaju;
+  if (norm.includes('elastic')) {
+    if (lotData.bottomType && lotData.bottomType.toLowerCase().includes('elastic')) return lotData.bottomType;
+    return lotData.elastic || '';
+  }
+  if (norm.includes('rib')) {
+    if (lotData.bottomType && lotData.bottomType.toLowerCase().includes('rib')) return lotData.bottomType;
+    return lotData.rib || '';
+  }
+  if (norm.includes('sticker') || norm.includes('label')) {
+    return lotData.sticker || lotData.label;
+  }
+  if (norm.includes('tag')) return lotData.tag;
+  if (norm.includes('dori') || norm.includes('drawstring') || norm.includes('nara')) {
+    return lotData.dori || lotData.drawstring;
+  }
+  if (norm.includes('pocket')) return lotData.pocket;
+  if (norm.includes('thread')) return lotData.thread;
+  if (norm.includes('hook') || norm.includes('buckle') || norm.includes('velcro')) return lotData.hook;
+  if (norm.includes('interlining') || norm.includes('fusing')) return lotData.fusing;
+
+  if (lotData[accName] !== undefined && lotData[accName] !== null) return lotData[accName];
+  if (lotData.rawRow) {
+    const rawKeys = Object.keys(lotData.rawRow);
+    const matchedKey = rawKeys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === norm);
+    if (matchedKey) return lotData.rawRow[matchedKey];
+  }
+  return '';
+};
+
+const createDefaultBomItems = (accList = [], matList = []) => {
+  const baseList = (accList && accList.length > 0) ? accList : [
+    'Zip', 'Button', 'Elastic', 'Tape / Lace', 'Rib', 'Collar',
+    'Sticker / Label', 'Thread', 'Pocket', 'Drawstring / Nara',
+    'Hook, buckle, velcro', 'Interlining / fusing', 'Bone', 'Full Baju'
+  ];
+  const uniqueNames = [...new Set(baseList)];
+  return uniqueNames.map(name => ({
+    name,
+    status: 'No',
+    detail: '',
+    description: '',
+    materialId: ''
+  }));
 };
 
 export default function DesignView({
@@ -302,26 +354,26 @@ export default function DesignView({
 
   const filteredDesigns = cleanSearchQuery
     ? statusFiltered.filter(design => {
-        const id = String(design.id || '').toLowerCase();
-        const lotNo2 = String(design.lotNo2 || '').toLowerCase();
-        const brand = String(design.brand || '').toLowerCase();
-        const style = String(design.style || '').toLowerCase();
-        const category = String(design.category || '').toLowerCase();
-        const fabric = String(design.fabricType || '').toLowerCase();
-        const designer = String(design.designer || '').toLowerCase();
-        const repeatAgainst = String(design.repeat_against || '').toLowerCase();
+      const id = String(design.id || '').toLowerCase();
+      const lotNo2 = String(design.lotNo2 || '').toLowerCase();
+      const brand = String(design.brand || '').toLowerCase();
+      const style = String(design.style || '').toLowerCase();
+      const category = String(design.category || '').toLowerCase();
+      const fabric = String(design.fabricType || '').toLowerCase();
+      const designer = String(design.designer || '').toLowerCase();
+      const repeatAgainst = String(design.repeat_against || '').toLowerCase();
 
-        return (
-          id.includes(cleanSearchQuery) ||
-          (lotNo2 !== 'n/a' && lotNo2.includes(cleanSearchQuery)) ||
-          brand.includes(cleanSearchQuery) ||
-          style.includes(cleanSearchQuery) ||
-          category.includes(cleanSearchQuery) ||
-          fabric.includes(cleanSearchQuery) ||
-          designer.includes(cleanSearchQuery) ||
-          repeatAgainst.includes(cleanSearchQuery)
-        );
-      })
+      return (
+        id.includes(cleanSearchQuery) ||
+        (lotNo2 !== 'n/a' && lotNo2.includes(cleanSearchQuery)) ||
+        brand.includes(cleanSearchQuery) ||
+        style.includes(cleanSearchQuery) ||
+        category.includes(cleanSearchQuery) ||
+        fabric.includes(cleanSearchQuery) ||
+        designer.includes(cleanSearchQuery) ||
+        repeatAgainst.includes(cleanSearchQuery)
+      );
+    })
     : statusFiltered.slice(0, 10);
 
   // Auto-calculate next Lot No for preview in form
@@ -346,22 +398,6 @@ export default function DesignView({
 
   const handleBrandChange = (newBrand) => {
     setBrand(newBrand);
-    const bStr = newBrand.trim();
-    setBomItems(prevBom =>
-      prevBom.map(item => {
-        const lower = item.name.toLowerCase();
-        if (lower === 'label' || lower === 'sticker / label') {
-          return { ...item, description: bStr ? `${bStr} Label` : 'Brand label required' };
-        }
-        if (lower === 'tag') {
-          return { ...item, description: bStr ? `${bStr} Tag` : 'Hang tag required' };
-        }
-        if (lower.includes('dori')) {
-          return { ...item, description: bStr ? `${bStr} Dori` : 'Dori required' };
-        }
-        return item;
-      })
-    );
   };
   const [style, setStyle] = useState('');
   const [section, setSection] = useState('Men');
@@ -462,7 +498,9 @@ export default function DesignView({
       return;
     }
     setAccessoryError('');
-    setBomItems([...bomItems, { name, status: 'Yes', detail: '', description: '', materialId: '' }]);
+    const newItem = { name, status: 'Yes', detail: '1', description: `${name} required`, materialId: '' };
+    newItem.materialId = findMatchingMaterialId(newItem, materials);
+    setBomItems([...bomItems, newItem]);
     setNewInlineName('');
     setShowAddInline(false);
   };
@@ -481,14 +519,24 @@ export default function DesignView({
 
   const handleBomChange = (index, field, value) => {
     const newItems = [...bomItems];
-    if (field === 'detail') {
+    if (field === 'status') {
+      newItems[index].status = value;
+      if (value === 'No') {
+        newItems[index].detail = '';
+        newItems[index].description = '';
+        newItems[index].materialId = '';
+      } else if (value === 'Yes') {
+        if (!newItems[index].detail) newItems[index].detail = '1';
+        if (!newItems[index].description) newItems[index].description = `${newItems[index].name} required`;
+        newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
+      }
+    } else if (field === 'detail') {
       newItems[index][field] = value.replace(/\D/g, '');
+      newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
     } else {
       newItems[index][field] = value;
+      newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
     }
-
-    // Automatically match and assign materialId when description/detail is edited
-    newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
 
     setBomItems(newItems);
   };
@@ -604,45 +652,45 @@ export default function DesignView({
         }
       }
 
-      // Auto-populate predefined accessories list from fetched data
-      const isZip = data.zip && data.zip.trim().toUpperCase() === 'YES';
-      const isTapeLace = data.tapeLace && data.tapeLace.trim().toUpperCase() === 'YES';
-      const isCollar = data.collar && data.collar.trim().toUpperCase() === 'YES';
-      const isSticker = data.sticker && data.sticker.trim().toUpperCase() === 'YES';
-      const isBone = data.bone && data.bone.trim().toUpperCase() === 'YES';
-      const isFullBaju = data.fullBaju && data.fullBaju.trim().toUpperCase() === 'YES';
-      const isElastic = data.bottomType && data.bottomType.toLowerCase().includes('elastic');
-      const isRib = data.bottomType && data.bottomType.toLowerCase().includes('rib');
+      // Auto-populate checklist accessories strictly from fetched Google Sheet data
+      const baseChecklist = (accessoriesList && accessoriesList.length > 0) ? accessoriesList : [
+        'Zip', 'Button', 'Elastic', 'Tape / Lace', 'Rib', 'Collar',
+        'Sticker / Label', 'Thread', 'Pocket', 'Drawstring / Nara',
+        'Hook, buckle, velcro', 'Interlining / fusing', 'Bone', 'Full Baju'
+      ];
+      const uniqueNames = [...new Set(baseChecklist)];
 
-      const extractInteger = (str) => {
-        if (!str) return '';
-        const match = String(str).match(/\d+/);
-        return match ? match[0] : '1';
-      };
+      const updatedBom = uniqueNames.map(name => {
+        const sheetVal = getAccessorySheetValue(name, data);
+        const isYes = isSheetValueYes(sheetVal);
+        const norm = name.toLowerCase();
 
-      const fetchedBrand = (data.brand || '').trim();
-      const updatedBom = [
-        { name: 'Label', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Label` : 'Brand label required', materialId: '' },
-        { name: 'Tag', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Tag` : 'Hang tag required', materialId: '' },
-        { name: 'Dori', status: 'Yes', detail: '1', description: fetchedBrand ? `${fetchedBrand} Dori` : 'Dori required', materialId: '' },
-        { name: 'Zip', status: isZip ? 'Yes' : 'No', detail: isZip ? '1' : '', description: isZip ? 'Zip required' : '', materialId: '' },
-        { name: 'Button', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Elastic', status: isElastic ? 'Yes' : 'No', detail: isElastic ? extractInteger(data.bottomType) : '', description: isElastic ? data.bottomType : '', materialId: '' },
-        { name: 'Tape / Lace', status: isTapeLace ? 'Yes' : 'No', detail: isTapeLace ? '1' : '', description: isTapeLace ? 'Tape/Lace required' : '', materialId: '' },
-        { name: 'Rib', status: isRib ? 'Yes' : 'No', detail: isRib ? extractInteger(data.bottomType) : '', description: isRib ? data.bottomType : '', materialId: '' },
-        { name: 'Collar', status: isCollar ? 'Yes' : 'No', detail: isCollar ? '1' : '', description: isCollar ? 'Collar required' : '', materialId: '' },
-        { name: 'Sticker / Label', status: isSticker ? 'Yes' : 'No', detail: isSticker ? '1' : '', description: isSticker ? 'Sticker required' : '', materialId: '' },
-        { name: 'Thread', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Pocket', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Drawstring / Nara', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Hook, buckle, velcro', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Interlining / fusing', status: 'No', detail: '', description: '', materialId: '' },
-        { name: 'Bone', status: isBone ? 'Yes' : 'No', detail: isBone ? '1' : '', description: isBone ? 'Bone required' : '', materialId: '' },
-        { name: 'Full Baju', status: isFullBaju ? 'Yes' : 'No', detail: isFullBaju ? '1' : '', description: isFullBaju ? 'Full Baju required' : '', materialId: '' }
-      ].map(item => ({
-        ...item,
-        materialId: findMatchingMaterialId(item, materials)
-      }));
+        let detail = '';
+        let description = '';
+
+        if (isYes) {
+          if (norm.includes('elastic') || norm.includes('rib')) {
+            detail = extractInteger(sheetVal);
+          } else {
+            detail = '1';
+          }
+          description = getSheetDescription(sheetVal, `${name} required`);
+        }
+
+        const item = {
+          name,
+          status: isYes ? 'Yes' : 'No',
+          detail,
+          description,
+          materialId: ''
+        };
+
+        if (isYes) {
+          item.materialId = findMatchingMaterialId(item, materials);
+        }
+        return item;
+      });
+
       setBomItems(updatedBom);
 
       // Set overridden Lot No to the fetched lot number

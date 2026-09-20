@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
-import React, { useState, useEffect, useRef } from 'react';
-import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 
@@ -300,6 +300,9 @@ export default function MaterialIssueView({
   const [personName, setPersonName] = useState(currentUser?.name || '');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [printLog, setPrintLog] = useState(null);
+  const [auditTab, setAuditTab] = useState('by_lot'); // 'by_lot' or 'all_logs'
+  const [selectedLotAuditDetail, setSelectedLotAuditDetail] = useState(null);
+  const [printLotAudit, setPrintLotAudit] = useState(null);
   // Print Preview (issue confirmation) modal
   const [previewIssue, setPreviewIssue] = useState(null); // { design, pieces, items, isReissue, personName }
   // Print prompt shown AFTER confirming issue
@@ -857,6 +860,98 @@ export default function MaterialIssueView({
     }, 100);
   };
 
+  // Group issue logs by Lot Number for complete audit and pieces verification
+  const lotAuditSummary = useMemo(() => {
+    const map = {};
+
+    issueLogs.forEach(log => {
+      const lotKey = String(log.lotId || 'N/A');
+      if (!map[lotKey]) {
+        const design = designs.find(d => String(d.id) === lotKey);
+        map[lotKey] = {
+          lotId: lotKey,
+          design,
+          category: log.category || design?.category || 'N/A',
+          brand: design?.brand || '—',
+          initialPieces: 0,
+          reissuePieces: 0,
+          totalPieces: 0,
+          initialLogs: [],
+          reissueLogs: [],
+          returnLogs: [],
+          allLogs: [],
+          materialsSummary: {} // { [key]: { bomItemName, materialName, unit, initialQty, reissueQty, returnedQty, totalIssuedQty } }
+        };
+      }
+
+      const entry = map[lotKey];
+      entry.allLogs.push(log);
+      const vol = Number(log.volume) || 0;
+
+      if (log.isReturn) {
+        entry.returnLogs.push(log);
+      } else if (log.isReissue) {
+        entry.reissuePieces += vol;
+        entry.reissueLogs.push(log);
+      } else {
+        entry.initialPieces += vol;
+        entry.initialLogs.push(log);
+      }
+
+      entry.totalPieces = entry.initialPieces + entry.reissuePieces;
+
+      if (log.materials && Array.isArray(log.materials)) {
+        log.materials.forEach(m => {
+          const key = m.bomItemName ? `${m.bomItemName}___${m.name}` : m.name;
+          if (!entry.materialsSummary[key]) {
+            entry.materialsSummary[key] = {
+              bomItemName: m.bomItemName || 'General',
+              materialName: m.name,
+              unit: m.unit || 'pcs',
+              initialQty: 0,
+              reissueQty: 0,
+              returnedQty: 0,
+              totalIssuedQty: 0
+            };
+          }
+          const mQty = parseFloat(m.qty) || 0;
+          if (log.isReturn) {
+            entry.materialsSummary[key].returnedQty += mQty;
+          } else if (log.isReissue) {
+            entry.materialsSummary[key].reissueQty += mQty;
+          } else {
+            entry.materialsSummary[key].initialQty += mQty;
+          }
+          entry.materialsSummary[key].totalIssuedQty =
+            (entry.materialsSummary[key].initialQty + entry.materialsSummary[key].reissueQty) - entry.materialsSummary[key].returnedQty;
+        });
+      }
+    });
+
+    return Object.values(map);
+  }, [issueLogs, designs]);
+
+  // Selected Lot Audit summary for form display
+  const selectedLotAudit = useMemo(() => {
+    if (!selectedDesignId) return null;
+    return lotAuditSummary.find(l => String(l.lotId) === String(selectedDesignId)) || null;
+  }, [selectedDesignId, lotAuditSummary]);
+
+  // Filtered lot audit summary for report view
+  const filteredLotAudits = useMemo(() => {
+    const q = logSearchQuery.toLowerCase().trim();
+    if (!q) return lotAuditSummary;
+    return lotAuditSummary.filter(l => {
+      const idMatch = String(l.lotId).toLowerCase().includes(q);
+      const catMatch = String(l.category).toLowerCase().includes(q);
+      const brandMatch = String(l.brand).toLowerCase().includes(q);
+      const matMatch = Object.values(l.materialsSummary).some(m =>
+        m.materialName.toLowerCase().includes(q) || m.bomItemName.toLowerCase().includes(q)
+      );
+      return idMatch || catMatch || brandMatch || matMatch;
+    });
+  }, [lotAuditSummary, logSearchQuery]);
+
   const filteredLogs = issueLogs.filter(log => {
     const q = logSearchQuery.toLowerCase();
     const idMatch = String(log.id).toLowerCase().includes(q);
@@ -880,6 +975,16 @@ export default function MaterialIssueView({
       window.print();
       document.body.classList.remove('print-single-issue-slip-mode');
       setPrintLog(null);
+    }, 100);
+  };
+
+  const handlePrintLotAudit = (lotAudit) => {
+    setPrintLotAudit(lotAudit);
+    document.body.classList.add('print-lot-audit-mode');
+    setTimeout(() => {
+      window.print();
+      document.body.classList.remove('print-lot-audit-mode');
+      setPrintLotAudit(null);
     }, 100);
   };
 
@@ -1200,6 +1305,62 @@ export default function MaterialIssueView({
               </div>
             </div>
 
+            {/* Live Lot Audit & Pieces Verification Snapshot */}
+            {selectedDesignId && selectedLotAudit && (
+              <div style={{
+                marginBottom: '20px',
+                padding: '12px 14px',
+                backgroundColor: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 'var(--border-radius-sm)',
+                boxShadow: 'var(--shadow-xs)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>
+                    <BarChart3 size={15} style={{ color: 'var(--accent-color)' }} />
+                    <span>Audit Breakdown for Lot {selectedDesignId}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => setSelectedLotAuditDetail(selectedLotAudit)}
+                    style={{ fontSize: '11px', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <Eye size={12} />
+                    <span>View Audit</span>
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Initial Issue</div>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>
+                      {selectedLotAudit.initialPieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '500' }}>pcs</span>
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Re-issued</div>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: selectedLotAudit.reissuePieces > 0 ? 'var(--warning)' : 'var(--text-muted)' }}>
+                      {selectedLotAudit.reissuePieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '500' }}>pcs</span>
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '10px', color: 'var(--accent-color)', textTransform: 'uppercase', fontWeight: '700' }}>Total Issued</div>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--accent-color)' }}>
+                      {selectedLotAudit.totalPieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '600' }}>pcs</span>
+                    </div>
+                  </div>
+                </div>
+
+                {issueMode === 'reissue' && pieces > 0 && (
+                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '600', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <TrendingUp size={13} />
+                    <span>Adding {pieces.toLocaleString()} pcs in this re-issue will bring total issued to {(selectedLotAudit.totalPieces + Number(pieces)).toLocaleString()} pcs.</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Warning alerts placed cleanly below inputs */}
             {isSelectedDesignAlreadyIssued && (
               <div style={{
@@ -1506,195 +1667,471 @@ export default function MaterialIssueView({
 
       {showLogs && (
         <div className="panel issue-logs-panel animate-scale" style={{ marginTop: '24px' }}>
+          {/* Header & Tabs */}
           <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <h3 className="panel-title">
-              <ClipboardList size={18} className="text-accent" />
-              Issued Materials Logs (Audit Trail)
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <h3 className="panel-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ClipboardList size={20} className="text-accent" />
+                <span>Material Issue &amp; Re-issue Audit Reports</span>
+              </h3>
+
+              {/* View mode toggle tabs */}
+              <div style={{
+                display: 'inline-flex',
+                backgroundColor: 'var(--bg-secondary)',
+                padding: '3px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color)',
+                marginLeft: '8px'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setAuditTab('by_lot')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: auditTab === 'by_lot' ? 'var(--accent-color)' : 'transparent',
+                    color: auditTab === 'by_lot' ? '#ffffff' : 'var(--text-main)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <BarChart3 size={13} />
+                  <span>By-Lot Audit Report</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    backgroundColor: auditTab === 'by_lot' ? 'rgba(255,255,255,0.25)' : 'var(--bg-primary)',
+                    color: auditTab === 'by_lot' ? '#ffffff' : 'var(--text-muted)'
+                  }}>
+                    {lotAuditSummary.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAuditTab('all_logs')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: auditTab === 'all_logs' ? 'var(--accent-color)' : 'transparent',
+                    color: auditTab === 'all_logs' ? '#ffffff' : 'var(--text-main)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <History size={13} />
+                  <span>All Transaction Slips</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    backgroundColor: auditTab === 'all_logs' ? 'rgba(255,255,255,0.25)' : 'var(--bg-primary)',
+                    color: auditTab === 'all_logs' ? '#ffffff' : 'var(--text-muted)'
+                  }}>
+                    {issueLogs.length}
+                  </span>
+                </button>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
               <div style={{ position: 'relative', width: '220px' }}>
                 <input
                   type="text"
                   className="form-input"
                   style={{ height: '32px', fontSize: '13px', paddingLeft: '12px' }}
-                  placeholder="🔍 Search logs..."
+                  placeholder={auditTab === 'by_lot' ? "🔍 Search lot or brand..." : "🔍 Search logs..."}
                   value={logSearchQuery}
                   onChange={(e) => setLogSearchQuery(e.target.value)}
                 />
               </div>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={handlePrintAllLogs}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }}
-                title="Print Overall Filtered Transaction Logs"
-                disabled={filteredLogs.length === 0}
-              >
-                <Printer size={14} />
-                <span>Print Logs</span>
-              </button>
+              {auditTab === 'all_logs' && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handlePrintAllLogs}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '32px', padding: '0 12px' }}
+                  title="Print Overall Filtered Transaction Logs"
+                  disabled={filteredLogs.length === 0}
+                >
+                  <Printer size={14} />
+                  <span>Print Logs</span>
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="custom-table-container">
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th>Log ID</th>
-                  <th>Lot Number</th>
-                  <th>Garment Category</th>
-                  <th>Volume (Pieces)</th>
-                  <th>Person Name</th>
-                  <th>Date Issued</th>
-                  <th>Issued Materials Details</th>
-                  <th className="print-hide" style={{ textAlign: 'center' }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
-                      {issueLogs.length === 0
-                        ? 'No material issues logged for this manufacturing cycle.'
-                        : 'No matching transaction logs found.'}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td style={{ fontWeight: 'bold' }}>
-                        {log.id}
-                        {log.isReissue && (
-                          <span className="status-badge rejected" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase' }}>
-                            Re-issue
-                          </span>
-                        )}
-                        {log.isReturn && (
-                          <span className="status-badge verified" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase', backgroundColor: 'var(--success-light)', color: 'var(--success)' }}>
-                            Return
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        {log.isReturn ? (
-                          <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
-                            {log.lotId && log.lotId !== 'N/A' ? `Lot ${log.lotId}` : 'No Lot'}
-                          </span>
-                        ) : (
-                          <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>Lot {log.lotId}</span>
-                        )}
-                      </td>
-                      <td>{log.category}</td>
-                      <td>
-                        {log.isReturn ? (
-                          <span style={{ color: 'var(--text-muted)' }}>—</span>
-                        ) : (
-                          <strong>{log.volume.toLocaleString()} units</strong>
-                        )}
-                      </td>
-                      <td><strong>{log.personName || 'System'}</strong></td>
-                      <td>{log.date}</td>
-                      <td style={{ fontSize: '12px' }}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                          {log.materials.map((m, mIdx) => (
-                            <span key={mIdx} style={{ backgroundColor: 'var(--bg-primary)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
-                              {m.bomItemName ? (
-                                <>
-                                  <strong>{m.bomItemName}</strong> ({m.name}): <strong>{m.qty} {m.unit}</strong>
-                                </>
-                              ) : (
-                                <>
-                                  {m.name}: <strong>{m.qty} {m.unit}</strong>
-                                </>
+          {/* TAB 1: By-Lot Audit Report */}
+          {auditTab === 'by_lot' && (
+            <div>
+              {/* Aggregate KPI Strip */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                padding: '14px 16px',
+                backgroundColor: 'var(--bg-primary)',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <div style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Lots Audited</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>
+                    {lotAuditSummary.length} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>Production Lots</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Initial Issues Volume</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.initialPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>pieces</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Re-issue Volume (Wastage)</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--warning)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.reissuePieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>pieces</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px', backgroundColor: 'rgba(99, 102, 241, 0.08)', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '700', textTransform: 'uppercase' }}>Total Pieces Audited</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--accent-color)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.totalPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>total pieces</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* By-Lot Audit Table */}
+              <div className="custom-table-container">
+                <table className="custom-table">
+                  <thead>
+                    <tr>
+                      <th>Lot Number</th>
+                      <th>Garment Category &amp; Brand</th>
+                      <th style={{ textAlign: 'center' }}>Initial Issue (Pcs)</th>
+                      <th style={{ textAlign: 'center' }}>Re-issue (Pcs)</th>
+                      <th style={{ textAlign: 'center', backgroundColor: 'rgba(99, 102, 241, 0.08)' }}>Total Pieces Issued</th>
+                      <th>Audit Trail History</th>
+                      <th className="print-hide" style={{ textAlign: 'center', minWidth: '160px' }}>Audit Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLotAudits.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '28px' }}>
+                          {lotAuditSummary.length === 0
+                            ? 'No material issue transactions recorded yet.'
+                            : 'No matching lot audit records found.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLotAudits.map((lotAudit) => {
+                        const hasReissues = lotAudit.reissuePieces > 0 || lotAudit.reissueLogs.length > 0;
+                        const hasReturns = lotAudit.returnLogs.length > 0;
+
+                        return (
+                          <tr key={lotAudit.lotId}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <strong style={{ fontSize: '13px' }}>
+                                  {lotAudit.lotId && lotAudit.lotId !== 'N/A' ? `Lot ${lotAudit.lotId}` : 'General / No Lot'}
+                                </strong>
+                              </div>
+                            </td>
+                            <td>
+                              <div>
+                                <strong style={{ color: 'var(--text-main)' }}>{lotAudit.category}</strong>
+                                {lotAudit.brand && lotAudit.brand !== '—' && (
+                                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '1px' }}>
+                                    Brand: {lotAudit.brand}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <div style={{ fontWeight: '700', fontSize: '13px' }}>
+                                {lotAudit.initialPieces > 0 ? `${lotAudit.initialPieces.toLocaleString()} pcs` : '—'}
+                              </div>
+                              {lotAudit.initialLogs.length > 0 && (
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                  {lotAudit.initialLogs[0].date.split(' ')[0]}
+                                </div>
                               )}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="print-hide" style={{ textAlign: 'center' }}>
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-xs"
-                          onClick={() => handlePrintSingleLog(log)}
-                          style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title="Print Single Issue Slip"
-                        >
-                          <Printer size={12} />
-                          <span>Print</span>
-                        </button>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {hasReissues ? (
+                                <div>
+                                  <span style={{
+                                    display: 'inline-block',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px',
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    backgroundColor: 'var(--warning-light)',
+                                    color: 'var(--warning)'
+                                  }}>
+                                    +{lotAudit.reissuePieces.toLocaleString()} pcs
+                                  </span>
+                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    {lotAudit.reissueLogs.length} re-issue{lotAudit.reissueLogs.length > 1 ? 's' : ''}
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)' }}>0 pcs</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: 'center', backgroundColor: 'rgba(99, 102, 241, 0.04)' }}>
+                              <div style={{
+                                display: 'inline-block',
+                                padding: '4px 12px',
+                                borderRadius: '6px',
+                                fontSize: '13px',
+                                fontWeight: '800',
+                                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                                color: 'var(--accent-color)',
+                                border: '1px solid rgba(99, 102, 241, 0.25)'
+                              }}>
+                                {lotAudit.totalPieces.toLocaleString()} pieces
+                              </div>
+                              {hasReissues && (
+                                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                                  ({lotAudit.initialPieces.toLocaleString()} initial + {lotAudit.reissuePieces.toLocaleString()} re-issue)
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>Total Slips: {lotAudit.allLogs.length}</span>
+                                  {hasReissues && (
+                                    <span className="status-badge rejected" style={{ fontSize: '9px', padding: '0 4px' }}>Re-issued</span>
+                                  )}
+                                  {hasReturns && (
+                                    <span className="status-badge verified" style={{ fontSize: '9px', padding: '0 4px' }}>Return</span>
+                                  )}
+                                </div>
+                                <div style={{ color: 'var(--text-muted)' }}>
+                                  Last Activity: {lotAudit.allLogs[0]?.date || '—'}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="print-hide" style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-xs"
+                                  onClick={() => setSelectedLotAuditDetail(lotAudit)}
+                                  style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title="View full audit trail, comparison and material breakdown"
+                                >
+                                  <Eye size={12} />
+                                  <span>Audit View</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary btn-xs"
+                                  onClick={() => handlePrintLotAudit(lotAudit)}
+                                  style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title="Print Formal Lot Audit Report"
+                                >
+                                  <Printer size={12} />
+                                  <span>Print Audit</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: All Transaction Logs (Chronological Flat Table) */}
+          {auditTab === 'all_logs' && (
+            <div className="custom-table-container">
+              <table className="custom-table">
+                <thead>
+                  <tr>
+                    <th>Log ID</th>
+                    <th>Lot Number</th>
+                    <th>Garment Category</th>
+                    <th>Volume (Pieces)</th>
+                    <th>Person Name</th>
+                    <th>Date Issued</th>
+                    <th>Issued Materials Details</th>
+                    <th className="print-hide" style={{ textAlign: 'center' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                        {issueLogs.length === 0
+                          ? 'No material issues logged for this manufacturing cycle.'
+                          : 'No matching transaction logs found.'}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : (
+                    filteredLogs.map((log) => (
+                      <tr key={log.id}>
+                        <td style={{ fontWeight: 'bold' }}>
+                          {log.id}
+                          {log.isReissue && (
+                            <span className="status-badge rejected" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase' }}>
+                              Re-issue
+                            </span>
+                          )}
+                          {log.isReturn && (
+                            <span className="status-badge verified" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase', backgroundColor: 'var(--success-light)', color: 'var(--success)' }}>
+                              Return
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {log.isReturn ? (
+                            <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+                              {log.lotId && log.lotId !== 'N/A' ? `Lot ${log.lotId}` : 'No Lot'}
+                            </span>
+                          ) : (
+                            <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>Lot {log.lotId}</span>
+                          )}
+                        </td>
+                        <td>{log.category}</td>
+                        <td>
+                          {log.isReturn ? (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          ) : (
+                            <strong>{log.volume.toLocaleString()} units</strong>
+                          )}
+                        </td>
+                        <td><strong>{log.personName || 'System'}</strong></td>
+                        <td>{log.date}</td>
+                        <td style={{ fontSize: '12px' }}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                            {log.materials.map((m, mIdx) => (
+                              <span key={mIdx} style={{ backgroundColor: 'var(--bg-primary)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                                {m.bomItemName ? (
+                                  <>
+                                    <strong>{m.bomItemName}</strong> ({m.name}): <strong>{m.qty} {m.unit}</strong>
+                                  </>
+                                ) : (
+                                  <>
+                                    {m.name}: <strong>{m.qty} {m.unit}</strong>
+                                  </>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="print-hide" style={{ textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            className="btn btn-secondary btn-xs"
+                            onClick={() => handlePrintSingleLog(log)}
+                            style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            title="Print Single Issue Slip"
+                          >
+                            <Printer size={12} />
+                            <span>Print</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {/* Printable Single Requisition Slip */}
       {printLog && (
         <div className="single-issue-print-slip">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', flex: 1, justifyContent: 'space-between' }}>
             <div>
-              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
-              <span style={{ fontSize: '12px', color: '#666' }}>Garment Product Data Management System</span>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', textTransform: 'uppercase', color: '#000' }}>
-                {printLog.isReturn ? 'Material Return Receipt' : 'Material Requisition & Issue Slip'}
-              </h3>
-              <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Slip ID: {printLog.id}</span>
-            </div>
-          </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '16px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
+                  <span style={{ fontSize: '11px', color: '#666' }}>Garment Product Data Management System</span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', color: '#000' }}>
+                    {printLog.isReturn ? 'Material Return Receipt' : 'Material Requisition & Issue Slip'}
+                  </h3>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Slip ID: {printLog.id}</span>
+                </div>
+              </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px 24px', padding: '12px', border: '1px solid #000', borderRadius: '6px', marginBottom: '20px', fontSize: '13px' }}>
-            <div><strong>Lot Number:</strong> {printLog.lotId && printLog.lotId !== 'N/A' ? `Lot ${printLog.lotId}` : 'N/A (General Inventory)'}</div>
-            <div><strong>Date {printLog.isReturn ? 'Returned' : 'Issued'}:</strong> {printLog.date}</div>
-            <div><strong>Garment Category:</strong> {printLog.category}</div>
-            <div><strong>{printLog.isReturn ? 'Reason / Notes' : 'Issuer (Person)'}:</strong> {printLog.personName || 'System'}</div>
-            {!printLog.isReturn && <div><strong>Batch Volume:</strong> {printLog.volume.toLocaleString()} units</div>}
-            <div><strong>Status:</strong> {printLog.isReturn ? 'Returned to Inventory' : printLog.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
-          </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 24px', padding: '12px', border: '1px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '12px' }}>
+                <div><strong>Lot Number:</strong> {printLog.lotId && printLog.lotId !== 'N/A' ? `Lot ${printLog.lotId}` : 'N/A (General Inventory)'}</div>
+                <div><strong>Date {printLog.isReturn ? 'Returned' : 'Issued'}:</strong> {printLog.date}</div>
+                <div><strong>Garment Category:</strong> {printLog.category}</div>
+                <div><strong>{printLog.isReturn ? 'Reason / Notes' : 'Issuer (Person)'}:</strong> {printLog.personName || 'System'}</div>
+                {!printLog.isReturn && <div><strong>Batch Volume:</strong> {printLog.volume.toLocaleString()} units</div>}
+                <div><strong>Status:</strong> {printLog.isReturn ? 'Returned to Inventory' : printLog.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
+              </div>
 
-          <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>
-            {printLog.isReturn ? 'Returned Materials Details' : 'Issued Materials Details'}
-          </h4>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '40px' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #000' }}>
-                <th style={{ textAlign: 'left', padding: '8px' }}>BOM Component</th>
-                <th style={{ textAlign: 'left', padding: '8px' }}>{printLog.isReturn ? 'Inventory Material Returned' : 'Inventory Material Issued'}</th>
-                <th style={{ textAlign: 'right', padding: '8px' }}>{printLog.isReturn ? 'Quantity Returned' : 'Quantity Issued'}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {printLog.materials.map((m, mIdx) => (
-                <tr key={mIdx} style={{ borderBottom: '1px solid #ddd' }}>
-                  <td style={{ padding: '8px', fontWeight: 'bold' }}>{m.bomItemName || 'N/A'}</td>
-                  <td style={{ padding: '8px' }}>{m.name}</td>
-                  <td style={{ padding: '8px', textAlign: 'right', fontWeight: 'bold' }}>{m.qty} {m.unit}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>
+                {printLog.isReturn ? 'Returned Materials Details' : 'Issued Materials Details'}
+              </h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '20px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f5f5f5' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px' }}>BOM Component</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px' }}>{printLog.isReturn ? 'Inventory Material Returned' : 'Inventory Material Issued'}</th>
+                    <th style={{ textAlign: 'right', padding: '6px 8px' }}>{printLog.isReturn ? 'Quantity Returned' : 'Quantity Issued'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printLog.materials.map((m, mIdx) => (
+                    <tr key={mIdx} style={{ borderBottom: '1px solid #ddd' }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{m.bomItemName || 'N/A'}</td>
+                      <td style={{ padding: '6px 8px' }}>{m.name}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold' }}>{m.qty} {m.unit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
-          {/* Signature Block */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '30px', marginTop: '50px', fontSize: '12px', borderTop: '1px solid #000', paddingTop: '20px' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ height: '40px' }}></div>
-              <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-              <div style={{ marginTop: '8px', fontWeight: 'bold' }}>{printLog.isReturn ? 'Returned By (Name & Sign)' : 'Issued By (Name & Sign)'}</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ height: '40px' }}></div>
-              <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-              <div style={{ marginTop: '8px', fontWeight: 'bold' }}>{printLog.isReturn ? 'Received By / Storekeeper' : 'Received By (Name & Sign)'}</div>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ height: '40px' }}></div>
-              <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-              <div style={{ marginTop: '8px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+            {/* Signature Block - pinned at bottom */}
+            <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '16px' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>{printLog.isReturn ? 'Returned By (Name & Sign)' : 'Issued By (Name & Sign)'}</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>{printLog.isReturn ? 'Received By / Storekeeper' : 'Received By (Name & Sign)'}</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1745,75 +2182,82 @@ export default function MaterialIssueView({
                 padding: '24px',
                 backgroundColor: '#fff',
                 color: '#000',
-                fontFamily: 'Arial, sans-serif'
+                fontFamily: 'Arial, sans-serif',
+                minHeight: '520px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
               }}>
-                {/* Slip header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '12px', marginBottom: '16px' }}>
-                  <div>
-                    <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
-                    <span style={{ fontSize: '12px', color: '#555' }}>Garment Product Data Management System</span>
+                <div>
+                  {/* Slip header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '12px', marginBottom: '16px' }}>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
+                      <span style={{ fontSize: '12px', color: '#555' }}>Garment Product Data Management System</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', color: '#000' }}>
+                        {previewIssue.isReissue ? 'Re-issue Requisition Slip' : 'Material Requisition & Issue Slip'}
+                      </h3>
+                      <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Date: {previewIssue.date}</span>
+                    </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 'bold', textTransform: 'uppercase', color: '#000' }}>
-                      {previewIssue.isReissue ? 'Re-issue Requisition Slip' : 'Material Requisition & Issue Slip'}
-                    </h3>
-                    <span style={{ fontSize: '12px', fontWeight: 'bold' }}>Date: {previewIssue.date}</span>
+
+                  {/* Info grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 24px', padding: '12px', border: '1px solid #ccc', borderRadius: '6px', marginBottom: '16px', fontSize: '13px' }}>
+                    <div><strong>Lot Number:</strong> Lot {previewIssue.design.id}</div>
+                    <div><strong>Date Issued:</strong> {previewIssue.date}</div>
+                    <div><strong>Garment Category:</strong> {previewIssue.design.category}</div>
+                    <div><strong>Brand:</strong> {previewIssue.design.brand || '—'}</div>
+                    <div><strong>Batch Volume:</strong> {previewIssue.pieces.toLocaleString()} units</div>
+                    <div><strong>Issuer (Person):</strong> {previewIssue.personName}</div>
+                    <div><strong>Status:</strong> {previewIssue.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
                   </div>
-                </div>
 
-                {/* Info grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 24px', padding: '12px', border: '1px solid #ccc', borderRadius: '6px', marginBottom: '16px', fontSize: '13px' }}>
-                  <div><strong>Lot Number:</strong> Lot {previewIssue.design.id}</div>
-                  <div><strong>Date Issued:</strong> {previewIssue.date}</div>
-                  <div><strong>Garment Category:</strong> {previewIssue.design.category}</div>
-                  <div><strong>Brand:</strong> {previewIssue.design.brand || '—'}</div>
-                  <div><strong>Batch Volume:</strong> {previewIssue.pieces.toLocaleString()} units</div>
-                  <div><strong>Issuer (Person):</strong> {previewIssue.personName}</div>
-                  <div><strong>Status:</strong> {previewIssue.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
-                </div>
-
-                {/* Materials table */}
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>Issued Materials</h4>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '24px' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f4f4f4' }}>
-                      <th style={{ textAlign: 'left', padding: '8px 6px' }}>#</th>
-                      <th style={{ textAlign: 'left', padding: '8px 6px' }}>BOM Component</th>
-                      <th style={{ textAlign: 'left', padding: '8px 6px' }}>Inventory Material</th>
-
-                      <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total Issued</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewIssue.items.map((item, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                        <td style={{ padding: '7px 6px', color: '#555' }}>{idx + 1}</td>
-                        <td style={{ padding: '7px 6px', fontWeight: 'bold' }}>{item.bomItemName}</td>
-                        <td style={{ padding: '7px 6px' }}>{item.materialName}</td>
-
-                        <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
+                  {/* Materials table */}
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>Issued Materials</h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '24px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f4f4f4' }}>
+                        <th style={{ textAlign: 'left', padding: '8px 6px' }}>#</th>
+                        <th style={{ textAlign: 'left', padding: '8px 6px' }}>BOM Component</th>
+                        <th style={{ textAlign: 'left', padding: '8px 6px' }}>Inventory Material</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total Issued</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {previewIssue.items.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+                          <td style={{ padding: '7px 6px', color: '#555' }}>{idx + 1}</td>
+                          <td style={{ padding: '7px 6px', fontWeight: 'bold' }}>{item.bomItemName}</td>
+                          <td style={{ padding: '7px 6px' }}>{item.materialName}</td>
+                          <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 {/* Signature block */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginTop: '30px', fontSize: '12px', borderTop: '1px solid #000', paddingTop: '16px' }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ height: '36px' }}></div>
-                    <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                    <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Issued By (Name & Sign)</div>
-                    <div style={{ marginTop: '4px', color: '#333' }}>{previewIssue.personName}</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ height: '36px' }}></div>
-                    <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                    <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Received By (Name & Sign)</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ height: '36px' }}></div>
-                    <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                    <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+                <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', fontSize: '12px', borderTop: '1px solid #000', paddingTop: '16px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Issued By (Name & Sign)</div>
+                      <div style={{ marginTop: '4px', color: '#333' }}>{previewIssue.personName}</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Received By (Name & Sign)</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1966,86 +2410,90 @@ export default function MaterialIssueView({
         <div className="issue-preview-print-layout">
           {['ORIGINAL COPY', 'DUPLICATE COPY'].map((copyLabel, copyIdx) => (
             <div key={copyIdx} className={copyIdx === 0 ? 'print-copy' : 'print-copy print-copy-second'}>
-              {/* Copy stamp */}
-              <div style={{
-                textAlign: 'right',
-                marginBottom: '6px',
-                fontWeight: 'bold',
-                fontSize: '12px',
-                letterSpacing: '2px',
-                textTransform: 'uppercase',
-                color: copyIdx === 0 ? '#000' : '#555',
-                borderBottom: copyIdx === 0 ? '2px solid #000' : '2px dashed #888',
-                paddingBottom: '4px'
-              }}>{copyLabel}</div>
-
-              {/* Slip header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', flex: 1, justifyContent: 'space-between' }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
-                  <span style={{ fontSize: '11px', color: '#555' }}>Garment Product Data Management System</span>
+                  {/* Copy stamp */}
+                  <div style={{
+                    textAlign: 'right',
+                    marginBottom: '8px',
+                    fontWeight: 'bold',
+                    fontSize: '12px',
+                    letterSpacing: '2px',
+                    textTransform: 'uppercase',
+                    color: copyIdx === 0 ? '#000' : '#555',
+                    borderBottom: copyIdx === 0 ? '2px solid #000' : '2px dashed #888',
+                    paddingBottom: '4px'
+                  }}>{copyLabel}</div>
+
+                  {/* Slip header */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
+                    <div>
+                      <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
+                      <span style={{ fontSize: '11px', color: '#555' }}>Garment Product Data Management System</span>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                        {showPrintPrompt.isReissue ? 'Re-issue Requisition Slip' : 'Material Requisition & Issue Slip'}
+                      </h3>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Date: {showPrintPrompt.date}</span>
+                    </div>
+                  </div>
+
+                  {/* Info grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px 20px', padding: '10px', border: '1px solid #000', borderRadius: '4px', marginBottom: '14px', fontSize: '11px' }}>
+                    <div><strong>Lot Number:</strong> Lot {showPrintPrompt.design.id}</div>
+                    <div><strong>Date Issued:</strong> {showPrintPrompt.date}</div>
+                    <div><strong>Garment Category:</strong> {showPrintPrompt.design.category}</div>
+                    <div><strong>Brand:</strong> {showPrintPrompt.design.brand || '—'}</div>
+                    <div><strong>Batch Volume:</strong> {showPrintPrompt.pieces.toLocaleString()} units</div>
+                    <div><strong>Issuer (Person):</strong> {showPrintPrompt.personName}</div>
+                    <div><strong>Issue Type:</strong> {showPrintPrompt.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
+                  </div>
+
+                  {/* Materials table */}
+                  <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Issued Materials</h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '18px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
+                        <th style={{ textAlign: 'left', padding: '6px 5px' }}>#</th>
+                        <th style={{ textAlign: 'left', padding: '6px 5px' }}>BOM Component</th>
+                        <th style={{ textAlign: 'left', padding: '6px 5px' }}>Inventory Material</th>
+                        <th style={{ textAlign: 'right', padding: '6px 5px' }}>Total Issued</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {showPrintPrompt.items.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #ccc' }}>
+                          <td style={{ padding: '5px' }}>{idx + 1}</td>
+                          <td style={{ padding: '5px', fontWeight: 'bold' }}>{item.bomItemName}</td>
+                          <td style={{ padding: '5px' }}>{item.materialName}</td>
+                          <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <h3 style={{ margin: 0, fontSize: '13px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    {showPrintPrompt.isReissue ? 'Re-issue Requisition Slip' : 'Material Requisition & Issue Slip'}
-                  </h3>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Date: {showPrintPrompt.date}</span>
-                </div>
-              </div>
 
-              {/* Info grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px 20px', padding: '10px', border: '1px solid #000', borderRadius: '4px', marginBottom: '14px', fontSize: '11px' }}>
-                <div><strong>Lot Number:</strong> Lot {showPrintPrompt.design.id}</div>
-                <div><strong>Date Issued:</strong> {showPrintPrompt.date}</div>
-                <div><strong>Garment Category:</strong> {showPrintPrompt.design.category}</div>
-                <div><strong>Brand:</strong> {showPrintPrompt.design.brand || '—'}</div>
-                <div><strong>Batch Volume:</strong> {showPrintPrompt.pieces.toLocaleString()} units</div>
-                <div><strong>Issuer (Person):</strong> {showPrintPrompt.personName}</div>
-                <div><strong>Issue Type:</strong> {showPrintPrompt.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
-              </div>
-
-              {/* Materials table */}
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Issued Materials</h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '18px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
-                    <th style={{ textAlign: 'left', padding: '6px 5px' }}>#</th>
-                    <th style={{ textAlign: 'left', padding: '6px 5px' }}>BOM Component</th>
-                    <th style={{ textAlign: 'left', padding: '6px 5px' }}>Inventory Material</th>
-
-                    <th style={{ textAlign: 'right', padding: '6px 5px' }}>Total Issued</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {showPrintPrompt.items.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #ccc' }}>
-                      <td style={{ padding: '5px' }}>{idx + 1}</td>
-                      <td style={{ padding: '5px', fontWeight: 'bold' }}>{item.bomItemName}</td>
-                      <td style={{ padding: '5px' }}>{item.materialName}</td>
-
-                      <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Signature block */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginTop: '24px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '12px' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '32px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Issued By (Name & Sign)</div>
-                  <div style={{ marginTop: '2px' }}>{showPrintPrompt.personName}</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '32px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Received By (Name & Sign)</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '32px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+                {/* Signature block - pinned to bottom */}
+                <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '16px' }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Issued By (Name & Sign)</div>
+                      <div style={{ marginTop: '2px' }}>{showPrintPrompt.personName}</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Received By (Name & Sign)</div>
+                    </div>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ height: '36px' }}></div>
+                      <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                      <div style={{ marginTop: '5px', fontWeight: 'bold' }}>Approved By (Supervisor)</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2382,6 +2830,379 @@ export default function MaterialIssueView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ============================================================
+           DETAILED LOT AUDIT MODAL — Breakdown of Issue & Re-issue
+          ============================================================ */}
+      {selectedLotAuditDetail && (
+        <div className="modal-overlay" style={{ zIndex: 250 }}>
+          <div className="modal-content animate-scale" style={{
+            maxWidth: '900px',
+            width: '95%',
+            maxHeight: '92vh',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            {/* Modal Header */}
+            <div className="modal-header" style={{ flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <BarChart3 size={22} style={{ color: 'var(--accent-color)' }} />
+                <div>
+                  <h3 className="modal-title" style={{ margin: 0 }}>
+                    Lot {selectedLotAuditDetail.lotId} — Material Issue &amp; Re-issue Audit Report
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Category: <strong>{selectedLotAuditDetail.category}</strong> {selectedLotAuditDetail.brand && `| Brand: ${selectedLotAuditDetail.brand}`} | Total Transactions: {selectedLotAuditDetail.allLogs.length}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setSelectedLotAuditDetail(null)}
+                style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <X size={14} />
+                <span>Close</span>
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', flex: 1, overflowY: 'auto' }}>
+              {/* 4 KPI Metric Summary Cards */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                marginBottom: '20px'
+              }}>
+                <div style={{ padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Initial Issue Pieces</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', marginTop: '4px' }}>
+                    {selectedLotAuditDetail.initialPieces.toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>pcs</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {selectedLotAuditDetail.initialLogs.length} initial transaction{selectedLotAuditDetail.initialLogs.length > 1 ? 's' : ''}
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Re-issued (Wastage)</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: selectedLotAuditDetail.reissuePieces > 0 ? 'var(--warning)' : 'var(--text-muted)', marginTop: '4px' }}>
+                    {selectedLotAuditDetail.reissuePieces > 0 ? `+${selectedLotAuditDetail.reissuePieces.toLocaleString()}` : '0'} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>pcs</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {selectedLotAuditDetail.reissueLogs.length} re-issue transaction{selectedLotAuditDetail.reissueLogs.length > 1 ? 's' : ''}
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px', backgroundColor: 'rgba(99, 102, 241, 0.1)', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '700', textTransform: 'uppercase' }}>Total Pieces Issued</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--accent-color)', marginTop: '4px' }}>
+                    {selectedLotAuditDetail.totalPieces.toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>pieces</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', marginTop: '2px', fontWeight: '500' }}>
+                    Verified total volume
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Components Dispatched</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', marginTop: '4px' }}>
+                    {Object.keys(selectedLotAuditDetail.materialsSummary).length} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>items</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {selectedLotAuditDetail.returnLogs.length > 0 ? `${selectedLotAuditDetail.returnLogs.length} returns logged` : 'Zero returns'}
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 1: Chronological Issue & Re-issue Timeline */}
+              <div style={{ marginBottom: '24px' }}>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <History size={15} className="text-accent" />
+                  <span>1. Issues &amp; Re-issues Transaction Timeline</span>
+                </h4>
+                <div className="custom-table-container">
+                  <table className="custom-table" style={{ fontSize: '12px' }}>
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>Slip ID</th>
+                        <th>Transaction Type</th>
+                        <th>Date &amp; Time</th>
+                        <th>Pieces Issued</th>
+                        <th>Issuer (Person)</th>
+                        <th>Dispatched Materials</th>
+                        <th style={{ textAlign: 'center' }}>Print</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedLotAuditDetail.allLogs.map((log, idx) => (
+                        <tr key={log.id}>
+                          <td>{idx + 1}</td>
+                          <td style={{ fontWeight: 'bold' }}>{log.id}</td>
+                          <td>
+                            {log.isReturn ? (
+                              <span className="status-badge verified" style={{ fontSize: '10px', padding: '1px 6px' }}>Return</span>
+                            ) : log.isReissue ? (
+                              <span className="status-badge rejected" style={{ fontSize: '10px', padding: '1px 6px' }}>Re-issue</span>
+                            ) : (
+                              <span className="status-badge po-generated" style={{ fontSize: '10px', padding: '1px 6px' }}>Initial Issue</span>
+                            )}
+                          </td>
+                          <td>{log.date}</td>
+                          <td>
+                            {log.isReturn ? (
+                              <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            ) : (
+                              <strong>{Number(log.volume).toLocaleString()} pcs</strong>
+                            )}
+                          </td>
+                          <td>{log.personName || 'System'}</td>
+                          <td>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                              {log.materials && log.materials.map((m, mIdx) => (
+                                <span key={mIdx} style={{ fontSize: '11px', padding: '1px 6px', backgroundColor: 'var(--bg-primary)', borderRadius: '3px', border: '1px solid var(--border-color)' }}>
+                                  {m.bomItemName ? `${m.bomItemName}: ` : ''}<strong>{m.qty} {m.unit}</strong>
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => handlePrintSingleLog(log)}
+                              style={{ padding: '3px 6px' }}
+                              title="Print this individual slip"
+                            >
+                              <Printer size={11} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* SECTION 2: Consolidated Material Consumption Breakdown */}
+              <div>
+                <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Layers size={15} className="text-accent" />
+                  <span>2. Consolidated Material Sourcing &amp; Net Dispatched Matrix</span>
+                </h4>
+                <div className="custom-table-container">
+                  <table className="custom-table" style={{ fontSize: '12px' }}>
+                    <thead>
+                      <tr>
+                        <th>BOM Component</th>
+                        <th>Inventory Material Name</th>
+                        <th style={{ textAlign: 'right' }}>Initial Issue Qty</th>
+                        <th style={{ textAlign: 'right' }}>Re-issue Qty</th>
+                        <th style={{ textAlign: 'right' }}>Returned Qty</th>
+                        <th style={{ textAlign: 'right', backgroundColor: 'rgba(99, 102, 241, 0.08)' }}>Total Net Issued</th>
+                        <th>Unit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.values(selectedLotAuditDetail.materialsSummary).map((mat, idx) => (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: '600' }}>{mat.bomItemName}</td>
+                          <td>{mat.materialName}</td>
+                          <td style={{ textAlign: 'right' }}>{mat.initialQty > 0 ? Number(mat.initialQty.toFixed(2)) : '0'}</td>
+                          <td style={{ textAlign: 'right', color: mat.reissueQty > 0 ? 'var(--warning)' : 'inherit', fontWeight: mat.reissueQty > 0 ? '700' : 'normal' }}>
+                            {mat.reissueQty > 0 ? `+${Number(mat.reissueQty.toFixed(2))}` : '0'}
+                          </td>
+                          <td style={{ textAlign: 'right', color: mat.returnedQty > 0 ? 'var(--success)' : 'inherit' }}>
+                            {mat.returnedQty > 0 ? `-${Number(mat.returnedQty.toFixed(2))}` : '0'}
+                          </td>
+                          <td style={{ textAlign: 'right', fontWeight: '800', color: 'var(--accent-color)', backgroundColor: 'rgba(99, 102, 241, 0.04)' }}>
+                            {Number(mat.totalIssuedQty.toFixed(2))}
+                          </td>
+                          <td>{mat.unit}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 20px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              flexShrink: 0,
+              backgroundColor: 'var(--bg-secondary)'
+            }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setSelectedLotAuditDetail(null)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => handlePrintLotAudit(selectedLotAuditDetail)}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Printer size={15} />
+                <span>Print Lot Audit Report</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================
+           PRINTABLE LOT AUDIT REPORT SLIP (Visible during print media)
+          ============================================================ */}
+      {printLotAudit && (
+        <div className="lot-audit-print-slip">
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', flex: 1, justifyContent: 'space-between' }}>
+            <div>
+              {/* Slip Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
+                  <span style={{ fontSize: '11px', color: '#555' }}>Garment Product Data Management System</span>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                    Lot Material Issue &amp; Re-issue Audit Report
+                  </h3>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                    Audit Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Lot & Pieces Audit Verification Summary Box */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '12px', border: '2px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '11px', backgroundColor: '#fcfcfc' }}>
+                <div>
+                  <div><strong>Lot Number:</strong> Lot {printLotAudit.lotId}</div>
+                  <div><strong>Garment Category:</strong> {printLotAudit.category}</div>
+                  <div><strong>Brand:</strong> {printLotAudit.brand || '—'}</div>
+                </div>
+                <div>
+                  <div><strong>Initial Issue Pieces:</strong> {printLotAudit.initialPieces.toLocaleString()} units</div>
+                  <div><strong>Re-issued Pieces (Wastage):</strong> {printLotAudit.reissuePieces.toLocaleString()} units</div>
+                  <div><strong>Total Issue Slips:</strong> {printLotAudit.allLogs.length} transactions</div>
+                </div>
+                <div style={{ borderLeft: '1px solid #000', paddingLeft: '12px' }}>
+                  <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#555' }}>Total Audited Pieces Issued</div>
+                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#000', marginTop: '2px' }}>
+                    {printLotAudit.totalPieces.toLocaleString()} units
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
+                    ({printLotAudit.initialPieces.toLocaleString()} initial + {printLotAudit.reissuePieces.toLocaleString()} re-issue)
+                  </div>
+                </div>
+              </div>
+
+              {/* SECTION 1: Detailed Issues & Re-issues Breakdown Table */}
+              <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
+                1. Chronological Issues &amp; Re-issues Transaction Log
+              </h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '16px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>#</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Slip ID</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Type</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Date &amp; Time</th>
+                    <th style={{ textAlign: 'right', padding: '5px' }}>Pieces</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Issuer (Person)</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Dispatched Materials Breakdown</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printLotAudit.allLogs.map((log, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+                      <td style={{ padding: '5px' }}>{idx + 1}</td>
+                      <td style={{ padding: '5px', fontWeight: 'bold' }}>{log.id}</td>
+                      <td style={{ padding: '5px' }}>
+                        {log.isReturn ? 'Return' : log.isReissue ? 'Re-issue' : 'Initial Issue'}
+                      </td>
+                      <td style={{ padding: '5px' }}>{log.date}</td>
+                      <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>
+                        {log.isReturn ? '—' : `${Number(log.volume).toLocaleString()} pcs`}
+                      </td>
+                      <td style={{ padding: '5px' }}>{log.personName || 'System'}</td>
+                      <td style={{ padding: '5px' }}>
+                        {log.materials && log.materials.map((m, mIdx) => (
+                          <span key={mIdx} style={{ marginRight: '6px' }}>
+                            {m.bomItemName ? `${m.bomItemName}: ` : ''}<strong>{m.qty} {m.unit}</strong>{mIdx < log.materials.length - 1 ? ',' : ''}
+                          </span>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* SECTION 2: Consolidated Material Consumption Breakdown */}
+              <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
+                2. Consolidated Material Sourcing &amp; Net Dispatched Matrix
+              </h4>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '20px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>BOM Component</th>
+                    <th style={{ textAlign: 'left', padding: '5px' }}>Inventory Material Name</th>
+                    <th style={{ textAlign: 'right', padding: '5px' }}>Initial Qty</th>
+                    <th style={{ textAlign: 'right', padding: '5px' }}>Re-issue Qty</th>
+                    <th style={{ textAlign: 'right', padding: '5px' }}>Returned Qty</th>
+                    <th style={{ textAlign: 'right', padding: '5px', fontWeight: 'bold' }}>Total Net Issued</th>
+                    <th style={{ textAlign: 'left', padding: '5px', paddingLeft: '8px' }}>Unit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.values(printLotAudit.materialsSummary).map((mat, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+                      <td style={{ padding: '5px', fontWeight: 'bold' }}>{mat.bomItemName}</td>
+                      <td style={{ padding: '5px' }}>{mat.materialName}</td>
+                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.initialQty > 0 ? Number(mat.initialQty.toFixed(2)) : '0'}</td>
+                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.reissueQty > 0 ? `+${Number(mat.reissueQty.toFixed(2))}` : '0'}</td>
+                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.returnedQty > 0 ? `-${Number(mat.returnedQty.toFixed(2))}` : '0'}</td>
+                      <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{Number(mat.totalIssuedQty.toFixed(2))}</td>
+                      <td style={{ padding: '5px', paddingLeft: '8px' }}>{mat.unit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Signature Block - pinned at bottom */}
+            <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '16px' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Issued By (Store In-charge)</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Verified By (Production Supervisor)</div>
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ height: '36px' }}></div>
+                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Audited &amp; Approved By (Admin)</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

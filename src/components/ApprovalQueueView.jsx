@@ -1861,121 +1861,123 @@ export default function ApprovalQueueView({
       {/* Hidden print layout — only visible during print media */}
       {printRequest && (
         <div className="approval-request-print-layout">
-          {/* Slip header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>MH ACCESSORIES & BOM</h2>
-              <span style={{ fontSize: '11px', color: '#555' }}>Premium Garment Production Management System</span>
+          <div>
+            {/* Slip header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>MH ACCESSORIES & BOM</h2>
+                <span style={{ fontSize: '11px', color: '#555' }}>Premium Garment Production Management System</span>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                  {printRequest.type === 'inward_approval' ? 'Material Inward Receipt Authorization' :
+                    printRequest.type === 'material_issue' ? 'Material Requisition & Issue Slip' :
+                      printRequest.type === 'design_verification' ? 'Design Verification Requisition' :
+                        'Material Deletion Authorization'}
+                </h3>
+                <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Request ID: #{printRequest.id}</span>
+              </div>
             </div>
-            <div style={{ textAlign: 'right' }}>
-              <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                {printRequest.type === 'inward_approval' ? 'Material Inward Receipt Authorization' :
-                  printRequest.type === 'material_issue' ? 'Material Requisition & Issue Slip' :
-                    printRequest.type === 'design_verification' ? 'Design Verification Requisition' :
-                      'Material Deletion Authorization'}
-              </h3>
-              <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Request ID: #{printRequest.id}</span>
+
+            {/* Info grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 20px', padding: '12px', border: '1px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '12px' }}>
+              <div><strong>Request Type:</strong> {printRequest.type === 'inward_approval' ? 'Inward Approval' : (printRequest.type === 'material_issue' ? 'Material Issue' : printRequest.type === 'design_verification' ? 'Design Verification' : 'Material Deletion')}</div>
+              <div><strong>Status:</strong> {printRequest.status.toUpperCase()}</div>
+              <div><strong>Lot Number:</strong> Lot {printRequest.lotId || 'N/A'}</div>
+              <div><strong>Submitted Date:</strong> {printRequest.date}</div>
+              <div><strong>Requested By:</strong> {printRequest.requesterName}</div>
+              {printRequest.resolvedDate && (
+                <div><strong>Approved/Resolved Date:</strong> {printRequest.resolvedDate}</div>
+              )}
+              {printRequest.materialName && (
+                <div><strong>Material Mapped:</strong> {printRequest.materialName} ({printRequest.materialId})</div>
+              )}
             </div>
-          </div>
 
-          {/* Info grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px 20px', padding: '12px', border: '1px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '12px' }}>
-            <div><strong>Request Type:</strong> {printRequest.type === 'inward_approval' ? 'Inward Approval' : (printRequest.type === 'material_issue' ? 'Material Issue' : printRequest.type === 'design_verification' ? 'Design Verification' : 'Material Deletion')}</div>
-            <div><strong>Status:</strong> {printRequest.status.toUpperCase()}</div>
-            <div><strong>Lot Number:</strong> Lot {printRequest.lotId || 'N/A'}</div>
-            <div><strong>Submitted Date:</strong> {printRequest.date}</div>
-            <div><strong>Requested By:</strong> {printRequest.requesterName}</div>
-            {printRequest.resolvedDate && (
-              <div><strong>Approved/Resolved Date:</strong> {printRequest.resolvedDate}</div>
-            )}
-            {printRequest.materialName && (
-              <div><strong>Material Mapped:</strong> {printRequest.materialName} ({printRequest.materialId})</div>
-            )}
-          </div>
+            {/* Reason Box */}
+            <div style={{ marginBottom: '16px', fontSize: '12px' }}>
+              <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Justification / Reason</h4>
+              <p style={{ margin: 0, fontStyle: 'italic', color: '#333' }}>
+                {printRequest.reason ? `"${printRequest.reason}"` : 'No justification details provided.'}
+              </p>
+              {printRequest.status === 'rejected' && printRequest.rejectionReason && (
+                <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '4px' }}>
+                  <strong style={{ color: '#dc2626' }}>Rejection Reason:</strong> <span style={{ color: '#dc2626' }}>{printRequest.rejectionReason}</span>
+                </div>
+              )}
+            </div>
 
-          {/* Reason Box */}
-          <div style={{ marginBottom: '16px', fontSize: '12px' }}>
-            <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Justification / Reason</h4>
-            <p style={{ margin: 0, fontStyle: 'italic', color: '#333' }}>
-              {printRequest.reason ? `"${printRequest.reason}"` : 'No justification details provided.'}
-            </p>
-            {printRequest.status === 'rejected' && printRequest.rejectionReason && (
-              <div style={{ marginTop: '8px', padding: '8px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '4px' }}>
-                <strong style={{ color: '#dc2626' }}>Rejection Reason:</strong> <span style={{ color: '#dc2626' }}>{printRequest.rejectionReason}</span>
+            {/* Items / Details Table */}
+            {printRequest.type === 'material_issue' && printRequest.items && printRequest.items.length > 0 && (
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Components to Issue</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f3f4f6' }}>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>#</th>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>BOM Component</th>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>Inventory Material Map</th>
+                      <th style={{ textAlign: 'right', padding: '6px' }}>Total Required</th>
+                      <th style={{ textAlign: 'left', padding: '6px', paddingLeft: '12px' }}>Unit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {printRequest.items.map((item, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <td style={{ padding: '6px' }}>{idx + 1}</td>
+                        <td style={{ padding: '6px', fontWeight: '600' }}>{item.bomItemName}</td>
+                        <td style={{ padding: '6px', color: '#4b5563' }}>{item.materialName}</td>
+                        <td style={{ padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired}</td>
+                        <td style={{ padding: '6px', paddingLeft: '12px', color: '#4b5563' }}>{item.unit}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {printRequest.type === 'design_verification' && (
+              <div style={{ marginBottom: '20px' }}>
+                <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Bill of Materials (BOM) Checklist</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f3f4f6' }}>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>#</th>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>Component Name</th>
+                      <th style={{ textAlign: 'center', padding: '6px' }}>Required Status</th>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>Qty/Piece</th>
+                      <th style={{ textAlign: 'left', padding: '6px' }}>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const design = designs.find(d => String(d.id) === String(printRequest.lotId));
+                      const bomList = design?.bom || [];
+                      if (bomList.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan="5" style={{ textAlign: 'center', padding: '12px', color: '#6b7280' }}>No BOM components configured.</td>
+                          </tr>
+                        );
+                      }
+                      return bomList.map((item, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                          <td style={{ padding: '6px' }}>{idx + 1}</td>
+                          <td style={{ padding: '6px', fontWeight: '600' }}>{item.name}</td>
+                          <td style={{ padding: '6px', textAlign: 'center' }}>{item.status || 'No'}</td>
+                          <td style={{ padding: '6px', fontWeight: 'bold' }}>{item.detail || '—'}</td>
+                          <td style={{ padding: '6px', color: '#4b5563' }}>{item.description || '—'}</td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
 
-          {/* Items / Details Table */}
-          {printRequest.type === 'material_issue' && printRequest.items && printRequest.items.length > 0 && (
-            <div style={{ marginBottom: '20px' }}>
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Components to Issue</h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f3f4f6' }}>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>#</th>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>BOM Component</th>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>Inventory Material Map</th>
-                    <th style={{ textAlign: 'right', padding: '6px' }}>Total Required</th>
-                    <th style={{ textAlign: 'left', padding: '6px', paddingLeft: '12px' }}>Unit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {printRequest.items.map((item, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                      <td style={{ padding: '6px' }}>{idx + 1}</td>
-                      <td style={{ padding: '6px', fontWeight: '600' }}>{item.bomItemName}</td>
-                      <td style={{ padding: '6px', color: '#4b5563' }}>{item.materialName}</td>
-                      <td style={{ padding: '6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired}</td>
-                      <td style={{ padding: '6px', paddingLeft: '12px', color: '#4b5563' }}>{item.unit}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {printRequest.type === 'design_verification' && (
-            <div style={{ marginBottom: '20px' }}>
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>Bill of Materials (BOM) Checklist</h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f3f4f6' }}>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>#</th>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>Component Name</th>
-                    <th style={{ textAlign: 'center', padding: '6px' }}>Required Status</th>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>Qty/Piece</th>
-                    <th style={{ textAlign: 'left', padding: '6px' }}>Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(() => {
-                    const design = designs.find(d => String(d.id) === String(printRequest.lotId));
-                    const bomList = design?.bom || [];
-                    if (bomList.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan="5" style={{ textAlign: 'center', padding: '12px', color: '#6b7280' }}>No BOM components configured.</td>
-                        </tr>
-                      );
-                    }
-                    return bomList.map((item, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                        <td style={{ padding: '6px' }}>{idx + 1}</td>
-                        <td style={{ padding: '6px', fontWeight: '600' }}>{item.name}</td>
-                        <td style={{ padding: '6px', textAlign: 'center' }}>{item.status || 'No'}</td>
-                        <td style={{ padding: '6px', fontWeight: 'bold' }}>{item.detail || '—'}</td>
-                        <td style={{ padding: '6px', color: '#4b5563' }}>{item.description || '—'}</td>
-                      </tr>
-                    ));
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Signatures */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '60px', fontSize: '12px' }}>
+          {/* Signatures - pinned at bottom */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '24px', fontSize: '12px' }}>
             <div style={{ width: '40%', borderTop: '1px solid #000', textAlign: 'center', paddingTop: '6px' }}>
               <strong>Requested By</strong>
               <div style={{ fontSize: '11px', color: '#555', marginTop: '2px' }}>{printRequest.requesterName}</div>

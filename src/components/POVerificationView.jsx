@@ -1374,54 +1374,66 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
       const isCompleted = !isPendingApp && (po.poStatus === 'Completed' || po.verificationStatus === 'Matched' || (po.totalOrdered > 0 && po.approvedReceived >= po.totalOrdered));
       const pendingQty = Math.max(0, po.totalOrdered - (po.approvedReceived || 0));
 
-      // Header Top Bar
-      doc.setFillColor(30, 41, 59); // slate-800
-      doc.rect(0, 0, 595.28, 55, 'F');
+      // ─── Outer Page Border ───
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1.2);
+      doc.rect(24, 24, 547.28, 794);
 
-      doc.setFontSize(14);
+      // ─── Header Top Bar (Black & White with Border) ───
+      doc.setFillColor(245, 245, 245);
+      doc.rect(24, 24, 547.28, 42, 'FD');
+
+      doc.setFontSize(13);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(255, 255, 255);
-      doc.text('G-PDMS | PURCHASE ORDER AUDIT & INWARD VERIFICATION', 36, 34);
+      doc.setTextColor(0, 0, 0);
+      doc.text('G-PDMS | PURCHASE ORDER AUDIT & INWARD VERIFICATION', 36, 50);
 
-      // Meta Box
+      // ─── Metadata Section in Bordered Box ───
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(36, 78, 523, 58);
+
       doc.setFontSize(9.5);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(30, 41, 59);
-      doc.text(`PO Reference: ${po.poNumber}`, 36, 80);
-      doc.text(`Vendor: ${po.vendor || 'N/A'}`, 36, 95);
-      doc.text(`Issued Date: ${po.date || 'N/A'}`, 36, 110);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`PO Reference: ${po.poNumber}`, 46, 96);
+      doc.text(`Vendor / Supplier: ${po.vendor || 'Direct Vendor'}`, 46, 111);
+      doc.text(`Issued Date: ${po.date || 'N/A'}`, 46, 126);
 
-      doc.text(`PO Type: ${po.type || 'General'}`, 340, 80);
-      doc.text(`Total Ordered: ${po.totalOrdered} pcs`, 340, 95);
-      doc.text(`Total Received: ${po.totalReceived} pcs`, 340, 110);
-      doc.text(`Pending Balance: ${pendingQty > 0 ? `${pendingQty} pcs` : '0 pcs (Fulfilled)'}`, 340, 125);
+      doc.text(`PO Type: ${po.type || 'General'}`, 330, 96);
+      doc.text(`Total Ordered: ${po.totalOrdered} pcs`, 330, 111);
+      doc.text(`Total Received: ${po.totalReceived} pcs`, 330, 126);
 
-      // Status Pill
-      let pillBg = [99, 102, 241];
-      let pillText = 'STATUS: PENDING INWARD';
+      // ─── Status Box (Black & White with Border) ───
+      let statusSummary = 'STATUS: PENDING INWARD';
       if (isPendingApp) {
-        pillBg = [217, 119, 6];
-        pillText = 'STATUS: PENDING APPROVAL (EXCESS HELD)';
+        statusSummary = `STATUS: PENDING APPROVAL (${po.pendingApprovalPieces || 0} PCS HELD)`;
       } else if (isCompleted) {
-        pillBg = [16, 185, 129];
-        pillText = 'STATUS: COMPLETED & VERIFIED';
+        statusSummary = 'STATUS: COMPLETED & VERIFIED (IN STOCK)';
       } else if (po.totalReceived > 0) {
-        pillBg = [245, 158, 11];
-        pillText = `STATUS: PARTIAL (${pendingQty} PCS SHORT)`;
+        statusSummary = `STATUS: PARTIAL (${pendingQty} PCS SHORT / PENDING)`;
       }
 
-      doc.setFillColor(pillBg[0], pillBg[1], pillBg[2]);
-      doc.roundedRect(36, 125, 240, 18, 3, 3, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8.5);
-      doc.text(pillText, 44, 137);
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1);
+      doc.rect(36, 142, 523, 20, 'FD');
 
-      let currentY = 160;
-
-      // Section 1: Ordered Items vs Received
-      doc.setFontSize(10.5);
+      doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(15, 23, 42);
+      doc.setTextColor(0, 0, 0);
+      doc.text(statusSummary, 46, 155);
+
+      const balanceText = `Pending Balance: ${pendingQty > 0 ? `${pendingQty} pcs` : '0 pcs (Fulfilled)'}`;
+      doc.setFont('helvetica', 'normal');
+      doc.text(balanceText, 380, 155);
+
+      let currentY = 178;
+
+      // ─── Section 1: Ordered Items vs Received ───
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
       doc.text('1. ORDERED ITEMS SPECIFICATIONS & COMPLIANCE', 36, currentY);
 
       const itemsHead = [['#', 'Item / Description', 'Dept', 'Ordered (pcs)', 'Received (pcs)', 'Status / Variance']];
@@ -1445,24 +1457,42 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
         body: itemsBody,
         startY: currentY + 6,
         theme: 'grid',
-        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
-        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: {
+          fillColor: [240, 240, 240],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          fontSize: 8.5,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8
+        },
+        bodyStyles: {
+          textColor: [0, 0, 0],
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8
+        },
+        styles: {
+          fontSize: 8,
+          cellPadding: 4,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8,
+          textColor: [0, 0, 0]
+        },
         columnStyles: {
           0: { cellWidth: 25, halign: 'center' },
           1: { cellWidth: 220 },
           2: { cellWidth: 65 },
           3: { cellWidth: 65, halign: 'center' },
           4: { cellWidth: 65, halign: 'center' },
-          5: { cellWidth: 80, halign: 'center' }
+          5: { cellWidth: 78, halign: 'center' }
         }
       });
 
-      currentY = doc.lastAutoTable.finalY + 20;
+      currentY = doc.lastAutoTable.finalY + 18;
 
-      // Section 2: Sequential Partial Inward Receipts (Bill No & Date)
-      doc.setFontSize(10.5);
+      // ─── Section 2: Sequential Partial Inward Receipts ───
+      doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(15, 23, 42);
+      doc.setTextColor(0, 0, 0);
       doc.text('2. SEQUENTIAL INWARD RECEIPTS RECORD & RECONCILIATION', 36, currentY);
 
       const inwardHead = [['Step #', 'Date Received', 'Bill / Invoice No', 'Material Name', 'PO Required Qty', 'Received Qty', 'Extra / Balance', 'PO Status']];
@@ -1484,8 +1514,26 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
         body: inwardBody,
         startY: currentY + 6,
         theme: 'grid',
-        headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8 },
-        styles: { fontSize: 7.5, cellPadding: 4 },
+        headStyles: {
+          fillColor: [240, 240, 240],
+          textColor: [0, 0, 0],
+          fontStyle: 'bold',
+          fontSize: 8,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8
+        },
+        bodyStyles: {
+          textColor: [0, 0, 0],
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8
+        },
+        styles: {
+          fontSize: 7.5,
+          cellPadding: 4,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.8,
+          textColor: [0, 0, 0]
+        },
         columnStyles: {
           0: { cellWidth: 35, halign: 'center' },
           1: { cellWidth: 75 },
@@ -1494,30 +1542,42 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
           4: { cellWidth: 60, halign: 'center' },
           5: { cellWidth: 55, halign: 'center' },
           6: { cellWidth: 70, halign: 'center' },
-          7: { cellWidth: 60, halign: 'center' }
+          7: { cellWidth: 58, halign: 'center' }
         }
       });
 
-      currentY = doc.lastAutoTable.finalY + 35;
-
-      // Signatures
-      if (currentY > 720) {
+      // ─── Signatures Block (Anchored at Page Bottom) ───
+      let lastTableY = doc.lastAutoTable.finalY;
+      if (lastTableY > 720) {
         doc.addPage();
-        currentY = 50;
+        // Add outer border on new page
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(1.2);
+        doc.rect(24, 24, 547.28, 794);
       }
 
-      doc.setDrawColor(0, 0, 0);
-      doc.setLineWidth(0.8);
-      doc.line(36, currentY + 25, 170, currentY + 25);
-      doc.line(210, currentY + 25, 350, currentY + 25);
-      doc.line(390, currentY + 25, 540, currentY + 25);
+      const sigLineY = 765;
+      const sigTextY = 778;
 
-      doc.setFontSize(8);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1);
+      doc.line(36, sigLineY, 175, sigLineY);
+      doc.line(215, sigLineY, 355, sigLineY);
+      doc.line(395, sigLineY, 545, sigLineY);
+
+      doc.setFontSize(8.5);
       doc.setFont('helvetica', 'bold');
-      doc.setTextColor(60, 60, 60);
-      doc.text('Store In-Charge Signature', 40, currentY + 37);
-      doc.text('Audited & Verified By', 225, currentY + 37);
-      doc.text('Authorized Signatory', 415, currentY + 37);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Store In-Charge Signature', 40, sigTextY);
+      doc.text('Audited & Verified By', 230, sigTextY);
+      doc.text('Authorized Signatory', 420, sigTextY);
+
+      // Footer timestamp inside frame
+      doc.setFontSize(7.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(90, 90, 90);
+      doc.text(`Generated on ${new Date().toLocaleString('en-IN')}`, 36, 804);
+      doc.text('Official Inward Verification Document', 418, 804);
 
       // Save PDF file directly to client
       doc.save(`PO_Verification_${po.poNumber || 'Report'}.pdf`);
@@ -2076,19 +2136,25 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
 
         {/* View switching */}
         {activeViewTab === 'report' ? (
-          <div className="table-responsive">
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="table-responsive" style={{
+            backgroundColor: 'var(--bg-primary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+            overflow: 'hidden'
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
               <thead>
-                <tr style={{ borderBottom: '2px solid var(--border-color)', textAlign: 'left' }}>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>PO Number</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Type</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Supplier / Vendor</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>Ordered</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>Received</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>Balance / Extra</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Inward Receipts (Bill & Date)</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'center' }}>PO Status</th>
-                  <th style={{ padding: '12px 8px', fontSize: '12px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', textAlign: 'right' }}>Actions</th>
+                <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1.5px solid var(--border-color)' }}>
+                  <th style={{ padding: '12px 12px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: '130px', whiteSpace: 'nowrap' }}>PO Number</th>
+                  <th style={{ padding: '12px 10px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: '110px', whiteSpace: 'nowrap' }}>Type</th>
+                  <th style={{ padding: '12px 12px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: '140px' }}>Supplier / Vendor</th>
+                  <th style={{ padding: '12px 10px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', minWidth: '95px', whiteSpace: 'nowrap' }}>Ordered</th>
+                  <th style={{ padding: '12px 10px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', minWidth: '120px', whiteSpace: 'nowrap' }}>Received</th>
+                  <th style={{ padding: '12px 10px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', minWidth: '120px', whiteSpace: 'nowrap' }}>Balance / Extra</th>
+                  <th style={{ padding: '12px 12px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: '240px' }}>Inward Receipts (Bill & Date)</th>
+                  <th style={{ padding: '12px 10px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', minWidth: '130px', whiteSpace: 'nowrap' }}>PO Status</th>
+                  <th style={{ padding: '12px 12px', fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'right', minWidth: '140px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2102,8 +2168,9 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                 ) : displayPOs.length === 0 ? (
                   <tr>
                     <td colSpan="9" style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
-                      <HelpCircle size={32} style={{ marginBottom: '8px', color: 'var(--text-muted)' }} />
-                      <div>No matching purchase orders or receipt verification records found.</div>
+                      <HelpCircle size={32} style={{ margin: '0 auto 8px auto', opacity: 0.4, color: 'var(--text-muted)' }} />
+                      <div style={{ fontWeight: '600', color: 'var(--text-main)' }}>No matching purchase orders found</div>
+                      <div style={{ fontSize: '12px', marginTop: '2px' }}>No records match the current filters or search term.</div>
                     </td>
                   </tr>
                 ) : (
@@ -2114,104 +2181,134 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                     const isPartial = !isCompleted && !isPendingApp && !hasRejected && (po.approvedReceived || 0) > 0;
                     const pendingQty = Math.max(0, po.totalOrdered - (po.approvedReceived || 0));
 
-                    let statusColor = '#6366f1';
-                    let statusBg = 'rgba(99, 102, 241, 0.12)';
+                    let statusColor = 'var(--accent-color)';
+                    let statusBg = 'var(--accent-light)';
+                    let statusBorder = 'rgba(99, 102, 241, 0.25)';
                     let statusLabel = 'Pending Inward';
 
                     if (isPendingApp) {
                       statusColor = '#b45309';
                       statusBg = '#fef3c7';
+                      statusBorder = '#fde68a';
                       statusLabel = 'Pending Approval';
                     } else if (hasRejected) {
-                      statusColor = '#ef4444';
+                      statusColor = '#dc2626';
                       statusBg = '#fee2e2';
+                      statusBorder = '#fecdd3';
                       statusLabel = 'Rejected';
                     } else if (isCompleted) {
-                      statusColor = '#10b981';
-                      statusBg = 'rgba(16, 185, 129, 0.12)';
+                      statusColor = '#059669';
+                      statusBg = '#ecfdf5';
+                      statusBorder = '#a7f3d0';
                       statusLabel = 'Accepted';
                     } else if (isPartial) {
-                      statusColor = '#f59e0b';
-                      statusBg = 'rgba(245, 158, 11, 0.12)';
+                      statusColor = '#d97706';
+                      statusBg = '#fffbeb';
+                      statusBorder = '#fde68a';
                       statusLabel = `Pending (Partial ${po.partialEntries?.length || 1})`;
                     }
 
                     return (
                       <tr
                         key={po.poNumber}
-                        style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background 0.2s' }}
+                        style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer', transition: 'background-color 0.15s ease' }}
                         className="hover-row"
                         onClick={() => setSelectedPO(po)}
                       >
-                        <td style={{ padding: '14px 8px', fontWeight: '800', color: 'var(--accent-color)' }}>
-                          <div>{po.poNumber}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 'normal' }}>{po.date}</div>
+                        {/* PO Number & Date */}
+                        <td style={{ padding: '12px 12px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontFamily: 'monospace', fontWeight: '800', fontSize: '13px', color: 'var(--accent-color)' }}>
+                            {po.poNumber}
+                          </div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', fontWeight: '500' }}>
+                            {po.date || 'N/A'}
+                          </div>
                         </td>
-                        <td style={{ padding: '14px 8px' }}>
+
+                        {/* Type Badge */}
+                        <td style={{ padding: '12px 10px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                           <span style={{
-                            padding: '3px 8px', borderRadius: '4px', fontSize: '10.5px', fontWeight: 'bold',
-                            backgroundColor: po.type === 'Zip' ? '#dbeafe' : (po.type === 'Doori' ? '#fef3c7' : (po.type === 'General' ? '#d1fae5' : '#fee2e2')),
-                            color: po.type === 'Zip' ? '#1e40af' : (po.type === 'Doori' ? '#92400e' : (po.type === 'General' ? '#065f46' : '#991b1b'))
+                            padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700',
+                            whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: '4px',
+                            backgroundColor: po.type === 'Zip' ? '#eff6ff' : (po.type === 'Doori' ? '#fffbeb' : (po.type === 'General' ? '#f0fdf4' : '#fff1f2')),
+                            color: po.type === 'Zip' ? '#1d4ed8' : (po.type === 'Doori' ? '#b45309' : (po.type === 'General' ? '#15803d' : '#e11d48')),
+                            border: `1px solid ${po.type === 'Zip' ? '#bfdbfe' : (po.type === 'Doori' ? '#fde68a' : (po.type === 'General' ? '#bbf7d0' : '#fecdd3'))}`
                           }}>
-                            {po.type}
+                            {po.type === 'Unregistered PO' ? '⚠️ Unregistered' : po.type}
                           </span>
                         </td>
-                        <td style={{ padding: '14px 8px', fontWeight: '500', color: 'var(--text-main)' }}>
-                          {po.vendor}
+
+                        {/* Vendor Name */}
+                        <td style={{ padding: '12px 12px', verticalAlign: 'middle', minWidth: '140px', maxWidth: '180px' }}>
+                          <div style={{ fontWeight: '600', fontSize: '12.5px', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={po.vendor}>
+                            {po.vendor && po.vendor !== 'N/A' && po.vendor.trim() ? po.vendor : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontWeight: 'normal' }}>Direct Vendor</span>}
+                          </div>
                         </td>
-                        <td style={{ padding: '14px 8px', textAlign: 'center', fontWeight: '700', color: 'var(--text-main)' }}>
-                          {po.totalOrdered} pcs
+
+                        {/* Ordered Qty */}
+                        <td style={{ padding: '12px 10px', verticalAlign: 'middle', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          {po.totalOrdered > 0 ? (
+                            <span style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-main)' }}>
+                              {po.totalOrdered.toLocaleString()} <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>pcs</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: '500' }}>—</span>
+                          )}
                         </td>
-                        <td style={{ padding: '14px 8px', textAlign: 'center', fontWeight: '800', color: isCompleted ? '#10b981' : (hasRejected ? '#ef4444' : (isPendingApp ? '#b45309' : 'var(--accent-color)')) }}>
-                          <div style={{ fontSize: '13.5px' }}>
-                            {po.approvedReceived > 0 ? `${po.approvedReceived} pcs` : '0 pcs'}
+
+                        {/* Received Qty */}
+                        <td style={{ padding: '12px 10px', verticalAlign: 'middle', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '13.5px', fontWeight: '800', color: isCompleted ? '#059669' : (hasRejected ? '#dc2626' : (isPendingApp ? '#d97706' : 'var(--text-main)')) }}>
+                            {(po.approvedReceived || 0).toLocaleString()} <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)' }}>pcs</span>
                           </div>
                           {isPendingApp && po.pendingApprovalPieces > 0 ? (
-                            <div style={{ fontSize: '10px', color: '#b45309', fontWeight: 'bold', marginTop: '2px' }}>
-                              ⚠️ ({po.pendingApprovalPieces} pcs Pending Approval)
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: '#b45309', fontWeight: '700', marginTop: '2px', backgroundColor: '#fef3c7', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fde68a' }}>
+                              ⚠️ ({po.pendingApprovalPieces.toLocaleString()} pcs Pending)
                             </div>
                           ) : hasRejected && po.rejectedPieces > 0 ? (
-                            <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: 'bold', marginTop: '2px' }}>
-                              ✖ ({po.rejectedPieces} pcs Rejected by Admin)
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: '#dc2626', fontWeight: '700', marginTop: '2px', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fecdd3' }}>
+                              ✖ ({po.rejectedPieces.toLocaleString()} pcs Rejected)
                             </div>
                           ) : po.approvedReceived > 0 ? (
-                            <div style={{ fontSize: '10px', color: '#047857', fontWeight: 'bold', marginTop: '2px' }}>
-                              ✅ ({po.approvedReceived} pcs In Stock)
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: '#059669', fontWeight: '700', marginTop: '2px', backgroundColor: '#ecfdf5', padding: '1px 6px', borderRadius: '4px', border: '1px solid #a7f3d0' }}>
+                              ✓ ({po.approvedReceived.toLocaleString()} pcs In Stock)
                             </div>
                           ) : null}
                         </td>
-                        <td style={{ padding: '14px 8px', textAlign: 'center', fontWeight: '800' }}>
+
+                        {/* Balance / Extra */}
+                        <td style={{ padding: '12px 10px', verticalAlign: 'middle', textAlign: 'center', whiteSpace: 'nowrap' }}>
                           {hasRejected && (po.approvedReceived || 0) === 0 ? (
-                            <span style={{ color: '#ef4444', backgroundColor: '#fee2e2', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' }}>
-                              Rejected (0 In Stock)
+                            <span style={{ color: '#dc2626', backgroundColor: '#fee2e2', border: '1px solid #fecdd3', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
+                              Rejected
                             </span>
                           ) : isPendingApp ? (
-                            <span style={{ color: '#b45309', backgroundColor: '#fef3c7', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' }}>
+                            <span style={{ color: '#b45309', backgroundColor: '#fef3c7', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
                               Awaiting Approval
                             </span>
                           ) : po.extraBalance > 0 ? (
-                            <span style={{ color: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.12)', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' }}>
-                              +{po.extraBalance} Extra
+                            <span style={{ color: '#7c3aed', backgroundColor: '#f5f3ff', border: '1px solid #ddd6fe', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
+                              +{po.extraBalance.toLocaleString()} Extra
                             </span>
                           ) : pendingQty > 0 ? (
-                            <span style={{ color: '#f43e5c', backgroundColor: 'rgba(244, 62, 92, 0.12)', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' }}>
-                              {pendingQty} Pending
+                            <span style={{ color: '#e11d48', backgroundColor: '#fff1f2', border: '1px solid #fecdd3', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
+                              {pendingQty.toLocaleString()} Pending
                             </span>
                           ) : (
-                            <span style={{ color: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.12)', padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' }}>
+                            <span style={{ color: '#059669', backgroundColor: '#ecfdf5', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700' }}>
                               0 (Fulfilled)
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: '14px 8px', fontSize: '11.5px', color: 'var(--text-main)' }}>
+
+                        {/* Inward Receipts */}
+                        <td style={{ padding: '12px 12px', verticalAlign: 'middle', fontSize: '11.5px' }}>
                           {po.partialEntries && po.partialEntries.length > 0 ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-                                <span style={{ fontWeight: '800', color: 'var(--accent-color)', fontSize: '11.5px' }}>
-                                  {po.partialEntries.length} Inward Receipt{po.partialEntries.length > 1 ? 's' : ''}:
-                                </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '380px' }}>
+                              <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--accent-color)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <span>📦 {po.partialEntries.length} Inward Receipt{po.partialEntries.length > 1 ? 's' : ''}:</span>
                               </div>
-                              {po.partialEntries.slice(0, 3).map((e, idx) => {
+                              {po.partialEntries.slice(0, 2).map((e, idx) => {
                                 const isApp = e.approvalStatus === 'Approved';
                                 const isRej = e.approvalStatus === 'Rejected';
                                 const isPend = e.approvalStatus === 'Pending Approval';
@@ -2220,8 +2317,8 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
 
                                 return (
                                   <div key={idx} style={{
-                                    display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', fontSize: '11px',
-                                    background: 'var(--bg-secondary)', padding: '4px 7px', borderRadius: '6px', border: '1px solid var(--border-color)'
+                                    display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap', fontSize: '11px',
+                                    background: 'var(--bg-secondary)', padding: '3px 7px', borderRadius: '6px', border: '1px solid var(--border-color)'
                                   }}>
                                     <span style={{
                                       padding: '1px 5px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '800',
@@ -2232,7 +2329,7 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                                       {isManual ? '📝 Manual' : '⚖️ Scale'}
                                     </span>
 
-                                    <span style={{ fontWeight: '800', color: 'var(--text-main)' }}>
+                                    <span style={{ fontFamily: 'monospace', fontWeight: '800', color: 'var(--text-main)' }}>
                                       {e.invoiceNo}
                                     </span>
 
@@ -2266,56 +2363,68 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                                   </div>
                                 );
                               })}
-                              {po.partialEntries.length > 3 && (
-                                <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                  +{po.partialEntries.length - 3} more receipts...
+                              {po.partialEntries.length > 2 && (
+                                <span style={{ fontSize: '10.5px', color: 'var(--accent-color)', fontWeight: '600', paddingLeft: '2px' }}>
+                                  +{po.partialEntries.length - 2} more receipt{po.partialEntries.length - 2 > 1 ? 's' : ''} (click Details)
                                 </span>
                               )}
                             </div>
                           ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Waiting for 1st Inward</span>
+                            <span style={{ color: 'var(--text-muted)', fontSize: '11.5px', fontStyle: 'italic' }}>Waiting for 1st Inward</span>
                           )}
                         </td>
-                        <td style={{ padding: '14px 8px', textAlign: 'center' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+
+                        {/* Status */}
+                        <td style={{ padding: '12px 10px', verticalAlign: 'middle', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'inline-flex', flexDirection: 'column', gap: '3px', alignItems: 'center' }}>
                             <span style={{
-                              padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: '700',
-                              color: statusColor, backgroundColor: statusBg, textTransform: 'uppercase', letterSpacing: '0.03em', display: 'inline-block'
+                              padding: '3px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '800',
+                              color: statusColor, backgroundColor: statusBg, border: `1px solid ${statusBorder}`,
+                              textTransform: 'uppercase', letterSpacing: '0.04em', display: 'inline-block'
                             }}>
                               {statusLabel}
                             </span>
                             {po.hasPendingApproval && (
                               <span style={{
-                                padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: '800',
-                                color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #f59e0b'
+                                padding: '2px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: '800',
+                                color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #f59e0b',
+                                display: 'inline-flex', alignItems: 'center', gap: '3px'
                               }}>
                                 ⚠️ {po.pendingApprovalCount} Needs Approval
                               </span>
                             )}
                           </div>
                         </td>
-                        <td style={{ padding: '14px 8px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
+
+                        {/* Actions */}
+                        <td style={{ padding: '12px 12px', verticalAlign: 'middle', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end', alignItems: 'center' }}>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              type="button"
+                              className="btn btn-secondary btn-xs"
                               onClick={() => setSelectedPO(po)}
-                              style={{ padding: '4px 8px', fontSize: '11px', fontWeight: '600' }}
+                              style={{ padding: '4px 9px', fontSize: '11px', fontWeight: '600', borderRadius: '6px', height: '28px' }}
                             >
                               Details
                             </button>
                             <button
-                              className="btn btn-secondary btn-sm"
+                              type="button"
+                              className="btn btn-secondary btn-xs"
                               onClick={() => handlePrintVerificationReport(po)}
-                              style={{ padding: '4px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: '600' }}
+                              style={{ padding: '4px 9px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '600', borderRadius: '6px', height: '28px' }}
                               title="Print Audit Report"
                             >
                               <Printer size={12} />
                               <span>Print</span>
                             </button>
                             <button
-                              className="btn btn-primary btn-sm"
+                              type="button"
+                              className="btn btn-primary btn-xs"
                               onClick={() => handleDownloadVerificationPDF(po)}
-                              style={{ padding: '4px 8px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px', fontWeight: '700' }}
+                              style={{
+                                padding: '4px 10px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px', fontWeight: '700',
+                                borderRadius: '6px', height: '28px', boxShadow: '0 1px 3px rgba(99, 102, 241, 0.25)'
+                              }}
                               title="Download PDF Document"
                             >
                               <Download size={12} />

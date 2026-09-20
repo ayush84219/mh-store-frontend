@@ -101,10 +101,16 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   const [filterDate, setFilterDate] = useState('');
   const [expandedRow, setExpandedRow] = useState(null);
 
-  // Printer status
+  // Printer status & Sticker Print Dialog State
   const [printerStatus, setPrinterStatus] = useState('offline');
   const [printerName, setPrinterName] = useState('');
   const printerWsRef = useRef(null);
+
+  const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [printTargetData, setPrintTargetData] = useState(null);
+  const [stickerCountToPrint, setStickerCountToPrint] = useState(1);
+  const [isPrinting, setIsPrinting] = useState(false);
+  const [printProgressText, setPrintProgressText] = useState('');
 
   // Counter
   const [nextCodeNum, setNextCodeNum] = useState(BASE_CODE);
@@ -381,6 +387,26 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
       showToast(`✅ Manual Material Inward Saved: ${totalPieces.toLocaleString()} ${form.unit}`);
 
+      // Setup print dialog with saved data
+      setPrintTargetData({
+        materialName: form.materialName,
+        materialCode: form.materialCode,
+        category: form.category || 'ACCESSORY',
+        supplier: form.supplier || 'Vendor',
+        poNumber: form.poNumber || 'N/A',
+        invoiceNo: form.invoiceNo || 'N/A',
+        pieces: totalPieces,
+        unit: form.unit || 'Pcs',
+        totalPackets: totalPackets,
+        barcodeId: barcodeId,
+        location: finalLocation,
+        storeIncharge: form.storeIncharge || currentUser?.name || 'Operator',
+        date: now.toLocaleDateString('en-GB')
+      });
+      setStickerCountToPrint(totalPackets || 1);
+      setPrintProgressText('');
+      setPrintModalOpen(true);
+
       // Save into MySQL table weight_capture (weight fields zeroed out cleanly)
       fetch(`${getBackendUrl()}/api/weight-capture`, {
         method: 'POST',
@@ -419,52 +445,147 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           }
         })
         .catch(() => { });
-
-      // Send to print service if online
-      if (printerStatus === 'online') {
-        try {
-          const pws = new WebSocket('ws://localhost:8765');
-          let nextPkt = 1;
-          const sendNext = () => {
-            if (nextPkt > totalPackets) { pws.close(); return; }
-            const pktLoc = getPacketLocationForIndex(nextPkt);
-            const pktBarcodeId = `${form.materialCode}-A${String(nextPkt).padStart(2, '0')}`;
-            pws.send(JSON.stringify({
-              type: 'print_accessory',
-              data: {
-                cmp: form.supplier || 'Vendor',
-                materialName: form.materialName,
-                materialCode: form.materialCode,
-                category: form.category,
-                weight: `N/A (Manual)`,
-                pieces: String(totalPieces),
-                unit: form.unit,
-                operator: form.storeIncharge,
-                poNumber: form.poNumber,
-                billNo: form.invoiceNo,
-                totalPackets,
-                barcodeId: pktBarcodeId,
-                location: pktLoc,
-                packetNo: nextPkt,
-                date: now.toLocaleDateString('en-GB')
-              }
-            }));
-            nextPkt++;
-          };
-          pws.onopen = () => {
-            pws.send(JSON.stringify({ type: 'auth', token: 'fabric-print-secret-key-2024' }));
-          };
-          pws.onmessage = (ev) => {
-            const msg = JSON.parse(ev.data);
-            if (msg.type === 'auth_success') sendNext();
-            else if (msg.type === 'print_accessory_result' && msg.success) {
-              if (nextPkt > totalPackets) pws.close();
-              else sendNext();
-            }
-          };
-        } catch (_) { }
-      }
     }, 400);
+  };
+
+  const handleOpenPrintModalForRow = (row) => {
+    const pkts = parseInt(row.packets, 10) || 1;
+    setPrintTargetData({
+      materialName: row.material,
+      materialCode: row.materialCode || row.barcodeId?.split('-A')[0] || `MT${row.id}`,
+      category: row.category || 'ACCESSORY',
+      supplier: row.supplier || 'Vendor',
+      poNumber: row.po || 'N/A',
+      invoiceNo: row.invoiceNo || 'N/A',
+      pieces: row.pieces,
+      unit: row.unit || 'Pcs',
+      totalPackets: pkts,
+      barcodeId: row.barcodeId,
+      location: row.location,
+      storeIncharge: row.operator,
+      date: row.date || new Date().toLocaleDateString('en-GB')
+    });
+    setStickerCountToPrint(pkts);
+    setPrintProgressText('');
+    setPrintModalOpen(true);
+  };
+
+  const handleExecutePrint = () => {
+    if (!printTargetData) return;
+    const numStickers = Math.max(1, parseInt(stickerCountToPrint, 10) || 1);
+    setIsPrinting(true);
+    setPrintProgressText(`Connecting to Python Printer Service (ws://localhost:8765)...`);
+
+    try {
+      const pws = new WebSocket('ws://localhost:8765');
+      let currentPkt = 1;
+
+      const sendNextSticker = () => {
+        if (currentPkt > numStickers) {
+          showToast(`✅ Successfully sent ${numStickers} sticker(s) to thermal printer!`);
+          setIsPrinting(false);
+          setPrintProgressText('');
+          setPrintModalOpen(false);
+          pws.close();
+          return;
+        }
+
+        const pktLoc = getPacketLocationForIndex(currentPkt);
+        const pktBarcodeId = `${printTargetData.materialCode}-A${String(currentPkt).padStart(2, '0')}`;
+
+        pws.send(JSON.stringify({
+          type: 'print_accessory',
+          data: {
+            cmp: printTargetData.supplier || 'Vendor',
+            materialName: printTargetData.materialName,
+            materialCode: printTargetData.materialCode,
+            category: printTargetData.category || 'ACCESSORY',
+            weight: 'N/A (Manual)',
+            pieces: String(printTargetData.pieces),
+            unit: printTargetData.unit || 'Pcs',
+            operator: printTargetData.storeIncharge || 'Operator',
+            authorized: printTargetData.storeIncharge || 'Operator',
+            poNumber: printTargetData.poNumber || 'N/A',
+            billNo: printTargetData.invoiceNo || 'N/A',
+            lotNo: printTargetData.materialCode || 'N/A',
+            totalPackets: numStickers,
+            barcodeId: pktBarcodeId,
+            location: pktLoc || printTargetData.location || 'Main Store',
+            packetNo: currentPkt,
+            date: printTargetData.date || new Date().toLocaleDateString('en-GB')
+          }
+        }));
+
+        setPrintProgressText(`🖨️ Printing barcode sticker ${currentPkt} of ${numStickers}...`);
+        currentPkt++;
+      };
+
+      pws.onopen = () => {
+        pws.send(JSON.stringify({ type: 'auth', token: 'fabric-print-secret-key-2024' }));
+      };
+
+      pws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'auth_success') {
+            setPrinterStatus('online');
+            sendNextSticker();
+          } else if (msg.type === 'print_accessory_result' || msg.type === 'print_result') {
+            if (msg.success !== false) {
+              if (currentPkt > numStickers) {
+                showToast(`✅ All ${numStickers} barcode sticker(s) printed!`);
+                setIsPrinting(false);
+                setPrintProgressText('');
+                setPrintModalOpen(false);
+                pws.close();
+              } else {
+                sendNextSticker();
+              }
+            } else {
+              showToast(`⚠️ Print warning: ${msg.message || 'Sticker output issue'}`, 'error');
+              sendNextSticker();
+            }
+          } else if (msg.type === 'auth_failed' || msg.type === 'error') {
+            showToast(`Print service error: ${msg.message}`, 'error');
+            setIsPrinting(false);
+            setPrintProgressText('');
+            pws.close();
+          }
+        } catch (e) {
+          sendNextSticker();
+        }
+      };
+
+      pws.onerror = () => {
+        setIsPrinting(false);
+        setPrintProgressText('');
+        setPrinterStatus('offline');
+        showToast('⚠️ Python Print Service is offline on ws://localhost:8765. Run "python print_service.py" in terminal.', 'error');
+      };
+
+      pws.onclose = () => {
+        if (isPrinting) {
+          setIsPrinting(false);
+          setPrintProgressText('');
+        }
+      };
+
+      setTimeout(() => {
+        if (pws.readyState === WebSocket.CONNECTING) {
+          pws.close();
+          setIsPrinting(false);
+          setPrintProgressText('');
+          setPrinterStatus('offline');
+          showToast('⚠️ Python Print Service connection timed out. Check print_service.py.', 'error');
+        }
+      }, 5000);
+
+    } catch (err) {
+      setIsPrinting(false);
+      setPrintProgressText('');
+      setPrinterStatus('offline');
+      showToast(`⚠️ Print error: ${err.message}`, 'error');
+    }
   };
 
   const handleClear = () => {
@@ -1524,18 +1645,34 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
                       {/* ACTIONS */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                        <button
-                          type="button"
-                          onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
-                          style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '6px 12px',
-                            borderRadius: '6px', fontSize: '12px', fontWeight: '700',
-                            border: '1.5px solid #cbd5e1', color: '#0f172a', background: '#ffffff',
-                            cursor: 'pointer', transition: 'all 0.15s'
-                          }}
-                        >
-                          {expandedRow === row.id ? <><ChevronDown size={14} /> Hide</> : <><ChevronRight size={14} /> Details</>}
-                        </button>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPrintModalForRow(row)}
+                            className="btn btn-secondary btn-sm"
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 10px',
+                              borderRadius: '6px', fontSize: '11.5px', fontWeight: '700',
+                              border: '1.5px solid rgba(99, 102, 241, 0.3)', color: '#4338ca', background: '#eef2ff',
+                              cursor: 'pointer'
+                            }}
+                            title="Print Barcode Stickers"
+                          >
+                            <Printer size={13} /> Print
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
+                            style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 10px',
+                              borderRadius: '6px', fontSize: '11.5px', fontWeight: '700',
+                              border: '1.5px solid #cbd5e1', color: '#0f172a', background: '#ffffff',
+                              cursor: 'pointer', transition: 'all 0.15s'
+                            }}
+                          >
+                            {expandedRow === row.id ? <><ChevronDown size={13} /> Hide</> : <><ChevronRight size={13} /> Details</>}
+                          </button>
+                        </div>
                       </td>
                     </tr>
 
@@ -1795,7 +1932,241 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         </div>
       )}
 
-      {/* ── IMAGE ENLARGED PREVIEW MODAL ─────────────────────────────── */}
+      {/* ── PRINT BARCODE STICKERS DIALOG ── */}
+      {printModalOpen && printTargetData && (
+        <div className="modal-overlay" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div className="panel animate-scale" style={{ maxWidth: '520px', width: '100%', margin: '20px', padding: '24px', borderRadius: '12px' }}>
+            <div className="panel-header" style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="panel-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Printer size={20} className="text-accent" />
+                Print Barcode Stickers
+              </h3>
+              <button
+                type="button"
+                onClick={() => { setPrintModalOpen(false); setIsPrinting(false); setPrintProgressText(''); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Inward Summary Card */}
+            <div style={{
+              background: 'var(--bg-primary)',
+              padding: '14px 16px',
+              borderRadius: '8px',
+              border: '1.5px solid var(--border-color)',
+              marginBottom: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>
+                  {printTargetData.materialName}
+                </span>
+                <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--accent-color)', fontFamily: 'monospace' }}>
+                  {printTargetData.materialCode}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)' }}>
+                <span>PO: <strong>{printTargetData.poNumber}</strong></span>
+                <span>Qty: <strong style={{ color: 'var(--text-main)' }}>{Number(printTargetData.pieces).toLocaleString()} {printTargetData.unit}</strong></span>
+                <span>Packets: <strong>{printTargetData.totalPackets}</strong></span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', paddingTop: '4px', borderTop: '1px dashed var(--border-color)' }}>
+                <span>📍 {printTargetData.location}</span>
+                <span>👤 {printTargetData.storeIncharge}</span>
+                <span>📅 {printTargetData.date}</span>
+              </div>
+            </div>
+
+            {/* Barcode Preview Strip */}
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02))',
+              border: '1.5px solid rgba(99,102,241,0.3)',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div>
+                <span style={{ fontSize: '10px', fontWeight: '800', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Generated Barcode Series
+                </span>
+                <div style={{ fontSize: '14px', fontWeight: '900', color: '#4338ca', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+                  {stickerCountToPrint > 1
+                    ? `${printTargetData.materialCode}-A01 ... ${printTargetData.materialCode}-A${String(stickerCountToPrint).padStart(2, '0')}`
+                    : `${printTargetData.materialCode}-A01`}
+                </div>
+              </div>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '4px 8px',
+                borderRadius: '6px',
+                backgroundColor: '#e0e7ff',
+                color: '#4338ca'
+              }}>
+                {stickerCountToPrint} Label{stickerCountToPrint > 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Sticker Count Input & Presets */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: '800', color: 'var(--text-main)', marginBottom: '8px' }}>
+                How many barcode stickers do you want to print?
+              </label>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => setStickerCountToPrint(prev => Math.max(1, (parseInt(prev, 10) || 1) - 1))}
+                  style={{
+                    width: '38px', height: '38px', borderRadius: '6px', border: '1.5px solid var(--border-color)',
+                    background: 'var(--bg-secondary)', color: 'var(--text-main)', fontWeight: '800', fontSize: '16px', cursor: 'pointer'
+                  }}
+                  disabled={isPrinting}
+                >
+                  -
+                </button>
+
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={stickerCountToPrint}
+                  onChange={(e) => setStickerCountToPrint(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  disabled={isPrinting}
+                  style={{
+                    flex: 1, height: '38px', textAlign: 'center', fontSize: '16px', fontWeight: '900',
+                    fontFamily: 'monospace', border: '2px solid var(--accent-color)', borderRadius: '6px',
+                    background: 'var(--bg-primary)', color: 'var(--text-main)'
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setStickerCountToPrint(prev => (parseInt(prev, 10) || 1) + 1)}
+                  style={{
+                    width: '38px', height: '38px', borderRadius: '6px', border: '1.5px solid var(--border-color)',
+                    background: 'var(--bg-secondary)', color: 'var(--text-main)', fontWeight: '800', fontSize: '16px', cursor: 'pointer'
+                  }}
+                  disabled={isPrinting}
+                >
+                  +
+                </button>
+              </div>
+
+              {/* Quick Presets */}
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {[1, 2, 5, printTargetData.totalPackets || 1].filter((val, idx, self) => self.indexOf(val) === idx).map(cnt => (
+                  <button
+                    key={cnt}
+                    type="button"
+                    onClick={() => setStickerCountToPrint(cnt)}
+                    disabled={isPrinting}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      background: stickerCountToPrint === cnt ? 'var(--accent-color)' : 'var(--bg-secondary)',
+                      color: stickerCountToPrint === cnt ? '#ffffff' : 'var(--text-main)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {cnt === printTargetData.totalPackets && cnt > 1 ? `All Packets (${cnt})` : `${cnt} Sticker${cnt > 1 ? 's' : ''}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Python Printer Service Status Strip */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              marginBottom: '16px',
+              fontSize: '11.5px',
+              fontWeight: '700',
+              backgroundColor: printerStatus === 'online' ? '#ecfdf5' : '#fef2f2',
+              border: `1px solid ${printerStatus === 'online' ? '#10b981' : '#ef4444'}`,
+              color: printerStatus === 'online' ? '#065f46' : '#991b1b'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{
+                  width: '8px', height: '8px', borderRadius: '50%',
+                  backgroundColor: printerStatus === 'online' ? '#10b981' : '#ef4444'
+                }}></span>
+                {printerStatus === 'online' ? `Python Printer: Online (${printerName || 'USB Thermal Printer'})` : 'Python Printer: Offline (ws://localhost:8765)'}
+              </span>
+
+              {printerStatus !== 'online' && (
+                <button
+                  type="button"
+                  onClick={connectPrinter}
+                  style={{
+                    background: 'none', border: '1px solid #ef4444', color: '#991b1b',
+                    fontSize: '10.5px', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontWeight: '800'
+                  }}
+                >
+                  Reconnect
+                </button>
+              )}
+            </div>
+
+            {/* Live Printing Progress Message */}
+            {printProgressText && (
+              <div style={{
+                marginBottom: '14px', padding: '10px 14px', borderRadius: '6px',
+                background: '#eff6ff', border: '1px solid #3b82f6', color: '#1d4ed8',
+                fontSize: '12px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '8px'
+              }}>
+                <div className="Spinner" style={{ width: '16px', height: '16px', borderWidth: '2px' }}></div>
+                <span>{printProgressText}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setPrintModalOpen(false); setIsPrinting(false); setPrintProgressText(''); }}
+                disabled={isPrinting}
+              >
+                Skip / Done
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleExecutePrint}
+                disabled={isPrinting}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '800', padding: '10px 18px' }}
+              >
+                {isPrinting ? (
+                  <>
+                    <div className="Spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }}></div>
+                    <span>Sending to Printer...</span>
+                  </>
+                ) : (
+                  <>
+                    <Printer size={16} />
+                    <span>Print {stickerCountToPrint} Barcode Sticker{stickerCountToPrint > 1 ? 's' : ''}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {previewModalImage && (
         <div
           className="modal-overlay"

@@ -468,7 +468,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
             </span>
           </div>
 
-          <h2 style={{ fontSize: '24px', fontWeight: '800', margin: '0 0 6px 0', letterSpacing: '-0.02em', color: '#ffffff' }}>
+          <h2 style={{ fontSize: '24px', fontWeight: '800', margin: '0 0 6px 0', letterSpacing: '-0.02em', color: '#b3aeaeff' }}>
             Warehouse Layout Matrix Visualizer
           </h2>
 
