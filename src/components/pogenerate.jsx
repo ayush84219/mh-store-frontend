@@ -2409,9 +2409,10 @@ export function PuneetZipForm({ prefilledLotNo = '', setPrefilledLotNo = () => {
 
         /* Keep all your existing styles from the original component */
         .Wrap {
-          max-width: 1600px;
-          margin: 0 auto;
-          padding: 12px 9px 41px;
+          max-width: 100%;
+          margin: 0;
+          padding: 12px 16px 41px;
+          box-sizing: border-box;
           font-family: 'Inter', system-ui, sans-serif;
           color: var(--text-main, #0f172a);
           min-height: 100vh;
@@ -4065,17 +4066,17 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
         {
             id: 'zip',
             label: 'Zip Purcharge Orders',
-            subtitle: 'Generate zipper order sheets',
-            gradient: 'linear-gradient(135deg, #7c3aed, #a855f7)',
-            glow: 'rgba(124, 58, 237, 0.25)',
+            subtitle: 'Manage and track all zipper material requirements',
+            gradient: 'linear-gradient(135deg, #4f46e5, #3b82f6)',
+            glow: 'rgba(79, 70, 229, 0.3)',
             icon: <FiPackage />
         },
         {
             id: 'dori',
             label: 'Dori Purcharge Orders',
-            subtitle: 'Generate drawstring order sheets',
-            gradient: 'linear-gradient(135deg, #d97706, #f59e0b)',
-            glow: 'rgba(217, 119, 6, 0.25)',
+            subtitle: 'Manage and track all dori material requirements',
+            gradient: 'linear-gradient(135deg, #0d9488, #059669)',
+            glow: 'rgba(13, 148, 136, 0.3)',
             icon: <FiScissors />
         }
     ];
@@ -4085,145 +4086,135 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
     return (
         <div style={{
             minHeight: '100vh',
-            background: 'var(--bg-primary, #ffffff)',
+            background: 'var(--bg-primary, #f8fafc)',
             fontFamily: "'Inter', system-ui, sans-serif",
         }}>
-            {/* ── Premium Hero Tab Header ── */}
-            <div style={{
-                borderBottom: '1px solid var(--border-color, #e2e8f0)',
-                background: 'var(--bg-primary, #ffffff)',
-                position: 'sticky',
-                top: 70,
-                zIndex: 10,
-                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.02)',
-            }}>
-                <div style={{
-                    maxWidth: '1200px',
-                    margin: '0 auto',
-                    padding: '0 16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                }}>
-                    {/* Left: Page branding */}
-                    <div style={{ padding: '8px 0', display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
-                        {viewMode === 'generator' && (
-                            <button
-                                onClick={() => setViewMode('dashboard')}
-                                className="BaseBtn GhostBtn"
-                                style={{
-                                    padding: '8px 12px',
-                                    borderRadius: '8px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    marginRight: '8px',
-                                    fontSize: '13px',
-                                    fontWeight: '600',
-                                    border: '1.5px solid #cbd5e1',
-                                    background: '#fff',
-                                    color: '#334155',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <FiArrowLeft /> Back
-                            </button>
-                        )}
-                        <div style={{
-                            width: '36px',
-                            height: '36px',
-                            borderRadius: '10px',
-                            background: activeTabData ? activeTabData.gradient : 'linear-gradient(135deg, #7c3aed, #d97706)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#fff',
-                            fontSize: '18px',
-                            boxShadow: activeTabData ? `0 4px 14px ${activeTabData.glow}` : 'none',
-                            transition: 'all 0.4s ease',
-                            flexShrink: 0,
-                        }}>
-                            {activeTabData?.icon}
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                            <div style={{
-                                fontSize: '15px',
-                                fontWeight: '800',
-                                color: 'var(--text-main, #0f172a)',
-                                letterSpacing: '-0.3px',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                {activeTabData?.label || 'Purchase Orders'} {viewMode === 'dashboard' ? 'Dashboard' : ''}
-                            </div>
-                            <div style={{
-                                fontSize: '11px',
-                                color: 'var(--text-muted, #94a3b8)',
-                                marginTop: '1px',
-                                whiteSpace: 'nowrap',
-                            }}>
-                                {viewMode === 'dashboard' ? `Manage and track all ${activeSubTab} material requirements` : activeTabData?.subtitle}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Right: Premium tab pills */}
-                    <div style={{
-                        display: 'flex',
-                        gap: '6px',
-                        padding: '4px',
-                        background: 'var(--bg-main, #f1f5f9)',
-                        borderRadius: '12px',
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        flexShrink: 0,
-                    }}>
-                        {tabs.map(tab => {
-                            const isActive = activeSubTab === tab.id;
-                            return (
-                                <button
-                                    key={tab.id}
-                                    onClick={() => {
-                                        setActiveSubTab(tab.id);
-                                    }}
-                                    style={{
-                                        position: 'relative',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '8px',
-                                        padding: '6px 14px',
-                                        borderRadius: '9px',
-                                        border: 'none',
-                                        cursor: 'pointer',
-                                        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        background: isActive ? tab.gradient : 'transparent',
-                                        color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
-                                        fontWeight: isActive ? '700' : '500',
-                                        fontSize: '13px',
-                                        letterSpacing: '0.2px',
-                                        boxShadow: isActive ? `0 4px 10px ${tab.glow}` : 'none',
-                                        transform: isActive ? 'translateY(-1px)' : 'translateY(0)',
-                                        whiteSpace: 'nowrap',
-                                    }}
-                                >
-                                    <span style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        fontSize: '14px'
-                                    }}>{tab.icon}</span>
-                                    <span>{tab.label}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            </div>
-
             {/* Render selected subview */}
-            <div style={{ padding: '24px 0 0 0' }}>
+            <div>
                 {activeSubTab === 'zip' ? (
                     viewMode === 'dashboard' ? (
-                        <ZipDashboard onCompileNewPO={() => setViewMode('generator')} />
+                        <ZipDashboard 
+                            onCompileNewPO={() => setViewMode('generator')}
+                            activeSubTab={activeSubTab}
+                            setActiveSubTab={setActiveSubTab}
+                            tabs={tabs}
+                        />
                     ) : (
-                        <PuneetZipForm prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} />
+                        <div className="dashboard-container" style={{ padding: '20px 20px 40px 20px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box' }}>
+                            {/* Generator Paper Box Header */}
+                            <div style={{
+                                background: 'var(--bg-secondary, #ffffff)',
+                                border: '1px solid var(--border-color, #e2e8f0)',
+                                borderRadius: '18px',
+                                padding: '20px 24px',
+                                marginBottom: '24px',
+                                boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
+                                position: 'relative',
+                                overflow: 'hidden',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: '16px'
+                            }}>
+                                <div style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    height: '3.5px',
+                                    background: 'linear-gradient(90deg, #4f46e5, #3b82f6, #06b6d4, #4f46e5)',
+                                    backgroundSize: '200% 100%'
+                                }} />
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                                    <button
+                                        onClick={() => setViewMode('dashboard')}
+                                        className="BaseBtn GhostBtn"
+                                        style={{
+                                            padding: '8px 14px',
+                                            borderRadius: '9px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '6px',
+                                            fontSize: '13px',
+                                            fontWeight: '700',
+                                            border: '1.5px solid #cbd5e1',
+                                            background: '#fff',
+                                            color: '#334155',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                                        }}
+                                    >
+                                        <FiArrowLeft /> Back to Dashboard
+                                    </button>
+                                    <div style={{
+                                        width: '42px',
+                                        height: '42px',
+                                        borderRadius: '12px',
+                                        background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: '#fff',
+                                        fontSize: '20px',
+                                        boxShadow: '0 6px 16px rgba(79, 70, 229, 0.35)',
+                                        flexShrink: 0
+                                    }}>
+                                        <FiPackage />
+                                    </div>
+                                    <div>
+                                        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main, #0f172a)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                                            Zip Purchase Order Generator
+                                        </h1>
+                                        <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginTop: '2px', fontWeight: '500' }}>
+                                            Compile, calculate and generate zip purchase orders
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '6px',
+                                    padding: '5px',
+                                    background: 'var(--bg-main, #f1f5f9)',
+                                    borderRadius: '12px',
+                                    border: '1px solid rgba(0,0,0,0.06)',
+                                    flexShrink: 0
+                                }}>
+                                    {tabs.map(tab => {
+                                        const isActive = activeSubTab === tab.id;
+                                        return (
+                                            <button
+                                                key={tab.id}
+                                                onClick={() => setActiveSubTab(tab.id)}
+                                                style={{
+                                                    position: 'relative',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    gap: '8px',
+                                                    padding: '7px 16px',
+                                                    borderRadius: '9px',
+                                                    border: 'none',
+                                                    cursor: 'pointer',
+                                                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                                                    background: isActive ? tab.gradient : 'transparent',
+                                                    color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
+                                                    fontWeight: isActive ? '700' : '600',
+                                                    fontSize: '13px',
+                                                    boxShadow: isActive ? `0 4px 10px ${tab.glow}` : 'none',
+                                                    whiteSpace: 'nowrap'
+                                                }}
+                                            >
+                                                <span style={{ display: 'flex', alignItems: 'center', fontSize: '15px' }}>{tab.icon}</span>
+                                                <span>{tab.label}</span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                            <PuneetZipForm prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} />
+                        </div>
                     )
                 ) : (
                     <DoriOrder
@@ -4231,6 +4222,9 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
                         setPrefilledLotNo={setPrefilledLotNo}
                         viewMode={viewMode}
                         setViewMode={setViewMode}
+                        activeSubTab={activeSubTab}
+                        setActiveSubTab={setActiveSubTab}
+                        tabs={tabs}
                     />
                 )}
             </div>
@@ -4238,7 +4232,12 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
     );
 }
 
-export function ZipDashboard({ onCompileNewPO }) {
+export function ZipDashboard({ 
+    onCompileNewPO,
+    activeSubTab = 'zip',
+    setActiveSubTab = () => {},
+    tabs = []
+}) {
     const [poList, setPoList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -4526,8 +4525,28 @@ export function ZipDashboard({ onCompileNewPO }) {
         );
     }
 
+    const defaultTabs = [
+        {
+            id: 'zip',
+            label: 'Zip Purcharge Orders',
+            subtitle: 'Manage and track all zipper material requirements',
+            gradient: 'linear-gradient(135deg, #4f46e5, #3b82f6)',
+            glow: 'rgba(79, 70, 229, 0.3)',
+            icon: <FiPackage />
+        },
+        {
+            id: 'dori',
+            label: 'Dori Purcharge Orders',
+            subtitle: 'Manage and track all dori material requirements',
+            gradient: 'linear-gradient(135deg, #0d9488, #059669)',
+            glow: 'rgba(13, 148, 136, 0.3)',
+            icon: <FiScissors />
+        }
+    ];
+    const displayTabs = tabs && tabs.length > 0 ? tabs : defaultTabs;
+
     return (
-        <div className="dashboard-container" style={{ padding: '0 16px 40px 16px', maxWidth: '1200px', margin: '0 auto', fontFamily: "'Inter', sans-serif" }}>
+        <div className="dashboard-container" style={{ padding: '20px 20px 40px 20px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', fontFamily: "'Inter', sans-serif" }}>
             <style>{`
                 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
                 .dashboard-card {
@@ -4623,78 +4642,205 @@ export function ZipDashboard({ onCompileNewPO }) {
                 }
             `}</style>
 
-            {/* Actions top row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                <button
-                    onClick={onCompileNewPO}
-                    className="BaseBtn PrimaryBtn"
-                    style={{
-                        background: 'linear-gradient(135deg, var(--accent-color), var(--accent-hover, #4f46e5))',
-                        color: '#fff',
-                        fontWeight: '700',
-                        fontSize: '13px',
-                        padding: '10px 18px',
-                        borderRadius: '10px',
-                        border: 'none',
+            {/* ── Paper Box Header: Branding, Tabs & Quick Actions ── */}
+            <div style={{
+                background: 'var(--bg-secondary, #ffffff)',
+                border: '1px solid var(--border-color, #e2e8f0)',
+                borderRadius: '18px',
+                padding: '22px 26px',
+                marginBottom: '24px',
+                boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '18px'
+            }}>
+                {/* Decorative top accent line */}
+                <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '3.5px',
+                    background: 'linear-gradient(90deg, #4f46e5, #3b82f6, #06b6d4, #4f46e5)',
+                    backgroundSize: '200% 100%'
+                }} />
+
+                {/* Top Row: Title, Icon, Subtitle & Tab Switcher */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '16px'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <div style={{
+                            width: '44px',
+                            height: '44px',
+                            borderRadius: '13px',
+                            background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                            fontSize: '22px',
+                            boxShadow: '0 6px 16px rgba(79, 70, 229, 0.35)',
+                            flexShrink: 0
+                        }}>
+                            <FiPackage />
+                        </div>
+                        <div>
+                            <h1 style={{
+                                margin: 0,
+                                fontSize: '19px',
+                                fontWeight: '800',
+                                color: 'var(--text-main, #0f172a)',
+                                letterSpacing: '-0.3px',
+                                fontFamily: "'Outfit', 'Inter', sans-serif"
+                            }}>
+                                Zip Purcharge Orders Dashboard
+                            </h1>
+                            <div style={{
+                                fontSize: '12px',
+                                color: 'var(--text-muted, #64748b)',
+                                marginTop: '2px',
+                                fontWeight: '500'
+                            }}>
+                                Manage and track all zipper material requirements
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right Tab Switcher Pills */}
+                    <div style={{
                         display: 'flex',
-                        alignItems: 'center',
                         gap: '6px',
-                        cursor: 'pointer',
-                        boxShadow: 'var(--shadow-sm)'
-                    }}
-                >
-                    <FiPlus /> Compile New Purchase Order
-                </button>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={downloadPDF} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--danger)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiPrinter /> PDF Report
+                        padding: '5px',
+                        background: 'var(--bg-main, #f1f5f9)',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        flexShrink: 0
+                    }}>
+                        {displayTabs.map(tab => {
+                            const isActive = activeSubTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setActiveSubTab(tab.id)}
+                                    style={{
+                                        position: 'relative',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        padding: '7px 16px',
+                                        borderRadius: '9px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        background: isActive ? tab.gradient : 'transparent',
+                                        color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
+                                        fontWeight: isActive ? '700' : '600',
+                                        fontSize: '13px',
+                                        letterSpacing: '0.2px',
+                                        boxShadow: isActive ? `0 4px 10px ${tab.glow}` : 'none',
+                                        transform: isActive ? 'translateY(-1px)' : 'translateY(0)',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '15px' }}>{tab.icon}</span>
+                                    <span>{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Soft Divider */}
+                <div style={{ height: '1px', background: 'var(--border-color, #e2e8f0)', width: '100%' }} />
+
+                {/* Bottom Row: Actions Bar */}
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                }}>
+                    <button
+                        onClick={onCompileNewPO}
+                        className="BaseBtn PrimaryBtn"
+                        style={{
+                            background: 'linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)',
+                            color: '#fff',
+                            fontWeight: '700',
+                            fontSize: '13px',
+                            padding: '10px 20px',
+                            borderRadius: '10px',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 14px rgba(79, 70, 229, 0.35)',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                        }}
+                    >
+                        <FiPlus size={16} /> Compile New Purchase Order
                     </button>
-                    <button onClick={downloadCSV} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--success)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiDownload /> Excel/CSV
-                    </button>
-                    <button onClick={fetchDashboardData} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--accent-color)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiRefreshCw /> Refresh
-                    </button>
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <button onClick={downloadPDF} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #fecdd3', background: '#ffffff', color: '#e11d48', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(225, 29, 72, 0.08)' }}>
+                            <FiPrinter size={15} /> PDF Report
+                        </button>
+                        <button onClick={downloadCSV} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #a7f3d0', background: '#ffffff', color: '#059669', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(5, 150, 105, 0.08)' }}>
+                            <FiDownload size={15} /> Excel/CSV
+                        </button>
+                        <button onClick={fetchDashboardData} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #c7d2fe', background: '#ffffff', color: '#4f46e5', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(79, 70, 229, 0.08)' }}>
+                            <FiRefreshCw size={14} /> Refresh
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {/* Stats Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--accent-light)', color: 'var(--accent-color)' }}><FiPackage /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(79, 70, 229, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#eef2ff', color: '#4f46e5', border: '1px solid #e0e7ff' }}><FiPackage /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.total}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Total Orders</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.total}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Total Orders</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--success-light)', color: 'var(--success)' }}><FiCheckSquare /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(16, 185, 129, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #d1fae5' }}><FiCheckSquare /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.gateDoneCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Gate Entry Done</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.gateDoneCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Gate Entry Done</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--info-light, rgba(6,182,212,0.15))', color: 'var(--info, #06b6d4)' }}><FiTruck /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(2, 132, 199, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#f0f9ff', color: '#0284c7', border: '1px solid #e0f2fe' }}><FiTruck /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.matReceivedCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Material Received</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.matReceivedCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Material Received</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}><FiUser /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(124, 58, 237, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#faf5ff', color: '#7c3aed', border: '1px solid #f3e8ff' }}><FiUser /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.supplierEntryCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Supplier Entry</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.supplierEntryCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Supplier Entry</div>
                     </div>
                 </div>
             </div>
 
             {/* Filter Panel */}
-            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '18px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' }}>
                 {/* Search */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
-                    <FiSearch style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)', fontSize: '16px' }} />
+                    <FiSearch style={{ position: 'absolute', left: '14px', color: 'var(--text-muted)', fontSize: '16px' }} />
                     <input
                         type="text"
                         placeholder="Search across all orders by lot, style, supervisor..."
@@ -4702,7 +4848,7 @@ export function ZipDashboard({ onCompileNewPO }) {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         style={{
                             width: '100%',
-                            padding: '10px 12px 10px 38px',
+                            padding: '10px 14px 10px 40px',
                             border: '1.5px solid var(--border-color)',
                             borderRadius: '10px',
                             background: 'var(--bg-secondary)',
@@ -4764,15 +4910,16 @@ export function ZipDashboard({ onCompileNewPO }) {
                             style={{
                                 width: '100%',
                                 padding: '8px 12px',
-                                border: '1.5px solid #ef4444',
-                                borderRadius: '8px',
-                                background: '#fef2f2',
-                                color: '#ef4444',
+                                border: '1.5px solid #e2e8f0',
+                                borderRadius: '10px',
+                                background: '#f8fafc',
+                                color: '#64748b',
                                 fontWeight: '700',
                                 cursor: 'pointer',
                                 fontSize: '13px',
                                 height: '38px',
-                                boxSizing: 'border-box'
+                                boxSizing: 'border-box',
+                                transition: 'all 0.2s'
                             }}
                         >
                             Clear Filters
@@ -4818,28 +4965,32 @@ export function ZipDashboard({ onCompileNewPO }) {
                                     return (
                                         <tr key={po.id || `${po.lotNumber}-v${po.version}`}>
                                             <td style={{ textAlign: 'center', fontWeight: '600', color: 'var(--text-muted)' }}>{serialNo}</td>
-                                            <td style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{po.lotNumber}</td>
+                                            <td>
+                                                <span style={{ fontWeight: '800', color: '#0f172a', background: '#eef2ff', border: '1px solid #e0e7ff', padding: '3px 8px', borderRadius: '6px', fontSize: '12px' }}>
+                                                    {po.lotNumber}
+                                                </span>
+                                            </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <span style={{
                                                     display: 'inline-block',
                                                     padding: '2px 8px',
-                                                    borderRadius: '20px',
+                                                    borderRadius: '6px',
                                                     fontSize: '11px',
                                                     fontWeight: '700',
                                                     background: isMultiVersion
-                                                        ? (po.version === 1 ? 'rgba(99,102,241,0.1)' : 'rgba(16,185,129,0.1)')
-                                                        : 'rgba(100,116,139,0.1)',
+                                                        ? (po.version === 1 ? '#eff6ff' : '#ecfdf5')
+                                                        : 'rgba(100,116,139,0.08)',
                                                     color: isMultiVersion
-                                                        ? (po.version === 1 ? '#6366f1' : '#10b981')
+                                                        ? (po.version === 1 ? '#2563eb' : '#059669')
                                                         : '#64748b',
-                                                    border: `1px solid ${isMultiVersion ? (po.version === 1 ? 'rgba(99,102,241,0.3)' : 'rgba(16,185,129,0.3)') : 'rgba(100,116,139,0.2)'}`
+                                                    border: `1px solid ${isMultiVersion ? (po.version === 1 ? '#bfdbfe' : '#a7f3d0') : 'rgba(100,116,139,0.2)'}`
                                                 }}>
                                                     V{po.version}
                                                 </span>
                                             </td>
                                             <td>
                                                 {po.poNumber
-                                                    ? <span className="status-badge approved" style={{ fontSize: '11px', padding: '3px 8px', textTransform: 'none', letterSpacing: '0.5px' }}>{po.poNumber}</span>
+                                                    ? <span style={{ background: '#f8fafc', color: '#0f172a', border: '1px solid #e2e8f0', padding: '3px 8px', borderRadius: '6px', fontFamily: 'monospace', fontWeight: '700', fontSize: '11px' }}>{po.poNumber}</span>
                                                     : <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>—</span>
                                                 }
                                             </td>

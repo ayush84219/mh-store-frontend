@@ -383,9 +383,10 @@ export default function ReturnMaterialView({
         @keyframes successPop { 0% { transform: scale(0.8); opacity: 0; } 60% { transform: scale(1.05); } 100% { transform: scale(1); opacity: 1; } }
         
         .RM_Wrap {
-          max-width: 1200px;
-          margin: 0 auto;
+          max-width: 100%;
+          margin: 0;
           padding: 24px 20px 40px;
+          box-sizing: border-box;
           font-family: var(--font-family-body, system-ui);
           color: var(--text-main, #0f172a);
           min-height: 100vh;

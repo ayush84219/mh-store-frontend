@@ -1,26 +1,62 @@
 import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 320, isAbove: false });
   const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   const selectedMaterial = materials.find(m => String(m.id) === String(value));
 
+  const updateCoords = () => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const isAbove = spaceBelow < 250 && rect.top > 250;
+      
+      setCoords({
+        top: isAbove ? rect.top : rect.bottom + 4,
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - 360)),
+        width: Math.max(rect.width, 320),
+        isAbove
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      const handleReposition = () => updateCoords();
+      window.addEventListener('resize', handleReposition);
+      window.addEventListener('scroll', handleReposition, true);
+      return () => {
+        window.removeEventListener('resize', handleReposition);
+        window.removeEventListener('scroll', handleReposition, true);
+      };
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+      if (
+        containerRef.current && !containerRef.current.contains(event.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(event.target)
+      ) {
         setIsOpen(false);
         setSearchQuery('');
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isOpen]);
 
   const filtered = materials.filter(m => {
     const q = searchQuery.toLowerCase().trim();
@@ -33,12 +69,15 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
   });
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', width: '100%', zIndex: isOpen ? 99999 : 1 }}>
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
       <div 
         onClick={() => {
           if (disabled) return;
+          if (!isOpen) {
+            updateCoords();
+            setSearchQuery('');
+          }
           setIsOpen(!isOpen);
-          if (!isOpen) setSearchQuery('');
         }}
         style={{
           display: 'flex',
@@ -109,26 +148,31 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         }} />
       </div>
 
-      {isOpen && !disabled && (
-        <div style={{
-          position: 'absolute',
-          top: 'calc(100% + 4px)',
-          left: 0,
-          width: 'max-content',
-          minWidth: '100%',
-          maxWidth: '360px',
-          border: '1.5px solid var(--border-color, #cbd5e1)',
-          borderRadius: '8px',
-          boxShadow: '0 12px 30px rgba(0, 0, 0, 0.22), 0 4px 10px rgba(0, 0, 0, 0.08)',
-          backgroundColor: 'var(--bg-primary, #ffffff)',
-          color: 'var(--text-main, #0f172a)',
-          zIndex: 999999,
-          padding: '8px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          boxSizing: 'border-box'
-        }}>
+      {isOpen && !disabled && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            ...(coords.isAbove
+              ? { bottom: `${window.innerHeight - coords.top + 4}px` }
+              : { top: `${coords.top}px` }),
+            left: `${coords.left}px`,
+            width: `${coords.width}px`,
+            maxWidth: 'calc(100vw - 24px)',
+            border: '1.5px solid var(--border-color, #cbd5e1)',
+            borderRadius: '8px',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.1)',
+            backgroundColor: 'var(--bg-primary, #ffffff)',
+            color: 'var(--text-main, #0f172a)',
+            zIndex: 9999999,
+            padding: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            boxSizing: 'border-box'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div style={{ position: 'relative', width: '100%' }}>
             <Search size={14} style={{
               position: 'absolute',
@@ -251,7 +295,8 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
               })
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -296,13 +341,18 @@ export default function MaterialIssueView({
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [returnError, setReturnError] = useState('');
-  const [issueMode, setIssueMode] = useState('initial'); // 'initial' or 'reissue'
+  const issueMode = 'initial';
   const [personName, setPersonName] = useState(currentUser?.name || '');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [printLog, setPrintLog] = useState(null);
-  const [auditTab, setAuditTab] = useState('by_lot'); // 'by_lot' or 'all_logs'
+  const [auditTab, setAuditTab] = useState('combined_audit'); // 'combined_audit', 'by_lot', or 'all_logs'
+  const [expandedAuditLots, setExpandedAuditLots] = useState({});
+  const toggleAuditLotExpand = (lotId) => {
+    setExpandedAuditLots(prev => ({ ...prev, [lotId]: !prev[lotId] }));
+  };
   const [selectedLotAuditDetail, setSelectedLotAuditDetail] = useState(null);
   const [printLotAudit, setPrintLotAudit] = useState(null);
+  const [isSnapshotBreakdownOpen, setIsSnapshotBreakdownOpen] = useState(false);
   // Print Preview (issue confirmation) modal
   const [previewIssue, setPreviewIssue] = useState(null); // { design, pieces, items, isReissue, personName }
   // Print prompt shown AFTER confirming issue
@@ -725,7 +775,7 @@ export default function MaterialIssueView({
       item.unit
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 115,
       head: [tableColumns],
       body: tableRows,
@@ -739,7 +789,7 @@ export default function MaterialIssueView({
     });
 
     // Signature Area
-    const finalY = doc.previousAutoTable.finalY + 40;
+    const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 40;
     doc.setFont('helvetica', 'normal');
     doc.line(14, finalY, 74, finalY);
     doc.text('Authorized Signatory (Issuer)', 14, finalY + 5);
@@ -801,33 +851,12 @@ export default function MaterialIssueView({
       design: selectedDesign,
       pieces,
       items: itemsToIssue,
-      isReissue: issueMode === 'reissue',
+      isReissue: false,
       personName: personName.trim(),
       date: dateStr
     };
 
-    if (!isAdmin && issueMode === 'reissue' && onSubmitApproval) {
-      // Normal user: submit for admin approval (only for re-issues/wastage)
-      onSubmitApproval('material_issue', {
-        lotId: selectedDesign.id,
-        category: selectedDesign.category,
-        pieces,
-        items: itemsToIssue,
-        isReissue: true,
-        personName: personName.trim()
-      }, currentUser);
-
-      setFormSuccess(`Your material re-issue request for Lot ${selectedDesign.id} has been submitted for Admin approval!`);
-      setSelectedDesignId('');
-      setSearchQuery('');
-      setPieces(100);
-      setBomMappings([]);
-      setPersonName(currentUser?.name || '');
-      setTimeout(() => setFormSuccess(''), 7000);
-    } else {
-      // Admin: show print preview directly
-      setPreviewIssue(issuePayload);
-    }
+    setPreviewIssue(issuePayload);
   };
 
   const handleConfirmIssue = () => {
@@ -888,9 +917,16 @@ export default function MaterialIssueView({
       entry.allLogs.push(log);
       const vol = Number(log.volume) || 0;
 
-      if (log.isReturn) {
+      const isReturn = !!log.isReturn;
+      const isReissue = !isReturn && (
+        log.isReissue === true ||
+        (log.id && (String(log.id).startsWith('RI') || String(log.id).startsWith('EMI'))) ||
+        (log.personName && String(log.personName).toLowerCase().includes('extra'))
+      );
+
+      if (isReturn) {
         entry.returnLogs.push(log);
-      } else if (log.isReissue) {
+      } else if (isReissue) {
         entry.reissuePieces += vol;
         entry.reissueLogs.push(log);
       } else {
@@ -915,9 +951,9 @@ export default function MaterialIssueView({
             };
           }
           const mQty = parseFloat(m.qty) || 0;
-          if (log.isReturn) {
+          if (isReturn) {
             entry.materialsSummary[key].returnedQty += mQty;
-          } else if (log.isReissue) {
+          } else if (isReissue) {
             entry.materialsSummary[key].reissueQty += mQty;
           } else {
             entry.materialsSummary[key].initialQty += mQty;
@@ -978,14 +1014,198 @@ export default function MaterialIssueView({
     }, 100);
   };
 
+  // Download PDF report for a Lot Audit with 3 Clear Sections (1st Time, Extra, Both Combined)
+  const handleDownloadLotAuditPdf = (lotAudit) => {
+    if (!lotAudit) return;
+    try {
+      const doc = new jsPDF();
+
+      // Top Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(30, 41, 59);
+      doc.text('MH ACCESSORIES & BOM STORE', 14, 16);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Garment Product Data Management System (G-PDMS) — Material Issue Audit', 14, 21);
+
+      // Header Banner
+      doc.setFillColor(79, 70, 229);
+      doc.roundedRect(14, 25, 182, 9, 2, 2, 'F');
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`COMBINED MATERIAL AUDIT REPORT — LOT ${lotAudit.lotId}`, 16, 31);
+
+      // Info Box
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 37, 182, 20, 2, 2, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Lot Number:', 18, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Lot ${lotAudit.lotId} ${lotAudit.design?.lotNo2 ? `(${lotAudit.design.lotNo2})` : ''}`, 42, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Garment Style:', 105, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${lotAudit.category} [${lotAudit.brand || 'Generic'}]`, 130, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('1st Time Volume:', 18, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(29, 78, 216);
+      doc.text(`${lotAudit.initialPieces.toLocaleString()} pcs (${lotAudit.initialLogs.length} vouchers)`, 45, 51);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('Extra Material Volume:', 105, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(220, 38, 38);
+      doc.text(`+${lotAudit.reissuePieces.toLocaleString()} pcs (${lotAudit.reissueLogs.length} vouchers)`, 140, 51);
+
+      doc.setTextColor(15, 23, 42);
+
+      // SECTION 1: 1st Time Issue Details
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(29, 78, 216);
+      doc.text('1. FIRST-TIME ISSUE DETAILS (INITIAL ALLOCATION)', 14, 63);
+
+      const initialRows = (lotAudit.initialLogs || []).map((l, idx) => [
+        idx + 1,
+        l.id,
+        l.date,
+        `${Number(l.volume || 0).toLocaleString()} pcs`,
+        `${l.personName || 'Store'}${l.receiverName ? ` -> ${l.receiverName}` : ''}`,
+        (l.materials || []).map(m => `${m.bomItemName || m.name}: ${m.qty} ${m.unit || 'pcs'}`).join(', ')
+      ]);
+
+      autoTable(doc, {
+        startY: 66,
+        head: [['#', 'Slip ID', 'Issue Date', 'Pieces', 'Issuer & Receiver', '1st Time Materials Dispatched']],
+        body: initialRows.length > 0 ? initialRows : [['—', '—', '—', '0 pcs', '—', 'No 1st-time issue records']],
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 7.5, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 22, fontStyle: 'bold' },
+          2: { cellWidth: 26 },
+          3: { cellWidth: 20, halign: 'right', fontStyle: 'bold' },
+          4: { cellWidth: 32 },
+          5: { cellWidth: 74 }
+        }
+      });
+
+      // SECTION 2: Extra Material Issue Details
+      let currentY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 90) + 7;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(220, 38, 38);
+      doc.text('2. EXTRA MATERIAL ISSUE DETAILS (WASTAGE & RE-ISSUES)', 14, currentY);
+
+      if (lotAudit.reissueLogs && lotAudit.reissueLogs.length > 0) {
+        const extraRows = lotAudit.reissueLogs.map((l, idx) => [
+          idx + 1,
+          l.id,
+          l.date,
+          `+${Number(l.volume || 0).toLocaleString()} pcs`,
+          l.materials && l.materials[0]?.reason ? l.materials[0].reason : 'Extra Material Requisition',
+          `${l.personName || 'Store'}${l.receiverName ? ` -> ${l.receiverName}` : ''}`,
+          (l.materials || []).map(m => `${m.bomItemName || m.name}: +${m.qty} ${m.unit || 'pcs'}`).join(', ')
+        ]);
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: [['#', 'Extra Slip ID', 'Issue Date', 'Extra Pcs', 'Reason / Cause', 'Issuer & Receiver', 'Extra Materials Issued']],
+          body: extraRows,
+          theme: 'grid',
+          headStyles: { fillColor: [220, 38, 38], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+          bodyStyles: { fontSize: 7.5, textColor: [15, 23, 42] },
+          columnStyles: {
+            0: { cellWidth: 8, halign: 'center' },
+            1: { cellWidth: 22, fontStyle: 'bold', textColor: [220, 38, 38] },
+            2: { cellWidth: 24 },
+            3: { cellWidth: 18, halign: 'right', fontStyle: 'bold' },
+            4: { cellWidth: 32 },
+            5: { cellWidth: 28 },
+            6: { cellWidth: 50 }
+          }
+        });
+        currentY = doc.lastAutoTable.finalY + 7;
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(22, 101, 52);
+        doc.text('  [OK] Zero Extra Material Issued for this lot. Production completed on 100% initial dispatch (0% wastage).', 14, currentY + 5);
+        currentY += 12;
+      }
+
+      // SECTION 3: Both Combined Details
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(79, 70, 229);
+      doc.text('3. BOTH COMBINED DETAILS (CONSOLIDATED SOURCING & NET DISPATCHED MATRIX)', 14, currentY);
+
+      const combinedRows = Object.values(lotAudit.materialsSummary || {}).map((m, idx) => {
+        const variance = m.initialQty > 0 ? `${((m.reissueQty / m.initialQty) * 100).toFixed(1)}%` : (m.reissueQty > 0 ? '100%' : '0%');
+        return [
+          idx + 1,
+          m.bomItemName,
+          m.materialName,
+          m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '0',
+          m.reissueQty > 0 ? `+${Number(m.reissueQty.toFixed(2))} ${m.unit}` : '0',
+          m.returnedQty > 0 ? `-${Number(m.returnedQty.toFixed(2))} ${m.unit}` : '0',
+          `${Number(m.totalIssuedQty.toFixed(2))} ${m.unit}`,
+          m.reissueQty > 0 ? `+${variance}` : 'Standard'
+        ];
+      });
+
+      autoTable(doc, {
+        startY: currentY + 3,
+        head: [['#', 'BOM Component', 'Inventory Item', '1st Time Qty', 'Extra Issue Qty', 'Returned', 'Combined Net Total', 'Variance %']],
+        body: combinedRows,
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 7.5, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 28, fontStyle: 'bold' },
+          2: { cellWidth: 42 },
+          3: { cellWidth: 22, halign: 'right', textColor: [29, 78, 216] },
+          4: { cellWidth: 24, halign: 'right', fontStyle: 'bold', textColor: [220, 38, 38] },
+          5: { cellWidth: 18, halign: 'right', textColor: [22, 101, 52] },
+          6: { cellWidth: 26, halign: 'right', fontStyle: 'bold', textColor: [79, 70, 229] },
+          7: { cellWidth: 14, halign: 'center' }
+        }
+      });
+
+      const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 180) + 16;
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.line(14, finalY, 65, finalY);
+      doc.text('Store Keeper (Issued)', 14, finalY + 4);
+
+      doc.line(75, finalY, 125, finalY);
+      doc.text('Cutting Master (Received)', 75, finalY + 4);
+
+      doc.line(135, finalY, 185, finalY);
+      doc.text('Supervisor / Admin (Audited)', 135, finalY + 4);
+
+      doc.save(`COMBINED_AUDIT_REPORT_LOT_${lotAudit.lotId}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate audit PDF:', err);
+      alert('Could not generate PDF audit report: ' + err.message);
+    }
+  };
+
   const handlePrintLotAudit = (lotAudit) => {
     setPrintLotAudit(lotAudit);
-    document.body.classList.add('print-lot-audit-mode');
-    setTimeout(() => {
-      window.print();
-      document.body.classList.remove('print-lot-audit-mode');
-      setPrintLotAudit(null);
-    }, 100);
   };
 
   return (
@@ -1017,72 +1237,11 @@ export default function MaterialIssueView({
           <div className="panel-header">
             <h3 className="panel-title">
               <ClipboardList size={18} className="text-accent" />
-              {issueMode === 'reissue' ? 'Re-issue Materials (Wastage/Missed)' : 'Start Production Batch'}
+              Start Production Batch
             </h3>
           </div>
 
           <form onSubmit={handleSubmit}>
-            {/* Issue Mode Toggle tabs */}
-            <div style={{
-              display: 'flex',
-              backgroundColor: 'var(--bg-primary)',
-              padding: '4px',
-              borderRadius: 'var(--border-radius-sm)',
-              border: '1px solid var(--border-color)',
-              marginBottom: '20px'
-            }}>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setIssueMode('initial');
-                  setSelectedDesignId('');
-                  setPieces(100);
-                  setFormError('');
-                }}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  borderRadius: '6px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  backgroundColor: issueMode === 'initial' ? 'var(--accent-color)' : 'transparent',
-                  color: issueMode === 'initial' ? '#ffffff' : 'var(--text-main)',
-                  transition: 'all 0.2s',
-                  boxShadow: 'none'
-                }}
-              >
-                First-Time Issue
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setIssueMode('reissue');
-                  setSelectedDesignId('');
-                  setPieces(10);
-                  setFormError('');
-                }}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  borderRadius: '6px',
-                  border: 'none',
-                  cursor: 'pointer',
-                  backgroundColor: issueMode === 'reissue' ? 'var(--accent-color)' : 'transparent',
-                  color: issueMode === 'reissue' ? '#ffffff' : 'var(--text-main)',
-                  transition: 'all 0.2s',
-                  boxShadow: 'none'
-                }}
-              >
-                Re-issue (Wastage/Missed)
-              </button>
-            </div>
-
             {formError && (
               <div style={{
                 color: 'var(--danger)',
@@ -1177,9 +1336,7 @@ export default function MaterialIssueView({
                         ) : (
                           filteredDesigns.map(design => {
                             const lotStatus = getLotIssueStatus(design);
-                            const isSelectionDisabled = issueMode === 'initial'
-                              ? lotStatus === 'completed'
-                              : lotStatus === 'ready';
+                            const isSelectionDisabled = lotStatus === 'completed';
                             const isSelected = String(design.id) === String(selectedDesignId);
 
                             return (
@@ -1225,37 +1382,23 @@ export default function MaterialIssueView({
                                     ({design.category}) &mdash; {design.brand || 'No Brand'}
                                   </span>
                                 </div>
-                                {issueMode === 'initial' ? (
-                                  <>
-                                    {lotStatus === 'completed' && (
-                                      <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                        Already Issued
-                                      </span>
-                                    )}
-                                    {lotStatus === 'in_process' && (
-                                      <span className="status-badge pending" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--warning-light)', color: 'var(--warning)' }}>
-                                        In Process
-                                      </span>
-                                    )}
-                                    {lotStatus === 'ready' && (
-                                      <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                        Ready
-                                      </span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <>
-                                    {lotStatus === 'ready' ? (
-                                      <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                        Not Issued Yet
-                                      </span>
-                                    ) : (
-                                      <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                        Ready to Re-issue
-                                      </span>
-                                    )}
-                                  </>
-                                )}
+                                <>
+                                  {lotStatus === 'completed' && (
+                                    <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                      Already Issued
+                                    </span>
+                                  )}
+                                  {lotStatus === 'in_process' && (
+                                    <span className="status-badge pending" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--warning-light)', color: 'var(--warning)' }}>
+                                      In Process
+                                    </span>
+                                  )}
+                                  {lotStatus === 'ready' && (
+                                    <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                      Ready
+                                    </span>
+                                  )}
+                                </>
                               </div>
                             );
                           })
@@ -1352,12 +1495,59 @@ export default function MaterialIssueView({
                   </div>
                 </div>
 
-                {issueMode === 'reissue' && pieces > 0 && (
-                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '600', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <TrendingUp size={13} />
-                    <span>Adding {pieces.toLocaleString()} pcs in this re-issue will bring total issued to {(selectedLotAudit.totalPieces + Number(pieces)).toLocaleString()} pcs.</span>
-                  </div>
-                )}
+                {/* 1st Time vs Extra Material Breakdown Toggle */}
+                <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsSnapshotBreakdownOpen(!isSnapshotBreakdownOpen)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      fontSize: '11px',
+                      color: 'var(--accent-color)',
+                      fontWeight: '700',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <ChevronDown size={13} style={{ transform: isSnapshotBreakdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                    <span>{isSnapshotBreakdownOpen ? 'Hide Material Breakdown' : 'Show 1st Time vs Extra Material Breakdown'}</span>
+                  </button>
+
+                  {isSnapshotBreakdownOpen && (
+                    <div style={{ marginTop: '8px', overflowX: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
+                            <th style={{ padding: '4px 6px' }}>BOM Component</th>
+                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>1st Issue</th>
+                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Extra Issue</th>
+                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Combined</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.values(selectedLotAudit.materialsSummary).map((mat, mIdx) => (
+                            <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '4px 6px', fontWeight: '600' }}>{mat.bomItemName}</td>
+                              <td style={{ padding: '4px 6px', textAlign: 'right', color: '#2563eb' }}>
+                                {mat.initialQty > 0 ? `${mat.initialQty} ${mat.unit}` : '—'}
+                              </td>
+                              <td style={{ padding: '4px 6px', textAlign: 'right', color: mat.reissueQty > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: mat.reissueQty > 0 ? '700' : 'normal' }}>
+                                {mat.reissueQty > 0 ? `+${mat.reissueQty} ${mat.unit}` : '0'}
+                              </td>
+                              <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: '800', color: 'var(--accent-color)' }}>
+                                {mat.totalIssuedQty} {mat.unit}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -1377,44 +1567,12 @@ export default function MaterialIssueView({
                 border: '1px solid rgba(239, 68, 68, 0.2)'
               }}>
                 <AlertTriangle size={16} />
-                <span>Materials already issued for Lot {selectedDesignId}. First-time issue is blocked. Select &quot;Re-issue&quot; mode above to add replacement/waste items.</span>
-              </div>
-            )}
-
-            {issueMode === 'reissue' && selectedDesignId && (
-              <div style={{
-                color: 'var(--warning)',
-                fontSize: '13px',
-                fontWeight: '600',
-                marginBottom: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 12px',
-                backgroundColor: 'var(--warning-light)',
-                borderRadius: '6px',
-                border: '1px solid rgba(245, 158, 11, 0.2)'
-              }}>
-                <AlertTriangle size={16} />
-                <span>Re-issuing materials for Lot {selectedDesignId} (Wastage / Replacement). Set unneeded items to 0 in the table.</span>
+                <span>Materials already issued for Lot {selectedDesignId}. First-time issue is completed. For additional materials, please use the &quot;Extra Material Issue&quot; tab.</span>
               </div>
             )}
 
             {selectedDesign && bomMappings.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
-                {/* Role indicator for non-admin users */}
-                {!isAdmin && issueMode === 'reissue' && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '8px',
-                    padding: '10px 12px', borderRadius: 'var(--border-radius-sm)',
-                    backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)',
-                    border: '1px solid rgba(99,102,241,0.2)', fontSize: '12px', fontWeight: '600',
-                    width: '100%'
-                  }}>
-                    <Shield size={14} />
-                    <span>As a non-admin user, your re-issue request will be sent to Admin for approval before materials are deducted.</span>
-                  </div>
-                )}
                 <button
                   type="submit"
                   className="btn"
@@ -1422,7 +1580,7 @@ export default function MaterialIssueView({
                     width: '100%', display: 'flex', justifyContent: 'center', gap: '8px',
                     padding: '12px 20px', fontWeight: '700', fontSize: '14px',
                     borderRadius: 'var(--border-radius-sm)', cursor: 'pointer', border: 'none',
-                    backgroundColor: (isAdmin || issueMode === 'initial') ? 'var(--accent-color)' : '#7c3aed',
+                    backgroundColor: 'var(--accent-color)',
                     color: '#fff', transition: 'opacity 0.2s',
                     opacity: (hasShortage || isSelectedDesignAlreadyIssued) ? 0.5 : 1
                   }}
@@ -1430,11 +1588,8 @@ export default function MaterialIssueView({
                   onMouseEnter={e => { if (!hasShortage && !isSelectedDesignAlreadyIssued) e.currentTarget.style.opacity = '0.88'; }}
                   onMouseLeave={e => e.currentTarget.style.opacity = (hasShortage || isSelectedDesignAlreadyIssued) ? '0.5' : '1'}
                 >
-                  {(isAdmin || issueMode === 'initial') ? (
-                    <><Layers size={16} /><span>{issueMode === 'reissue' ? 'Re-issue Materials' : 'Issue Materials for Batch'}</span></>
-                  ) : (
-                    <><Send size={16} /><span>Submit Re-issue for Approval</span></>
-                  )}
+                  <Layers size={16} />
+                  <span>Issue Materials for Batch</span>
                 </button>
               </div>
             )}
@@ -1686,6 +1841,37 @@ export default function MaterialIssueView({
               }}>
                 <button
                   type="button"
+                  onClick={() => setAuditTab('combined_audit')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: auditTab === 'combined_audit' ? 'var(--accent-color)' : 'transparent',
+                    color: auditTab === 'combined_audit' ? '#ffffff' : 'var(--text-main)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Layers size={13} />
+                  <span>Combined Audit (1st Time & Extra)</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    backgroundColor: auditTab === 'combined_audit' ? 'rgba(255,255,255,0.25)' : 'var(--bg-primary)',
+                    color: auditTab === 'combined_audit' ? '#ffffff' : 'var(--text-muted)'
+                  }}>
+                    {lotAuditSummary.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setAuditTab('by_lot')}
                   style={{
                     display: 'flex',
@@ -1703,7 +1889,7 @@ export default function MaterialIssueView({
                   }}
                 >
                   <BarChart3 size={13} />
-                  <span>By-Lot Audit Report</span>
+                  <span>By-Lot Summary</span>
                   <span style={{
                     fontSize: '10px',
                     padding: '1px 5px',
@@ -1749,12 +1935,41 @@ export default function MaterialIssueView({
             </div>
 
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div style={{ position: 'relative', width: '220px' }}>
+              {auditTab === 'combined_audit' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allExpanded = filteredLotAudits.length > 0 && filteredLotAudits.every(l => !!expandedAuditLots[l.lotId]);
+                    if (allExpanded) {
+                      setExpandedAuditLots({});
+                    } else {
+                      const nextMap = {};
+                      filteredLotAudits.forEach(l => { nextMap[l.lotId] = true; });
+                      setExpandedAuditLots(nextMap);
+                    }
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '32px', padding: '0 10px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap' }}
+                  title="Expand or collapse all lot audit cards"
+                >
+                  <ChevronDown
+                    size={14}
+                    style={{
+                      transform: (filteredLotAudits.length > 0 && filteredLotAudits.every(l => !!expandedAuditLots[l.lotId])) ? 'rotate(180deg)' : 'none',
+                      transition: 'transform 0.2s'
+                    }}
+                  />
+                  <span>
+                    {(filteredLotAudits.length > 0 && filteredLotAudits.every(l => !!expandedAuditLots[l.lotId])) ? 'Collapse All' : 'Expand All'}
+                  </span>
+                </button>
+              )}
+              <div style={{ position: 'relative', width: '230px' }}>
                 <input
                   type="text"
                   className="form-input"
                   style={{ height: '32px', fontSize: '13px', paddingLeft: '12px' }}
-                  placeholder={auditTab === 'by_lot' ? "🔍 Search lot or brand..." : "🔍 Search logs..."}
+                  placeholder={auditTab === 'all_logs' ? "🔍 Search logs..." : "🔍 Search lot, garment, material..."}
                   value={logSearchQuery}
                   onChange={(e) => setLogSearchQuery(e.target.value)}
                 />
@@ -1774,6 +1989,448 @@ export default function MaterialIssueView({
               )}
             </div>
           </div>
+
+          {/* TAB 1: Combined Audit Report (1st Time vs Extra Material Issue Matrix) */}
+          {auditTab === 'combined_audit' && (
+            <div>
+              {/* Aggregate KPI Strip */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                padding: '14px 16px',
+                backgroundColor: 'var(--bg-primary)',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <div style={{ padding: '10px 14px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Lots with Material Audit</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>
+                    {lotAuditSummary.length} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>Production Lots</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(37, 99, 235, 0.08)', borderRadius: '6px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '700', textTransform: 'uppercase' }}>1st Time Issue Volume</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#1d4ed8', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.initialPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>pieces</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.initialLogs.length, 0)} initial voucher slips
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(239, 68, 68, 0.08)', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: '700', textTransform: 'uppercase' }}>Extra Material Volume</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#b91c1c', marginTop: '2px' }}>
+                    +{lotAuditSummary.reduce((sum, l) => sum + l.reissuePieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>pieces</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.reissueLogs.length, 0)} extra requisition slips
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(99, 102, 241, 0.08)', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '700', textTransform: 'uppercase' }}>Total Combined Dispatched</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--accent-color)', marginTop: '2px' }}>
+                    {lotAuditSummary.reduce((sum, l) => sum + l.totalPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>total pieces</span>
+                  </div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Cumulative verified production
+                  </div>
+                </div>
+              </div>
+
+              {/* Combined Matrix Lot Cards List */}
+              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {filteredLotAudits.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                    {lotAuditSummary.length === 0 ? 'No material transactions recorded yet.' : 'No matching audit records found.'}
+                  </div>
+                ) : (
+                  filteredLotAudits.map((lotAudit) => {
+                    const materialsList = Object.values(lotAudit.materialsSummary || {});
+                    const hasReissues = lotAudit.reissuePieces > 0 || lotAudit.reissueLogs.length > 0;
+                    const isExpanded = !!expandedAuditLots[lotAudit.lotId]; // Default collapsed: only show full detail when user clicks Expand
+
+                    return (
+                      <div
+                        key={lotAudit.lotId}
+                        style={{
+                          backgroundColor: 'var(--bg-primary)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          boxShadow: 'var(--shadow-xs)',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {/* Lot Header Bar */}
+                        <div style={{
+                          padding: '12px 16px',
+                          backgroundColor: 'var(--bg-secondary)',
+                          borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>
+                                {lotAudit.lotId && lotAudit.lotId !== 'N/A' ? `Lot ${lotAudit.lotId}` : 'General / No Lot'}
+                              </strong>
+                              {lotAudit.design?.lotNo2 && (
+                                <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#4f46e5', fontWeight: '700' }}>
+                                  {lotAudit.design.lotNo2}
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                              • {lotAudit.category} {lotAudit.brand && lotAudit.brand !== '—' && `(${lotAudit.brand})`}
+                            </span>
+                            <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#4f46e5', fontWeight: '700' }}>
+                              {materialsList.length} BOM Components
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            {/* Comparison Pills */}
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '11.5px' }}>
+                              <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: 'rgba(37, 99, 235, 0.1)', color: '#1d4ed8', fontWeight: '700' }}>
+                                1st Time: {lotAudit.initialPieces.toLocaleString()} pcs
+                              </span>
+                              <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: hasReissues ? 'rgba(239, 68, 68, 0.12)' : 'var(--bg-primary)', color: hasReissues ? '#dc2626' : 'var(--text-muted)', fontWeight: '700' }}>
+                                Extra: {hasReissues ? `+${lotAudit.reissuePieces.toLocaleString()} pcs` : '0 pcs'}
+                              </span>
+                              <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#4f46e5', fontWeight: '800' }}>
+                                Combined: {lotAudit.totalPieces.toLocaleString()} pcs
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => toggleAuditLotExpand(lotAudit.lotId)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                            >
+                              <ChevronDown size={13} style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                              <span>{isExpanded ? 'Collapse' : 'Expand'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => setSelectedLotAuditDetail(lotAudit)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                              title="Open Full Audit Trail Modal"
+                            >
+                              <Eye size={12} />
+                              <span>Slips & Details</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-primary btn-xs"
+                              onClick={() => handlePrintLotAudit(lotAudit)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                              title="Print Formal Audit Slip"
+                            >
+                              <Printer size={12} />
+                              <span>Print Audit</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-xs"
+                              onClick={() => handleDownloadLotAuditPdf(lotAudit)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                              title="Download Combined Audit PDF"
+                            >
+                              <FileText size={12} />
+                              <span>PDF</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 3 Sequential Sections: 1st Time Issue -> Extra Issue -> Both Combined */}
+                        {isExpanded && (
+                          <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                            
+                            {/* 1. FIRST-TIME ISSUE DETAILS (GOOD / INITIAL ALLOCATION) */}
+                            <div style={{ borderRadius: '6px', border: '1px solid #bfdbfe', overflow: 'hidden' }}>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 12px',
+                                backgroundColor: '#eff6ff',
+                                borderBottom: '1px solid #bfdbfe',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                color: '#1e40af'
+                              }}>
+                                <span>1. FIRST-TIME ISSUE DETAILS (GOOD / INITIAL ALLOCATION)</span>
+                                <span style={{ fontSize: '11px', fontWeight: '700', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '10px' }}>
+                                  {lotAudit.initialPieces.toLocaleString()} Pcs • {lotAudit.initialLogs.length} Slip(s)
+                                </span>
+                              </div>
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
+                                      <th style={{ padding: '7px 10px', width: '30px' }}>#</th>
+                                      <th style={{ padding: '7px 10px', width: '110px' }}>Slip ID</th>
+                                      <th style={{ padding: '7px 10px', width: '130px' }}>Issue Date</th>
+                                      <th style={{ padding: '7px 10px', textAlign: 'right', width: '90px' }}>Pieces</th>
+                                      <th style={{ padding: '7px 10px', width: '150px' }}>Issuer &amp; Receiver</th>
+                                      <th style={{ padding: '7px 10px' }}>First-Time Dispatched Materials</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {lotAudit.initialLogs.length === 0 ? (
+                                      <tr>
+                                        <td colSpan="6" style={{ padding: '10px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                          No initial issue slip recorded for this lot.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      lotAudit.initialLogs.map((l, lIdx) => (
+                                        <tr key={lIdx} style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: lIdx % 2 === 0 ? 'transparent' : 'rgba(0,0,0,0.015)' }}>
+                                          <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{lIdx + 1}</td>
+                                          <td style={{ padding: '7px 10px', fontWeight: '700', fontFamily: 'monospace', color: '#2563eb' }}>{l.id}</td>
+                                          <td style={{ padding: '7px 10px' }}>{l.date}</td>
+                                          <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '700', color: 'var(--text-main)' }}>
+                                            {Number(l.volume || 0).toLocaleString()} pcs
+                                          </td>
+                                          <td style={{ padding: '7px 10px' }}>
+                                            {l.personName || 'Store'}{l.receiverName ? ` → ${l.receiverName}` : ''}
+                                          </td>
+                                          <td style={{ padding: '7px 10px' }}>
+                                            {(l.materials || []).map((m, mIdx) => (
+                                              <span key={mIdx} style={{ marginRight: '8px', display: 'inline-block' }}>
+                                                {m.bomItemName || m.name}: <strong style={{ color: 'var(--text-main)' }}>{m.qty} {m.unit || 'pcs'}</strong>{mIdx < l.materials.length - 1 ? ',' : ''}
+                                              </span>
+                                            ))}
+                                          </td>
+                                        </tr>
+                                      ))
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* 2. EXTRA MATERIAL ISSUE DETAILS (WASTAGE & RE-ISSUES) */}
+                            <div style={{
+                              borderRadius: '6px',
+                              border: `1px solid ${lotAudit.reissueLogs.length > 0 ? '#fecaca' : '#bbf7d0'}`,
+                              overflow: 'hidden'
+                            }}>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 12px',
+                                backgroundColor: lotAudit.reissueLogs.length > 0 ? '#fef2f2' : '#f0fdf4',
+                                borderBottom: `1px solid ${lotAudit.reissueLogs.length > 0 ? '#fecaca' : '#bbf7d0'}`,
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                color: lotAudit.reissueLogs.length > 0 ? '#991b1b' : '#166534'
+                              }}>
+                                <span>2. EXTRA MATERIAL ISSUE DETAILS (WASTAGE &amp; RE-ISSUES)</span>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  backgroundColor: lotAudit.reissueLogs.length > 0 ? '#fee2e2' : '#dcfce7',
+                                  color: lotAudit.reissueLogs.length > 0 ? '#b91c1c' : '#15803d',
+                                  padding: '2px 8px',
+                                  borderRadius: '10px'
+                                }}>
+                                  {lotAudit.reissueLogs.length > 0
+                                    ? `+${lotAudit.reissuePieces.toLocaleString()} Pcs • ${lotAudit.reissueLogs.length} Extra Slip(s)`
+                                    : '0 Extra Pcs • Zero Wastage'}
+                                </span>
+                              </div>
+                              {lotAudit.reissueLogs.length === 0 ? (
+                                <div style={{
+                                  padding: '12px 14px',
+                                  backgroundColor: '#f0fdf4',
+                                  color: '#166534',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px'
+                                }}>
+                                  <CheckCircle size={16} style={{ color: '#16a34a' }} />
+                                  <span>Zero Extra Material Issued — Standard 1st-Time Issue (0% Extra Wastage). All production pieces completed within original initial dispatch.</span>
+                                </div>
+                              ) : (
+                                <div style={{ overflowX: 'auto' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                                    <thead>
+                                      <tr style={{ backgroundColor: '#fff5f5', borderBottom: '1px solid #fecaca', textAlign: 'left' }}>
+                                        <th style={{ padding: '7px 10px', width: '30px' }}>#</th>
+                                        <th style={{ padding: '7px 10px', width: '110px' }}>Extra Slip ID</th>
+                                        <th style={{ padding: '7px 10px', width: '130px' }}>Issue Date</th>
+                                        <th style={{ padding: '7px 10px', textAlign: 'right', width: '90px' }}>Extra Pcs</th>
+                                        <th style={{ padding: '7px 10px', width: '150px' }}>Reason / Cause</th>
+                                        <th style={{ padding: '7px 10px', width: '150px' }}>Issuer &amp; Receiver</th>
+                                        <th style={{ padding: '7px 10px' }}>Extra Dispatched Materials</th>
+                                        <th style={{ padding: '7px 10px', width: '60px', textAlign: 'center' }}>Slip</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {lotAudit.reissueLogs.map((rLog, rIdx) => (
+                                        <tr key={rIdx} style={{ borderBottom: '1px solid #fee2e2', backgroundColor: rIdx % 2 === 0 ? 'transparent' : 'rgba(239, 68, 68, 0.02)' }}>
+                                          <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{rIdx + 1}</td>
+                                          <td style={{ padding: '7px 10px', fontWeight: '700', fontFamily: 'monospace', color: '#dc2626' }}>{rLog.id}</td>
+                                          <td style={{ padding: '7px 10px' }}>{rLog.date}</td>
+                                          <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '700', color: '#b91c1c' }}>
+                                            +{Number(rLog.volume || 0).toLocaleString()} pcs
+                                          </td>
+                                          <td style={{ padding: '7px 10px', fontWeight: '600', color: '#7f1d1d' }}>
+                                            {rLog.materials && rLog.materials[0]?.reason ? rLog.materials[0].reason : 'Extra Material Requisition'}
+                                          </td>
+                                          <td style={{ padding: '7px 10px' }}>
+                                            {rLog.personName || 'Store'}{rLog.receiverName ? ` → ${rLog.receiverName}` : ''}
+                                          </td>
+                                          <td style={{ padding: '7px 10px' }}>
+                                            {(rLog.materials || []).map((m, mIdx) => (
+                                              <span key={mIdx} style={{ marginRight: '8px', display: 'inline-block' }}>
+                                                {m.bomItemName || m.name}: <strong style={{ color: '#b91c1c' }}>+{m.qty} {m.unit || 'pcs'}</strong>{mIdx < rLog.materials.length - 1 ? ',' : ''}
+                                              </span>
+                                            ))}
+                                          </td>
+                                          <td style={{ padding: '7px 10px', textAlign: 'center' }}>
+                                            <button
+                                              type="button"
+                                              onClick={() => handlePrintSingleLog(rLog)}
+                                              className="btn btn-secondary btn-xs"
+                                              style={{ padding: '2px 6px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                              title="Reprint Slip"
+                                            >
+                                              <Printer size={11} />
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 3. BOTH DETAILS COMBINED (CONSOLIDATED SOURCING & DISPATCHED MATRIX) */}
+                            <div style={{ borderRadius: '6px', border: '1px solid #c7d2fe', overflow: 'hidden' }}>
+                              <div style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                padding: '8px 12px',
+                                backgroundColor: '#eef2ff',
+                                borderBottom: '1px solid #c7d2fe',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                color: '#3730a3'
+                              }}>
+                                <span>3. BOTH DETAILS COMBINED (CONSOLIDATED SOURCING &amp; DISPATCHED MATRIX)</span>
+                                <span style={{ fontSize: '11px', fontWeight: '700', backgroundColor: '#e0e7ff', color: '#4338ca', padding: '2px 8px', borderRadius: '10px' }}>
+                                  Combined Total: {lotAudit.totalPieces.toLocaleString()} Pcs Net
+                                </span>
+                              </div>
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                  <thead>
+                                    <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1.5px solid var(--border-color)', textAlign: 'left' }}>
+                                      <th style={{ padding: '8px 10px', width: '30px' }}>#</th>
+                                      <th style={{ padding: '8px 10px' }}>BOM Component</th>
+                                      <th style={{ padding: '8px 10px' }}>Mapped Material</th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'right', backgroundColor: 'rgba(37, 99, 235, 0.05)', color: '#1d4ed8' }}>
+                                        1st Time Issue Qty
+                                      </th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'right', backgroundColor: 'rgba(239, 68, 68, 0.05)', color: '#dc2626' }}>
+                                        Extra Issue Qty
+                                      </th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)' }}>
+                                        Returned Qty
+                                      </th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'right', backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#4f46e5', fontWeight: '800' }}>
+                                        Combined Total Net
+                                      </th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                        Variance / Status
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {materialsList.length === 0 ? (
+                                      <tr>
+                                        <td colSpan={8} style={{ padding: '14px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                          No material details recorded for this lot.
+                                        </td>
+                                      </tr>
+                                    ) : (
+                                      materialsList.map((m, mIdx) => {
+                                        const variancePercent = m.initialQty > 0 ? ((m.reissueQty / m.initialQty) * 100).toFixed(1) : (m.reissueQty > 0 ? '100.0' : '0.0');
+                                        const hasExtra = m.reissueQty > 0;
+
+                                        return (
+                                          <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background-color 0.15s' }}>
+                                            <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{mIdx + 1}</td>
+                                            <td style={{ padding: '8px 10px', fontWeight: '700', color: 'var(--text-main)' }}>
+                                              {m.bomItemName}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', color: 'var(--text-main)' }}>
+                                              {m.materialName}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700', color: '#1d4ed8', backgroundColor: 'rgba(37, 99, 235, 0.02)' }}>
+                                              {m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '—'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700', color: hasExtra ? '#dc2626' : 'var(--text-muted)', backgroundColor: 'rgba(239, 68, 68, 0.02)' }}>
+                                              {hasExtra ? (
+                                                <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: 'rgba(239, 68, 68, 0.1)' }}>
+                                                  +{Number(m.reissueQty.toFixed(2))} {m.unit}
+                                                </span>
+                                              ) : (
+                                                '0'
+                                              )}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', color: m.returnedQty > 0 ? '#059669' : 'var(--text-muted)' }}>
+                                              {m.returnedQty > 0 ? `-${Number(m.returnedQty.toFixed(2))} ${m.unit}` : '0'}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '800', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.05)' }}>
+                                              {Number(m.totalIssuedQty.toFixed(2))} {m.unit}
+                                            </td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                                              {hasExtra ? (
+                                                <span style={{ fontSize: '10.5px', fontWeight: '700', padding: '1px 6px', borderRadius: '10px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#dc2626' }}>
+                                                  +{variancePercent}% Extra
+                                                </span>
+                                              ) : (
+                                                <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: '600' }}>
+                                                  Standard 1st Issue
+                                                </span>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })
+                                    )}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: By-Lot Audit Report */}
           {auditTab === 'by_lot' && (
@@ -1845,7 +2502,8 @@ export default function MaterialIssueView({
                         const hasReturns = lotAudit.returnLogs.length > 0;
 
                         return (
-                          <tr key={lotAudit.lotId}>
+                          <React.Fragment key={lotAudit.lotId}>
+                            <tr>
                             <td>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <strong style={{ fontSize: '13px' }}>
@@ -1935,6 +2593,16 @@ export default function MaterialIssueView({
                                 <button
                                   type="button"
                                   className="btn btn-secondary btn-xs"
+                                  onClick={() => toggleAuditLotExpand(lotAudit.lotId)}
+                                  style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title="Toggle Combined Material Matrix"
+                                >
+                                  <Layers size={12} />
+                                  <span>{expandedAuditLots[lotAudit.lotId] ? 'Hide Materials' : 'Materials'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-xs"
                                   onClick={() => setSelectedLotAuditDetail(lotAudit)}
                                   style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                                   title="View full audit trail, comparison and material breakdown"
@@ -1952,9 +2620,68 @@ export default function MaterialIssueView({
                                   <Printer size={12} />
                                   <span>Print Audit</span>
                                 </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-xs"
+                                  onClick={() => handleDownloadLotAuditPdf(lotAudit)}
+                                  style={{ padding: '4px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title="Download Combined Audit PDF"
+                                >
+                                  <FileText size={12} />
+                                  <span>PDF</span>
+                                </button>
                               </div>
                             </td>
                           </tr>
+                          {expandedAuditLots[lotAudit.lotId] && (
+                            <tr key={lotAudit.lotId + '-expanded'}>
+                              <td colSpan="7" style={{ backgroundColor: 'var(--bg-secondary)', padding: '12px 16px' }}>
+                                <div style={{ backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)', overflow: 'hidden' }}>
+                                  <div style={{ padding: '8px 12px', backgroundColor: 'rgba(99, 102, 241, 0.08)', fontWeight: '700', fontSize: '12px', color: 'var(--text-main)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>Combined Material Dispatched Matrix — Lot {lotAudit.lotId}</span>
+                                    <div style={{ display: 'flex', gap: '10px', fontSize: '11px' }}>
+                                      <span style={{ color: '#2563eb' }}>1st Time: {lotAudit.initialPieces.toLocaleString()} pcs</span>
+                                      <span style={{ color: '#dc2626' }}>Extra: +{lotAudit.reissuePieces.toLocaleString()} pcs</span>
+                                      <span style={{ color: '#059669', fontWeight: '800' }}>Combined: {lotAudit.totalPieces.toLocaleString()} pcs</span>
+                                    </div>
+                                  </div>
+                                  <table style={{ width: '100%', fontSize: '11.5px', borderCollapse: 'collapse' }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', textAlign: 'left' }}>
+                                        <th style={{ padding: '6px 10px' }}>BOM Component</th>
+                                        <th style={{ padding: '6px 10px' }}>Inventory Material</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', color: '#1d4ed8' }}>1st Issue Qty</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', color: '#dc2626' }}>Extra Issue Qty</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right' }}>Returned Qty</th>
+                                        <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#4f46e5' }}>Combined Net Total</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {Object.values(lotAudit.materialsSummary || {}).map((m, mIdx) => (
+                                        <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                          <td style={{ padding: '6px 10px', fontWeight: '700' }}>{m.bomItemName}</td>
+                                          <td style={{ padding: '6px 10px' }}>{m.materialName}</td>
+                                          <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '600', color: '#1d4ed8' }}>
+                                            {m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '—'}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '600', color: m.reissueQty > 0 ? '#dc2626' : 'var(--text-muted)' }}>
+                                            {m.reissueQty > 0 ? `+${Number(m.reissueQty.toFixed(2))} ${m.unit}` : '0'}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', textAlign: 'right', color: m.returnedQty > 0 ? '#059669' : 'var(--text-muted)' }}>
+                                            {m.returnedQty > 0 ? `-${Number(m.returnedQty.toFixed(2))} ${m.unit}` : '0'}
+                                          </td>
+                                          <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#4f46e5' }}>
+                                            {Number(m.totalIssuedQty.toFixed(2))} {m.unit}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         );
                       })
                     )}
@@ -3002,31 +3729,46 @@ export default function MaterialIssueView({
                       <tr>
                         <th>BOM Component</th>
                         <th>Inventory Material Name</th>
-                        <th style={{ textAlign: 'right' }}>Initial Issue Qty</th>
-                        <th style={{ textAlign: 'right' }}>Re-issue Qty</th>
-                        <th style={{ textAlign: 'right' }}>Returned Qty</th>
-                        <th style={{ textAlign: 'right', backgroundColor: 'rgba(99, 102, 241, 0.08)' }}>Total Net Issued</th>
+                        <th style={{ textAlign: 'right', backgroundColor: 'rgba(37, 99, 235, 0.08)', color: '#1d4ed8' }}>1st Time Issue (Initial)</th>
+                        <th style={{ textAlign: 'right', backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#dc2626' }}>Extra Material Issue</th>
+                        <th style={{ textAlign: 'right', color: 'var(--text-muted)' }}>Returned Qty</th>
+                        <th style={{ textAlign: 'right', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#4f46e5', fontWeight: '800' }}>Combined Net Total</th>
+                        <th style={{ textAlign: 'center' }}>Extra % Ratio</th>
                         <th>Unit</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.values(selectedLotAuditDetail.materialsSummary).map((mat, idx) => (
-                        <tr key={idx}>
-                          <td style={{ fontWeight: '600' }}>{mat.bomItemName}</td>
-                          <td>{mat.materialName}</td>
-                          <td style={{ textAlign: 'right' }}>{mat.initialQty > 0 ? Number(mat.initialQty.toFixed(2)) : '0'}</td>
-                          <td style={{ textAlign: 'right', color: mat.reissueQty > 0 ? 'var(--warning)' : 'inherit', fontWeight: mat.reissueQty > 0 ? '700' : 'normal' }}>
-                            {mat.reissueQty > 0 ? `+${Number(mat.reissueQty.toFixed(2))}` : '0'}
-                          </td>
-                          <td style={{ textAlign: 'right', color: mat.returnedQty > 0 ? 'var(--success)' : 'inherit' }}>
-                            {mat.returnedQty > 0 ? `-${Number(mat.returnedQty.toFixed(2))}` : '0'}
-                          </td>
-                          <td style={{ textAlign: 'right', fontWeight: '800', color: 'var(--accent-color)', backgroundColor: 'rgba(99, 102, 241, 0.04)' }}>
-                            {Number(mat.totalIssuedQty.toFixed(2))}
-                          </td>
-                          <td>{mat.unit}</td>
-                        </tr>
-                      ))}
+                      {Object.values(selectedLotAuditDetail.materialsSummary).map((mat, idx) => {
+                        const variancePercent = mat.initialQty > 0 ? ((mat.reissueQty / mat.initialQty) * 100).toFixed(1) : (mat.reissueQty > 0 ? '100.0' : '0.0');
+                        return (
+                          <tr key={idx}>
+                            <td style={{ fontWeight: '700' }}>{mat.bomItemName}</td>
+                            <td>{mat.materialName}</td>
+                            <td style={{ textAlign: 'right', fontWeight: '700', color: '#1d4ed8', backgroundColor: 'rgba(37, 99, 235, 0.02)' }}>
+                              {mat.initialQty > 0 ? Number(mat.initialQty.toFixed(2)) : '0'}
+                            </td>
+                            <td style={{ textAlign: 'right', color: mat.reissueQty > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: mat.reissueQty > 0 ? '700' : 'normal', backgroundColor: 'rgba(239, 68, 68, 0.02)' }}>
+                              {mat.reissueQty > 0 ? `+${Number(mat.reissueQty.toFixed(2))}` : '0'}
+                            </td>
+                            <td style={{ textAlign: 'right', color: mat.returnedQty > 0 ? '#059669' : 'inherit' }}>
+                              {mat.returnedQty > 0 ? `-${Number(mat.returnedQty.toFixed(2))}` : '0'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: '800', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.06)' }}>
+                              {Number(mat.totalIssuedQty.toFixed(2))}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {mat.reissueQty > 0 ? (
+                                <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '4px', backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', fontWeight: '700' }}>
+                                  +{variancePercent}%
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '10px', color: '#059669' }}>0% Extra</span>
+                              )}
+                            </td>
+                            <td style={{ fontWeight: '600', color: 'var(--text-muted)' }}>{mat.unit}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -3065,141 +3807,404 @@ export default function MaterialIssueView({
       )}
 
       {/* ============================================================
-           PRINTABLE LOT AUDIT REPORT SLIP (Visible during print media)
+           PRINTABLE LOT AUDIT REPORT MODAL & PRINT SLIP
           ============================================================ */}
       {printLotAudit && (
-        <div className="lot-audit-print-slip">
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', flex: 1, justifyContent: 'space-between' }}>
-            <div>
-              {/* Slip Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>G-PDMS Secure Systems</h2>
-                  <span style={{ fontSize: '11px', color: '#555' }}>Garment Product Data Management System</span>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                    Lot Material Issue &amp; Re-issue Audit Report
-                  </h3>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold' }}>
-                    Audit Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
-                  </span>
-                </div>
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.65)',
+          zIndex: 999999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            color: '#0f172a',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '920px',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '14px 20px',
+              backgroundColor: '#1e293b',
+              color: '#ffffff'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Printer size={18} style={{ color: '#818cf8' }} />
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700' }}>
+                  Lot Material Issue &amp; Re-issue Audit Voucher — Lot {printLotAudit.lotId}
+                </h3>
               </div>
-
-              {/* Lot & Pieces Audit Verification Summary Box */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '12px', border: '2px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '11px', backgroundColor: '#fcfcfc' }}>
-                <div>
-                  <div><strong>Lot Number:</strong> Lot {printLotAudit.lotId}</div>
-                  <div><strong>Garment Category:</strong> {printLotAudit.category}</div>
-                  <div><strong>Brand:</strong> {printLotAudit.brand || '—'}</div>
-                </div>
-                <div>
-                  <div><strong>Initial Issue Pieces:</strong> {printLotAudit.initialPieces.toLocaleString()} units</div>
-                  <div><strong>Re-issued Pieces (Wastage):</strong> {printLotAudit.reissuePieces.toLocaleString()} units</div>
-                  <div><strong>Total Issue Slips:</strong> {printLotAudit.allLogs.length} transactions</div>
-                </div>
-                <div style={{ borderLeft: '1px solid #000', paddingLeft: '12px' }}>
-                  <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#555' }}>Total Audited Pieces Issued</div>
-                  <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#000', marginTop: '2px' }}>
-                    {printLotAudit.totalPieces.toLocaleString()} units
-                  </div>
-                  <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
-                    ({printLotAudit.initialPieces.toLocaleString()} initial + {printLotAudit.reissuePieces.toLocaleString()} re-issue)
-                  </div>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    document.body.classList.add('print-lot-audit-mode');
+                    window.print();
+                    setTimeout(() => {
+                      document.body.classList.remove('print-lot-audit-mode');
+                    }, 1000);
+                  }}
+                  className="btn btn-primary btn-sm"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    backgroundColor: '#6366f1',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Printer size={14} />
+                  <span>Print Slip</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadLotAuditPdf(printLotAudit)}
+                  className="btn btn-secondary btn-sm"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    backgroundColor: '#334155',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    border: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <FileText size={14} />
+                  <span>Download PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintLotAudit(null)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#94a3b8',
+                    cursor: 'pointer',
+                    fontSize: '22px',
+                    marginLeft: '8px',
+                    lineHeight: 1
+                  }}
+                >
+                  &times;
+                </button>
               </div>
-
-              {/* SECTION 1: Detailed Issues & Re-issues Breakdown Table */}
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
-                1. Chronological Issues &amp; Re-issues Transaction Log
-              </h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '16px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>#</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Slip ID</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Type</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Date &amp; Time</th>
-                    <th style={{ textAlign: 'right', padding: '5px' }}>Pieces</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Issuer (Person)</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Dispatched Materials Breakdown</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {printLotAudit.allLogs.map((log, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                      <td style={{ padding: '5px' }}>{idx + 1}</td>
-                      <td style={{ padding: '5px', fontWeight: 'bold' }}>{log.id}</td>
-                      <td style={{ padding: '5px' }}>
-                        {log.isReturn ? 'Return' : log.isReissue ? 'Re-issue' : 'Initial Issue'}
-                      </td>
-                      <td style={{ padding: '5px' }}>{log.date}</td>
-                      <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>
-                        {log.isReturn ? '—' : `${Number(log.volume).toLocaleString()} pcs`}
-                      </td>
-                      <td style={{ padding: '5px' }}>{log.personName || 'System'}</td>
-                      <td style={{ padding: '5px' }}>
-                        {log.materials && log.materials.map((m, mIdx) => (
-                          <span key={mIdx} style={{ marginRight: '6px' }}>
-                            {m.bomItemName ? `${m.bomItemName}: ` : ''}<strong>{m.qty} {m.unit}</strong>{mIdx < log.materials.length - 1 ? ',' : ''}
-                          </span>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* SECTION 2: Consolidated Material Consumption Breakdown */}
-              <h4 style={{ margin: '0 0 6px 0', fontSize: '11px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '3px' }}>
-                2. Consolidated Material Sourcing &amp; Net Dispatched Matrix
-              </h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '20px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>BOM Component</th>
-                    <th style={{ textAlign: 'left', padding: '5px' }}>Inventory Material Name</th>
-                    <th style={{ textAlign: 'right', padding: '5px' }}>Initial Qty</th>
-                    <th style={{ textAlign: 'right', padding: '5px' }}>Re-issue Qty</th>
-                    <th style={{ textAlign: 'right', padding: '5px' }}>Returned Qty</th>
-                    <th style={{ textAlign: 'right', padding: '5px', fontWeight: 'bold' }}>Total Net Issued</th>
-                    <th style={{ textAlign: 'left', padding: '5px', paddingLeft: '8px' }}>Unit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.values(printLotAudit.materialsSummary).map((mat, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                      <td style={{ padding: '5px', fontWeight: 'bold' }}>{mat.bomItemName}</td>
-                      <td style={{ padding: '5px' }}>{mat.materialName}</td>
-                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.initialQty > 0 ? Number(mat.initialQty.toFixed(2)) : '0'}</td>
-                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.reissueQty > 0 ? `+${Number(mat.reissueQty.toFixed(2))}` : '0'}</td>
-                      <td style={{ padding: '5px', textAlign: 'right' }}>{mat.returnedQty > 0 ? `-${Number(mat.returnedQty.toFixed(2))}` : '0'}</td>
-                      <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{Number(mat.totalIssuedQty.toFixed(2))}</td>
-                      <td style={{ padding: '5px', paddingLeft: '8px' }}>{mat.unit}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             </div>
 
-            {/* Signature Block - pinned at bottom */}
-            <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '16px' }}>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '36px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Issued By (Store In-charge)</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '36px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Verified By (Production Supervisor)</div>
-                </div>
-                <div style={{ textAlign: 'center' }}>
-                  <div style={{ height: '36px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
-                  <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Audited &amp; Approved By (Admin)</div>
+            {/* Modal Body with Printable Area */}
+            <div style={{ padding: '24px', overflowY: 'auto', flex: 1, backgroundColor: '#ffffff' }}>
+              <div className="lot-audit-print-slip" style={{ display: 'block' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '100%', flex: 1, justifyContent: 'space-between' }}>
+                  <div>
+                    {/* Slip Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '14px' }}>
+                      <div>
+                        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>MH ACCESSORIES &amp; BOM STORE</h2>
+                        <span style={{ fontSize: '11px', color: '#555' }}>Garment Product Data Management System (G-PDMS)</span>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', textTransform: 'uppercase', color: '#4f46e5' }}>
+                          Lot Material Issue &amp; Re-issue Audit Report
+                        </h3>
+                        <span style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                          Audit Date: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Lot & Pieces Audit Verification Summary Box */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', padding: '12px', border: '2px solid #000', borderRadius: '4px', marginBottom: '16px', fontSize: '11px', backgroundColor: '#fcfcfc' }}>
+                      <div>
+                        <div><strong>Lot Number:</strong> Lot {printLotAudit.lotId}</div>
+                        <div><strong>Garment Category:</strong> {printLotAudit.category}</div>
+                        <div><strong>Brand:</strong> {printLotAudit.brand || '—'}</div>
+                      </div>
+                      <div>
+                        <div><strong>Initial Issue Pieces:</strong> {printLotAudit.initialPieces.toLocaleString()} units</div>
+                        <div><strong>Re-issued Pieces (Wastage):</strong> {printLotAudit.reissuePieces.toLocaleString()} units</div>
+                        <div><strong>Total Issue Slips:</strong> {printLotAudit.allLogs.length} transactions</div>
+                      </div>
+                      <div style={{ borderLeft: '1px solid #000', paddingLeft: '12px' }}>
+                        <div style={{ fontSize: '10px', textTransform: 'uppercase', color: '#555' }}>Total Audited Pieces Issued</div>
+                        <div style={{ fontSize: '16px', fontWeight: 'bold', color: '#000', marginTop: '2px' }}>
+                          {printLotAudit.totalPieces.toLocaleString()} units
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#666', marginTop: '2px' }}>
+                          ({printLotAudit.initialPieces.toLocaleString()} initial + {printLotAudit.reissuePieces.toLocaleString()} re-issue)
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 1. FIRST-TIME ISSUE DETAILS (INITIAL ALLOCATION) */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 10px',
+                        backgroundColor: '#eff6ff',
+                        borderLeft: '4px solid #2563eb',
+                        borderTop: '1px solid #bfdbfe',
+                        borderRight: '1px solid #bfdbfe',
+                        borderBottom: '1px solid #bfdbfe',
+                        borderRadius: '4px 4px 0 0',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        color: '#1e40af'
+                      }}>
+                        <span>1. FIRST-TIME ISSUE DETAILS (GOOD / INITIAL ALLOCATION)</span>
+                        <span style={{ fontSize: '10.5px', fontWeight: '700', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '1px 8px', borderRadius: '10px' }}>
+                          {printLotAudit.initialPieces.toLocaleString()} Pcs • {printLotAudit.initialLogs.length} Slip(s)
+                        </span>
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', border: '1px solid #bfdbfe', borderTop: 'none' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1.5px solid #cbd5e1' }}>
+                            <th style={{ padding: '5px 8px', textAlign: 'center', width: '25px' }}>#</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', width: '100px' }}>Slip ID</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', width: '120px' }}>Issue Date</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', width: '80px' }}>Pieces</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', width: '120px' }}>Issuer & Receiver</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left' }}>First-Time Dispatched Materials</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {printLotAudit.initialLogs.length === 0 ? (
+                            <tr>
+                              <td colSpan="6" style={{ padding: '8px', textAlign: 'center', color: '#64748b' }}>No initial issue slip recorded for this lot.</td>
+                            </tr>
+                          ) : (
+                            printLotAudit.initialLogs.map((l, lIdx) => (
+                              <tr key={lIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: lIdx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                                <td style={{ padding: '5px 8px', textAlign: 'center' }}>{lIdx + 1}</td>
+                                <td style={{ padding: '5px 8px', fontWeight: '700', fontFamily: 'monospace', color: '#1d4ed8' }}>{l.id}</td>
+                                <td style={{ padding: '5px 8px' }}>{l.date}</td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '700', color: '#1e293b' }}>
+                                  {Number(l.volume || 0).toLocaleString()} pcs
+                                </td>
+                                <td style={{ padding: '5px 8px' }}>{l.personName || 'Store'}{l.receiverName ? ` → ${l.receiverName}` : ''}</td>
+                                <td style={{ padding: '5px 8px' }}>
+                                  {(l.materials || []).map((m, mIdx) => (
+                                    <span key={mIdx} style={{ marginRight: '8px', display: 'inline-block' }}>
+                                      {m.bomItemName || m.name}: <strong style={{ color: '#0f172a' }}>{m.qty} {m.unit || 'pcs'}</strong>{mIdx < l.materials.length - 1 ? ',' : ''}
+                                    </span>
+                                  ))}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* 2. EXTRA MATERIAL ISSUE DETAILS (WASTAGE / SUPPLEMENTARY ALLOCATIONS) */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 10px',
+                        backgroundColor: printLotAudit.reissueLogs.length > 0 ? '#fef2f2' : '#f0fdf4',
+                        borderLeft: `4px solid ${printLotAudit.reissueLogs.length > 0 ? '#dc2626' : '#16a34a'}`,
+                        borderTop: `1px solid ${printLotAudit.reissueLogs.length > 0 ? '#fecaca' : '#bbf7d0'}`,
+                        borderRight: `1px solid ${printLotAudit.reissueLogs.length > 0 ? '#fecaca' : '#bbf7d0'}`,
+                        borderBottom: `1px solid ${printLotAudit.reissueLogs.length > 0 ? '#fecaca' : '#bbf7d0'}`,
+                        borderRadius: '4px 4px 0 0',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        color: printLotAudit.reissueLogs.length > 0 ? '#991b1b' : '#166534'
+                      }}>
+                        <span>2. EXTRA MATERIAL ISSUE DETAILS (WASTAGE &amp; RE-ISSUES)</span>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: '700',
+                          backgroundColor: printLotAudit.reissueLogs.length > 0 ? '#fee2e2' : '#dcfce7',
+                          color: printLotAudit.reissueLogs.length > 0 ? '#b91c1c' : '#15803d',
+                          padding: '1px 8px',
+                          borderRadius: '10px'
+                        }}>
+                          {printLotAudit.reissueLogs.length > 0
+                            ? `+${printLotAudit.reissuePieces.toLocaleString()} Pcs • ${printLotAudit.reissueLogs.length} Extra Slip(s)`
+                            : '0 Extra Pcs • Zero Wastage'}
+                        </span>
+                      </div>
+
+                      {printLotAudit.reissueLogs.length === 0 ? (
+                        <div style={{
+                          padding: '12px 14px',
+                          border: '1px solid #bbf7d0',
+                          borderTop: 'none',
+                          backgroundColor: '#f0fdf4',
+                          color: '#15803d',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <span>✓ Zero Extra Material Issued — Standard 1st-Time Issue (0% Extra Wastage). All production pieces completed within original initial dispatch.</span>
+                        </div>
+                      ) : (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', border: '1px solid #fecaca', borderTop: 'none' }}>
+                          <thead>
+                            <tr style={{ backgroundColor: '#fef2f2', borderBottom: '1.5px solid #fca5a5' }}>
+                              <th style={{ padding: '5px 8px', textAlign: 'center', width: '25px' }}>#</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', width: '100px' }}>Extra Slip ID</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', width: '120px' }}>Issue Date</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'right', width: '80px' }}>Extra Pcs</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', width: '140px' }}>Reason / Cause</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', width: '120px' }}>Issuer & Receiver</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left' }}>Extra Dispatched Materials</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {printLotAudit.reissueLogs.map((l, lIdx) => (
+                              <tr key={lIdx} style={{ borderBottom: '1px solid #fee2e2', backgroundColor: lIdx % 2 === 0 ? '#ffffff' : '#fff5f5' }}>
+                                <td style={{ padding: '5px 8px', textAlign: 'center' }}>{lIdx + 1}</td>
+                                <td style={{ padding: '5px 8px', fontWeight: '700', fontFamily: 'monospace', color: '#dc2626' }}>{l.id}</td>
+                                <td style={{ padding: '5px 8px' }}>{l.date}</td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '700', color: '#b91c1c' }}>
+                                  +{Number(l.volume || 0).toLocaleString()} pcs
+                                </td>
+                                <td style={{ padding: '5px 8px', fontWeight: '600', color: '#7f1d1d' }}>
+                                  {l.materials && l.materials[0]?.reason ? l.materials[0].reason : 'Extra Material Requisition'}
+                                </td>
+                                <td style={{ padding: '5px 8px' }}>{l.personName || 'Store'}{l.receiverName ? ` → ${l.receiverName}` : ''}</td>
+                                <td style={{ padding: '5px 8px' }}>
+                                  {(l.materials || []).map((m, mIdx) => (
+                                    <span key={mIdx} style={{ marginRight: '8px', display: 'inline-block' }}>
+                                      {m.bomItemName || m.name}: <strong style={{ color: '#b91c1c' }}>+{m.qty} {m.unit || 'pcs'}</strong>{mIdx < l.materials.length - 1 ? ',' : ''}
+                                    </span>
+                                  ))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* 3. BOTH COMBINED DETAILS (CONSOLIDATED SOURCING & NET DISPATCHED MATRIX) */}
+                    <div style={{ marginBottom: '14px' }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '6px 10px',
+                        backgroundColor: '#eef2ff',
+                        borderLeft: '4px solid #4f46e5',
+                        borderTop: '1px solid #c7d2fe',
+                        borderRight: '1px solid #c7d2fe',
+                        borderBottom: '1px solid #c7d2fe',
+                        borderRadius: '4px 4px 0 0',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        color: '#3730a3'
+                      }}>
+                        <span>3. BOTH DETAILS COMBINED (CONSOLIDATED SOURCING &amp; DISPATCHED MATRIX)</span>
+                        <span style={{ fontSize: '10.5px', fontWeight: '700', backgroundColor: '#e0e7ff', color: '#4338ca', padding: '1px 8px', borderRadius: '10px' }}>
+                          Combined Total: {printLotAudit.totalPieces.toLocaleString()} Pcs Net
+                        </span>
+                      </div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', border: '1px solid #c7d2fe', borderTop: 'none' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1.5px solid #cbd5e1' }}>
+                            <th style={{ padding: '5px 8px', textAlign: 'center', width: '25px' }}>#</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left' }}>BOM Component</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left' }}>Inventory Material</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', backgroundColor: 'rgba(37, 99, 235, 0.08)', color: '#1d4ed8' }}>1st Issue Qty</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#dc2626' }}>Extra Qty</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', color: '#059669' }}>Returned</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '800', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#4338ca' }}>Combined Net Total</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'center' }}>Variance %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.values(printLotAudit.materialsSummary || {}).map((m, mIdx) => {
+                            const hasExtra = m.reissueQty > 0;
+                            const variancePercent = m.initialQty > 0 ? ((m.reissueQty / m.initialQty) * 100).toFixed(1) : (hasExtra ? 100 : 0);
+                            return (
+                              <tr key={mIdx} style={{ borderBottom: '1px solid #e2e8f0', backgroundColor: mIdx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                                <td style={{ padding: '5px 8px', textAlign: 'center' }}>{mIdx + 1}</td>
+                                <td style={{ padding: '5px 8px', fontWeight: '700' }}>{m.bomItemName}</td>
+                                <td style={{ padding: '5px 8px' }}>{m.materialName}</td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '700', color: '#1d4ed8' }}>
+                                  {m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '0'}
+                                </td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '700', color: hasExtra ? '#dc2626' : '#64748b' }}>
+                                  {hasExtra ? `+${Number(m.reissueQty.toFixed(2))} ${m.unit}` : '0'}
+                                </td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', color: '#059669' }}>
+                                  {m.returnedQty > 0 ? `-${Number(m.returnedQty.toFixed(2))} ${m.unit}` : '0'}
+                                </td>
+                                <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '800', color: '#4338ca' }}>
+                                  {Number(m.totalIssuedQty.toFixed(2))} {m.unit}
+                                </td>
+                                <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: '700' }}>
+                                  {hasExtra ? (
+                                    <span style={{ color: '#dc2626', backgroundColor: '#fee2e2', padding: '1px 6px', borderRadius: '8px', fontSize: '10px' }}>
+                                      +{variancePercent}% Extra
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#16a34a', backgroundColor: '#dcfce7', padding: '1px 6px', borderRadius: '8px', fontSize: '10px' }}>
+                                      Standard 1st Issue
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Signature Block - pinned at bottom */}
+                  <div style={{ marginTop: 'auto', paddingTop: '20px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', fontSize: '11px', borderTop: '1px solid #000', paddingTop: '16px' }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ height: '36px' }}></div>
+                        <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                        <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Issued By (Store In-charge)</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ height: '36px' }}></div>
+                        <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                        <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Verified By (Production Supervisor)</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ height: '36px' }}></div>
+                        <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto' }}></div>
+                        <div style={{ marginTop: '6px', fontWeight: 'bold' }}>Audited &amp; Approved By (Admin)</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

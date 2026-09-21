@@ -1833,9 +1833,24 @@ export const generateIssuePdf = async (matrix, {
         totalZipCost: totalZipCost
     };
 };
-export default function DoriOrder({ prefilledLotNo = '', setPrefilledLotNo = () => { }, viewMode = 'dashboard', setViewMode = () => { } } = {}) {
+export default function DoriOrder({ 
+    prefilledLotNo = '', 
+    setPrefilledLotNo = () => { }, 
+    viewMode = 'dashboard', 
+    setViewMode = () => { },
+    activeSubTab = 'dori',
+    setActiveSubTab = () => { },
+    tabs = []
+} = {}) {
     if (viewMode === 'dashboard') {
-        return <DoriDashboard onCompileNewPO={() => setViewMode('generator')} />;
+        return (
+            <DoriDashboard 
+                onCompileNewPO={() => setViewMode('generator')}
+                activeSubTab={activeSubTab}
+                setActiveSubTab={setActiveSubTab}
+                tabs={tabs}
+            />
+        );
     }
 
     const [lotInput, setLotInput] = useState('');
@@ -2420,8 +2435,140 @@ export default function DoriOrder({ prefilledLotNo = '', setPrefilledLotNo = () 
         [matrix, displaySizes]
     );
 
+    const defaultTabs = [
+        {
+            id: 'zip',
+            label: 'Zip Purcharge Orders',
+            subtitle: 'Manage and track all zipper material requirements',
+            gradient: 'linear-gradient(135deg, #4f46e5, #3b82f6)',
+            glow: 'rgba(79, 70, 229, 0.3)',
+            icon: <FiPackage />
+        },
+        {
+            id: 'dori',
+            label: 'Dori Purcharge Orders',
+            subtitle: 'Manage and track all dori material requirements',
+            gradient: 'linear-gradient(135deg, #0d9488, #059669)',
+            glow: 'rgba(13, 148, 136, 0.3)',
+            icon: <FiScissors />
+        }
+    ];
+    const displayTabs = tabs && tabs.length > 0 ? tabs : defaultTabs;
+
     return (
-        <div className="Wrap">
+        <div className="Wrap" style={{ padding: '20px 20px 40px 20px' }}>
+            {/* Generator Paper Box Header */}
+            <div style={{
+                background: 'var(--bg-secondary, #ffffff)',
+                border: '1px solid var(--border-color, #e2e8f0)',
+                borderRadius: '18px',
+                padding: '20px 24px',
+                marginBottom: '24px',
+                boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '16px'
+            }}>
+                <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '3.5px',
+                    background: 'linear-gradient(90deg, #0d9488, #059669, #10b981, #0d9488)',
+                    backgroundSize: '200% 100%'
+                }} />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <button
+                        onClick={() => setViewMode('dashboard')}
+                        className="BaseBtn GhostBtn"
+                        style={{
+                            padding: '8px 14px',
+                            borderRadius: '9px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '13px',
+                            fontWeight: '700',
+                            border: '1.5px solid #cbd5e1',
+                            background: '#fff',
+                            color: '#334155',
+                            cursor: 'pointer',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                        }}
+                    >
+                        <FiArrowLeft /> Back to Dashboard
+                    </button>
+                    <div style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '12px',
+                        background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#fff',
+                        fontSize: '20px',
+                        boxShadow: '0 6px 16px rgba(13, 148, 136, 0.35)',
+                        flexShrink: 0
+                    }}>
+                        <FiScissors />
+                    </div>
+                    <div>
+                        <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main, #0f172a)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>
+                            Dori Purchase Order Generator
+                        </h1>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginTop: '2px', fontWeight: '500' }}>
+                            Compile, calculate and generate dori purchase orders
+                        </div>
+                    </div>
+                </div>
+
+                <div style={{
+                    display: 'flex',
+                    gap: '6px',
+                    padding: '5px',
+                    background: 'var(--bg-main, #f1f5f9)',
+                    borderRadius: '12px',
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    flexShrink: 0
+                }}>
+                    {displayTabs.map(tab => {
+                        const isActive = activeSubTab === tab.id;
+                        return (
+                            <button
+                                key={tab.id}
+                                onClick={() => setActiveSubTab(tab.id)}
+                                style={{
+                                    position: 'relative',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    padding: '7px 16px',
+                                    borderRadius: '9px',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    background: isActive ? tab.gradient : 'transparent',
+                                    color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
+                                    fontWeight: isActive ? '700' : '600',
+                                    fontSize: '13px',
+                                    boxShadow: isActive ? `0 4px 10px ${tab.glow}` : 'none',
+                                    whiteSpace: 'nowrap'
+                                }}
+                            >
+                                <span style={{ display: 'flex', alignItems: 'center', fontSize: '15px' }}>{tab.icon}</span>
+                                <span>{tab.label}</span>
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
             <style>
                 {`
         /* Add loading state styles */
@@ -2449,9 +2596,10 @@ export default function DoriOrder({ prefilledLotNo = '', setPrefilledLotNo = () 
 
         /* Keep all your existing styles from the original component */
         .Wrap {
-          max-width: 1600px;
-          margin: 0 auto;
-          padding: 12px 9px 41px;
+          max-width: 100%;
+          margin: 0;
+          padding: 12px 16px 41px;
+          box-sizing: border-box;
           font-family: 'Inter', system-ui, sans-serif;
           color: var(--text-main, #0f172a);
           min-height: 100vh;
@@ -4083,7 +4231,12 @@ export default function DoriOrder({ prefilledLotNo = '', setPrefilledLotNo = () 
     );
 }
 
-export function DoriDashboard({ onCompileNewPO }) {
+export function DoriDashboard({ 
+    onCompileNewPO,
+    activeSubTab = 'dori',
+    setActiveSubTab = () => {},
+    tabs = []
+}) {
     const [poList, setPoList] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -4381,8 +4534,28 @@ export function DoriDashboard({ onCompileNewPO }) {
         );
     }
 
+    const defaultTabs = [
+        {
+            id: 'zip',
+            label: 'Zip Purcharge Orders',
+            subtitle: 'Manage and track all zipper material requirements',
+            gradient: 'linear-gradient(135deg, #4f46e5, #3b82f6)',
+            glow: 'rgba(79, 70, 229, 0.3)',
+            icon: <FiPackage />
+        },
+        {
+            id: 'dori',
+            label: 'Dori Purcharge Orders',
+            subtitle: 'Manage and track all dori material requirements',
+            gradient: 'linear-gradient(135deg, #0d9488, #059669)',
+            glow: 'rgba(13, 148, 136, 0.3)',
+            icon: <FiScissors />
+        }
+    ];
+    const displayTabs = tabs && tabs.length > 0 ? tabs : defaultTabs;
+
     return (
-        <div className="dashboard-container" style={{ padding: '0 16px 40px 16px', maxWidth: '1200px', margin: '0 auto', fontFamily: "'Inter', sans-serif" }}>
+        <div className="dashboard-container" style={{ padding: '20px 20px 40px 20px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', fontFamily: "'Inter', sans-serif" }}>
             <style>{`
                 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
                 .dashboard-card {
@@ -4434,8 +4607,8 @@ export function DoriDashboard({ onCompileNewPO }) {
                     box-shadow: 0 1px 2px rgba(0,0,0,0.02);
                 }
                 .filter-select:focus {
-                    border-color: #d97706;
-                    box-shadow: 0 0 0 3px rgba(217, 119, 6, 0.15);
+                    border-color: #0d9488;
+                    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
                 }
                 .po-table {
                     width: 100%;
@@ -4478,78 +4651,205 @@ export function DoriDashboard({ onCompileNewPO }) {
                 }
             `}</style>
 
-            {/* Actions top row */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
-                <button
-                    onClick={onCompileNewPO}
-                    className="BaseBtn PrimaryBtn"
-                    style={{
-                        background: 'linear-gradient(135deg, var(--warning), var(--warning-light, #f59e0b))',
-                        color: '#fff',
-                        fontWeight: '700',
-                        fontSize: '13px',
-                        padding: '10px 18px',
-                        borderRadius: '10px',
-                        border: 'none',
+            {/* ── Paper Box Header: Branding, Tabs & Quick Actions ── */}
+            <div style={{
+                background: 'var(--bg-secondary, #ffffff)',
+                border: '1px solid var(--border-color, #e2e8f0)',
+                borderRadius: '18px',
+                padding: '22px 26px',
+                marginBottom: '24px',
+                boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.05), 0 2px 6px -1px rgba(0, 0, 0, 0.03)',
+                position: 'relative',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '18px'
+            }}>
+                {/* Decorative top accent line */}
+                <div style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: '3.5px',
+                    background: 'linear-gradient(90deg, #0d9488, #059669, #10b981, #0d9488)',
+                    backgroundSize: '200% 100%'
+                }} />
+
+                {/* Top Row: Title, Icon, Subtitle & Tab Switcher */}
+                <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '16px'
+                }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                        <div style={{
+                            width: '44px',
+                            height: '44px',
+                            borderRadius: '13px',
+                            background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#fff',
+                            fontSize: '22px',
+                            boxShadow: '0 6px 16px rgba(13, 148, 136, 0.35)',
+                            flexShrink: 0
+                        }}>
+                            <FiScissors />
+                        </div>
+                        <div>
+                            <h1 style={{
+                                margin: 0,
+                                fontSize: '19px',
+                                fontWeight: '800',
+                                color: 'var(--text-main, #0f172a)',
+                                letterSpacing: '-0.3px',
+                                fontFamily: "'Outfit', 'Inter', sans-serif"
+                            }}>
+                                Dori Purcharge Orders Dashboard
+                            </h1>
+                            <div style={{
+                                fontSize: '12px',
+                                color: 'var(--text-muted, #64748b)',
+                                marginTop: '2px',
+                                fontWeight: '500'
+                            }}>
+                                Manage and track all dori material requirements
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Right Tab Switcher Pills */}
+                    <div style={{
                         display: 'flex',
-                        alignItems: 'center',
                         gap: '6px',
-                        cursor: 'pointer',
-                        boxShadow: 'var(--shadow-sm)'
-                    }}
-                >
-                    <FiPlus /> Compile New Purchase Order
-                </button>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={downloadPDF} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--danger)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiPrinter /> PDF Report
+                        padding: '5px',
+                        background: 'var(--bg-main, #f1f5f9)',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        flexShrink: 0
+                    }}>
+                        {displayTabs.map(tab => {
+                            const isActive = activeSubTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => setActiveSubTab(tab.id)}
+                                    style={{
+                                        position: 'relative',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        padding: '7px 16px',
+                                        borderRadius: '9px',
+                                        border: 'none',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        background: isActive ? tab.gradient : 'transparent',
+                                        color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
+                                        fontWeight: isActive ? '700' : '600',
+                                        fontSize: '13px',
+                                        letterSpacing: '0.2px',
+                                        boxShadow: isActive ? `0 4px 10px ${tab.glow}` : 'none',
+                                        transform: isActive ? 'translateY(-1px)' : 'translateY(0)',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '15px' }}>{tab.icon}</span>
+                                    <span>{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Soft Divider */}
+                <div style={{ height: '1px', background: 'var(--border-color, #e2e8f0)', width: '100%' }} />
+
+                {/* Bottom Row: Actions Bar */}
+                <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                }}>
+                    <button
+                        onClick={onCompileNewPO}
+                        className="BaseBtn PrimaryBtn"
+                        style={{
+                            background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                            color: '#fff',
+                            fontWeight: '700',
+                            fontSize: '13px',
+                            padding: '10px 20px',
+                            borderRadius: '10px',
+                            border: 'none',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            cursor: 'pointer',
+                            boxShadow: '0 4px 14px rgba(13, 148, 136, 0.35)',
+                            transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                        }}
+                    >
+                        <FiPlus size={16} /> Compile New Purchase Order
                     </button>
-                    <button onClick={downloadCSV} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--success)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiDownload /> Excel/CSV
-                    </button>
-                    <button onClick={fetchDashboardData} className="BaseBtn" style={{ padding: '8px 14px', borderRadius: '8px', border: 'none', background: 'var(--warning)', color: '#fff', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px' }}>
-                        <FiRefreshCw /> Refresh
-                    </button>
+
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        <button onClick={downloadPDF} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #fecdd3', background: '#ffffff', color: '#e11d48', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(225, 29, 72, 0.08)' }}>
+                            <FiPrinter size={15} /> PDF Report
+                        </button>
+                        <button onClick={downloadCSV} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #a7f3d0', background: '#ffffff', color: '#059669', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(5, 150, 105, 0.08)' }}>
+                            <FiDownload size={15} /> Excel/CSV
+                        </button>
+                        <button onClick={fetchDashboardData} className="BaseBtn" style={{ padding: '9px 15px', borderRadius: '10px', border: '1.5px solid #99f6e4', background: '#ffffff', color: '#0d9488', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '13px', boxShadow: '0 1px 3px rgba(13, 148, 136, 0.08)' }}>
+                            <FiRefreshCw size={14} /> Refresh
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {/* Stats Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}><FiPackage /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(13, 148, 136, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#f0fdfa', color: '#0d9488', border: '1px solid #ccfbf1' }}><FiPackage /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.total}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Total Orders</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.total}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Total Orders</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--success-light)', color: 'var(--success)' }}><FiCheckSquare /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(16, 185, 129, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#ecfdf5', color: '#059669', border: '1px solid #d1fae5' }}><FiCheckSquare /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.gateDoneCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Gate Entry Done</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.gateDoneCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Gate Entry Done</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--info-light, rgba(6,182,212,0.15))', color: 'var(--info, #06b6d4)' }}><FiTruck /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(2, 132, 199, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#f0f9ff', color: '#0284c7', border: '1px solid #e0f2fe' }}><FiTruck /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.matReceivedCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Material Received</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.matReceivedCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Material Received</div>
                     </div>
                 </div>
-                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                    <div className="dashboard-card-icon" style={{ background: 'var(--warning-light)', color: 'var(--warning)' }}><FiUser /></div>
+                <div className="dashboard-card" style={{ background: 'var(--bg-secondary)', border: '1px solid rgba(124, 58, 237, 0.18)' }}>
+                    <div className="dashboard-card-icon" style={{ background: '#faf5ff', color: '#7c3aed', border: '1px solid #f3e8ff' }}><FiUser /></div>
                     <div>
-                        <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>{stats.supplierEntryCount}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '500' }}>Supplier Entry</div>
+                        <div style={{ fontSize: '26px', fontWeight: '800', color: 'var(--text-main)', fontFamily: "'Outfit', 'Inter', sans-serif" }}>{stats.supplierEntryCount}</div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>Supplier Entry</div>
                     </div>
                 </div>
             </div>
 
             {/* Filter Panel */}
-            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '16px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' }}>
+            <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '14px', padding: '18px', marginBottom: '20px', boxShadow: 'var(--shadow-sm)' }}>
                 {/* Search */}
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
-                    <FiSearch style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)', fontSize: '16px' }} />
+                    <FiSearch style={{ position: 'absolute', left: '14px', color: 'var(--text-muted)', fontSize: '16px' }} />
                     <input
                         type="text"
                         placeholder="Search across all orders by lot, style, supervisor..."
@@ -4557,7 +4857,7 @@ export function DoriDashboard({ onCompileNewPO }) {
                         onChange={(e) => setSearchTerm(e.target.value)}
                         style={{
                             width: '100%',
-                            padding: '10px 12px 10px 38px',
+                            padding: '10px 14px 10px 40px',
                             border: '1.5px solid var(--border-color)',
                             borderRadius: '10px',
                             background: 'var(--bg-secondary)',
@@ -4619,15 +4919,16 @@ export function DoriDashboard({ onCompileNewPO }) {
                             style={{
                                 width: '100%',
                                 padding: '8px 12px',
-                                border: '1.5px solid #ef4444',
-                                borderRadius: '8px',
-                                background: '#fef2f2',
-                                color: '#ef4444',
+                                border: '1.5px solid #e2e8f0',
+                                borderRadius: '10px',
+                                background: '#f8fafc',
+                                color: '#64748b',
                                 fontWeight: '700',
                                 cursor: 'pointer',
                                 fontSize: '13px',
                                 height: '38px',
-                                boxSizing: 'border-box'
+                                boxSizing: 'border-box',
+                                transition: 'all 0.2s'
                             }}
                         >
                             Clear Filters
@@ -4673,28 +4974,32 @@ export function DoriDashboard({ onCompileNewPO }) {
                                     return (
                                         <tr key={po.id || `${po.lotNumber}-v${po.version}`}>
                                             <td style={{ textAlign: 'center', fontWeight: '600', color: 'var(--text-muted)' }}>{serialNo}</td>
-                                            <td style={{ fontWeight: '700', color: 'var(--warning)' }}>{po.lotNumber}</td>
+                                            <td>
+                                                <span style={{ fontWeight: '800', color: '#0f172a', background: '#f0fdfa', border: '1px solid #ccfbf1', padding: '3px 8px', borderRadius: '6px', fontSize: '12px' }}>
+                                                    {po.lotNumber}
+                                                </span>
+                                            </td>
                                             <td style={{ textAlign: 'center' }}>
                                                 <span style={{
                                                     display: 'inline-block',
                                                     padding: '2px 8px',
-                                                    borderRadius: '20px',
+                                                    borderRadius: '6px',
                                                     fontSize: '11px',
                                                     fontWeight: '700',
                                                     background: isMultiVersion
-                                                        ? (po.version === 1 ? 'rgba(217,119,6,0.1)' : 'rgba(16,185,129,0.1)')
-                                                        : 'rgba(100,116,139,0.1)',
+                                                        ? (po.version === 1 ? '#eff6ff' : '#ecfdf5')
+                                                        : 'rgba(100,116,139,0.08)',
                                                     color: isMultiVersion
-                                                        ? (po.version === 1 ? '#d97706' : '#10b981')
+                                                        ? (po.version === 1 ? '#2563eb' : '#059669')
                                                         : '#64748b',
-                                                    border: `1px solid ${isMultiVersion ? (po.version === 1 ? 'rgba(217,119,6,0.3)' : 'rgba(16,185,129,0.3)') : 'rgba(100,116,139,0.2)'}`
+                                                    border: `1px solid ${isMultiVersion ? (po.version === 1 ? '#bfdbfe' : '#a7f3d0') : 'rgba(100,116,139,0.2)'}`
                                                 }}>
                                                     V{po.version}
                                                 </span>
                                             </td>
                                             <td>
                                                 {po.poNumber
-                                                    ? <span className="status-badge in-verification" style={{ fontSize: '11px', padding: '3px 8px', textTransform: 'none', letterSpacing: '0.5px' }}>{po.poNumber}</span>
+                                                    ? <span style={{ background: '#f8fafc', color: '#0f172a', border: '1px solid #e2e8f0', padding: '3px 8px', borderRadius: '6px', fontFamily: 'monospace', fontWeight: '700', fontSize: '11px' }}>{po.poNumber}</span>
                                                     : <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>—</span>
                                                 }
                                             </td>

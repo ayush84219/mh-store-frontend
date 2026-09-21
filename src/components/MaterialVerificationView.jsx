@@ -2,7 +2,7 @@ import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ClipboardList, AlertTriangle, CheckSquare, CheckCircle, ArrowRight, Layers, HelpCircle, X, Shield, Send, Printer } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 export default function MaterialVerificationView({
   designs = [],
@@ -267,7 +267,7 @@ export default function MaterialVerificationView({
       item.unit
     ]);
 
-    doc.autoTable({
+    autoTable(doc, {
       startY: 115,
       head: [tableColumns],
       body: tableRows,
@@ -280,7 +280,7 @@ export default function MaterialVerificationView({
       }
     });
 
-    const finalY = doc.previousAutoTable.finalY + 40;
+    const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 160) + 40;
     doc.setFont('helvetica', 'normal');
     doc.line(14, finalY, 74, finalY);
     doc.text('Authorized Signatory (Issuer)', 14, finalY + 5);

@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles
 } from 'lucide-react';
 import './App.css';
 
@@ -19,6 +19,7 @@ const DashboardView = lazy(() => import('./components/DashboardView'));
 const DesignView = lazy(() => import('./components/DesignView'));
 const MaterialVerificationView = lazy(() => import('./components/MaterialVerificationView'));
 const MaterialIssueView = lazy(() => import('./components/MaterialIssueView'));
+const ExtraMaterialIssueView = lazy(() => import('./components/ExtraMaterialIssueView'));
 const GeneratePOView = lazy(() => import('./components/GeneratePOView'));
 const MaterialDetailsView = lazy(() => import('./components/MaterialDetailsView'));
 const ReportsHistoryView = lazy(() => import('./components/ReportsHistoryView'));
@@ -230,6 +231,7 @@ const hasTabAccess = (tabName, role) => {
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
+      'extra_material_issue',
       'return_material',
       'material_details',
       'material_transfer',
@@ -266,6 +268,7 @@ const hasTabAccess = (tabName, role) => {
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
+      'extra_material_issue',
       'return_material',
       'material_details',
       'material_transfer',
@@ -287,6 +290,7 @@ const TAB_ROUTES = {
   design: '/design',
   material_verification: '/material-verification',
   material_issue: '/material-issue',
+  extra_material_issue: '/extra-material-issue',
   return_material: '/return-material',
   generate_po: '/generate-po',
   re_download: '/re-download',
@@ -613,6 +617,7 @@ export default function App() {
       scanner_logs: 'Scanner Log',
       weight_capture: 'Material Add',
       material_issue: 'Material Issue',
+      extra_material_issue: 'Extra Material Issue',
       return_material: 'Return Material',
       material_details: 'Material Detail',
       material_transfer: 'Material Transfer',
@@ -1908,6 +1913,17 @@ export default function App() {
               <X size={20} />
             </button>
           </div>
+          {isSidebarCollapsed && (
+            <button
+              type="button"
+              className="sidebar-open-btn-collapsed"
+              onClick={toggleSidebar}
+              title="Open / Expand Sidebar (Ctrl+B)"
+              aria-label="Open Sidebar"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+          )}
         </div>
 
         <nav className="sidebar-nav">
@@ -1930,8 +1946,12 @@ export default function App() {
                 <li
                   className={`sidebar-item ${['design', 'material_verification', 'material_details', 'rgp', 'zip_po', 'dori_po', 'generate_po', 'history', 'scanner_logs', 'only_cutting'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
-                    if (isSidebarCollapsed) setIsSidebarCollapsed(false);
-                    setAdminDesignMenuOpen(!adminDesignMenuOpen);
+                    if (isSidebarCollapsed) {
+                      setIsSidebarCollapsed(false);
+                      setAdminDesignMenuOpen(true);
+                    } else {
+                      setAdminDesignMenuOpen(!adminDesignMenuOpen);
+                    }
                   }}
                   title="Design Panel"
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -1985,10 +2005,14 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
-                    if (isSidebarCollapsed) setIsSidebarCollapsed(false);
-                    setAdminStoreMenuOpen(!adminStoreMenuOpen);
+                    if (isSidebarCollapsed) {
+                      setIsSidebarCollapsed(false);
+                      setAdminStoreMenuOpen(true);
+                    } else {
+                      setAdminStoreMenuOpen(!adminStoreMenuOpen);
+                    }
                   }}
                   title="Store Panel"
                   style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -2011,6 +2035,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                       <span className="sidebar-text">Material Issue</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
+                      <span className="sidebar-text">Extra Material Issue</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => handleTabClick('return_material')} title="Return Material">
                       <span className="sidebar-text">Return Material</span>
@@ -2126,6 +2153,10 @@ export default function App() {
                   <ClipboardList size={18} />
                   <span className="sidebar-text">Material Issue</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
+                  <Sparkles size={18} />
+                  <span className="sidebar-text">Extra Material Issue</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => handleTabClick('return_material')} title="Return Material">
                   <RotateCcw size={18} />
                   <span className="sidebar-text">Return Material</span>
@@ -2206,7 +2237,7 @@ export default function App() {
                   <Shield size={18} />
                   <span className="sidebar-text">Approval Queue</span>
                   {approvalRequests.filter(r => r.status === 'pending').length > 0 && (
-                    <span style={{
+                    <span className="sidebar-badge" style={{
                       position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
                       backgroundColor: 'var(--warning)', color: '#fff', fontSize: '10px',
                       fontWeight: '800', padding: '2px 6px', borderRadius: '10px',
@@ -2255,7 +2286,7 @@ export default function App() {
               title={isSidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
               aria-label="Toggle sidebar"
             >
-              {isSidebarCollapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}
+              {isSidebarCollapsed ? <PanelLeftOpen size={19} strokeWidth={2.2} /> : <PanelLeftClose size={19} strokeWidth={2.2} />}
             </button>
             <div className="header-title-container">
               <h1>
@@ -2271,6 +2302,7 @@ export default function App() {
                 {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
                 {activeTab === 'manually_weight_capture' && 'Manual Material Inward Entry'}
                 {activeTab === 'material_issue' && 'Material Issue'}
+                {activeTab === 'extra_material_issue' && 'Extra Material Issue'}
                 {activeTab === 'return_material' && 'Return Material'}
                 {activeTab === 'material_details' && 'Material Detail'}
                 {activeTab === 'material_transfer' && 'Material Transfer'}
@@ -2539,6 +2571,18 @@ export default function App() {
                 currentUser={currentUser}
                 onSubmitApproval={handleSubmitApprovalRequest}
                 onRedirectToZipPO={handleRedirectToZipPO}
+              />
+            )}
+
+            {activeTab === 'extra_material_issue' && (
+              <ExtraMaterialIssueView
+                designs={designs}
+                materials={materials}
+                onIssueMaterials={handleIssueMaterials}
+                issueLogs={issueLogs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+                onSubmitApproval={handleSubmitApprovalRequest}
               />
             )}
 

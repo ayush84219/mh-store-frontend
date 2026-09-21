@@ -1476,6 +1476,11 @@ export default function ApprovalQueueView({
                     <div className="card-pills-row">
                       <span className="card-pill-tag code-tag">{matDetails.materialId}</span>
                       <span className={`card-pill-tag ${priorityInfo.colorClass}`}>{priorityInfo.text}</span>
+                      {req.exceedsLimit && (
+                        <span className="card-pill-tag priority-high" style={{ backgroundColor: '#fee2e2', color: '#dc2626', borderColor: '#fca5a5', fontWeight: '700' }}>
+                          Exceeds 5% Limit (+{req.extraPercentage || '>5'}%)
+                        </span>
+                      )}
                     </div>
 
                     <div className="card-requester-info">
@@ -1634,28 +1639,71 @@ export default function ApprovalQueueView({
                 {/* Collapsible components table (only for material issue requests) */}
                 {isExpanded && req.type === 'material_issue' && req.items && req.items.length > 0 && (
                   <div className="card-expanded-table-container">
-                    <h5 className="expanded-table-title">Components to Issue</h5>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <h5 className="expanded-table-title" style={{ margin: 0 }}>
+                        {req.isReissue ? 'Extra Material Requisition Components' : 'Components to Issue'}
+                      </h5>
+                      {req.exceedsLimit && (
+                        <span style={{ fontSize: '11px', fontWeight: '800', backgroundColor: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: '10px' }}>
+                          Admin Approval Required (&gt;5% Excess)
+                        </span>
+                      )}
+                    </div>
                     <div className="custom-table-container">
                       <table className="custom-table" style={{ fontSize: '12.5px' }}>
                         <thead>
                           <tr>
                             <th>BOM Component</th>
                             <th>Inventory Material Map</th>
-
-                            <th>Total Required</th>
-                            <th>Unit</th>
+                            {req.isReissue && <th>Base Req.</th>}
+                            <th>{req.isReissue ? 'Extra Requested' : 'Total Required'}</th>
+                            {req.isReissue && <th>Issue %</th>}
+                            {req.isReissue && <th>Excess</th>}
+                            <th>{req.isReissue ? 'Reason / Remarks' : 'Unit'}</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {req.items.map((item, idx) => (
-                            <tr key={idx}>
-                              <td style={{ fontWeight: '600', color: 'var(--text-main)' }}>{item.bomItemName}</td>
-                              <td style={{ color: 'var(--text-muted)' }}>{item.materialName}</td>
-
-                              <td style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{item.totalRequired}</td>
-                              <td style={{ color: 'var(--text-muted)' }}>{item.unit}</td>
-                            </tr>
-                          ))}
+                          {req.items.map((item, idx) => {
+                            const isOver = item.exceedsLimit || (item.issuePercentage && item.issuePercentage > 5);
+                            return (
+                              <tr key={idx}>
+                                <td style={{ fontWeight: '600', color: 'var(--text-main)' }}>{item.bomItemName}</td>
+                                <td style={{ color: 'var(--text-muted)' }}>{item.materialName}</td>
+                                {req.isReissue && (
+                                  <td style={{ color: 'var(--text-muted)' }}>
+                                    {item.baseQty !== undefined ? `${item.baseQty} ${item.unit}` : '-'}
+                                  </td>
+                                )}
+                                <td style={{ fontWeight: '700', color: req.isReissue ? '#dc2626' : 'var(--accent-color)' }}>
+                                  {req.isReissue ? `+${item.totalRequired} ${item.unit}` : `${item.totalRequired} ${item.unit}`}
+                                </td>
+                                {req.isReissue && (
+                                  <td>
+                                    {item.issuePercentage !== undefined ? (
+                                      <span style={{
+                                        fontSize: '11px',
+                                        fontWeight: '800',
+                                        padding: '2px 6px',
+                                        borderRadius: '6px',
+                                        backgroundColor: isOver ? '#fee2e2' : '#dcfce7',
+                                        color: isOver ? '#dc2626' : '#16a34a'
+                                      }}>
+                                        +{item.issuePercentage}% {isOver ? '(>5%)' : ''}
+                                      </span>
+                                    ) : '-'}
+                                  </td>
+                                )}
+                                {req.isReissue && (
+                                  <td style={{ fontWeight: '700', color: isOver ? '#dc2626' : '#64748b' }}>
+                                    {item.excessQty > 0 ? `+${item.excessQty} ${item.unit}` : '-'}
+                                  </td>
+                                )}
+                                <td style={{ color: 'var(--text-muted)', fontSize: '11.5px' }}>
+                                  {req.isReissue ? (item.reason || '-') : item.unit}
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
