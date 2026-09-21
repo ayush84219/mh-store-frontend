@@ -1442,7 +1442,7 @@ export default function MaterialIssueView({
         </div>
 
         {/* Right Side: Materials Calculation Checklist */}
-        <div className="panel" style={{ minHeight: '320px' }}>
+        <div className="panel" style={{ minHeight: '320px', minWidth: 0, overflow: 'hidden' }}>
           <div className="panel-header">
             <h3 className="panel-title">
               <Layers size={18} className="text-accent" />
@@ -1503,11 +1503,11 @@ export default function MaterialIssueView({
                 </div>
               </div>
 
-              <div className="custom-table-container" style={{ overflow: 'visible', minHeight: '320px' }}>
-                <table className="custom-table" style={{ fontSize: '13px' }}>
+              <div className="custom-table-container" style={{ overflowX: 'auto', minHeight: '320px', width: '100%', WebkitOverflowScrolling: 'touch', paddingBottom: '8px' }}>
+                <table className="custom-table" style={{ fontSize: '13px', width: '100%', minWidth: '780px' }}>
                   <thead>
                     <tr>
-                      <th style={{ width: '40px', textAlign: 'center' }}>
+                      <th style={{ width: '36px', textAlign: 'center', padding: '10px 8px' }}>
                         <input
                           type="checkbox"
                           checked={computedItems.length > 0 && computedItems.filter(item => !item.alreadyIssued).every(item => item.issued)}
@@ -1523,13 +1523,13 @@ export default function MaterialIssueView({
                           title="Select / Deselect All Components"
                         />
                       </th>
-                      <th style={{ width: '160px' }}>BOM Component</th>
-                      <th style={{ minWidth: '280px' }}>Inventory Item Map</th>
+                      <th style={{ width: '140px', padding: '10px 8px' }}>BOM Component</th>
+                      <th style={{ minWidth: '220px', maxWidth: '280px', padding: '10px 8px' }}>Inventory Item Map</th>
 
-                      <th>Description</th>
-                      <th style={{ textAlign: 'center' }}>Total Needed</th>
-                      <th style={{ textAlign: 'center' }}>Current Stock</th>
-                      <th style={{ textAlign: 'center' }}>After Issue</th>
+                      <th style={{ minWidth: '100px', padding: '10px 8px' }}>Description</th>
+                      <th style={{ textAlign: 'center', width: '110px', padding: '10px 8px' }}>Total Needed</th>
+                      <th style={{ textAlign: 'center', width: '95px', padding: '10px 8px' }}>Current Stock</th>
+                      <th style={{ textAlign: 'center', width: '110px', padding: '10px 8px' }}>After Issue</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1546,7 +1546,7 @@ export default function MaterialIssueView({
                           transition: 'opacity 0.2s, background-color 0.2s',
                           color: item.alreadyIssued ? 'var(--text-muted)' : 'inherit'
                         }}>
-                          <td style={{ textAlign: 'center' }}>
+                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
                             <input
                               type="checkbox"
                               checked={!!item.issued}
@@ -1555,7 +1555,7 @@ export default function MaterialIssueView({
                               style={{ cursor: item.alreadyIssued ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
                             />
                           </td>
-                          <td>
+                          <td style={{ padding: '10px 8px' }}>
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
                               <strong style={{
                                 textDecoration: (item.alreadyIssued || !item.issued) ? 'line-through' : 'none',
@@ -1572,7 +1572,7 @@ export default function MaterialIssueView({
                               )}
                             </div>
                           </td>
-                          <td>
+                          <td style={{ padding: '10px 8px' }}>
                             <SearchableMaterialSelect
                               materials={materials}
                               value={item.materialId}
@@ -1582,10 +1582,10 @@ export default function MaterialIssueView({
                             />
                           </td>
 
-                          <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
+                          <td style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '10px 8px' }}>
                             {item.bomItemDetail || '—'}
                           </td>
-                          <td style={{ textAlign: 'center' }}>
+                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
                             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}>
                               <input
                                 type="number"
@@ -1600,10 +1600,10 @@ export default function MaterialIssueView({
                               <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.unit}</span>
                             </div>
                           </td>
-                          <td style={{ textAlign: 'center', fontWeight: '500', color: (item.issued && !item.alreadyIssued) ? 'inherit' : 'var(--text-muted)' }}>
+                          <td style={{ textAlign: 'center', fontWeight: '500', color: (item.issued && !item.alreadyIssued) ? 'inherit' : 'var(--text-muted)', padding: '10px 8px' }}>
                             {item.currentStock} {item.unit}
                           </td>
-                          <td style={{ textAlign: 'center' }}>
+                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
                             {item.alreadyIssued ? (
                               <span className="status-badge verified" style={{ backgroundColor: 'var(--success-light)', color: 'var(--success)', fontWeight: 'bold' }}>
                                 Already Issued

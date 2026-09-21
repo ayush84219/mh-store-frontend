@@ -592,20 +592,23 @@ export default function ReportsHistoryView({
 
   return (
     <div className="animate-fade">
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>Reports & Transaction Ledger</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Analyze manufacturing cost expenditures, check PO archives, and inspect material consumption by Lot.</p>
+      <div style={{ marginBottom: '20px', paddingTop: '4px' }}>
+        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 6px 0' }}>Reports & Transaction Ledger</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>Analyze manufacturing cost expenditures, check PO archives, and inspect material consumption by Lot.</p>
       </div>
 
       {/* Sub-tab navigation */}
       <div className="print-hide" style={{
         display: 'flex',
         backgroundColor: 'var(--bg-secondary)',
-        padding: '4px',
-        borderRadius: 'var(--border-radius-sm)',
+        padding: '5px',
+        borderRadius: '10px',
         border: '1px solid var(--border-color)',
         marginBottom: '24px',
         width: 'fit-content',
+        maxWidth: '100%',
+        overflowX: 'auto',
+        flexWrap: 'wrap',
         gap: '4px'
       }}>
         <button
@@ -1979,34 +1982,34 @@ export default function ReportsHistoryView({
           </div>
 
           {/* Filter and Search Bar */}
-          <div className="panel print-hide" style={{ marginBottom: '20px', padding: '16px' }}>
+          <div className="panel print-hide" style={{ marginBottom: '20px', padding: '14px 18px' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', gap: '12px', flex: '1 1 300px', flexWrap: 'wrap' }}>
-                <div style={{ position: 'relative', flex: '1 1 200px' }}>
-                  <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <div style={{ display: 'flex', gap: '10px', flex: '1 1 520px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '220px' }}>
+                  <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
                   <input
                     type="text"
                     className="form-input"
                     placeholder="Search Lot Number, Style, Fabric, Party..."
-                    style={{ paddingLeft: '36px', width: '100%', height: '38px' }}
+                    style={{ paddingLeft: '34px', width: '100%', height: '36px', fontSize: '13px' }}
                     value={undesignedSearch}
                     onChange={(e) => setUndesignedSearch(e.target.value)}
                   />
                 </div>
                 <select
                   className="form-input"
-                  style={{ height: '38px', minWidth: '160px' }}
+                  style={{ height: '36px', width: '180px', fontSize: '12.5px', flexShrink: 0 }}
                   value={undesignedFabricFilter}
                   onChange={(e) => setUndesignedFabricFilter(e.target.value)}
                 >
                   <option value="all">All Fabrics</option>
-                  {Array.from(new Set(undesignedLots.map(l => (l.Fabric || '').trim()).filter(Boolean))).slice(0, 30).map(f => (
+                  {Array.from(new Set(undesignedLots.map(l => (l.Fabric || '').trim()).filter(Boolean))).slice(0, 50).map(f => (
                     <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
                 <select
                   className="form-input"
-                  style={{ height: '38px', minWidth: '140px' }}
+                  style={{ height: '36px', width: '150px', fontSize: '12.5px', flexShrink: 0 }}
                   value={undesignedSort}
                   onChange={(e) => setUndesignedSort(e.target.value)}
                 >
@@ -2017,11 +2020,11 @@ export default function ReportsHistoryView({
                 </select>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0 }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px', padding: '0 12px' }}
                   onClick={() => {
                     setLoadingUndesigned(true);
                     fetch(`${getBackendUrl()}/api/reports/undesigned-cutting-lots`)
@@ -2030,13 +2033,13 @@ export default function ReportsHistoryView({
                       .finally(() => setLoadingUndesigned(false));
                   }}
                 >
-                  <RefreshCw size={14} />
+                  <RefreshCw size={13} className={loadingUndesigned ? "animate-spin" : ""} />
                   <span>Refresh</span>
                 </button>
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '38px' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px', padding: '0 12px' }}
                   onClick={() => {
                     const csvContent = "data:text/csv;charset=utf-8," + 
                       ["Lot Number,Fabric,Garment Type,Style,Shades,Sizes,Cutting Qty,Date,Supervisor"]
@@ -2052,7 +2055,7 @@ export default function ReportsHistoryView({
                     document.body.removeChild(link);
                   }}
                 >
-                  <Download size={14} />
+                  <Download size={13} />
                   <span>Export CSV</span>
                 </button>
               </div>

@@ -437,7 +437,7 @@ body {
 
 /* Page Wrapper */
 .page-container {
-  padding: 16px;
+  padding: 20px 24px 40px;
   flex-grow: 1;
   max-width: 1600px;
   width: 100%;
@@ -955,6 +955,11 @@ body {
   display: grid;
   grid-template-columns: 320px 1fr;
   gap: 24px;
+}
+
+.split-view > *,
+.split-view-asymmetric > * {
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
