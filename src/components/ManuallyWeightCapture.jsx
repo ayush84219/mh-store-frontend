@@ -8,6 +8,7 @@ import {
   AlertTriangle, X, Printer, Menu, Edit3, Layers, FileText,
   Camera, Upload, Image as ImageIcon, Eye
 } from 'lucide-react';
+import SearchableLocationSelect from './SearchableLocationSelect';
 
 const BASE_CODE = 1000;
 
@@ -1149,21 +1150,13 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
           <div className="form-group">
             <label className="wcs-label">Location Slot <span style={{ color: '#ef4444' }}>*</span></label>
-            <select
-              required
-              className="wcs-input"
+            <SearchableLocationSelect
+              locations={generatedLocations}
               value={form.storeLocation}
-              onChange={setF('storeLocation')}
-              style={{ height: '40px', cursor: 'pointer' }}
-            >
-              <option value="">-- Select Configured Location Slot --</option>
-              {form.storeLocation && !generatedLocations.some(l => l.code === form.storeLocation || l.label === form.storeLocation) && (
-                <option value={form.storeLocation}>{form.storeLocation} (Current)</option>
-              )}
-              {generatedLocations.map(loc => (
-                <option key={loc.code} value={loc.code}>{loc.label}</option>
-              ))}
-            </select>
+              onChange={(val) => setForm(p => ({ ...p, storeLocation: val }))}
+              placeholder="-- Select Configured Location Slot --"
+              required
+            />
           </div>
 
           <div className="form-group">
@@ -1833,17 +1826,13 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               {locationMode === 'same' ? (
                 <div>
                   <label className="wcs-label">Store Location</label>
-                  <select
-                    className="wcs-input"
+                  <SearchableLocationSelect
+                    locations={generatedLocations}
                     value={form.storeLocation}
-                    onChange={setF('storeLocation')}
-                    style={{ height: '36px', fontSize: '13px', cursor: 'pointer' }}
-                  >
-                    <option value="">-- Select Configured Location Slot --</option>
-                    {generatedLocations.map(loc => (
-                      <option key={loc.code} value={loc.code}>{loc.label}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setForm(p => ({ ...p, storeLocation: val }))}
+                    placeholder="-- Select Configured Location Slot --"
+                    compact
+                  />
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1851,20 +1840,15 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                     <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <div style={{ flex: 2 }}>
                         <label style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)' }}>Location #{idx + 1}</label>
-                        <select
-                          className="wcs-input"
+                        <SearchableLocationSelect
+                          locations={generatedLocations}
                           value={grp.location}
-                          onChange={e => {
-                            const val = e.target.value;
+                          onChange={(val) => {
                             setLocationGroups(prev => prev.map((g, i) => i === idx ? { ...g, location: val } : g));
                           }}
-                          style={{ padding: '4px 8px', fontSize: '12px', height: '32px', cursor: 'pointer' }}
-                        >
-                          <option value="">-- Select Slot --</option>
-                          {generatedLocations.map(loc => (
-                            <option key={loc.code} value={loc.code}>{loc.code} ({loc.label.split(' - ')[0]})</option>
-                          ))}
-                        </select>
+                          placeholder="-- Select Slot --"
+                          compact
+                        />
                       </div>
                       <div style={{ flex: 1 }}>
                         <label style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)' }}>Packets</label>

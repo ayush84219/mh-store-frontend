@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ArrowLeftRight, Search, Package, MapPin, CheckCircle,
   AlertTriangle, Clock, User, Calendar, RefreshCw, Printer, ArrowLeft
 } from 'lucide-react';
+import SearchableLocationSelect from './SearchableLocationSelect';
 import { getBackendUrl } from '../utils/api';
 
 function SearchableMaterialSelect({ materials, value, onChange, placeholder = "— Select Material to Transfer —" }) {
@@ -14,7 +15,8 @@ function SearchableMaterialSelect({ materials, value, onChange, placeholder = "�
 
   const getDisplayLabel = (m) => {
     if (!m) return '';
-    return `[${m.id}] ${m.name} (${m.color || 'No Location'}) — ${m.stock} ${m.unit}`;
+    const loc = m.location || (m.color && (m.color.toLowerCase().includes('hall') || m.color.toLowerCase().includes('rack') || m.color.toLowerCase().includes('store')) ? m.color : 'Main Store');
+    return `[${m.id}] ${m.name} (${loc}) — ${m.stock} ${m.unit}`;
   };
 
   useEffect(() => {
@@ -144,6 +146,7 @@ function SearchableMaterialSelect({ materials, value, onChange, placeholder = "�
 
 export default function MaterialTransferView({ currentUser }) {
   const [materials, setMaterials] = useState([]);
+  const [warehouseLocations, setWarehouseLocations] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
   const [sourceLocations, setSourceLocations] = useState([]);
   const [fromLoc, setFromLoc] = useState('');
@@ -206,19 +209,27 @@ export default function MaterialTransferView({ currentUser }) {
 
   const selectedMaterial = materials.find(m => m.id === selectedMaterialId);
 
-  // Fetch materials & transfer logs
+  // Fetch materials, transfer logs & warehouse locations
   const fetchData = async () => {
     setLoading(true);
     try {
-      const matRes = await fetch(`${getBackendUrl()}/api/materials`);
-      if (matRes.ok) {
+      const [matRes, transRes, whRes] = await Promise.all([
+        fetch(`${getBackendUrl()}/api/materials`).catch(() => null),
+        fetch(`${getBackendUrl()}/api/transfers`).catch(() => null),
+        fetch(`${getBackendUrl()}/api/warehouse-locations`).catch(() => null)
+      ]);
+      if (matRes && matRes.ok) {
         const matData = await matRes.json();
         setMaterials(matData);
       }
-      const transRes = await fetch(`${getBackendUrl()}/api/transfers`);
-      if (transRes.ok) {
+      if (transRes && transRes.ok) {
         const transData = await transRes.json();
         setHistory(transData);
+      }
+      if (whRes && whRes.ok) {
+        const whData = await whRes.json();
+        const list = Array.isArray(whData) ? whData : (whData.data || []);
+        setWarehouseLocations(list);
       }
     } catch (err) {
       console.error('Failed to fetch data:', err);
@@ -240,7 +251,7 @@ export default function MaterialTransferView({ currentUser }) {
       return;
     }
 
-    const locStr = selectedMaterial.color || 'Main Store';
+    const locStr = selectedMaterial.location || (selectedMaterial.color && (selectedMaterial.color.toLowerCase().includes('hall') || selectedMaterial.color.toLowerCase().includes('rack') || selectedMaterial.color.toLowerCase().includes('store')) ? selectedMaterial.color : 'Main Store');
     const pkts = Math.max(1, selectedMaterial.packets || 1);
     
     // Parse locations string e.g. "hall 1 rack 2 (8 pkts), hall 2 rack 3 (2 pkts)"
@@ -344,7 +355,7 @@ export default function MaterialTransferView({ currentUser }) {
       // 2. Send PUT request to update material's location
       const updatedMaterial = {
         ...selectedMaterial,
-        color: newLocSummary
+        location: newLocSummary
       };
 
       const putRes = await fetch(`${getBackendUrl()}/api/materials/${selectedMaterialId}`, {
@@ -517,14 +528,36 @@ export default function MaterialTransferView({ currentUser }) {
     }
   };
 
-  const activeLocationsList = Array.from(
-    new Set(
-      materials.flatMap(m => {
-        const pkts = Math.max(1, m.packets || 1);
-        return parseLocationString(m.color, pkts).map(g => g.location);
-      })
-    )
-  ).filter(loc => loc && loc.toLowerCase() !== 'main store');
+  const destinationOptions = useMemo(() => {
+    const locMap = new Map();
+
+    // 1. Add configured warehouse locations
+    if (warehouseLocations && warehouseLocations.length > 0) {
+      warehouseLocations.forEach(rack => {
+        const warehouse = rack.warehouse || 'Main Store';
+        const rawCode = String(rack.code || '').trim();
+        const label = rack.warehouse && rawCode.includes(rack.warehouse)
+          ? rawCode
+          : `${warehouse} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
+        if (!locMap.has(label)) {
+          locMap.set(label, { code: label, label, warehouse });
+        }
+      });
+    }
+
+    // 2. Fallback defaults if no warehouse locations in DB yet
+    if (locMap.size === 0) {
+      ['Main Store', 'Hall 1', 'Hall 2', 'Hall 3'].forEach(hall => {
+        const count = hall === 'Main Store' ? 50 : 30;
+        for (let i = 1; i <= count; i++) {
+          const label = `${hall} - Rack ${i}`;
+          locMap.set(label, { code: label, label, warehouse: hall });
+        }
+      });
+    }
+
+    return Array.from(locMap.values());
+  }, [warehouseLocations]);
 
   return (
     <div style={{ padding: '24px 20px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -619,25 +652,13 @@ export default function MaterialTransferView({ currentUser }) {
               <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
                 3. DESTINATION LOCATION / RACK
               </label>
-              <div style={{ position: 'relative' }}>
-                <input 
-                  type="text" 
-                  placeholder="e.g. HALL 5 RACK 12"
-                  value={toLoc}
-                  onChange={(e) => setToLoc(e.target.value)}
-                  list="destination-locations-list"
-                  style={{
-                    width: '100%', padding: '11px 14px', borderRadius: '10px',
-                    border: '1.5px solid var(--border-color)', background: 'var(--bg-primary)',
-                    fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)', outline: 'none'
-                  }}
-                />
-                <datalist id="destination-locations-list">
-                  {activeLocationsList.map(loc => (
-                    <option key={loc} value={loc} />
-                  ))}
-                </datalist>
-              </div>
+              <SearchableLocationSelect
+                locations={destinationOptions}
+                value={toLoc}
+                onChange={setToLoc}
+                placeholder="Search destination rack or slot..."
+                allowCustom={true}
+              />
             </div>
 
             {/* Step 4: Transfer Quantity */}

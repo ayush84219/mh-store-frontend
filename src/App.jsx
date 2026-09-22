@@ -313,8 +313,9 @@ const TAB_ROUTES = {
 
 const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   acc[path] = tab;
+  acc[path.replace(/-/g, '_')] = tab;
   return acc;
-}, { '/': 'dashboard', '/material-detail': 'material_details' });
+}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details' });
 
 export default function App() {
   const navigate = useNavigate();

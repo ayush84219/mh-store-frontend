@@ -33,12 +33,12 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [selectedStatus, setSelectedStatus] = useState('All');
 
-  const fetchLiveLocations = async () => {
+  const fetchLiveLocations = async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) setLoading(true);
       const [locRes, capRes] = await Promise.all([
         fetch(`${getBackendUrl()}/api/warehouse-locations`).catch(() => null),
-        fetch(`${getBackendUrl()}/api/weight-capture`).catch(() => null)
+        fetch(`${getBackendUrl()}/api/weight-capture?summary=true`).catch(() => null)
       ]);
       if (locRes && locRes.ok) {
         const lData = await locRes.json();
@@ -52,13 +52,13 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
     } catch (err) {
       console.warn("Could not fetch warehouse locations from DB:", err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchLiveLocations();
-    const interval = setInterval(fetchLiveLocations, 5000);
+    fetchLiveLocations(true);
+    const interval = setInterval(() => fetchLiveLocations(false), 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -96,6 +96,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
 
   /**
    * Construct locations array strictly from manually configured / DB entries
+   * HIGH-PERFORMANCE PRE-INDEXED RESOLUTION FOR LARGE DATASETS
    */
   const locations = useMemo(() => {
     const slotMap = new Map();
@@ -166,30 +167,83 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
       });
     });
 
-    // Cross-reference all slots with materials and captures
+    // ── Pre-Index Materials & Captures in O(N) for Instant Lookup ──
+    const materialIndex = new Map();
+    (materials || []).forEach(m => {
+      const locStr = String(m.location || '').trim();
+      if (!locStr) return;
+      const totalPkts = Math.max(1, Number(m.packets) || 1);
+      const parts = locStr.split(',');
+
+      parts.forEach(part => {
+        const cleanPart = part.trim();
+        const pureLoc = cleanPart.replace(/\(\d+\s*pkts?\)/i, '').trim();
+        const pktMatch = cleanPart.match(/\((\d+)\s*pkt/);
+        const pktsCount = pktMatch ? (parseInt(pktMatch[1], 10) || 1) : totalPkts;
+
+        const norm1 = normalizeSlotCode(pureLoc)?.toLowerCase();
+        const norm2 = pureLoc.toLowerCase();
+        const cleanTarget = pureLoc.toLowerCase().replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
+        const norm3 = cleanTarget ? `rack ${cleanTarget}` : '';
+
+        [norm1, norm2, cleanTarget, norm3].filter(Boolean).forEach(k => {
+          if (!materialIndex.has(k)) materialIndex.set(k, []);
+          materialIndex.get(k).push({
+            material: m,
+            effectivePkts: pktsCount,
+            totalPkts
+          });
+        });
+      });
+    });
+
+    const captureIndex = new Map();
+    (captures || []).forEach(c => {
+      const cLoc = String(c.storeLocation || '').trim();
+      if (!cLoc) return;
+      const norm1 = normalizeSlotCode(cLoc)?.toLowerCase();
+      const norm2 = cLoc.toLowerCase();
+      const cleanTarget = cLoc.toLowerCase().replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
+      const norm3 = cleanTarget ? `rack ${cleanTarget}` : '';
+
+      [norm1, norm2, cleanTarget, norm3].filter(Boolean).forEach(k => {
+        if (!captureIndex.has(k)) captureIndex.set(k, []);
+        captureIndex.get(k).push(c);
+      });
+    });
+
+    // O(1) Fast Resolution Per Slot
     const result = [];
     slotMap.forEach((slot, codeKey) => {
       const code = slot.code || codeKey;
       const capacity = slot.capacity || 20;
       const cleanSlot = String(code).toLowerCase().trim();
       const normSlotKey = normalizeSlotCode(code)?.toLowerCase();
+      const cleanTarget = cleanSlot.replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
 
-      const matchedMaterials = (materials || []).filter(m => {
-        const mLoc = String(m.location || '').toLowerCase();
-        if (!mLoc) return false;
-
-        const mParts = mLoc.split(',').map(p => p.replace(/\(\d+\s*pkts?\)/i, '').trim());
-        return mParts.some(p => {
-          const normP = normalizeSlotCode(p)?.toLowerCase();
-          return p === cleanSlot || normP === normSlotKey;
+      const seenMatIds = new Set();
+      const matchedMaterialsEntries = [];
+      [cleanSlot, normSlotKey, cleanTarget, cleanTarget ? `rack ${cleanTarget}` : ''].filter(Boolean).forEach(k => {
+        const list = materialIndex.get(k) || [];
+        list.forEach(item => {
+          if (!seenMatIds.has(item.material.id)) {
+            seenMatIds.add(item.material.id);
+            matchedMaterialsEntries.push(item);
+          }
         });
       });
 
-      const matchedCaptures = (captures || []).filter(c => {
-        const cLoc = String(c.storeLocation || '').toLowerCase().trim();
-        if (!cLoc) return false;
-        const normC = normalizeSlotCode(cLoc)?.toLowerCase();
-        return cLoc === cleanSlot || normC === normSlotKey;
+      const seenCapIds = new Set();
+      const matchedCaptures = [];
+      [cleanSlot, normSlotKey, cleanTarget, cleanTarget ? `rack ${cleanTarget}` : ''].filter(Boolean).forEach(k => {
+        const list = captureIndex.get(k) || [];
+        list.forEach(c => {
+          const capId = c.id || c.barcodeId || (c.materialCode + c.capturedAt);
+          if (!seenCapIds.has(capId)) {
+            seenCapIds.add(capId);
+            matchedCaptures.push(c);
+          }
+        });
       });
 
       let currentPackets = 0;
@@ -202,11 +256,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
       let storeIncharges = [];
       let lastUpdated = '';
 
-      matchedMaterials.forEach(m => {
-        const pkts = getPacketsInLocation(m, code);
-        const totalPkts = Math.max(1, Number(m.packets) || 1);
-        const mLoc = String(m.location || '').toLowerCase();
-        const effectivePkts = Math.min(totalPkts, pkts > 0 ? pkts : (mLoc.includes(String(code).toLowerCase()) ? totalPkts : 1));
+      matchedMaterialsEntries.forEach(({ material: m, effectivePkts, totalPkts }) => {
         currentPackets += effectivePkts;
         totalQty += Math.round((Number(m.stock) / totalPkts) * effectivePkts);
         unit = m.unit || 'Pcs';
@@ -261,8 +311,8 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
         unit,
         materialName: materialDetailsList.map(m => m.name).join(', ') || 'Empty Slot',
         materialDetailsList,
-        matchedMaterials,
-        poNumber: poNumbers[0] || (matchedMaterials[0] ? `PO-${matchedMaterials[0].id}` : 'N/A'),
+        matchedMaterials: matchedMaterialsEntries.map(e => e.material),
+        poNumber: poNumbers[0] || (matchedMaterialsEntries[0] ? `PO-${matchedMaterialsEntries[0].material.id}` : 'N/A'),
         lotNumber: lotNumbers[0] || 'N/A',
         weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : `${Math.round(totalQty * 0.05)} kg`,
         storeIncharge: storeIncharges[0] || 'Store Team',

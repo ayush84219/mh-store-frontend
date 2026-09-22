@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle } from 'lucide-react';
+import { getBackendUrl } from '../utils/api';
 
 export default function SettingsView({
   vendors,
@@ -33,6 +34,168 @@ export default function SettingsView({
   const [vendorError, setVendorError] = useState('');
 
 
+
+  // Warehouse Racks & Storage Locations Management States
+  const [dbLocations, setDbLocations] = useState([]);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  const [rackSearchQuery, setRackSearchQuery] = useState('');
+  const [selectedRackWarehouse, setSelectedRackWarehouse] = useState('All');
+  const [isAddingRack, setIsAddingRack] = useState(false);
+  const [newRackWarehouse, setNewRackWarehouse] = useState('Main Store');
+  const [customRackWh, setCustomRackWh] = useState('');
+  const [newRackName, setNewRackName] = useState('');
+  const [newRackCapacity, setNewRackCapacity] = useState(20);
+  const [rackActionMsg, setRackActionMsg] = useState(null);
+  const [isDeletingRackId, setIsDeletingRackId] = useState(null);
+
+  // Fetch live warehouse locations from backend
+  const fetchLiveLocations = async () => {
+    try {
+      setLoadingLocations(true);
+      const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`);
+      if (res.ok) {
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : (json.data || []);
+        setDbLocations(list);
+      }
+    } catch (err) {
+      console.warn('Failed to load warehouse locations in settings:', err);
+    } finally {
+      setLoadingLocations(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveLocations();
+  }, []);
+
+  // Compute all available locations combining DB & state
+  const allLocationsList = useMemo(() => {
+    const map = new Map();
+    (dbLocations || []).forEach(loc => {
+      const id = loc.id || loc.code;
+      const wh = loc.warehouse || (String(loc.code || '').includes(' - ') ? loc.code.split(' - ')[0].trim() : 'Main Store');
+      const code = String(loc.code || '').trim();
+      const cap = Number(loc.capacity) || 20;
+      map.set(id, { id, code, warehouse: wh, capacity: cap, source: 'db' });
+    });
+    (racks || []).forEach(r => {
+      const wh = r.warehouse || 'Main Store';
+      const rawCode = String(r.code || r.name || '').trim();
+      const code = r.warehouse && rawCode.includes(r.warehouse) ? rawCode : `${wh} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
+      const id = r.id || code;
+      if (!map.has(id)) {
+        map.set(id, { id, code, warehouse: wh, capacity: Number(r.capacity) || 20, source: 'racks' });
+      }
+    });
+    return Array.from(map.values());
+  }, [dbLocations, racks]);
+
+  const uniqueWarehouses = useMemo(() => {
+    const s = new Set();
+    allLocationsList.forEach(l => {
+      if (l.warehouse) s.add(l.warehouse);
+    });
+    ['Main Store', 'Hall 1', 'Hall 2', 'Hall 3'].forEach(h => s.add(h));
+    return Array.from(s);
+  }, [allLocationsList]);
+
+  const filteredRacks = useMemo(() => {
+    return allLocationsList.filter(loc => {
+      const q = rackSearchQuery.toLowerCase().trim();
+      const matchesSearch = !q || loc.code.toLowerCase().includes(q) || loc.warehouse.toLowerCase().includes(q);
+      const matchesWh = selectedRackWarehouse === 'All' || loc.warehouse === selectedRackWarehouse;
+      return matchesSearch && matchesWh;
+    });
+  }, [allLocationsList, rackSearchQuery, selectedRackWarehouse]);
+
+  // Handle Delete Rack
+  const handleDeleteRack = async (loc) => {
+    const identifier = loc.id || loc.code;
+    const label = loc.code || identifier;
+    if (!window.confirm(`Are you sure you want to delete rack "${label}"? This will remove it from all location selection menus.`)) {
+      return;
+    }
+    setIsDeletingRackId(identifier);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/warehouse-locations/${encodeURIComponent(identifier)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setDbLocations(prev => prev.filter(l => l.id !== identifier && l.code !== identifier && l.code !== loc.code));
+        if (setRacks) {
+          setRacks(prev => prev.filter(r => r.id !== identifier && r.code !== identifier && `${r.warehouse} - ${r.code}` !== loc.code));
+        }
+        setRackActionMsg({ type: 'success', text: `Rack "${label}" deleted successfully.` });
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setRackActionMsg({ type: 'error', text: errData.error || 'Failed to delete rack.' });
+      }
+    } catch (err) {
+      setRackActionMsg({ type: 'error', text: 'Server connection error: ' + err.message });
+    } finally {
+      setIsDeletingRackId(null);
+      setTimeout(() => setRackActionMsg(null), 4000);
+    }
+  };
+
+  // Handle Add Rack
+  const handleAddRackSubmit = async (e) => {
+    e.preventDefault();
+    const finalWh = newRackWarehouse === '__custom__' ? (customRackWh.trim() || 'Main Store') : newRackWarehouse;
+    const raw = newRackName.trim();
+    if (!raw) return;
+    const fullCode = raw.toLowerCase().includes(finalWh.toLowerCase()) ? raw : `${finalWh} - Rack ${raw.replace(/^rack\s*/i, '')}`;
+
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          warehouse: finalWh,
+          code: fullCode,
+          capacity: Number(newRackCapacity) || 20
+        })
+      });
+      if (res.ok) {
+        await fetchLiveLocations();
+        setIsAddingRack(false);
+        setNewRackName('');
+        setCustomRackWh('');
+        setRackActionMsg({ type: 'success', text: `Rack "${fullCode}" created successfully.` });
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setRackActionMsg({ type: 'error', text: errData.error || 'Failed to create rack.' });
+      }
+    } catch (err) {
+      setRackActionMsg({ type: 'error', text: 'Error: ' + err.message });
+    } finally {
+      setTimeout(() => setRackActionMsg(null), 4000);
+    }
+  };
+
+  // Handle Clear All Racks
+  const handleClearAllRacks = async () => {
+    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL warehouse racks? This cannot be undone.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setDbLocations([]);
+        if (setRacks) setRacks([]);
+        setRackActionMsg({ type: 'success', text: 'All warehouse racks cleared successfully.' });
+      } else {
+        setRackActionMsg({ type: 'error', text: 'Failed to clear warehouse racks.' });
+      }
+    } catch (err) {
+      setRackActionMsg({ type: 'error', text: err.message });
+    } finally {
+      setTimeout(() => setRackActionMsg(null), 4000);
+    }
+  };
 
   // Raw Materials Catalog Management States
   const [editingMaterial, setEditingMaterial] = useState(null);
@@ -382,6 +545,189 @@ export default function SettingsView({
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* Warehouse Racks & Storage Slots Management */}
+      <div className="panel" style={{ marginTop: '24px' }}>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+          <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Warehouse size={18} className="text-accent" />
+            Warehouse Racks & Storage Locations ({allLocationsList.length})
+          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={fetchLiveLocations}
+              disabled={loadingLocations}
+              title="Refresh Racks list"
+              style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <RefreshCw size={13} className={loadingLocations ? 'animate-spin' : ''} /> Refresh
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => {
+                setIsAddingRack(true);
+                setNewRackName('');
+                setNewRackCapacity(20);
+                setNewRackWarehouse('Main Store');
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <PlusCircle size={14} /> Add New Rack
+            </button>
+            {allLocationsList.length > 0 && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={handleClearAllRacks}
+                title="Delete all configured warehouse racks"
+                style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+              >
+                <Trash2 size={13} /> Clear All
+              </button>
+            )}
+          </div>
+        </div>
+
+        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '14px' }}>
+          Configure, search, add, or <strong>delete warehouse racks & slots</strong>. Deleted racks will be removed in real-time from Inward Weight Capture, Manual Entry, and Material Transfer dropdowns.
+        </p>
+
+        {/* Action Status Banner */}
+        {rackActionMsg && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              marginBottom: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '13px',
+              fontWeight: '600',
+              backgroundColor: rackActionMsg.type === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+              color: rackActionMsg.type === 'error' ? '#ef4444' : '#10b981',
+              border: `1px solid ${rackActionMsg.type === 'error' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}`
+            }}
+          >
+            {rackActionMsg.type === 'error' ? <AlertTriangle size={16} /> : <CheckCircle size={16} />}
+            <span>{rackActionMsg.text}</span>
+          </div>
+        )}
+
+        {/* Filter and Search Bar for Racks */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '14px' }}>
+          <div style={{ position: 'relative', width: '100%', maxWidth: '320px' }}>
+            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Search rack or hall (e.g. Rack 12, Hall 1)..."
+              value={rackSearchQuery}
+              onChange={(e) => setRackSearchQuery(e.target.value)}
+              style={{ paddingLeft: '32px', height: '34px', fontSize: '13px', width: '100%' }}
+            />
+          </div>
+
+          {/* Warehouse Filter Tabs */}
+          <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
+            {['All', ...uniqueWarehouses].map(wh => (
+              <button
+                key={wh}
+                type="button"
+                onClick={() => setSelectedRackWarehouse(wh)}
+                style={{
+                  border: 'none',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  background: selectedRackWarehouse === wh ? 'var(--accent-color, #3b82f6)' : 'var(--bg-secondary, #f1f5f9)',
+                  color: selectedRackWarehouse === wh ? '#ffffff' : 'var(--text-muted, #64748b)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {wh}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Racks Table */}
+        <div className="custom-table-container" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+          <table className="custom-table">
+            <thead>
+              <tr>
+                <th style={{ width: '22%' }}>Warehouse / Hall</th>
+                <th style={{ width: '40%' }}>Rack Code / Full Slot Label</th>
+                <th style={{ width: '18%' }}>Default Capacity</th>
+                <th style={{ textAlign: 'right', width: '20%' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRacks.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '28px' }}>
+                    {loadingLocations ? 'Loading warehouse racks...' : 'No warehouse racks found matching your filter. Click "+ Add New Rack" to create one.'}
+                  </td>
+                </tr>
+              ) : (
+                filteredRacks.map((loc) => {
+                  const isDeleting = isDeletingRackId === (loc.id || loc.code);
+                  return (
+                    <tr key={loc.id || loc.code}>
+                      <td>
+                        <span
+                          className="status-badge"
+                          style={{
+                            backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                            color: '#2563eb',
+                            fontSize: '11.5px',
+                            fontWeight: '700',
+                            border: '1px solid rgba(59, 130, 246, 0.2)'
+                          }}
+                        >
+                          <MapPin size={11} style={{ display: 'inline', marginRight: '4px' }} />
+                          {loc.warehouse || 'Main Store'}
+                        </span>
+                      </td>
+                      <td>
+                        <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{loc.code}</strong>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '12.5px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                          {loc.capacity || 20} pkts
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleDeleteRack(loc)}
+                          disabled={isDeleting}
+                          title={`Delete rack ${loc.code}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 10px',
+                            fontSize: '12px',
+                            fontWeight: '700'
+                          }}
+                        >
+                          <Trash2 size={13} />
+                          <span>{isDeleting ? 'Deleting...' : 'Delete Rack'}</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -823,6 +1169,112 @@ export default function SettingsView({
                   className="btn btn-primary"
                 >
                   Catalog Material
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Add Warehouse Rack Modal */}
+      {isAddingRack && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <PlusCircle size={20} style={{ color: 'var(--accent-color)' }} />
+                <span>Add Warehouse Rack / Slot</span>
+              </h3>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setIsAddingRack(false)}
+                style={{ padding: '4px 8px' }}
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleAddRackSubmit}>
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Warehouse / Hall
+                </label>
+                <select
+                  className="form-input"
+                  value={newRackWarehouse}
+                  onChange={(e) => setNewRackWarehouse(e.target.value)}
+                  style={{ height: '38px', fontSize: '13px' }}
+                >
+                  <option value="Main Store">Main Store</option>
+                  <option value="Hall 1">Hall 1</option>
+                  <option value="Hall 2">Hall 2</option>
+                  <option value="Hall 3">Hall 3</option>
+                  <option value="Hall 4">Hall 4</option>
+                  <option value="Hall 5">Hall 5</option>
+                  <option value="__custom__">+ Custom Warehouse / Hall...</option>
+                </select>
+              </div>
+
+              {newRackWarehouse === '__custom__' && (
+                <div className="form-group" style={{ marginBottom: '14px' }}>
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                    Custom Hall / Zone Name
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Hall 6, Secondary Warehouse"
+                    value={customRackWh}
+                    onChange={(e) => setCustomRackWh(e.target.value)}
+                    required
+                    style={{ height: '38px', fontSize: '13px' }}
+                  />
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Rack Name / Number <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Rack 15, RACK 101, Slot A"
+                  value={newRackName}
+                  onChange={(e) => setNewRackName(e.target.value)}
+                  required
+                  style={{ height: '38px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '18px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Default Packet Capacity
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  className="form-input"
+                  value={newRackCapacity}
+                  onChange={(e) => setNewRackCapacity(e.target.value)}
+                  style={{ height: '38px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setIsAddingRack(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  Create Rack Slot
                 </button>
               </div>
             </form>
