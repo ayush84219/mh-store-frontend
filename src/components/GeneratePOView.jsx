@@ -1486,15 +1486,6 @@ export default function GeneratePOView({
       }
     });
 
-    // Find logs matching repeat_against parent lot ID if exists
-    if (designObj && designObj.repeat_against) {
-      historyLogs.forEach(h => {
-        if (String(h.lotId).toLowerCase() === String(designObj.repeat_against).toLowerCase()) {
-          logs.push(h);
-        }
-      });
-    }
-
     return logs;
   };
 
@@ -2307,22 +2298,72 @@ export default function GeneratePOView({
         }
         
         /* Inline input details in table list */
+        .po-document-paper .custom-table-container {
+          width: 100%;
+          overflow-x: auto;
+          overflow-y: visible;
+          padding-top: 6px;
+          padding-bottom: 8px;
+          margin-bottom: 12px;
+        }
+        .po-document-paper .custom-table {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          margin-top: 2px;
+        }
+        .po-document-paper .custom-table thead th {
+          padding: 10px 8px;
+          font-size: 11px;
+          font-weight: 800;
+          color: var(--text-muted, #64748b);
+          border-top: 1px solid var(--border-color, #e2e8f0);
+          border-bottom: 2px solid var(--border-color, #e2e8f0);
+          background: var(--bg-primary, #f8fafc);
+          vertical-align: middle;
+          line-height: 1.5;
+          white-space: nowrap;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+        }
+        .po-document-paper .custom-table thead th:first-child {
+          border-left: 1px solid var(--border-color, #e2e8f0);
+          border-top-left-radius: 8px;
+          border-bottom-left-radius: 8px;
+        }
+        .po-document-paper .custom-table thead th:last-child {
+          border-right: 1px solid var(--border-color, #e2e8f0);
+          border-top-right-radius: 8px;
+          border-bottom-right-radius: 8px;
+        }
+        .po-document-paper .custom-table tbody td {
+          padding: 8px;
+          vertical-align: middle;
+        }
         .custom-table select,
         .custom-table input {
           width: 100%;
+          height: 32px;
           border: 1px solid var(--border-color, #e2e8f0);
           border-radius: 6px;
           background: var(--bg-primary, #f8fafc);
           color: var(--text-main, #0f172a);
-          padding: 6px 10px;
-          font-size: 13px;
+          padding: 4px 8px;
+          font-size: 12px;
           transition: all 0.2s;
+          box-sizing: border-box;
         }
         .custom-table select:focus,
         .custom-table input:focus {
           border-color: var(--accent-color, #6366f1);
           outline: none;
           box-shadow: 0 0 0 2px var(--accent-light, rgba(99, 102, 241, 0.08));
+        }
+        .custom-table .smart-dropdown input {
+          height: 32px;
+          padding: 4px 8px;
+          font-size: 12px;
+          border-radius: 6px;
         }
         .smart-dropdown input {
           padding: 10px 14px;
@@ -2763,13 +2804,13 @@ export default function GeneratePOView({
                             }}
                             placeholder="Custom"
                             style={{
-                              width: '52px',
+                              width: '68px',
                               height: '22px',
-                              padding: '2px 4px',
-                              fontSize: '10px',
+                              padding: '2px 6px',
+                              fontSize: '11px',
                               borderRadius: '4px',
                               border: '1px solid var(--border-color)',
-                              textAlign: 'right',
+                              textAlign: 'center',
                               background: 'var(--bg-secondary)',
                               color: 'var(--text-main)'
                             }}
@@ -2786,15 +2827,15 @@ export default function GeneratePOView({
                   <table className="custom-table" style={{ background: 'transparent' }}>
                     <thead>
                       <tr>
-                        <th style={{ width: '30px', textAlign: 'center', padding: '10px 8px' }}>#</th>
-                        <th style={{ width: '130px', padding: '10px 8px' }}>Dept *</th>
-                        <th style={{ padding: '10px 8px' }}>Description *</th>
-                        {shadeEnabled && <th style={{ width: '110px', padding: '10px 8px' }}>Shade</th>}
-                        <th style={{ width: '80px', textAlign: 'center', padding: '10px 8px' }}>UOM *</th>
-                        <th style={{ width: '80px', textAlign: 'right', padding: '10px 8px' }}>Qty *</th>
-                        <th style={{ width: '80px', textAlign: 'right', padding: '10px 8px' }}>Rate (₹)</th>
-                        <th style={{ width: '90px', textAlign: 'right', padding: '10px 8px' }}>Amount</th>
-                        <th style={{ width: '30px', textAlign: 'center', padding: '10px 8px' }}></th>
+                        <th style={{ width: '38px', textAlign: 'center' }}>#</th>
+                        <th style={{ width: '130px' }}>Dept *</th>
+                        <th>Description *</th>
+                        {shadeEnabled && <th style={{ width: '120px' }}>Shade</th>}
+                        <th style={{ width: '90px', textAlign: 'center' }}>UOM *</th>
+                        <th style={{ width: '85px', textAlign: 'right' }}>Qty *</th>
+                        <th style={{ width: '90px', textAlign: 'right' }}>Rate (₹)</th>
+                        <th style={{ width: '95px', textAlign: 'right' }}>Amount</th>
+                        <th style={{ width: '36px', textAlign: 'center' }}></th>
                       </tr>
                     </thead>
                     <tbody>

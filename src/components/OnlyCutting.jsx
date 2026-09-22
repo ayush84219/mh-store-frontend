@@ -69,14 +69,13 @@ export default function OnlyCutting({
         setWorkerStats(statusData?.workerStats || null);
       }
 
-      // Build Set of all designed lot identifiers (id, lotNo2, name, repeat_against)
+      // Build Set of all designed lot identifiers (id, lotNo2, name)
       const designedSet = new Set();
       if (Array.isArray(designsData)) {
         designsData.forEach(d => {
           if (d.id) designedSet.add(String(d.id).toLowerCase().trim());
           if (d.lotNo2 && d.lotNo2 !== 'N/A') designedSet.add(String(d.lotNo2).toLowerCase().trim());
           if (d.name) designedSet.add(String(d.name).toLowerCase().trim());
-          if (d.repeat_against) designedSet.add(String(d.repeat_against).toLowerCase().trim());
         });
       }
       setDesignedLotIds(designedSet);

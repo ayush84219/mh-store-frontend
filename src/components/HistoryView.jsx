@@ -1528,14 +1528,6 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
 
 const getLotVersionInfo = (lotNo, designs = []) => {
   const lotStr = String(lotNo || '').trim();
-  const d = designs.find(des => String(des.id).toLowerCase() === lotStr.toLowerCase());
-  if (d && d.repeat_against) {
-    return {
-      displayLot: lotStr,
-      versionText: `Repeat against Lot #${d.repeat_against}`,
-      isRecreated: true
-    };
-  }
   if (lotStr.includes('-V')) {
     const parts = lotStr.split('-V');
     return {

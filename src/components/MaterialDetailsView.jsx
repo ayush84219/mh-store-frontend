@@ -605,10 +605,8 @@ export default function MaterialDetailsView({
     return generated;
   };
 
-  const handlePrintBarcodes = async (barcodesList, material) => {
-    if (!barcodesList || barcodesList.length === 0) return;
-
-    const totalPkts = barcodesList.length;
+  const sendDirectMachinePrint = (material, totalPkts = 1, customFields = {}) => {
+    const pkts = Math.max(1, totalPkts);
     const d = new Date();
     const printDate =
       String(d.getDate()).padStart(2, '0') + '-' +
@@ -617,68 +615,59 @@ export default function MaterialDetailsView({
       String(d.getHours()).padStart(2, '0') + ':' +
       String(d.getMinutes()).padStart(2, '0');
 
-    let matchingCaptures = [];
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/weight-capture`);
-      if (res.ok) {
-        const result = await res.json();
-        const captures = result.data || [];
-        matchingCaptures = captures.filter(c => String(c.materialCode) === String(material.id));
-      }
-    } catch (err) {
-      console.warn("Failed to fetch weight captures for barcodes printing:", err);
-    }
+    setPrintStatus({
+      type: 'info',
+      message: `🖨️ Connecting to Machine Thermal Printer for ${material.name} (${pkts} sticker${pkts > 1 ? 's' : ''})...`
+    });
 
-    // Attempt direct WebSocket connection to Python print_service.py (ws://localhost:8765)
     try {
       const pws = new WebSocket('ws://localhost:8765');
       let nextPkt = 1;
 
       const sendNext = () => {
-        if (nextPkt > totalPkts) { pws.close(); return; }
-        const code = barcodesList[nextPkt - 1];
-        const match = code.match(/-A(\d+)$/) || code.match(/-B(\d+)$/);
-        const rollNum = match ? parseInt(match[1]) : nextPkt;
-        const pktLoc = getPacketLocationForMaterial(material, rollNum);
-        const pktBarcodeId = `${material.id}-A${String(rollNum).padStart(2, '0')}`;
+        if (nextPkt > pkts) {
+          setPrintStatus({
+            type: 'success',
+            message: `✅ Successfully sent ${pkts} sticker(s) directly to Machine Printer!`
+          });
+          setTimeout(() => setPrintStatus(null), 5000);
+          pws.close();
+          return;
+        }
 
-        const pktQty = Math.round((material.stock / totalPkts) * 100) / 100;
-
-        const capture = matchingCaptures.find(c => c.barcodeId === pktBarcodeId)
-          || matchingCaptures[rollNum - 1]
-          || matchingCaptures[0];
-
-        const displayWeight = capture ? `${capture.netWeightKg} KG` : `${pktQty} ${material.unit || 'Pcs'}`;
-        const displayPieces = capture ? String(capture.pieces) : String(pktQty);
-        const displayTotalQty = capture ? `${capture.pieces} ${material.unit || 'Pcs'}` : `${material.stock} ${material.unit || 'Pcs'}`;
-        const displayPo = capture?.poNumber || material.poNumber || material.po || 'N/A';
-        const displayBill = capture?.invoiceNo || material.invoiceNo || material.billNo || 'N/A';
-        const displayCmp = capture?.supplier || material.supplier || 'paras';
+        const pktLoc = getPacketLocationForMaterial(material, nextPkt);
+        const pktBarcodeId = `${material.id}-A${String(nextPkt).padStart(2, '0')}`;
+        const pktQty = Math.round((Number(material.stock || 0) / pkts) * 100) / 100;
 
         const payload = {
           type: 'print_accessory',
           data: {
-            cmp: displayCmp,
+            cmp: customFields.supplier || material.supplier || 'MH STORE',
             materialName: material.name,
             materialCode: material.id,
             category: material.category || 'Accessory',
             shade: material.color || 'Default',
-            weight: displayWeight,
-            pieces: displayPieces,
-            totalQty: displayTotalQty,
+            weight: `${pktQty} ${material.unit || 'Pcs'}`,
+            pieces: String(pktQty),
+            totalQty: `${material.stock || pktQty} ${material.unit || 'Pcs'}`,
             unit: material.unit || 'Pcs',
-            location: pktLoc,
+            location: pktLoc || material.location || 'Main Store',
             date: printDate,
-            poNumber: displayPo,
-            billNo: displayBill,
+            poNumber: customFields.poNumber || material.poNumber || material.po || 'N/A',
+            billNo: customFields.invoiceNo || material.invoiceNo || material.billNo || 'N/A',
             lotNo: material.id,
             operator: currentUser?.name || 'Paras',
             authorized: currentUser?.name || 'Paras',
-            packetNo: rollNum,
-            totalPackets: totalPkts,
+            packetNo: nextPkt,
+            totalPackets: pkts,
             barcodeId: pktBarcodeId
           }
         };
+
+        setPrintStatus({
+          type: 'info',
+          message: `🖨️ Direct printing sticker ${nextPkt} of ${pkts} on machine (${material.id})...`
+        });
 
         pws.send(JSON.stringify(payload));
         nextPkt++;
@@ -689,34 +678,59 @@ export default function MaterialDetailsView({
       };
 
       pws.onmessage = (ev) => {
-        const msg = JSON.parse(ev.data);
-        if (msg.type === 'auth_success') {
-          sendNext();
-        } else if (msg.type === 'print_accessory_result') {
-          if (msg.success) {
-            if (nextPkt > totalPkts) {
-              alert(`✅ All ${totalPkts} sticker(s) printed via Python Print Service!`);
-              pws.close();
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === 'auth_success') {
+            sendNext();
+          } else if (msg.type === 'print_accessory_result' || msg.type === 'print_result') {
+            if (msg.success !== false) {
+              if (nextPkt > pkts) {
+                setPrintStatus({
+                  type: 'success',
+                  message: `✅ All ${pkts} sticker(s) printed directly on machine!`
+                });
+                setTimeout(() => setPrintStatus(null), 5000);
+                pws.close();
+              } else {
+                sendNext();
+              }
             } else {
+              setPrintStatus({
+                type: 'error',
+                message: `⚠️ Sticker ${msg.packetNo || ''} warning: ${msg.message || 'Check printer'}`
+              });
               sendNext();
             }
-          } else {
-            alert(`⚠️ Sticker ${msg.packetNo} print error: ${msg.message}`);
-            sendNext();
+          } else if (msg.type === 'auth_failed' || msg.type === 'error') {
+            setPrintStatus({
+              type: 'error',
+              message: `❌ Python Print Service: ${msg.message}`
+            });
+            pws.close();
           }
-        } else if (msg.type === 'auth_failed' || msg.type === 'error') {
-          alert('Python Print Service: ' + msg.message);
-          pws.close();
+        } catch (e) {
+          sendNext();
         }
       };
 
       pws.onerror = () => {
-        // If Python print service is offline, alert user to start print_service.py
-        alert(`⚠️ Python Print Service offline (ws://localhost:8765).\nPlease run "python print_service.py" in terminal to print stickers.`);
+        setPrintStatus({
+          type: 'error',
+          message: `⚠️ Python Print Service is offline on ws://localhost:8765. Please run "python print_service.py" in terminal.`
+        });
+        setTimeout(() => setPrintStatus(null), 8000);
       };
     } catch (err) {
-      alert('Could not connect to Python Print Service: ' + err.message);
+      setPrintStatus({
+        type: 'error',
+        message: `⚠️ Direct machine print failed: ${err.message}`
+      });
     }
+  };
+
+  const handlePrintBarcodes = (barcodesList, material) => {
+    if (!barcodesList || barcodesList.length === 0) return;
+    sendDirectMachinePrint(material, barcodesList.length);
   };
 
   const handlePrint = () => {
@@ -829,6 +843,12 @@ export default function MaterialDetailsView({
   const [threshold, setThreshold] = useState(50);
   const [color, setColor] = useState('');
   const [location, setLocation] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [poNumber, setPoNumber] = useState('');
+  const [invoiceNo, setInvoiceNo] = useState('');
+  const [packetsToPrint, setPacketsToPrint] = useState(1);
+  const [directPrintOnAdd, setDirectPrintOnAdd] = useState(true);
+  const [printStatus, setPrintStatus] = useState(null); // { message, type: 'info' | 'success' | 'error' }
   const [imageUrl, setImageUrl] = useState('');
   const [imageInputMode, setImageInputMode] = useState('upload'); // 'upload' | 'url'
   const [imageUploading, setImageUploading] = useState(false);
@@ -891,8 +911,8 @@ export default function MaterialDetailsView({
     XLSX.writeFile(workbook, 'materials_inventory.xlsx');
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleSubmit = (e, shouldDirectPrint = directPrintOnAdd) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!name.trim()) {
       setFormError('Please enter material name');
       return;
@@ -904,14 +924,15 @@ export default function MaterialDetailsView({
     setFormError('');
 
     const materialId = `M${Math.floor(1400 + Math.random() * 8000)}`;
+    const numPackets = Math.max(1, parseInt(packetsToPrint, 10) || 1);
     const generatedBarcodes = Array.from(
-      { length: Number(stock) }, 
-      (_, i) => `${materialId}-B${String(i + 1).padStart(3, '0')}`
+      { length: numPackets }, 
+      (_, i) => `${materialId}-A${String(i + 1).padStart(2, '0')}`
     );
 
     const newMaterial = {
       id: materialId,
-      name,
+      name: name.trim(),
       category,
       stock: Number(stock),
       unit,
@@ -920,10 +941,22 @@ export default function MaterialDetailsView({
       color: color.trim() || 'Default',
       location: location.trim() || 'Main Store',
       imageUrl: imageUrl.trim() || undefined,
+      poNumber: poNumber.trim() || undefined,
+      invoiceNo: invoiceNo.trim() || undefined,
+      supplier: supplier.trim() || undefined,
+      packets: numPackets,
       barcodes: generatedBarcodes
     };
 
     onAddMaterial(newMaterial);
+
+    if (shouldDirectPrint) {
+      sendDirectMachinePrint(newMaterial, numPackets, {
+        supplier: supplier.trim(),
+        poNumber: poNumber.trim(),
+        invoiceNo: invoiceNo.trim()
+      });
+    }
 
     // Reset state
     setName('');
@@ -932,6 +965,10 @@ export default function MaterialDetailsView({
     setThreshold(50);
     setColor('');
     setLocation('');
+    setSupplier('');
+    setPoNumber('');
+    setInvoiceNo('');
+    setPacketsToPrint(1);
     setImageUrl('');
     setIsAdding(false);
   };
@@ -956,6 +993,36 @@ export default function MaterialDetailsView({
           </button>
         </div>
       </div>
+
+      {/* Direct Machine Print Status Banner */}
+      {printStatus && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '12px 16px',
+          borderRadius: '10px',
+          marginBottom: '18px',
+          backgroundColor: printStatus.type === 'success' ? 'rgba(16, 185, 129, 0.12)' : printStatus.type === 'error' ? 'rgba(239, 68, 68, 0.12)' : 'rgba(99, 102, 241, 0.12)',
+          border: `1.5px solid ${printStatus.type === 'success' ? 'rgba(16, 185, 129, 0.35)' : printStatus.type === 'error' ? 'rgba(239, 68, 68, 0.35)' : 'rgba(99, 102, 241, 0.35)'}`,
+          color: printStatus.type === 'success' ? '#059669' : printStatus.type === 'error' ? '#dc2626' : '#4f46e5',
+          fontSize: '13px',
+          fontWeight: '700',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Printer size={16} />
+            <span>{printStatus.message}</span>
+          </div>
+          <button
+            onClick={() => setPrintStatus(null)}
+            style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '2px', display: 'flex' }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* KPI Overview Summary Cards */}
       <div style={{
@@ -1144,6 +1211,93 @@ export default function MaterialDetailsView({
               </div>
             </div>
 
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">PO Reference Number</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. PO-8924 or N/A"
+                  value={poNumber}
+                  onChange={(e) => setPoNumber(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Bill / Invoice Number</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. INV-2024-001 or N/A"
+                  value={invoiceNo}
+                  onChange={(e) => setInvoiceNo(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Supplier / Vendor Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Paras, Vardhman, Coats..."
+                  value={supplier}
+                  onChange={(e) => setSupplier(e.target.value)}
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Total Packets / Sticker Labels to Generate</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  className="form-input"
+                  placeholder="1"
+                  value={packetsToPrint}
+                  onChange={(e) => setPacketsToPrint(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Direct Machine Print Settings Card */}
+            <div style={{
+              marginTop: '8px',
+              marginBottom: '16px',
+              padding: '14px 16px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(99, 102, 241, 0.05)',
+              border: '1.5px solid rgba(99, 102, 241, 0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', cursor: 'pointer', margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={directPrintOnAdd}
+                    onChange={(e) => setDirectPrintOnAdd(e.target.checked)}
+                    style={{ width: '16px', height: '16px', accentColor: 'var(--accent-color)', cursor: 'pointer' }}
+                  />
+                  <span>🖨️ Direct Print on Thermal Machine (ws://localhost:8765)</span>
+                </label>
+                <span style={{
+                  fontSize: '11px', fontWeight: '700',
+                  color: printServiceStatus === 'connected' ? '#059669' : '#d97706',
+                  backgroundColor: printServiceStatus === 'connected' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                  padding: '3px 8px', borderRadius: '6px', border: '1px solid currentColor'
+                }}>
+                  {printServiceStatus === 'connected' ? `● Machine Ready (${printerName || 'Thermal Printer'})` : '● Print Service: ' + printServiceStatus}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                Prints barcode stickers directly to the thermal printer on machine via Python print daemon. No file download or browser print dialog required.
+              </p>
+            </div>
+
             {/* Image / Photo Attachment (Optional) */}
             <div style={{
               marginTop: '6px',
@@ -1252,9 +1406,25 @@ export default function MaterialDetailsView({
               )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setIsAdding(false)}>Cancel</button>
-              <button type="submit" className="btn btn-primary">Catalog Material</button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={(e) => handleSubmit(e, false)}
+                style={{ fontWeight: '600' }}
+              >
+                Catalog Only
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={(e) => handleSubmit(e, true)}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700' }}
+              >
+                <Printer size={15} />
+                <span>Catalog & Direct Print ({packetsToPrint} Sticker{packetsToPrint > 1 ? 's' : ''})</span>
+              </button>
             </div>
           </form>
         </div>

@@ -1235,11 +1235,15 @@ body {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+  height: 100vh;
   width: 100%;
   background: linear-gradient(135deg, var(--bg-primary) 0%, #dbeafe 50%, #eff6ff 100%);
-  padding: 20px;
+  padding: 40px 20px;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
 }
 
 body.dark-theme .auth-page {
@@ -1279,10 +1283,21 @@ body.dark-theme .auth-page {
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-lg), 0 20px 40px -15px rgba(0, 0, 0, 0.1);
-  padding: 40px;
+  padding: 32px 36px;
   z-index: 2;
   animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
+  margin: auto;
+  flex-shrink: 0;
+}
+
+.auth-card .form-group {
+  margin-bottom: 14px;
+}
+
+.auth-card .form-label {
+  font-size: 13px;
+  margin-bottom: 5px;
 }
 
 .auth-logo {
