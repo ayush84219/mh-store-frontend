@@ -174,9 +174,11 @@ export default function MaterialDetailsView({
   onUpdateMaterial = null,
   currencySymbol = 'R',
   currentUser = null,
-  onSubmitApproval = null
+  onSubmitApproval = null,
+  allowMaterialPhotoEdit = true
 }) {
   const isAdmin = currentUser?.role === 'Admin';
+  const canEditPhoto = Boolean(allowMaterialPhotoEdit);
   const [isAdding, setIsAdding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const debouncedSearchQuery = useDebounce(searchQuery, 300);
@@ -186,7 +188,117 @@ export default function MaterialDetailsView({
   const [rpp, setRpp] = useState(10);
   const [expandedMaterialId, setExpandedMaterialId] = useState(null);
   const [printQueue, setPrintQueue] = useState(null);
-  const [previewModalImage, setPreviewModalImage] = useState(null);
+  
+  // Material Photo Management Modal State
+  const [photoModalData, setPhotoModalData] = useState(null); // material object
+  const [photoModalImage, setPhotoModalImage] = useState('');
+  const [photoModalUrlInput, setPhotoModalUrlInput] = useState('');
+  const [photoModalMode, setPhotoModalMode] = useState('upload'); // 'upload' | 'url'
+  const [photoModalSaving, setPhotoModalSaving] = useState(false);
+  const [photoModalSuccess, setPhotoModalSuccess] = useState('');
+  const photoFileInputRef = useRef(null);
+
+  const handleOpenPhotoModal = (material) => {
+    setPhotoModalData(material);
+    setPhotoModalImage(material.imageUrl || '');
+    setPhotoModalUrlInput(material.imageUrl || '');
+    setPhotoModalMode('upload');
+    setPhotoModalSaving(false);
+    setPhotoModalSuccess('');
+  };
+
+  const handlePhotoFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Image size exceeds 10MB limit. Please select a smaller photo.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setPhotoModalImage(ev.target.result || '');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSavePhoto = async () => {
+    if (!photoModalData) return;
+    setPhotoModalSaving(true);
+    setPhotoModalSuccess('');
+
+    const finalImg = photoModalMode === 'url' ? photoModalUrlInput.trim() : photoModalImage;
+    const updatedMat = {
+      ...photoModalData,
+      imageUrl: finalImg
+    };
+
+    try {
+      if (onUpdateMaterial) {
+        await onUpdateMaterial(updatedMat);
+      } else {
+        await fetch(`${getBackendUrl()}/api/materials/${photoModalData.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedMat)
+        });
+      }
+
+      // Update in local memory
+      photoModalData.imageUrl = finalImg;
+      const targetInList = materials.find(m => m.id === photoModalData.id);
+      if (targetInList) targetInList.imageUrl = finalImg;
+
+      setPhotoModalSuccess('✅ Material photo updated successfully!');
+      setTimeout(() => {
+        setPhotoModalSuccess('');
+        setPhotoModalData(null);
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to update material photo:', err);
+      alert('Failed to update photo: ' + err.message);
+    } finally {
+      setPhotoModalSaving(false);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!photoModalData) return;
+    if (!window.confirm(`Are you sure you want to remove the photo for ${photoModalData.name}?`)) return;
+
+    setPhotoModalSaving(true);
+    const updatedMat = {
+      ...photoModalData,
+      imageUrl: ''
+    };
+
+    try {
+      if (onUpdateMaterial) {
+        await onUpdateMaterial(updatedMat);
+      } else {
+        await fetch(`${getBackendUrl()}/api/materials/${photoModalData.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedMat)
+        });
+      }
+
+      photoModalData.imageUrl = '';
+      const targetInList = materials.find(m => m.id === photoModalData.id);
+      if (targetInList) targetInList.imageUrl = '';
+
+      setPhotoModalImage('');
+      setPhotoModalUrlInput('');
+      setPhotoModalSuccess('✅ Photo removed successfully!');
+      setTimeout(() => {
+        setPhotoModalSuccess('');
+        setPhotoModalData(null);
+      }, 1000);
+    } catch (err) {
+      alert('Failed to remove photo: ' + err.message);
+    } finally {
+      setPhotoModalSaving(false);
+    }
+  };
 
   // Custom UI Dialog & Validation States
   const [confirmModal, setConfirmModal] = useState(null); // { message, onConfirm, isDanger }
@@ -1724,10 +1836,10 @@ export default function MaterialDetailsView({
                         <td style={{ textAlign: 'center', verticalAlign: 'middle', padding: '8px 4px' }}>
                           {m.imageUrl ? (
                             <div
-                              onClick={(e) => { e.stopPropagation(); setPreviewModalImage(m.imageUrl); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenPhotoModal(m); }}
                               style={{
-                                width: '40px',
-                                height: '40px',
+                                width: '42px',
+                                height: '42px',
                                 borderRadius: '8px',
                                 border: '1.5px solid var(--border-color)',
                                 overflow: 'hidden',
@@ -1738,11 +1850,12 @@ export default function MaterialDetailsView({
                                 justifyContent: 'center',
                                 backgroundColor: 'var(--bg-secondary)',
                                 boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                                transition: 'transform 0.15s ease'
+                                position: 'relative',
+                                transition: 'all 0.15s ease'
                               }}
-                              title="Click to view full photo"
-                              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.1)'}
-                              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                              title={canEditPhoto ? "Click to view, change, or delete photo" : "Click to view photo preview"}
+                              onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.borderColor = 'var(--accent-color)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.borderColor = 'var(--border-color)'; }}
                             >
                               <img
                                 src={getCleanImageUrl(m.imageUrl)}
@@ -1750,21 +1863,61 @@ export default function MaterialDetailsView({
                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                 onError={(e) => { e.target.style.display = 'none'; }}
                               />
+                              <div style={{
+                                position: 'absolute', bottom: 0, right: 0, left: 0,
+                                background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '8px',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1px',
+                                opacity: 0.85
+                              }}>
+                                {canEditPhoto ? <Camera size={10} /> : <Eye size={10} />}
+                              </div>
                             </div>
+                          ) : canEditPhoto ? (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); handleOpenPhotoModal(m); }}
+                              style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--bg-secondary)',
+                                border: '1.5px dashed var(--accent-color, #6366f1)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                margin: '0 auto',
+                                color: 'var(--accent-color, #6366f1)',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s ease',
+                                padding: '2px',
+                                outline: 'none'
+                              }}
+                              title="Click to add photo for this material"
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.12)'; e.currentTarget.style.transform = 'scale(1.05)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; e.currentTarget.style.transform = 'scale(1)'; }}
+                            >
+                              <Camera size={13} />
+                              <span style={{ fontSize: '7.5px', fontWeight: '800', marginTop: '1px' }}>+PHOTO</span>
+                            </button>
                           ) : (
-                            <div style={{
-                              width: '38px',
-                              height: '38px',
-                              borderRadius: '8px',
-                              backgroundColor: 'var(--bg-secondary)',
-                              border: '1px dashed var(--border-color)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              margin: '0 auto',
-                              color: 'var(--text-muted)'
-                            }} title="No photo uploaded">
-                              <ImageIcon size={16} style={{ opacity: 0.35 }} />
+                            <div
+                              style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--bg-secondary)',
+                                border: '1px solid var(--border-color)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                margin: '0 auto',
+                                color: 'var(--text-muted)',
+                                opacity: 0.45
+                              }}
+                              title="No photo attached (view-only mode)"
+                            >
+                              <ImageIcon size={16} />
                             </div>
                           )}
                         </td>
@@ -2806,58 +2959,293 @@ export default function MaterialDetailsView({
         </div>
       )}
 
-      {/* ── IMAGE ENLARGED PREVIEW MODAL ─────────────────────────────── */}
-      {previewModalImage && (
+      {/* ── MATERIAL PHOTO PREVIEW & CHANGE MODAL ───────────────────────── */}
+      {photoModalData && (
         <div
           className="modal-overlay"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, background: 'rgba(0,0,0,0.75)' }}
-          onClick={() => setPreviewModalImage(null)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 10000, background: 'rgba(15, 23, 42, 0.75)', backdropFilter: 'blur(4px)'
+          }}
+          onClick={() => setPhotoModalData(null)}
         >
           <div
             className="panel animate-scale"
             style={{
-              maxWidth: '650px', width: '90%', padding: '20px',
-              borderRadius: '12px', background: '#ffffff',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-              position: 'relative', display: 'flex', flexDirection: 'column', gap: '14px'
+              maxWidth: '680px', width: '92%', padding: '24px',
+              borderRadius: '16px', background: 'var(--panel-bg, #ffffff)',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.35)',
+              position: 'relative', display: 'flex', flexDirection: 'column', gap: '16px',
+              maxHeight: '90vh', overflowY: 'auto'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                📷 Material Photo Preview
-              </h3>
+            {/* Hidden File Input (Only if canEditPhoto) */}
+            {canEditPhoto && (
+              <input
+                type="file"
+                ref={photoFileInputRef}
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handlePhotoFileUpload}
+              />
+            )}
+
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1.5px solid var(--border-color, #e2e8f0)', paddingBottom: '12px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {canEditPhoto ? (
+                      <>
+                        <Camera size={20} style={{ color: '#6366f1' }} /> Material Photo
+                      </>
+                    ) : (
+                      <>
+                        <Eye size={20} style={{ color: '#6366f1' }} /> Material Photo Preview
+                      </>
+                    )}
+                  </h3>
+                  {!canEditPhoto && (
+                    <span style={{
+                      fontSize: '10.5px',
+                      fontWeight: '800',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      backgroundColor: 'rgba(100, 116, 139, 0.12)',
+                      color: 'var(--text-muted)',
+                      border: '1px solid rgba(100, 116, 139, 0.2)'
+                    }}>
+                      Normal View Panel
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    fontSize: '11.5px', fontWeight: '800', color: '#4f46e5',
+                    background: 'rgba(99, 102, 241, 0.1)', padding: '2px 8px', borderRadius: '6px'
+                  }}>
+                    {photoModalData.id}
+                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main)' }}>
+                    {photoModalData.name}
+                  </span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    ({photoModalData.category || 'Accessory'})
+                  </span>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setPreviewModalImage(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+                onClick={() => setPhotoModalData(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted, #64748b)', padding: '4px' }}
               >
                 <X size={20} />
               </button>
             </div>
 
+            {/* Success Toast */}
+            {photoModalSuccess && (
+              <div style={{
+                padding: '10px 14px', borderRadius: '8px',
+                background: 'rgba(16, 185, 129, 0.12)', color: '#059669',
+                fontSize: '12.5px', fontWeight: '800', border: '1px solid rgba(16, 185, 129, 0.25)',
+                display: 'flex', alignItems: 'center', gap: '8px'
+              }}>
+                <CheckCircle size={16} /> {photoModalSuccess}
+              </div>
+            )}
+
+            {/* Mode Switcher Tabs (Only if canEditPhoto) */}
+            {canEditPhoto && (
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setPhotoModalMode('upload')}
+                  style={{
+                    padding: '6px 14px', borderRadius: '8px',
+                    border: photoModalMode === 'upload' ? '1.5px solid #6366f1' : '1px solid var(--border-color, #cbd5e1)',
+                    background: photoModalMode === 'upload' ? 'rgba(99, 102, 241, 0.1)' : 'var(--bg-secondary, #f8fafc)',
+                    color: photoModalMode === 'upload' ? '#4f46e5' : 'var(--text-muted, #64748b)',
+                    fontSize: '12px', fontWeight: '800', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <Upload size={14} /> Upload from Computer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoModalMode('url')}
+                  style={{
+                    padding: '6px 14px', borderRadius: '8px',
+                    border: photoModalMode === 'url' ? '1.5px solid #6366f1' : '1px solid var(--border-color, #cbd5e1)',
+                    background: photoModalMode === 'url' ? 'rgba(99, 102, 241, 0.1)' : 'var(--bg-secondary, #f8fafc)',
+                    color: photoModalMode === 'url' ? '#4f46e5' : 'var(--text-muted, #64748b)',
+                    fontSize: '12px', fontWeight: '800', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '6px'
+                  }}
+                >
+                  <ExternalLink size={14} /> Enter Web Image URL
+                </button>
+              </div>
+            )}
+
+            {/* URL Input Box if in URL mode (Only if canEditPhoto) */}
+            {canEditPhoto && photoModalMode === 'url' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>
+                  IMAGE URL
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://example.com/photos/material.jpg"
+                  value={photoModalUrlInput}
+                  onChange={(e) => {
+                    setPhotoModalUrlInput(e.target.value);
+                    setPhotoModalImage(e.target.value);
+                  }}
+                  style={{
+                    padding: '8px 12px', borderRadius: '8px',
+                    border: '1.5px solid var(--border-color, #cbd5e1)',
+                    background: 'var(--bg-primary, #ffffff)', color: 'var(--text-main)',
+                    fontSize: '12.5px', outline: 'none'
+                  }}
+                />
+              </div>
+            )}
+
+            {/* Image Preview Container */}
             <div style={{
-              width: '100%', maxHeight: '450px', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              background: '#f8fafc', borderRadius: '8px', overflow: 'hidden', padding: '10px'
+              width: '100%', minHeight: '260px', maxHeight: '420px',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--bg-secondary, #f8fafc)', borderRadius: '12px',
+              border: '2px dashed var(--border-color, #cbd5e1)', overflow: 'hidden', padding: '16px',
+              position: 'relative'
             }}>
-              <img
-                src={getCleanImageUrl(previewModalImage)}
-                alt="Material preview enlarged"
-                style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '6px' }}
-                onError={(e) => { e.target.alt = 'Image failed to load'; }}
-              />
+              {photoModalImage ? (
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+                  <img
+                    src={getCleanImageUrl(photoModalImage)}
+                    alt="Material preview"
+                    style={{
+                      maxWidth: '100%', maxHeight: '320px', objectFit: 'contain',
+                      borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                    }}
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                    }}
+                  />
+                  {canEditPhoto && (
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => photoFileInputRef.current?.click()}
+                        style={{
+                          padding: '6px 14px', borderRadius: '8px',
+                          border: '1px solid #6366f1', background: '#6366f1', color: '#ffffff',
+                          fontSize: '12px', fontWeight: '700', cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: '6px',
+                          boxShadow: '0 2px 6px rgba(99,102,241,0.25)'
+                        }}
+                      >
+                        <Upload size={13} /> Change Photo
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRemovePhoto}
+                        disabled={photoModalSaving}
+                        style={{
+                          padding: '6px 14px', borderRadius: '8px',
+                          border: '1px solid rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.08)',
+                          color: '#dc2626', fontSize: '12px', fontWeight: '700', cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: '6px'
+                        }}
+                      >
+                        <Trash2 size={13} /> Remove Photo
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', padding: '20px', textAlign: 'center' }}>
+                  <div style={{
+                    width: '60px', height: '60px', borderRadius: '50%',
+                    background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}>
+                    <Camera size={28} />
+                  </div>
+                  <div>
+                    <strong style={{ fontSize: '14px', color: 'var(--text-main)', display: 'block', marginBottom: '2px' }}>
+                      No Photo Added Yet
+                    </strong>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {canEditPhoto
+                        ? 'Upload an image file or paste a web URL to attach a photo to this material.'
+                        : 'No image is currently uploaded for this raw material item.'}
+                    </span>
+                  </div>
+                  {canEditPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => photoFileInputRef.current?.click()}
+                      style={{
+                        marginTop: '6px',
+                        padding: '8px 18px', borderRadius: '8px',
+                        border: 'none', background: '#6366f1', color: '#ffffff',
+                        fontSize: '13px', fontWeight: '800', cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: '8px',
+                        boxShadow: '0 3px 10px rgba(99,102,241,0.3)'
+                      }}
+                    >
+                      <Upload size={15} /> Upload Photo from Computer
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setPreviewModalImage(null)}
-                style={{ fontWeight: '700', padding: '8px 16px' }}
-              >
-                Close Preview
-              </button>
+            {/* Modal Footer Controls */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              borderTop: '1px solid var(--border-color, #e2e8f0)', paddingTop: '14px', marginTop: '4px'
+            }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                {canEditPhoto ? '💡 Tip: High quality JPG, PNG, or WebP recommended.' : '🔒 View-Only Mode: Photo modifications are managed in Settings by Admin.'}
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setPhotoModalData(null)}
+                  style={{
+                    padding: '8px 18px', borderRadius: '8px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    background: canEditPhoto ? 'var(--bg-primary, #ffffff)' : '#6366f1',
+                    color: canEditPhoto ? 'var(--text-main, #0f172a)' : '#ffffff',
+                    fontSize: '13px', fontWeight: '700', cursor: 'pointer'
+                  }}
+                >
+                  {canEditPhoto ? 'Cancel' : 'Close Preview'}
+                </button>
+                {canEditPhoto && (
+                  <button
+                    type="button"
+                    disabled={photoModalSaving || (!photoModalImage && !photoModalUrlInput)}
+                    onClick={handleSavePhoto}
+                    style={{
+                      padding: '8px 20px', borderRadius: '8px',
+                      border: 'none', background: '#10b981', color: '#ffffff',
+                      fontSize: '13px', fontWeight: '800',
+                      cursor: (photoModalSaving || (!photoModalImage && !photoModalUrlInput)) ? 'not-allowed' : 'pointer',
+                      opacity: (photoModalSaving || (!photoModalImage && !photoModalUrlInput)) ? 0.6 : 1,
+                      display: 'inline-flex', alignItems: 'center', gap: '6px',
+                      boxShadow: '0 3px 10px rgba(16,185,129,0.3)'
+                    }}
+                  >
+                    {photoModalSaving ? 'Saving Photo...' : '💾 Save Photo'}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

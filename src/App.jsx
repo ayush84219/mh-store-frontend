@@ -536,6 +536,7 @@ export default function App() {
   const [isDarkTheme, setIsDarkTheme] = useState(() => {
     return localStorage.getItem('gpdms_darktheme') === 'true';
   });
+  const [allowMaterialPhotoEdit, setAllowMaterialPhotoEdit] = useState(true);
 
   // Modal State
   const [isNewDesignModalOpen, setIsNewDesignModalOpen] = useState(false);
@@ -919,6 +920,8 @@ export default function App() {
             setHalls(data.warehouseHalls);
           if (data.warehouseRacks && data.warehouseRacks.length > 0)
             setRacks(data.warehouseRacks);
+          if (data.allowMaterialPhotoEdit !== undefined)
+            setAllowMaterialPhotoEdit(Boolean(data.allowMaterialPhotoEdit));
         }
       } catch (err) {
         console.error('Failed to fetch settings from DB:', err);
@@ -1179,7 +1182,7 @@ export default function App() {
     }).catch(err => console.error('Failed to save issue log to DB:', err));
   };
 
-  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '') => {
+  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '') => {
     // 1. Deduct materials stock counts
     const updatedMaterials = materials.map(m => {
       const issued = issuedItems.find(item => item.materialId === m.id);
@@ -1204,6 +1207,8 @@ export default function App() {
       category: design ? design.category : 'Unknown',
       volume,
       personName,
+      receiverName: receiverName || '',
+      receiverDept: receiverDept || '',
       date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
       materials: issuedItems.map(item => ({
         name: item.materialName,
@@ -1531,6 +1536,27 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ value: updated })
     }).catch(err => console.error('Failed to update designers in DB:', err));
+  };
+
+  const handleToggleAllowMaterialPhotoEdit = async (newValue) => {
+    setAllowMaterialPhotoEdit(newValue);
+    try {
+      await fetch(`${getBackendUrl()}/api/settings/allow_material_photo_edit`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue })
+      });
+      setToast({
+        type: 'success',
+        title: 'Photo Control Setting Saved',
+        message: newValue
+          ? 'Material Photo Change & Delete option is now ENABLED.'
+          : 'Material Photo Change & Delete option is now DISABLED (Normal View Panel Mode).'
+      });
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      console.error('Failed to save allow_material_photo_edit setting:', err);
+    }
   };
 
   const handleModalAutofillFromLot = async (lotNo) => {
@@ -2635,6 +2661,7 @@ export default function App() {
                 currencySymbol={currencySymbol}
                 currentUser={currentUser}
                 onSubmitApproval={handleSubmitApprovalRequest}
+                allowMaterialPhotoEdit={allowMaterialPhotoEdit}
               />
             )}
 
@@ -2693,6 +2720,8 @@ export default function App() {
                 setRacks={setRacks}
                 halls={halls}
                 setHalls={setHalls}
+                allowMaterialPhotoEdit={allowMaterialPhotoEdit}
+                onToggleAllowMaterialPhotoEdit={handleToggleAllowMaterialPhotoEdit}
               />
             )}
 

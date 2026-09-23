@@ -88,6 +88,28 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
             }}>
               {selectedMaterial.stock} {selectedMaterial.unit || 'Pcs'}
             </span>
+            <button
+              type="button"
+              title="Clear selection"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange('');
+                setIsOpen(false);
+                setSearchQuery('');
+              }}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center',
+                color: 'var(--text-muted, #94a3b8)',
+                borderRadius: '4px'
+              }}
+            >
+              <X size={14} />
+            </button>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted, #94a3b8)' }}>
@@ -290,6 +312,7 @@ export default function MaterialTransferView({ currentUser }) {
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
   const [printModalData, setPrintModalData] = useState(null);
+  const [lastTransferSuccess, setLastTransferSuccess] = useState(null);
 
   // Printer connection state
   const [printerStatus, setPrinterStatus] = useState('offline');
@@ -376,6 +399,15 @@ export default function MaterialTransferView({ currentUser }) {
     fetchData();
   }, []);
 
+  const handleResetForm = () => {
+    setSelectedMaterialId('');
+    setSourceLocations([]);
+    setFromLoc('');
+    setToLoc('');
+    setTransferQty(1);
+    setLastTransferSuccess(null);
+  };
+
   // Parse source locations when material selection changes
   useEffect(() => {
     if (!selectedMaterial) {
@@ -432,7 +464,7 @@ export default function MaterialTransferView({ currentUser }) {
 
   const showNotification = (msg, type = 'success') => {
     setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 5000);
+    setTimeout(() => setToast(null), 3000);
   };
 
   const handleExecuteTransfer = async () => {
@@ -519,10 +551,34 @@ export default function MaterialTransferView({ currentUser }) {
 
       if (!logRes.ok) throw new Error('Failed to log transfer history');
 
+      // Save success summary for quick actions & sticker printing
+      const completedTransfer = {
+        id: Date.now(),
+        materialCode: selectedMaterialId,
+        materialName: selectedMaterial.name,
+        fromLocation: fromLoc,
+        toLocation: toLoc.trim(),
+        quantity: transferQty,
+        operator: currentUser?.name || 'Admin',
+        transferredAt: new Date().toISOString()
+      };
+      setLastTransferSuccess(completedTransfer);
+
+      // Automatically dismiss the success banner after exactly 3 seconds
+      if (window._transferSuccessTimer) clearTimeout(window._transferSuccessTimer);
+      window._transferSuccessTimer = setTimeout(() => {
+        setLastTransferSuccess(null);
+      }, 3000);
+
       showNotification(`Successfully transferred ${transferQty} packet(s) of ${selectedMaterial.name} to ${toLoc}!`);
       
-      // Reset form & Refresh
+      // Cleanly reset all transfer form fields
+      setSelectedMaterialId('');
+      setSourceLocations([]);
+      setFromLoc('');
       setToLoc('');
+      setTransferQty(1);
+
       await fetchData();
     } catch (err) {
       console.error(err);
@@ -683,14 +739,128 @@ export default function MaterialTransferView({ currentUser }) {
         
         {/* Left Panel: Execute Transfer */}
         <div className="panel" style={{ padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}>
-              <ArrowLeftRight size={20} style={{ color: '#6366f1' }} /> Material Store Transfer
-            </h2>
-            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-              Relocate packet inventory across warehouse racks & shelves.
-            </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}>
+                <ArrowLeftRight size={20} style={{ color: '#6366f1' }} /> Material Store Transfer
+              </h2>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                Relocate packet inventory across warehouse racks & shelves.
+              </span>
+            </div>
+            {(selectedMaterialId || toLoc) && (
+              <button
+                type="button"
+                onClick={handleResetForm}
+                style={{
+                  padding: '5px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color, #cbd5e1)',
+                  background: 'var(--bg-secondary, #f8fafc)',
+                  color: 'var(--text-muted, #64748b)',
+                  fontSize: '0.75rem',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <X size={12} /> Clear Form
+              </button>
+            )}
           </div>
+
+          {/* Transfer Success Banner Card */}
+          {lastTransferSuccess && (
+            <div style={{
+              padding: '14px 16px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.08) 100%)',
+              border: '1.5px solid rgba(16, 185, 129, 0.3)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <CheckCircle size={18} style={{ color: '#10b981' }} />
+                  <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#065f46' }}>
+                    Transfer Completed Successfully!
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLastTransferSuccess(null)}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px' }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.82rem', background: 'rgba(255,255,255,0.8)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+                <div>
+                  <span style={{ fontWeight: '800', color: '#4f46e5' }}>{lastTransferSuccess.materialCode}</span>
+                  <span style={{ fontWeight: '700', color: 'var(--text-main)', marginLeft: '6px' }}>{lastTransferSuccess.materialName}</span>
+                </div>
+                <span style={{ fontWeight: '800', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 8px', borderRadius: '6px' }}>
+                  {lastTransferSuccess.quantity} pkt{lastTransferSuccess.quantity > 1 ? 's' : ''}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', fontWeight: '700' }}>
+                <span style={{ color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '3px 8px', borderRadius: '6px' }}>
+                  From: {lastTransferSuccess.fromLocation}
+                </span>
+                <ArrowLeftRight size={12} style={{ color: '#94a3b8' }} />
+                <span style={{ color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '3px 8px', borderRadius: '6px' }}>
+                  To: {lastTransferSuccess.toLocation}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => handlePrintTransferLabel(lastTransferSuccess)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#6366f1',
+                    color: '#ffffff',
+                    fontSize: '0.8rem',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(99,102,241,0.3)'
+                  }}
+                >
+                  <Printer size={14} /> Print Transfer Barcode
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLastTransferSuccess(null)}
+                  style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    background: 'var(--bg-primary, #ffffff)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.8rem',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Transfer Another
+                </button>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {/* Step 1: Select Material */}
@@ -727,8 +897,8 @@ export default function MaterialTransferView({ currentUser }) {
                 2. TRANSFER FROM LOCATION
               </label>
               {sourceLocations.length === 0 ? (
-                <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'var(--bg-secondary, #f8fafc)', color: 'var(--text-muted, #64748b)', fontSize: '0.85rem', fontWeight: '600', border: '1.5px solid var(--border-color, #e2e8f0)' }}>
-                  No active source location
+                <div style={{ padding: '14px', borderRadius: '10px', background: 'var(--bg-secondary, #f8fafc)', color: 'var(--text-muted, #64748b)', fontSize: '0.82rem', fontWeight: '600', border: '1.5px dashed var(--border-color, #e2e8f0)', textAlign: 'center' }}>
+                  {selectedMaterialId ? 'No source stock locations found for this material.' : 'Select an accessory material in step 1 above to view source rack locations.'}
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -790,173 +960,84 @@ export default function MaterialTransferView({ currentUser }) {
               />
             </div>
 
-            {/* Step 4: Transfer Quantity with Stepper and Quick Presets */}
+            {/* Step 4: Transfer Quantity with Professional Scroll Range Slider */}
             <div>
               {(() => {
                 const maxAvailable = sourceLocations.find(g => g.location === fromLoc)?.count || 1;
                 const totalPkts = selectedMaterial?.packets || maxAvailable;
                 const approxPcsPerPkt = selectedMaterial ? Math.round(Number(selectedMaterial.stock || 0) / Math.max(1, totalPkts)) : 0;
+                const totalPcsAvailable = maxAvailable * approxPcsPerPkt;
+                const movingPcs = transferQty * approxPcsPerPkt;
                 const remainingAfter = Math.max(0, maxAvailable - transferQty);
+                const remainingPcs = remainingAfter * approxPcsPerPkt;
 
                 return (
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', margin: 0 }}>
-                        4. PACKETS COUNT TO TRANSFER
+                  <div style={{
+                    padding: '14px 16px',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-secondary, #f8fafc)',
+                    border: '1.5px solid var(--border-color, #e2e8f0)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted, #64748b)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        4. Quantity to Transfer
                       </label>
-                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#6366f1' }}>
-                        Max Available: {maxAvailable} pkt{maxAvailable > 1 ? 's' : ''}
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>
+                        Available: <strong style={{ color: '#0f172a' }}>{maxAvailable} Pkt{maxAvailable > 1 ? 's' : ''}</strong> {approxPcsPerPkt > 0 ? `(~${totalPcsAvailable.toLocaleString()} ${selectedMaterial?.unit || 'Pcs'})` : ''}
                       </span>
                     </div>
 
-                    {/* Stepper Control */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                      <button
-                        type="button"
-                        onClick={() => setTransferQty(prev => Math.max(1, prev - 1))}
-                        disabled={transferQty <= 1}
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '10px',
-                          border: '1.5px solid var(--border-color, #cbd5e1)',
-                          background: 'var(--bg-primary, #ffffff)',
-                          cursor: transferQty <= 1 ? 'not-allowed' : 'pointer',
-                          opacity: transferQty <= 1 ? 0.4 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'var(--text-main, #0f172a)',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <Minus size={16} />
-                      </button>
+                    {/* Selected Quantity Readout */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '4px 0' }}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                        <span style={{ fontSize: '1.4rem', fontWeight: '800', color: '#4f46e5' }}>
+                          {transferQty}
+                        </span>
+                        <span style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+                          {transferQty === 1 ? 'Packet' : 'Packets'}
+                        </span>
+                        {approxPcsPerPkt > 0 && (
+                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: '#6366f1' }}>
+                            • ~{movingPcs.toLocaleString()} {selectedMaterial?.unit || 'Pcs'}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: remainingAfter > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                        color: remainingAfter > 0 ? '#059669' : '#d97706'
+                      }}>
+                        Remaining: {remainingAfter} pkt{remainingAfter !== 1 ? 's' : ''}
+                      </span>
+                    </div>
 
-                      <input 
-                        type="number"
+                    {/* Smooth Clean Scroll Slider */}
+                    <div style={{ position: 'relative', width: '100%' }}>
+                      <input
+                        type="range"
                         min="1"
                         max={maxAvailable}
                         value={transferQty}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          if (isNaN(val) || val < 1) setTransferQty(1);
-                          else if (val > maxAvailable) setTransferQty(maxAvailable);
-                          else setTransferQty(val);
-                        }}
+                        onChange={(e) => setTransferQty(Number(e.target.value) || 1)}
                         style={{
-                          flex: 1,
-                          height: '42px',
-                          padding: '0 12px',
-                          borderRadius: '10px',
-                          border: '1.5px solid var(--border-color, #cbd5e1)',
-                          background: 'var(--bg-primary, #ffffff)',
-                          fontSize: '1.05rem',
-                          fontWeight: '800',
-                          color: 'var(--text-main, #0f172a)',
-                          textAlign: 'center',
-                          outline: 'none'
+                          width: '100%',
+                          height: '8px',
+                          accentColor: '#4f46e5',
+                          cursor: 'pointer',
+                          display: 'block'
                         }}
                       />
-
-                      <button
-                        type="button"
-                        onClick={() => setTransferQty(prev => Math.min(maxAvailable, prev + 1))}
-                        disabled={transferQty >= maxAvailable}
-                        style={{
-                          width: '42px',
-                          height: '42px',
-                          borderRadius: '10px',
-                          border: '1.5px solid var(--border-color, #cbd5e1)',
-                          background: 'var(--bg-primary, #ffffff)',
-                          cursor: transferQty >= maxAvailable ? 'not-allowed' : 'pointer',
-                          opacity: transferQty >= maxAvailable ? 0.4 : 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'var(--text-main, #0f172a)',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
-
-                    {/* Quick Preset Buttons */}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
-                      {[1, 2, 5].filter(q => q <= maxAvailable).map(q => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => setTransferQty(q)}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: transferQty === q ? '1px solid #6366f1' : '1px solid var(--border-color, #e2e8f0)',
-                            background: transferQty === q ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-secondary, #f8fafc)',
-                            color: transferQty === q ? '#4f46e5' : 'var(--text-muted, #64748b)',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {q} Pkt{q > 1 ? 's' : ''}
-                        </button>
-                      ))}
-                      {maxAvailable > 2 && (
-                        <button
-                          type="button"
-                          onClick={() => setTransferQty(Math.max(1, Math.floor(maxAvailable / 2)))}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: '1px solid var(--border-color, #e2e8f0)',
-                            background: 'var(--bg-secondary, #f8fafc)',
-                            color: 'var(--text-muted, #64748b)',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Half (50%)
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => setTransferQty(maxAvailable)}
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          border: transferQty === maxAvailable ? '1px solid #10b981' : '1px solid var(--border-color, #e2e8f0)',
-                          background: transferQty === maxAvailable ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-secondary, #f8fafc)',
-                          color: transferQty === maxAvailable ? '#059669' : 'var(--text-muted, #64748b)',
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                          marginLeft: 'auto'
-                        }}
-                      >
-                        All ({maxAvailable} pkts)
-                      </button>
-                    </div>
-
-                    {/* Calculation Preview Box */}
-                    <div style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: 'rgba(99, 102, 241, 0.04)',
-                      border: '1px solid rgba(99, 102, 241, 0.12)',
-                      fontSize: '12px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <span style={{ color: 'var(--text-main, #0f172a)', fontWeight: '700' }}>
-                        Moving: <strong style={{ color: '#4f46e5' }}>{transferQty} pkt{transferQty > 1 ? 's' : ''}</strong> {approxPcsPerPkt > 0 ? `(~${(transferQty * approxPcsPerPkt).toLocaleString()} ${selectedMaterial?.unit || 'Pcs'})` : ''}
-                      </span>
-                      <span style={{ color: 'var(--text-muted, #64748b)', fontWeight: '600' }}>
-                        Remaining at source: <strong style={{ color: remainingAfter > 0 ? '#10b981' : '#f59e0b' }}>{remainingAfter} pkts</strong>
-                      </span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginTop: '6px', fontWeight: '600' }}>
+                        <span>1 Pkt</span>
+                        {maxAvailable > 1 && <span>Scroll slider to adjust (1 — {maxAvailable})</span>}
+                        <span>{maxAvailable} Pkts</span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -1008,7 +1089,7 @@ export default function MaterialTransferView({ currentUser }) {
               }}
             >
               <ArrowLeftRight size={16} />
-              {submitting ? 'Executing Transfer...' : `Execute Transfer (${transferQty} Packet${transferQty > 1 ? 's' : ''})`}
+              {submitting ? 'Executing Transfer...' : 'Execute Transfer'}
             </button>
           </div>
         </div>
@@ -1174,20 +1255,34 @@ export default function MaterialTransferView({ currentUser }) {
                         </td>
                       </tr>
                     ) : (
-                      filteredHistory.map(item => {
+                      filteredHistory.map((item, idx) => {
                         const d = item.transferredAt ? new Date(item.transferredAt) : null;
                         const isValidDate = d && !isNaN(d.getTime());
                         const dateText = isValidDate ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
                         const timeText = isValidDate ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
+                        const isJustTransferred = lastTransferSuccess && String(item.materialCode) === String(lastTransferSuccess.materialCode) && item.toLocation === lastTransferSuccess.toLocation && idx === 0;
 
                         return (
-                          <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-main)', fontWeight: '600' }}>
+                          <tr key={item.id || idx} style={{
+                            borderBottom: '1px solid var(--border-color)',
+                            color: 'var(--text-main)',
+                            fontWeight: '600',
+                            background: isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : 'transparent',
+                            transition: 'background 0.3s ease'
+                          }}>
                             {/* Date & Time Column */}
                             <td style={{ padding: '10px 8px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <span style={{ fontWeight: '700', fontSize: '0.8rem', color: 'var(--text-main)' }}>
-                                  {dateText}
-                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontWeight: '700', fontSize: '0.8rem', color: 'var(--text-main)' }}>
+                                    {dateText}
+                                  </span>
+                                  {isJustTransferred && (
+                                    <span style={{ fontSize: '9.5px', background: '#10b981', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                      NEW
+                                    </span>
+                                  )}
+                                </div>
                                 {timeText && (
                                   <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                     <Clock size={10} style={{ color: '#6366f1' }} /> {timeText}

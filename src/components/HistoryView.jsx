@@ -102,6 +102,9 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
   const [zipOrders, setZipOrders] = useState([]);
   const [pos, setPOs] = useState([]);
   const [issueLogs, setIssueLogs] = useState([]);
+  const [transfers, setTransfers] = useState([]);
+  const [extraMaterialIssues, setExtraMaterialIssues] = useState([]);
+  const [weightCaptures, setWeightCaptures] = useState([]);
 
   // Loading & error states
   const [isLoading, setIsLoading] = useState(false);
@@ -115,14 +118,17 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       const backendUrl = getBackendUrl();
 
       try {
-        const [historyRes, scansRes, headersRes, dooriRes, zipRes, posRes, issueRes] = await Promise.all([
+        const [historyRes, scansRes, headersRes, dooriRes, zipRes, posRes, issueRes, transferRes, extraRes, weightRes] = await Promise.all([
           fetch(`${backendUrl}/api/design-history`),
           fetch(`${backendUrl}/api/scans`),
           fetch(`${backendUrl}/api/cutting-headers`),
           fetch(`${backendUrl}/api/doori-orders`),
           fetch(`${backendUrl}/api/zip-orders`),
           fetch(`${backendUrl}/api/pos`),
-          fetch(`${backendUrl}/api/issue-logs`)
+          fetch(`${backendUrl}/api/issue-logs`),
+          fetch(`${backendUrl}/api/transfers`),
+          fetch(`${backendUrl}/api/extra-material-issues`),
+          fetch(`${backendUrl}/api/weight-capture`)
         ]);
 
         if (historyRes.ok) setHistoryLogs(await historyRes.json());
@@ -132,6 +138,12 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         if (zipRes.ok) setZipOrders(await zipRes.json());
         if (posRes.ok) setPOs(await posRes.json());
         if (issueRes.ok) setIssueLogs(await issueRes.json());
+        if (transferRes && transferRes.ok) setTransfers(await transferRes.json());
+        if (extraRes && extraRes.ok) setExtraMaterialIssues(await extraRes.json());
+        if (weightRes && weightRes.ok) {
+          const wData = await weightRes.json();
+          setWeightCaptures(wData.success && Array.isArray(wData.data) ? wData.data : (Array.isArray(wData) ? wData : []));
+        }
       } catch (err) {
         console.error('Failed to load history lists:', err);
         setErrorMessage('Failed to connect to the backend server. Make sure port 5000 is running.');
@@ -571,13 +583,17 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         title: title,
         timestamp: formatDateTime(log.date) || 'Processed',
         dateObj: parseToDateObject(log.date),
-        actor: log.personName || 'Storekeeper',
+        actor: log.receiverName ? `${log.personName || 'Store'} → ${log.receiverName}` : (log.personName || 'Storekeeper'),
         icon: <ClipboardList size={16} />,
         color: isRet ? '#ef4444' : (isRe ? '#84cc16' : '#10b981'),
         details: (
           <div style={{ fontSize: '12px', marginTop: '6px' }}>
             <p><strong>Category:</strong> {log.category || 'N/A'}</p>
-            <p><strong>Total Items Count:</strong> {log.volume || 0}</p>
+            <p><strong>Issuer Person:</strong> {log.personName || 'Storekeeper'}</p>
+            {log.receiverName && (
+              <p><strong>Received By:</strong> <span style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{log.receiverName}</span> {log.receiverDept ? `(${log.receiverDept})` : ''}</p>
+            )}
+            <p><strong>Total Items Count:</strong> {log.volume || 0} pcs</p>
             {parsedMaterials.length > 0 && (
               <table style={{ width: '100%', marginTop: '6px', borderCollapse: 'collapse', fontSize: '11px' }}>
                 <thead>
@@ -596,6 +612,97 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 </tbody>
               </table>
             )}
+          </div>
+        )
+      });
+    });
+
+    // 8. Milestone: Dedicated Extra Material Issues (from extra_material_issues table)
+    const lotExtraIssues = extraMaterialIssues.filter(ei => String(ei.lotId).toLowerCase() === lotIdLower);
+    lotExtraIssues.forEach(ei => {
+      const alreadyInIssueLogs = lotIssueLogs.some(l => String(l.id).includes(String(ei.voucherId)));
+      if (alreadyInIssueLogs) return;
+
+      const items = Array.isArray(ei.items) ? ei.items : [];
+      events.push({
+        type: 'extra_material_issue',
+        title: `Extra Material Requisition (${ei.voucherId || 'Voucher'})`,
+        timestamp: formatDateTime(ei.issueDate || ei.createdAt) || 'Processed',
+        dateObj: parseToDateObject(ei.issueDate || ei.createdAt),
+        actor: ei.personName || 'Store Staff',
+        icon: <AlertCircle size={16} />,
+        color: '#dc2626',
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <p><strong>Voucher No:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{ei.voucherId}</span></p>
+            <p><strong>Receiver:</strong> {ei.receiverName || 'Tailor'} ({ei.receiverDept || 'Cutting'})</p>
+            <p><strong>Status:</strong> <span className="status-badge verified">{ei.status || 'Issued'}</span></p>
+            {items.length > 0 && (
+              <table style={{ width: '100%', marginTop: '6px', borderCollapse: 'collapse', fontSize: '11px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '4px' }}>Component / Material</th>
+                    <th style={{ padding: '4px', textAlign: 'right' }}>Extra Qty</th>
+                    <th style={{ padding: '4px' }}>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '4px' }}>{it.bomItemName || it.materialName}</td>
+                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>+{it.totalRequired} {it.unit}</td>
+                      <td style={{ padding: '4px', fontSize: '10.5px' }}>{it.reason || 'Extra requisition'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )
+      });
+    });
+
+    // 9. Milestone: Weight Captures (from weight_capture table)
+    const lotWeights = weightCaptures.filter(wc => String(wc.lotNo).toLowerCase() === lotIdLower);
+    lotWeights.forEach(wc => {
+      events.push({
+        type: 'weight_capture_log',
+        title: `Material Weight Captured (${wc.materialName || 'Fabric/Trims'})`,
+        timestamp: formatDateTime(wc.capturedAt || wc.createdAt) || 'Processed',
+        dateObj: parseToDateObject(wc.capturedAt || wc.createdAt),
+        actor: wc.storeIncharge || 'Weighbridge Staff',
+        icon: <ShieldCheck size={16} />,
+        color: '#8b5cf6',
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <p><strong>Material:</strong> {wc.materialName} ({wc.materialCode || '—'})</p>
+            <p><strong>Pieces:</strong> {wc.pieces || 0} pcs</p>
+            <p><strong>Net Weight:</strong> {wc.netWeightKg || wc.weight || 0} kg</p>
+            <p><strong>Operator:</strong> {wc.storeIncharge || 'Store'}</p>
+          </div>
+        )
+      });
+    });
+
+    // 10. Milestone: Material Transfers
+    const lotTransfers = transfers.filter(t => 
+      (t.lotId && String(t.lotId).toLowerCase() === lotIdLower) ||
+      (t.lotNumber && String(t.lotNumber).toLowerCase() === lotIdLower)
+    );
+    lotTransfers.forEach(t => {
+      events.push({
+        type: 'stock_transfer_log',
+        title: `Stock Transferred to ${t.toLocation}`,
+        timestamp: formatDateTime(t.transferredAt || t.date) || 'Transferred',
+        dateObj: parseToDateObject(t.transferredAt || t.date),
+        actor: t.operator || t.transferredBy || 'Admin',
+        icon: <Shuffle size={16} />,
+        color: '#f59e0b',
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <p><strong>Material:</strong> {t.materialName || t.materialCode}</p>
+            <p><strong>From:</strong> {t.fromLocation || 'Store'} → <strong>To:</strong> {t.toLocation}</p>
+            <p><strong>Quantity:</strong> {t.quantity || t.qty} packets/units</p>
           </div>
         )
       });

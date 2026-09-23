@@ -309,9 +309,7 @@ export default function ExtraMaterialIssueView({
   onSubmitApproval = null
 }) {
   const isAdmin = currentUser?.role === 'Admin';
-  const approvedDesigns = useMemo(() => {
-    return designs.filter(d => d.status === 'Approved');
-  }, [designs]);
+
 
   // Main UI states
   const [selectedDesignId, setSelectedDesignId] = useState('');
@@ -320,8 +318,8 @@ export default function ExtraMaterialIssueView({
   const [isLoadingPieces, setIsLoadingPieces] = useState(false);
   const [bomMappings, setBomMappings] = useState([]);
   const [personName, setPersonName] = useState(currentUser?.name || 'Store Keeper');
-  const [receiverName, setReceiverName] = useState('Cutting Master');
-  const [receiverDept, setReceiverDept] = useState('Cutting Dept');
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverDept, setReceiverDept] = useState('');
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [activeSubTab, setActiveSubTab] = useState('issue'); // 'issue', 'history', or 'combined_audit'
@@ -340,6 +338,9 @@ export default function ExtraMaterialIssueView({
 
   // 5% Threshold Exceeded Approval Modal State
   const [extraApprovalModal, setExtraApprovalModal] = useState(null);
+
+  // Issue Confirmation Modal State (shows summary & confirmation before final dispatch)
+  const [confirmIssueModal, setConfirmIssueModal] = useState(null);
 
   // Calculate extra issue percentage and 5% threshold compliance
   const getComponentExtraPercentage = (item) => {
@@ -368,6 +369,112 @@ export default function ExtraMaterialIssueView({
     return designs.find(d => String(d.id) === String(selectedDesignId));
   }, [designs, selectedDesignId]);
 
+  // Extra Material Issues Table State from Database
+  const [dbExtraIssues, setDbExtraIssues] = useState([]);
+
+  // Fetch extra material issues directly from database table
+  const fetchDbExtraIssues = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/extra-material-issues`);
+      if (res.ok) {
+        const data = await res.json();
+        setDbExtraIssues(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch extra material issues from database table:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDbExtraIssues();
+  }, []);
+
+  // Issue logs fetched from backend to guarantee fresh records
+  const [fetchedIssueLogs, setFetchedIssueLogs] = useState([]);
+
+  const fetchDbIssueLogs = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/issue-logs`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setFetchedIssueLogs(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch issue logs from backend:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDbIssueLogs();
+  }, []);
+
+  // Combined issue logs (props + backend)
+  const allIssueLogs = useMemo(() => {
+    const map = new Map();
+    (issueLogs || []).forEach(log => {
+      if (log && (log.id || log.lotId)) {
+        map.set(String(log.id || `${log.lotId}-${log.date}`), log);
+      }
+    });
+    (fetchedIssueLogs || []).forEach(log => {
+      if (log && (log.id || log.lotId)) {
+        const key = String(log.id || `${log.lotId}-${log.date}`);
+        if (!map.has(key)) {
+          map.set(key, log);
+        }
+      }
+    });
+    const merged = Array.from(map.values());
+    if (merged.length > 0) return merged;
+    return (issueLogs && issueLogs.length > 0) ? issueLogs : fetchedIssueLogs;
+  }, [issueLogs, fetchedIssueLogs]);
+
+  // Set of Lot IDs that have already had material issued (non-return)
+  const alreadyIssuedLotIds = useMemo(() => {
+    const set = new Set();
+    allIssueLogs.forEach(log => {
+      const isReturn = log.isReturn === true || log.isReturn === 1 || String(log.isReturn).toLowerCase() === 'true';
+      if (!isReturn && log.lotId) {
+        set.add(String(log.lotId).toLowerCase().trim());
+      }
+    });
+    dbExtraIssues.forEach(item => {
+      if (item.lotId) {
+        set.add(String(item.lotId).toLowerCase().trim());
+      }
+    });
+    return set;
+  }, [allIssueLogs, dbExtraIssues]);
+
+  // Only show lots that are Approved AND have already had material issued
+  const alreadyIssuedDesigns = useMemo(() => {
+    return designs.filter(d => {
+      if (d.status !== 'Approved') return false;
+      const idStr = String(d.id || '').toLowerCase().trim();
+      const lot2Str = String(d.lotNo2 || '').toLowerCase().trim();
+      const hasBeenIssued = (idStr && alreadyIssuedLotIds.has(idStr)) ||
+                            (lot2Str && alreadyIssuedLotIds.has(lot2Str));
+      return hasBeenIssued;
+    });
+  }, [designs, alreadyIssuedLotIds]);
+
+  // Helper to persist extra material issues to database table
+  const saveExtraMaterialIssueToDb = async (payload) => {
+    try {
+      await fetch(`${getBackendUrl()}/api/extra-material-issues`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      fetchDbExtraIssues();
+      fetchDbIssueLogs();
+    } catch (err) {
+      console.error('Failed to save extra material issue to database table:', err);
+    }
+  };
+
   // Auto-fill personName from currentUser
   useEffect(() => {
     if (currentUser?.name) {
@@ -375,11 +482,11 @@ export default function ExtraMaterialIssueView({
     }
   }, [currentUser]);
 
-  // Filter approved designs
+  // Filter already issued designs by search query
   const filteredDesigns = useMemo(() => {
     const q = searchLotQuery.toLowerCase().trim();
-    if (!q) return approvedDesigns;
-    return approvedDesigns.filter(d => {
+    if (!q) return alreadyIssuedDesigns;
+    return alreadyIssuedDesigns.filter(d => {
       const idMatch = String(d.id || '').toLowerCase().includes(q);
       const lot2Match = String(d.lotNo2 || '').toLowerCase().includes(q);
       const brandMatch = String(d.brand || '').toLowerCase().includes(q);
@@ -388,13 +495,23 @@ export default function ExtraMaterialIssueView({
       const fabricMatch = String(d.fabricType || '').toLowerCase().includes(q);
       return idMatch || lot2Match || brandMatch || catMatch || styleMatch || fabricMatch;
     });
-  }, [approvedDesigns, searchLotQuery]);
+  }, [alreadyIssuedDesigns, searchLotQuery]);
+
+  // Clear selected lot if not among already issued designs
+  useEffect(() => {
+    if (selectedDesignId && alreadyIssuedDesigns.length > 0) {
+      const exists = alreadyIssuedDesigns.some(d => String(d.id) === String(selectedDesignId));
+      if (!exists) {
+        setSelectedDesignId('');
+      }
+    }
+  }, [alreadyIssuedDesigns, selectedDesignId]);
 
   // Calculate previous issues for the selected lot
   const lotPreviousIssues = useMemo(() => {
     if (!selectedDesignId) return [];
-    return issueLogs.filter(log => String(log.lotId) === String(selectedDesignId));
-  }, [issueLogs, selectedDesignId]);
+    return allIssueLogs.filter(log => String(log.lotId) === String(selectedDesignId));
+  }, [allIssueLogs, selectedDesignId]);
 
   // Summary of already issued quantities per component
   const issuedSummaryPerBom = useMemo(() => {
@@ -466,6 +583,11 @@ export default function ExtraMaterialIssueView({
 
     const isDifferentLot = String(activeLotIdRef.current) !== String(selectedDesignId);
     activeLotIdRef.current = selectedDesignId;
+
+    if (isDifferentLot) {
+      setReceiverName('');
+      setReceiverDept('');
+    }
 
     setBomMappings(prev => {
       // If staying on the same lot, preserve all user selections and inputs!
@@ -572,8 +694,8 @@ export default function ExtraMaterialIssueView({
         const newQty = Math.max(0, current + addAmount);
         return { 
           ...item, 
-          extraQty: newQty,
-          selectedForExtra: newQty > 0 ? true : item.selectedForExtra
+          extraQty: newQty > 0 ? newQty : '',
+          selectedForExtra: newQty > 0
         };
       }
       return item;
@@ -648,21 +770,40 @@ export default function ExtraMaterialIssueView({
       }
     }
 
+    // Save Requisition into extra_material_issues database table with status: Pending Approval
+    saveExtraMaterialIssueToDb({
+      voucherId: `AR-${Date.now().toString().slice(-6)}`,
+      lotId: design.id,
+      style: design.style || '',
+      brand: design.brand || '',
+      category: design.category || '',
+      season: design.season || '',
+      pieces: pcs,
+      personName: pName,
+      receiverName: rName,
+      receiverDept: rDept,
+      status: 'Pending Approval',
+      exceedsLimit: true,
+      items: payloadItems
+    });
+
     setFormSuccess(`Approval Request submitted to Admin! Lot ${design.id} extra requisition (${exceededSummary}) is now pending Admin approval. Material will be issued after Admin approval.`);
 
-    // Reset rows that were submitted
-    if (isSingle && typeof singleIdx === 'number') {
-      handleMappingChange(singleIdx, 'extraQty', '');
-      handleMappingChange(singleIdx, 'extraRemarks', '');
-    } else {
-      setBomMappings(prev => prev.map(m => m.selectedForExtra ? { ...m, extraQty: '', extraRemarks: '', selectedForExtra: false } : m));
-    }
+    // Reset ALL row inputs completely to clean empty state
+    setBomMappings(prev => prev.map(m => ({
+      ...m,
+      extraQty: '',
+      extraRemarks: '',
+      selectedForExtra: false
+    })));
 
+    setReceiverName('');
+    setReceiverDept('');
     setExtraApprovalModal(null);
     setTimeout(() => setFormSuccess(''), 8000);
   };
 
-  // Issue SINGLE component
+  // Issue SINGLE component - Opens Confirmation Modal
   const handleIssueSingleComponent = (index) => {
     setFormError('');
     setFormSuccess('');
@@ -698,7 +839,17 @@ export default function ExtraMaterialIssueView({
     }
 
     if (!personName.trim()) {
-      setFormError('Please provide the Issuer Name.');
+      setFormError('Please provide Issuer Person name.');
+      return;
+    }
+
+    if (!receiverName.trim()) {
+      setFormError('Please enter Receiver Person name before issuing material.');
+      return;
+    }
+
+    if (!receiverDept.trim()) {
+      setFormError('Please enter Receiver Department / Line before issuing material.');
       return;
     }
 
@@ -730,59 +881,31 @@ export default function ExtraMaterialIssueView({
       return;
     }
 
-    // Direct Issue (<= 5% standard limit)
-    const voucherId = `EMI-${Date.now().toString().slice(-6)}`;
-    const issueDateStr = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-
-    const issuedPayloadItem = {
-      materialId: mat.id,
-      materialName: mat.color && mat.color !== 'Default' ? `${mat.name} (${mat.color})` : mat.name,
-      bomItemName: item.bomItemName,
-      bomItemDetail: item.bomItemDetail,
-      totalRequired: extraQty,
-      unit: mat.unit || item.unit || 'Pcs',
-      reason: item.extraReason + (item.extraRemarks ? ` - ${item.extraRemarks}` : ''),
-      previouslyIssued: item.previouslyIssuedQty,
-      receiverDept: receiverDept,
-      receiverName: receiverName
-    };
-
-    // 1. Call onIssueMaterials to deduct stock & record log
-    if (onIssueMaterials) {
-      onIssueMaterials(
-        selectedDesign.id,
-        pieces,
-        [issuedPayloadItem],
-        true, // isReissue / extra issue
-        `${personName.trim()} (Extra: ${item.extraReason})`
-      );
-    }
-
-    // 2. Prepare print slip data and trigger preview modal
-    const slipPayload = {
-      voucherId,
-      issueDate: issueDateStr,
-      design: selectedDesign,
+    // Standard Issue (<= 5%) -> Show Confirmation Modal first
+    setConfirmIssueModal({
+      isSingle: true,
+      singleIdx: index,
+      items: [{
+        originalIdx: index,
+        item,
+        mat,
+        extraQty,
+        baseQty: pctInfo.baseQty,
+        percentage: pctInfo.percentage,
+        maxAllowedQty: pctInfo.maxAllowedQty,
+        excessQty: pctInfo.excessQty,
+        exceedsLimit: false,
+        reason: item.extraReason + (item.extraRemarks ? ` - ${item.extraRemarks}` : '')
+      }],
+      selectedDesign,
       pieces,
       personName: personName.trim(),
       receiverName: receiverName.trim(),
-      receiverDept: receiverDept.trim(),
-      items: [issuedPayloadItem],
-      isSingle: true
-    };
-
-    setPrintSlipData(slipPayload);
-    setFormSuccess(`Successfully issued ${extraQty} ${issuedPayloadItem.unit} of "${issuedPayloadItem.materialName}" for Lot ${selectedDesign.id}!`);
-
-    // Reset extra quantity for that row
-    handleMappingChange(index, 'extraQty', '');
-    handleMappingChange(index, 'extraRemarks', '');
-
-    // Auto-clear success banner after 6s
-    setTimeout(() => setFormSuccess(''), 6000);
+      receiverDept: receiverDept.trim()
+    });
   };
 
-  // Issue ALL SELECTED components
+  // Issue ALL SELECTED components - Opens Confirmation Modal
   const handleIssueSelectedComponents = () => {
     setFormError('');
     setFormSuccess('');
@@ -821,7 +944,17 @@ export default function ExtraMaterialIssueView({
     }
 
     if (!personName.trim()) {
-      setFormError('Please provide the Issuer Name.');
+      setFormError('Please provide Issuer Person name.');
+      return;
+    }
+
+    if (!receiverName.trim()) {
+      setFormError('Please enter Receiver Person name before issuing material.');
+      return;
+    }
+
+    if (!receiverDept.trim()) {
+      setFormError('Please enter Receiver Department / Line before issuing material.');
       return;
     }
 
@@ -859,54 +992,111 @@ export default function ExtraMaterialIssueView({
       return;
     }
 
-    // Direct Issue (all selected items are <= 5% standard limit)
+    // Standard Issue (all <= 5%) -> Show Confirmation Modal first
+    setConfirmIssueModal({
+      isSingle: false,
+      items: itemsWithPct,
+      selectedDesign,
+      pieces,
+      personName: personName.trim(),
+      receiverName: receiverName.trim(),
+      receiverDept: receiverDept.trim()
+    });
+  };
+
+  // Execute Issue after User Confirms in Modal
+  const handleExecuteConfirmedIssue = () => {
+    if (!confirmIssueModal) return;
+    const { isSingle, singleIdx, items, selectedDesign: design, pieces: pcs, personName: pName, receiverName: rName, receiverDept: rDept } = confirmIssueModal;
+
     const voucherId = `EMI-${Date.now().toString().slice(-6)}`;
     const issueDateStr = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 
-    const issuedPayloadItems = selectedItems.map(item => {
-      const mat = materials.find(m => String(m.id) === String(item.materialId));
-      return {
-        materialId: mat.id,
-        materialName: mat.color && mat.color !== 'Default' ? `${mat.name} (${mat.color})` : mat.name,
-        bomItemName: item.bomItemName,
-        bomItemDetail: item.bomItemDetail,
-        totalRequired: parseFloat(item.extraQty),
-        unit: mat.unit || item.unit || 'Pcs',
-        reason: item.extraReason + (item.extraRemarks ? ` - ${item.extraRemarks}` : ''),
-        previouslyIssued: item.previouslyIssuedQty,
-        receiverDept: receiverDept,
-        receiverName: receiverName
-      };
-    });
+    const issuedPayloadItems = items.map(it => ({
+      materialId: it.mat.id,
+      materialName: it.mat.color && it.mat.color !== 'Default' ? `${it.mat.name} (${it.mat.color})` : it.mat.name,
+      bomItemName: it.item.bomItemName,
+      bomItemDetail: it.item.bomItemDetail,
+      totalRequired: it.extraQty,
+      unit: it.mat.unit || it.item.unit || 'Pcs',
+      reason: it.reason,
+      previouslyIssued: it.item.previouslyIssuedQty,
+      receiverDept: rDept,
+      receiverName: rName
+    }));
 
     if (onIssueMaterials) {
       onIssueMaterials(
-        selectedDesign.id,
-        pieces,
+        design.id,
+        pcs,
         issuedPayloadItems,
-        true,
-        `${personName.trim()} (Extra Batch Issue)`
+        true, // isReissue / extra issue
+        isSingle
+          ? `${pName} (Extra: ${items[0]?.item?.extraReason || 'Requisition'})`
+          : `${pName} (Extra Batch Issue)`
       );
     }
+
+    // Save directly to extra_material_issues database table
+    saveExtraMaterialIssueToDb({
+      voucherId,
+      lotId: design.id,
+      style: design.style || '',
+      brand: design.brand || '',
+      category: design.category || '',
+      season: design.season || '',
+      pieces: pcs,
+      personName: pName,
+      receiverName: rName,
+      receiverDept: rDept,
+      issueDate: issueDateStr,
+      status: 'Issued',
+      items: items.map(it => ({
+        materialId: it.mat.id,
+        materialName: it.mat.color && it.mat.color !== 'Default' ? `${it.mat.name} (${it.mat.color})` : it.mat.name,
+        bomItemName: it.item.bomItemName,
+        bomItemDetail: it.item.bomItemDetail,
+        totalRequired: it.extraQty,
+        unit: it.mat.unit || it.item.unit || 'Pcs',
+        reason: it.reason,
+        previouslyIssued: it.item.previouslyIssuedQty,
+        receiverDept: rDept,
+        receiverName: rName,
+        baseQty: it.baseQty,
+        issuePercentage: it.percentage,
+        maxAllowedQty: it.maxAllowedQty,
+        excessQty: it.excessQty,
+        exceedsLimit: it.exceedsLimit
+      }))
+    });
 
     const slipPayload = {
       voucherId,
       issueDate: issueDateStr,
-      design: selectedDesign,
-      pieces,
-      personName: personName.trim(),
-      receiverName: receiverName.trim(),
-      receiverDept: receiverDept.trim(),
+      design,
+      pieces: pcs,
+      personName: pName,
+      receiverName: rName,
+      receiverDept: rDept,
       items: issuedPayloadItems,
-      isSingle: false
+      isSingle
     };
 
     setPrintSlipData(slipPayload);
-    setFormSuccess(`Successfully issued ${issuedPayloadItems.length} extra material components for Lot ${selectedDesign.id}!`);
+    setFormSuccess(`Successfully issued ${issuedPayloadItems.length} extra material component(s) for Lot ${design.id}!`);
 
-    // Reset rows
-    setBomMappings(prev => prev.map(m => m.selectedForExtra ? { ...m, extraQty: '', extraRemarks: '', selectedForExtra: false } : m));
+    // Reset ALL row inputs completely to clean empty state
+    setBomMappings(prev => prev.map(m => ({
+      ...m,
+      extraQty: '',
+      extraRemarks: '',
+      selectedForExtra: false
+    })));
 
+    setReceiverName('');
+    setReceiverDept('');
+
+    setConfirmIssueModal(null);
     setTimeout(() => setFormSuccess(''), 6000);
   };
 
@@ -1047,13 +1237,13 @@ export default function ExtraMaterialIssueView({
 
   // All extra/re-issue logs (unfiltered) for accurate KPI statistics
   const allExtraLogs = useMemo(() => {
-    return issueLogs.filter(log => {
+    return allIssueLogs.filter(log => {
       const isExtra = log.isReissue || 
         (log.id && (log.id.startsWith('EMI') || log.id.startsWith('RI'))) || 
         (log.personName && log.personName.toLowerCase().includes('extra'));
       return isExtra;
     });
-  }, [issueLogs]);
+  }, [allIssueLogs]);
 
   // Filter extra logs for History Tab Search
   const extraIssueLogs = useMemo(() => {
@@ -1099,7 +1289,7 @@ export default function ExtraMaterialIssueView({
   const lotAuditSummary = useMemo(() => {
     const map = {};
 
-    issueLogs.forEach(log => {
+    allIssueLogs.forEach(log => {
       const lotKey = String(log.lotId || 'N/A');
       if (!map[lotKey]) {
         const design = designs.find(d => String(d.id) === lotKey);
@@ -1550,15 +1740,15 @@ export default function ExtraMaterialIssueView({
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <CheckCircle size={14} style={{ color: '#10b981' }} />
                 <h3 style={{ margin: 0, fontSize: '12.5px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
-                  Approved Lots ({filteredDesigns.length})
+                  Issued Lots ({filteredDesigns.length})
                 </h3>
               </div>
               <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: '600' }}>
-                Total: {approvedDesigns.length}
+                Total: {alreadyIssuedDesigns.length}
               </span>
             </div>
 
-            {/* Search Approved Lots */}
+            {/* Search Approved & Issued Lots */}
             <div style={{ position: 'relative', width: '100%' }}>
               <Search size={14} style={{
                 position: 'absolute',
@@ -1569,7 +1759,7 @@ export default function ExtraMaterialIssueView({
               }} />
               <input
                 type="text"
-                placeholder="Search Lot, Brand, Style..."
+                placeholder="Search Issued Lot, Brand, Style..."
                 value={searchLotQuery}
                 onChange={(e) => setSearchLotQuery(e.target.value)}
                 className="form-input"
@@ -1621,9 +1811,18 @@ export default function ExtraMaterialIssueView({
                   fontSize: '12px',
                   backgroundColor: 'var(--bg-primary)',
                   borderRadius: '6px',
-                  border: '1px dashed var(--border-color)'
+                  border: '1px dashed var(--border-color)',
+                  lineHeight: 1.5
                 }}>
-                  No approved lots match your search.
+                  {alreadyIssuedDesigns.length === 0 ? (
+                    <>
+                      <AlertTriangle size={24} style={{ color: '#f59e0b', margin: '0 auto 8px auto', display: 'block' }} />
+                      <strong style={{ display: 'block', color: 'var(--text-main)', marginBottom: '4px' }}>No Issued Lots Found</strong>
+                      Extra material issue is only available for lots where initial material issue has already been completed in <strong>Material Issue</strong>.
+                    </>
+                  ) : (
+                    'No issued lots match your search.'
+                  )}
                 </div>
               ) : (
                 filteredDesigns.map(d => {
@@ -1674,10 +1873,13 @@ export default function ExtraMaterialIssueView({
                           fontWeight: '700',
                           padding: '2px 6px',
                           borderRadius: '4px',
-                          backgroundColor: '#dcfce7',
-                          color: '#15803d'
+                          backgroundColor: '#e0e7ff',
+                          color: '#4338ca',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '3px'
                         }}>
-                          Approved
+                          <CheckCircle size={10} /> Issued
                         </span>
                       </div>
 
@@ -1742,7 +1944,7 @@ export default function ExtraMaterialIssueView({
                   No Lot Selected
                 </h3>
                 <p style={{ margin: 0, fontSize: '12px', maxWidth: '400px' }}>
-                  Please select an approved production lot from the left panel to inspect its BOM components and issue extra materials.
+                  Please select an already-issued production lot from the left panel to inspect its BOM components and issue extra materials.
                 </p>
               </div>
             ) : (
@@ -1840,40 +2042,70 @@ export default function ExtraMaterialIssueView({
                   }}>
                     <div>
                       <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Issuer Person:
+                        Issuer Person: <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
-                        style={{ height: '36px', fontSize: '13px', width: '100%', padding: '6px 12px', borderRadius: '7px' }}
+                        style={{
+                          height: '36px',
+                          fontSize: '13px',
+                          width: '100%',
+                          padding: '6px 12px',
+                          borderRadius: '7px',
+                          borderColor: !personName.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                        }}
                         value={personName}
-                        onChange={(e) => setPersonName(e.target.value)}
+                        onChange={(e) => {
+                          setPersonName(e.target.value);
+                          if (formError) setFormError('');
+                        }}
                         placeholder="Store Incharge"
                       />
                     </div>
                     <div>
                       <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Receiver Person:
+                        Receiver Person: <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
-                        style={{ height: '36px', fontSize: '13px', width: '100%', padding: '6px 12px', borderRadius: '7px' }}
+                        style={{
+                          height: '36px',
+                          fontSize: '13px',
+                          width: '100%',
+                          padding: '6px 12px',
+                          borderRadius: '7px',
+                          borderColor: !receiverName.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                        }}
                         value={receiverName}
-                        onChange={(e) => setReceiverName(e.target.value)}
+                        onChange={(e) => {
+                          setReceiverName(e.target.value);
+                          if (formError) setFormError('');
+                        }}
                         placeholder="Master / Tailor"
                       />
                     </div>
                     <div>
                       <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Receiver Dept / Line:
+                        Receiver Dept / Line: <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
-                        style={{ height: '36px', fontSize: '13px', width: '100%', padding: '6px 12px', borderRadius: '7px' }}
+                        style={{
+                          height: '36px',
+                          fontSize: '13px',
+                          width: '100%',
+                          padding: '6px 12px',
+                          borderRadius: '7px',
+                          borderColor: !receiverDept.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                        }}
                         value={receiverDept}
-                        onChange={(e) => setReceiverDept(e.target.value)}
+                        onChange={(e) => {
+                          setReceiverDept(e.target.value);
+                          if (formError) setFormError('');
+                        }}
                         placeholder="Cutting Dept"
                       />
                     </div>
@@ -2153,7 +2385,7 @@ export default function ExtraMaterialIssueView({
                                             ? '#6366f1'
                                             : 'var(--border-color)'
                                         }}
-                                        value={item.extraQty}
+                                        value={item.extraQty === 0 || item.extraQty === '0' ? '' : (item.extraQty ?? '')}
                                         onChange={(e) => handleMappingChange(originalIdx, 'extraQty', e.target.value)}
                                       />
                                       <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
@@ -4354,6 +4586,248 @@ export default function ExtraMaterialIssueView({
                   Submit for Admin Approval
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal - Review & Confirm Extra Material Issue */}
+      {confirmIssueModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10050,
+          padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '14px',
+            width: '100%',
+            maxWidth: '780px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+            border: '1.5px solid #c7d2fe',
+            overflow: 'hidden',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              backgroundColor: '#eef2ff',
+              borderBottom: '2px solid #c7d2fe',
+              padding: '16px 22px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  backgroundColor: '#6366f1',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 2px 6px rgba(99, 102, 241, 0.3)'
+                }}>
+                  <Send size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#1e1b4b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    Confirm Extra Material Issue
+                    <span style={{ fontSize: '11px', fontWeight: '700', backgroundColor: '#6366f1', color: '#ffffff', padding: '2px 8px', borderRadius: '10px' }}>
+                      {confirmIssueModal.items.length} {confirmIssueModal.items.length === 1 ? 'Component' : 'Components'}
+                    </span>
+                  </h3>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#4338ca', fontWeight: '500' }}>
+                    Please review requisition details before confirming stock issue and generating voucher.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmIssueModal(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '24px',
+                  fontWeight: '700',
+                  lineHeight: 1,
+                  padding: '4px'
+                }}
+                title="Close"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '18px 22px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Lot & Requisition Info Box */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: '10px',
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontSize: '12px'
+              }}>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', textTransform: 'uppercase', fontWeight: '700' }}>Lot Number</span>
+                  <strong style={{ color: '#4f46e5', fontSize: '13px' }}>
+                    Lot {confirmIssueModal.selectedDesign?.id} {confirmIssueModal.selectedDesign?.lotNo2 ? `(${confirmIssueModal.selectedDesign.lotNo2})` : ''}
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', textTransform: 'uppercase', fontWeight: '700' }}>Garment Volume</span>
+                  <strong style={{ color: '#059669', fontSize: '13px' }}>
+                    {confirmIssueModal.pieces.toLocaleString()} Pcs
+                  </strong>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', textTransform: 'uppercase', fontWeight: '700' }}>Issuer Person</span>
+                  <strong style={{ color: '#0f172a', fontSize: '12.5px' }}>{confirmIssueModal.personName}</strong>
+                </div>
+                <div>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', textTransform: 'uppercase', fontWeight: '700' }}>Receiver / Dept</span>
+                  <strong style={{ color: '#0f172a', fontSize: '12.5px' }}>
+                    {confirmIssueModal.receiverName || '—'} ({confirmIssueModal.receiverDept || 'Cutting'})
+                  </strong>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <h4 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#1e293b' }}>
+                    Material Requisition Breakdown
+                  </h4>
+                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                    Ready for store dispatch
+                  </span>
+                </div>
+
+                <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1.5px solid #cbd5e1' }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>BOM Component</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>Assigned Inventory Material</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '700', color: '#475569' }}>Available Stock</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.08)' }}>Extra Qty</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>Reason / Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {confirmIssueModal.items.map((it, idx) => (
+                        <tr key={idx} style={{ borderBottom: idx < confirmIssueModal.items.length - 1 ? '1px solid #e2e8f0' : 'none', backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                          <td style={{ padding: '8px 10px', fontWeight: '700', color: '#0f172a' }}>
+                            {it.item.bomItemName}
+                          </td>
+                          <td style={{ padding: '8px 10px', color: '#334155' }}>
+                            <span style={{ fontFamily: 'monospace', fontWeight: '700', color: '#4f46e5', marginRight: '5px' }}>
+                              [{it.mat.id}]
+                            </span>
+                            {it.mat.name} {it.mat.color && it.mat.color !== 'Default' ? `(${it.mat.color})` : ''}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center', color: '#059669', fontWeight: '600' }}>
+                            {it.mat.stock} {it.mat.unit || 'Pcs'}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.06)' }}>
+                            +{it.extraQty} {it.mat.unit || it.item.unit || 'Pcs'}
+                          </td>
+                          <td style={{ padding: '8px 10px', color: '#64748b', fontSize: '11.5px' }}>
+                            {it.reason || 'Extra requisition'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Compliance note */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '8px 12px',
+                backgroundColor: '#f0fdf4',
+                border: '1px solid #bbf7d0',
+                borderRadius: '6px',
+                fontSize: '11.5px',
+                color: '#166534'
+              }}>
+                <CheckCircle2 size={15} style={{ flexShrink: 0, color: '#16a34a' }} />
+                <span>
+                  All items are within standard allowable limits (&le; 5.0%). On confirmation, inventory stock will be deducted immediately, saved to database, and an issue receipt voucher will be generated.
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              backgroundColor: '#f8fafc',
+              borderTop: '1px solid #e2e8f0',
+              padding: '12px 22px',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '10px',
+              alignItems: 'center'
+            }}>
+              <button
+                type="button"
+                onClick={() => setConfirmIssueModal(null)}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: '7px',
+                  border: '1px solid #cbd5e1',
+                  backgroundColor: '#ffffff',
+                  color: '#475569',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '12.5px'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteConfirmedIssue}
+                style={{
+                  padding: '8px 22px',
+                  borderRadius: '7px',
+                  border: 'none',
+                  backgroundColor: '#6366f1',
+                  color: '#ffffff',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  fontSize: '12.5px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  boxShadow: '0 2px 6px rgba(99, 102, 241, 0.3)'
+                }}
+              >
+                <CheckCircle size={15} />
+                Confirm &amp; Issue Material
+              </button>
             </div>
           </div>
         </div>

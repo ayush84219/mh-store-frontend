@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield } from 'lucide-react';
 import { getBackendUrl } from '../utils/api';
 
 export default function SettingsView({
@@ -24,7 +24,9 @@ export default function SettingsView({
   racks = [],
   setRacks,
   halls = [],
-  setHalls
+  setHalls,
+  allowMaterialPhotoEdit = true,
+  onToggleAllowMaterialPhotoEdit
 }) {
   const [isAddingVendor, setIsAddingVendor] = useState(false);
   const [vendorName, setVendorName] = useState('');
@@ -211,6 +213,65 @@ export default function SettingsView({
   const [matLocation, setMatLocation] = useState('');
   const [matError, setMatError] = useState('');
 
+  // Handle Edit Material Update Submit
+  const handleUpdateSubmit = (e) => {
+    e.preventDefault();
+    if (!matName.trim()) {
+      setMatError('Material Name is required.');
+      return;
+    }
+    const updated = {
+      ...editingMaterial,
+      name: matName.trim(),
+      category: matCategory,
+      stock: parseFloat(matStock) || 0,
+      unit: matUnit,
+      cost: parseFloat(matCost) || 0,
+      threshold: parseFloat(matThreshold) || 50,
+      color: matColor ? matColor.trim() : 'Default',
+      location: matLocation ? matLocation.trim() : 'Main Store'
+    };
+    if (onUpdateMaterial) {
+      onUpdateMaterial(updated);
+    }
+    setEditingMaterial(null);
+    setMatError('');
+  };
+
+  // Handle Add Material Submit
+  const handleAddMatSubmit = (e) => {
+    e.preventDefault();
+    if (!matName.trim()) {
+      setMatError('Material Name is required.');
+      return;
+    }
+    const newId = `M${Math.floor(1000 + Math.random() * 9000)}`;
+    const newMat = {
+      id: newId,
+      name: matName.trim(),
+      category: matCategory,
+      stock: parseFloat(matStock) || 0,
+      unit: matUnit,
+      cost: parseFloat(matCost) || 0,
+      threshold: parseFloat(matThreshold) || 50,
+      color: matColor ? matColor.trim() : 'Default',
+      location: matLocation ? matLocation.trim() : 'Main Store',
+      packets: 1,
+      poNumber: 'N/A',
+      invoiceNo: 'N/A'
+    };
+    if (onAddMaterial) {
+      onAddMaterial(newMat);
+    }
+    setIsAddingMaterial(false);
+    setMatName('');
+    setMatStock('');
+    setMatCost('');
+    setMatColor('');
+    setMatLocation('');
+    setMatError('');
+  };
+
   // Filter materials based on Search input
   const filteredMaterials = (materials || []).filter(m => {
     const q = matSearchQuery.toLowerCase();
@@ -233,6 +294,201 @@ export default function SettingsView({
       <div className="split-view" style={{ gridTemplateColumns: '0.9fr 1.1fr' }}>
         {/* Left Column: System Configurations */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Material Photo Change & Delete Permission Control (Admin Exclusive) */}
+          <div className="panel" style={{
+            marginBottom: 0,
+            border: allowMaterialPhotoEdit ? '1.5px solid rgba(16, 185, 129, 0.35)' : '1.5px solid rgba(99, 102, 241, 0.35)',
+            background: allowMaterialPhotoEdit ? 'linear-gradient(180deg, rgba(16, 185, 129, 0.03) 0%, var(--bg-primary) 100%)' : 'linear-gradient(180deg, rgba(99, 102, 241, 0.03) 0%, var(--bg-primary) 100%)'
+          }}>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Camera size={18} className="text-accent" />
+                Material Photo Change & Delete Permission
+              </h3>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                color: '#4f46e5',
+                border: '1px solid rgba(99, 102, 241, 0.2)'
+              }}>
+                <Shield size={11} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
+                Admin Only
+              </span>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '12.5px', marginBottom: '14px', lineHeight: '1.45' }}>
+              Control whether operators and users can upload, change, or delete material photos in <strong>Material Details</strong>. Turn OFF to restrict to normal view-only photo preview panel.
+            </p>
+
+            <div
+              onClick={() => {
+                if (onToggleAllowMaterialPhotoEdit) {
+                  onToggleAllowMaterialPhotoEdit(!allowMaterialPhotoEdit);
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 18px',
+                borderRadius: '12px',
+                backgroundColor: allowMaterialPhotoEdit ? 'rgba(16, 185, 129, 0.07)' : 'rgba(100, 116, 139, 0.06)',
+                border: allowMaterialPhotoEdit ? '1.5px solid rgba(16, 185, 129, 0.35)' : '1.5px solid rgba(100, 116, 139, 0.22)',
+                cursor: 'pointer',
+                transition: 'all 0.25s ease',
+                userSelect: 'none',
+                boxShadow: allowMaterialPhotoEdit ? '0 4px 16px rgba(16, 185, 129, 0.08)' : '0 2px 8px rgba(0,0,0,0.03)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.borderColor = allowMaterialPhotoEdit ? '#10b981' : '#64748b';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.borderColor = allowMaterialPhotoEdit ? 'rgba(16, 185, 129, 0.35)' : 'rgba(100, 116, 139, 0.22)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: allowMaterialPhotoEdit
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                    : 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
+                  color: '#ffffff',
+                  boxShadow: allowMaterialPhotoEdit
+                    ? '0 4px 12px rgba(16, 185, 129, 0.35)'
+                    : '0 3px 8px rgba(100, 116, 139, 0.25)',
+                  transition: 'all 0.3s ease'
+                }}>
+                  {allowMaterialPhotoEdit ? <Camera size={22} /> : <Eye size={22} />}
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                    <span style={{
+                      fontSize: '14px',
+                      fontWeight: '800',
+                      color: allowMaterialPhotoEdit ? '#065f46' : 'var(--text-main)'
+                    }}>
+                      {allowMaterialPhotoEdit ? 'Photo Change & Delete: ACTIVE' : 'Normal View Panel: ACTIVE'}
+                    </span>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      padding: '2px 7px',
+                      borderRadius: '9999px',
+                      backgroundColor: allowMaterialPhotoEdit ? '#dcfce7' : '#e2e8f0',
+                      color: allowMaterialPhotoEdit ? '#15803d' : '#475569',
+                      border: allowMaterialPhotoEdit ? '1px solid #86efac' : '1px solid #cbd5e1',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        backgroundColor: allowMaterialPhotoEdit ? '#16a34a' : '#94a3b8',
+                        boxShadow: allowMaterialPhotoEdit ? '0 0 6px #16a34a' : 'none'
+                      }} />
+                      {allowMaterialPhotoEdit ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    {allowMaterialPhotoEdit
+                      ? 'Users can upload, replace, or delete photos directly in Material Details.'
+                      : 'Edit & delete controls are hidden. Users see the standard view-only photo preview.'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Premium iOS-style Interactive Switch Pill */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '68px',
+                  height: '36px',
+                  borderRadius: '9999px',
+                  background: allowMaterialPhotoEdit
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                    : 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)',
+                  boxShadow: allowMaterialPhotoEdit
+                    ? '0 4px 14px rgba(16, 185, 129, 0.4), inset 0 1px 2px rgba(255,255,255,0.3)'
+                    : 'inset 0 2px 4px rgba(0,0,0,0.15)',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '3px',
+                  boxSizing: 'border-box',
+                  flexShrink: 0
+                }}
+                title={allowMaterialPhotoEdit ? 'Click to switch OFF (Normal Panel)' : 'Click to switch ON (Allow Photo Edit/Delete)'}
+              >
+                {/* Track Text Indicator */}
+                <span style={{
+                  position: 'absolute',
+                  left: '10px',
+                  fontSize: '10px',
+                  fontWeight: '900',
+                  letterSpacing: '0.05em',
+                  color: '#ffffff',
+                  opacity: allowMaterialPhotoEdit ? 1 : 0,
+                  transform: allowMaterialPhotoEdit ? 'scale(1)' : 'scale(0.7)',
+                  transition: 'all 0.25s ease',
+                  pointerEvents: 'none'
+                }}>
+                  ON
+                </span>
+                <span style={{
+                  position: 'absolute',
+                  right: '9px',
+                  fontSize: '9.5px',
+                  fontWeight: '900',
+                  letterSpacing: '0.05em',
+                  color: '#ffffff',
+                  opacity: !allowMaterialPhotoEdit ? 1 : 0,
+                  transform: !allowMaterialPhotoEdit ? 'scale(1)' : 'scale(0.7)',
+                  transition: 'all 0.25s ease',
+                  pointerEvents: 'none'
+                }}>
+                  OFF
+                </span>
+
+                {/* Sliding Knob */}
+                <div
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    boxShadow: '0 3px 8px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.1)',
+                    transform: `translateX(${allowMaterialPhotoEdit ? '34px' : '2px'})`,
+                    transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: allowMaterialPhotoEdit ? '#10b981' : '#64748b'
+                  }}
+                >
+                  {allowMaterialPhotoEdit ? (
+                    <CheckCircle size={14} style={{ color: '#10b981' }} />
+                  ) : (
+                    <Eye size={13} style={{ color: '#64748b' }} />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Garment Accessories Catalog Configurations */}
           <div className="panel" style={{ marginBottom: 0 }}>
             <div className="panel-header">
@@ -409,26 +665,6 @@ export default function SettingsView({
                 <PlusCircle size={14} /> Add
               </button>
             </form>
-          </div>
-
-
-
-          {/* Database maintenance */}
-          <div className="panel" style={{ border: '1px solid var(--danger)', backgroundColor: 'var(--danger-light)', marginBottom: 0 }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--danger)' }}>
-              <h3 className="panel-title" style={{ color: 'var(--danger)' }}>
-                <ShieldAlert size={18} />
-                Critical Actions (System Reset)
-              </h3>
-            </div>
-
-            <p style={{ fontSize: '12px', color: 'var(--danger)', marginBottom: '16px', fontWeight: '500' }}>
-              Warning: Resetting the database will delete all local custom designs, purchase orders, catalog changes, and vendor additions, restoring the default mock datasets.
-            </p>
-
-            <button className="btn btn-danger" onClick={onResetDatabase} style={{ width: '100%' }}>
-              Wipe Database & Restore Defaults
-            </button>
           </div>
         </div>
 

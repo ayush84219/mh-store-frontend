@@ -343,6 +343,8 @@ export default function MaterialIssueView({
   const [returnError, setReturnError] = useState('');
   const issueMode = 'initial';
   const [personName, setPersonName] = useState(currentUser?.name || '');
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverDept, setReceiverDept] = useState('Cutting');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [printLog, setPrintLog] = useState(null);
   const [auditTab, setAuditTab] = useState('combined_audit'); // 'combined_audit', 'by_lot', or 'all_logs'
@@ -838,7 +840,11 @@ export default function MaterialIssueView({
       return;
     }
     if (!personName || !personName.trim()) {
-      setFormError('Please enter the name of the person issuing the materials.');
+      setFormError('Please enter the name of the person issuing the materials (Issuer).');
+      return;
+    }
+    if (!receiverName || !receiverName.trim()) {
+      setFormError('Please enter the received name / person receiving the materials.');
       return;
     }
 
@@ -853,6 +859,8 @@ export default function MaterialIssueView({
       items: itemsToIssue,
       isReissue: false,
       personName: personName.trim(),
+      receiverName: receiverName.trim(),
+      receiverDept: receiverDept.trim() || 'Cutting',
       date: dateStr
     };
 
@@ -861,21 +869,23 @@ export default function MaterialIssueView({
 
   const handleConfirmIssue = () => {
     if (!previewIssue) return;
-    const { design, pieces: p, items, isReissue, personName: pName, date } = previewIssue;
+    const { design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, date } = previewIssue;
 
     // Perform actual issue
-    onIssueMaterials(design.id, p, items, isReissue, pName);
+    onIssueMaterials(design.id, p, items, isReissue, pName, rName, rDept);
 
     setFormSuccess(`Successfully issued materials for Lot ${design.id} production batch of ${p} units!`);
 
     // Save issue data for the print prompt, close preview
-    setShowPrintPrompt({ design, pieces: p, items, isReissue, personName: pName, date });
+    setShowPrintPrompt({ design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, date });
     setPreviewIssue(null);
     setSelectedDesignId('');
     setSearchQuery('');
     setPieces(100);
     setBomMappings([]);
     setPersonName(currentUser?.name || '');
+    setReceiverName('');
+    setReceiverDept('Cutting');
 
     // Clear success message after 5 seconds
     setTimeout(() => setFormSuccess(''), 5000);
@@ -1432,7 +1442,10 @@ export default function MaterialIssueView({
 
               {/* Person Name (Issuer) */}
               <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Person Name (Issuer)</label>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>Person Name (Issuer)</span>
+                  <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
                 <input
                   type="text"
                   className="form-input"
@@ -1446,110 +1459,42 @@ export default function MaterialIssueView({
                   Records the name of the person issuing the raw materials.
                 </span>
               </div>
+
+              {/* Received Name (Receiver Person) */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span>Received Name (Receiver Person)</span>
+                  <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Masterji / Tailor / Line Incharge"
+                  value={receiverName}
+                  onChange={(e) => setReceiverName(e.target.value)}
+                  disabled={isSelectedDesignAlreadyIssued}
+                  required
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
+                  Records the name of the person receiving the materials.
+                </span>
+              </div>
+
+              {/* Receiver Department / Line */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Receiver Department / Line</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Cutting / Stitching / Line 1"
+                  value={receiverDept}
+                  onChange={(e) => setReceiverDept(e.target.value)}
+                  disabled={isSelectedDesignAlreadyIssued}
+                />
+              </div>
             </div>
 
-            {/* Live Lot Audit & Pieces Verification Snapshot */}
-            {selectedDesignId && selectedLotAudit && (
-              <div style={{
-                marginBottom: '20px',
-                padding: '12px 14px',
-                backgroundColor: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 'var(--border-radius-sm)',
-                boxShadow: 'var(--shadow-xs)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>
-                    <BarChart3 size={15} style={{ color: 'var(--accent-color)' }} />
-                    <span>Audit Breakdown for Lot {selectedDesignId}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-xs"
-                    onClick={() => setSelectedLotAuditDetail(selectedLotAudit)}
-                    style={{ fontSize: '11px', padding: '2px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Eye size={12} />
-                    <span>View Audit</span>
-                  </button>
-                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '6px' }}>
-                  <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Initial Issue</div>
-                    <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>
-                      {selectedLotAudit.initialPieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '500' }}>pcs</span>
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: 'var(--bg-secondary)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: '600' }}>Re-issued</div>
-                    <div style={{ fontSize: '13px', fontWeight: '800', color: selectedLotAudit.reissuePieces > 0 ? 'var(--warning)' : 'var(--text-muted)' }}>
-                      {selectedLotAudit.reissuePieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '500' }}>pcs</span>
-                    </div>
-                  </div>
-                  <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)', border: '1px solid rgba(99, 102, 241, 0.25)', padding: '6px 8px', borderRadius: '4px', textAlign: 'center' }}>
-                    <div style={{ fontSize: '10px', color: 'var(--accent-color)', textTransform: 'uppercase', fontWeight: '700' }}>Total Issued</div>
-                    <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--accent-color)' }}>
-                      {selectedLotAudit.totalPieces.toLocaleString()} <span style={{ fontSize: '10px', fontWeight: '600' }}>pcs</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 1st Time vs Extra Material Breakdown Toggle */}
-                <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setIsSnapshotBreakdownOpen(!isSnapshotBreakdownOpen)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      cursor: 'pointer',
-                      fontSize: '11px',
-                      color: 'var(--accent-color)',
-                      fontWeight: '700',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <ChevronDown size={13} style={{ transform: isSnapshotBreakdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                    <span>{isSnapshotBreakdownOpen ? 'Hide Material Breakdown' : 'Show 1st Time vs Extra Material Breakdown'}</span>
-                  </button>
-
-                  {isSnapshotBreakdownOpen && (
-                    <div style={{ marginTop: '8px', overflowX: 'auto' }}>
-                      <table style={{ width: '100%', fontSize: '11px', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left' }}>
-                            <th style={{ padding: '4px 6px' }}>BOM Component</th>
-                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>1st Issue</th>
-                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Extra Issue</th>
-                            <th style={{ padding: '4px 6px', textAlign: 'right' }}>Combined</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.values(selectedLotAudit.materialsSummary).map((mat, mIdx) => (
-                            <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                              <td style={{ padding: '4px 6px', fontWeight: '600' }}>{mat.bomItemName}</td>
-                              <td style={{ padding: '4px 6px', textAlign: 'right', color: '#2563eb' }}>
-                                {mat.initialQty > 0 ? `${mat.initialQty} ${mat.unit}` : '—'}
-                              </td>
-                              <td style={{ padding: '4px 6px', textAlign: 'right', color: mat.reissueQty > 0 ? '#dc2626' : 'var(--text-muted)', fontWeight: mat.reissueQty > 0 ? '700' : 'normal' }}>
-                                {mat.reissueQty > 0 ? `+${mat.reissueQty} ${mat.unit}` : '0'}
-                              </td>
-                              <td style={{ padding: '4px 6px', textAlign: 'right', fontWeight: '800', color: 'var(--accent-color)' }}>
-                                {mat.totalIssuedQty} {mat.unit}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
 
             {/* Warning alerts placed cleanly below inputs */}
             {isSelectedDesignAlreadyIssued && (

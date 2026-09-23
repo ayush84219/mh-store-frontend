@@ -8,6 +8,84 @@ import {
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
 
+const formatDateTime = (dateVal) => {
+  if (!dateVal) return '—';
+  const str = String(dateVal).trim();
+
+  // Handle dd/mm/yyyy hh:mm or dd/mm/yyyy
+  const dmyRegex = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?)?(?:\s*(AM|PM))?/i;
+  const match = str.match(dmyRegex);
+
+  if (match) {
+    const day = match[1].padStart(2, '0');
+    const month = match[2].padStart(2, '0');
+    const year = match[3];
+    const hour = match[4];
+    const minute = match[5];
+    const ampm = match[6];
+
+    if (hour && minute) {
+      if (ampm) {
+        return `${day}/${month}/${year} ${hour.padStart(2, '0')}:${minute} ${ampm.toUpperCase()}`;
+      }
+      let hr = parseInt(hour, 10);
+      const calculatedAmPm = hr >= 12 ? 'PM' : 'AM';
+      hr = hr % 12;
+      hr = hr ? hr : 12;
+      return `${day}/${month}/${year} ${String(hr).padStart(2, '0')}:${minute} ${calculatedAmPm}`;
+    }
+    return `${day}/${month}/${year}`;
+  }
+
+  // Try JS standard Date parsing
+  try {
+    const parsed = new Date(dateVal);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }).replace(',', '');
+    }
+  } catch (e) { }
+
+  return str;
+};
+
+const parseToDateObject = (dateVal) => {
+  if (!dateVal) return new Date(0);
+
+  const str = String(dateVal).trim();
+  const dmyRegex = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?)?(?:\s*(AM|PM))?/i;
+  const match = str.match(dmyRegex);
+
+  if (match) {
+    const day = parseInt(match[1], 10);
+    const month = parseInt(match[2], 10) - 1;
+    const year = parseInt(match[3], 10);
+    let hour = match[4] ? parseInt(match[4], 10) : 0;
+    const minute = match[5] ? parseInt(match[5], 10) : 0;
+    const ampm = match[6];
+
+    if (ampm) {
+      if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
+      if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+    }
+
+    return new Date(year, month, day, hour, minute);
+  }
+
+  const parsed = new Date(dateVal);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
+  return new Date(0);
+};
+
 export default function ReportsHistoryView({ 
   pos = [], 
   designs = [],
@@ -108,10 +186,12 @@ export default function ReportsHistoryView({
   // Audit states
   const [designHistory, setDesignHistory] = useState([]);
   const [transfers, setTransfers] = useState([]);
+  const [extraMaterialIssues, setExtraMaterialIssues] = useState([]);
   const [weightCaptures, setWeightCaptures] = useState([]);
   const [zipOrders, setZipOrders] = useState([]);
   const [dooriOrders, setDooriOrders] = useState([]);
   const [scans, setScans] = useState([]);
+  const [fetchedIssueLogs, setFetchedIssueLogs] = useState([]);
   const [expandedLotId, setExpandedLotId] = useState(null);
   const [expandedStoreLogId, setExpandedStoreLogId] = useState(null);
   const [expandedPtId, setExpandedPtId] = useState(null);
@@ -153,6 +233,18 @@ export default function ReportsHistoryView({
   useEffect(() => {
     const backendUrl = getBackendUrl();
 
+    // Fetch issue logs
+    fetch(`${backendUrl}/api/issue-logs`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setFetchedIssueLogs(data))
+      .catch(err => console.error('Error fetching issue logs:', err));
+
+    // Fetch extra material issues
+    fetch(`${backendUrl}/api/extra-material-issues`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setExtraMaterialIssues(data))
+      .catch(err => console.error('Error fetching extra material issues:', err));
+
     // Fetch design history
     fetch(`${backendUrl}/api/design-history`)
       .then(res => res.ok ? res.json() : [])
@@ -189,6 +281,8 @@ export default function ReportsHistoryView({
       .then(data => {
         if (data.success && Array.isArray(data.data)) {
           setWeightCaptures(data.data);
+        } else if (Array.isArray(data)) {
+          setWeightCaptures(data);
         }
       })
       .catch(err => console.error('Error fetching weight captures:', err));
@@ -204,6 +298,8 @@ export default function ReportsHistoryView({
     }
   }, [activeReportTab]);
 
+  const allIssueLogs = issueLogs && issueLogs.length > 0 ? issueLogs : fetchedIssueLogs;
+
   // Calculate stats
   const totalPOValue = pos.reduce((sum, po) => sum + po.total, 0);
   const totalTaxPaid = pos.reduce((sum, po) => sum + po.tax, 0);
@@ -213,60 +309,133 @@ export default function ReportsHistoryView({
   const getStoreAudits = () => {
     const list = [];
     
-    // 1. Issue Logs
-    (issueLogs || []).forEach(log => {
+    // 1. Issue & Return Logs
+    (allIssueLogs || []).forEach(log => {
+      const dateVal = log.date || log.issuedAt || log.timestamp || log.created_at;
+      let matSummary = '';
+      if (Array.isArray(log.materials)) {
+        matSummary = log.materials.map(m => `${m.qty || m.issueQty || 0} ${m.unit || 'pcs'} ${m.name || m.bomItemName || ''}`).filter(Boolean).join(', ');
+      } else if (typeof log.materials === 'string') {
+        try {
+          const parsed = JSON.parse(log.materials);
+          if (Array.isArray(parsed)) {
+            matSummary = parsed.map(m => `${m.qty || m.issueQty || 0} ${m.unit || 'pcs'} ${m.name || m.bomItemName || ''}`).filter(Boolean).join(', ');
+          }
+        } catch (_) {}
+      }
+      
+      const isRet = log.isReturn === 1 || log.isReturn === true;
+      const isRe = log.isReissue === 1 || log.isReissue === true;
+      const typeStr = isRet ? 'Material Return' : (isRe ? 'Material Re-Issue' : 'Material Issue');
+
       list.push({
         id: `IS-${log.id}`,
-        type: 'Material Issue',
-        date: log.issuedAt,
-        details: `${log.qtyIssued} units of material issued for Lot #${log.lotId}`,
-        operator: log.issuedBy || 'Store Incharge',
-        tag: 'issue'
+        type: typeStr,
+        date: dateVal,
+        details: matSummary || `${log.volume || log.qtyIssued || 0} units of material for Lot #${log.lotId}`,
+        operator: log.receiverName ? `${log.personName || log.issuedBy || 'Store'} → ${log.receiverName}` : (log.personName || log.issuedBy || 'Store Incharge'),
+        tag: isRet ? 'return' : 'issue'
       });
-      if (log.returnedQty > 0) {
+
+      if (log.returnedQty > 0 && !isRet) {
         list.push({
           id: `RT-${log.id}`,
           type: 'Material Return',
-          date: log.returnedAt || log.issuedAt,
+          date: log.returnedAt || dateVal,
           details: `${log.returnedQty} units of material returned for Lot #${log.lotId}`,
-          operator: log.returnedBy || 'Store Incharge',
+          operator: log.returnedBy || log.personName || 'Store Incharge',
           tag: 'return'
         });
       }
     });
 
-    // 2. Transfers
+    // 2. Extra Material Issues
+    (extraMaterialIssues || []).forEach(ei => {
+      let itemsSummary = '';
+      const items = Array.isArray(ei.items) ? ei.items : [];
+      if (items.length > 0) {
+        itemsSummary = items.map(it => `+${it.totalRequired || it.qty || 0} ${it.unit || 'pcs'} ${it.bomItemName || it.materialName || ''}`).filter(Boolean).join(', ');
+      }
+
+      list.push({
+        id: `EX-${ei.voucherId || ei.id}`,
+        type: 'Extra Material Requisition',
+        date: ei.issueDate || ei.createdAt || ei.date,
+        details: `Voucher ${ei.voucherId || ''}: ${itemsSummary || 'Extra materials issued'} for Lot #${ei.lotId} (Receiver: ${ei.receiverName || 'Dept'})`,
+        operator: ei.personName || 'Store Staff',
+        tag: 'extra_issue'
+      });
+    });
+
+    // 3. Transfers
     (transfers || []).forEach(t => {
       list.push({
         id: `TR-${t.id}`,
         type: 'Stock Transfer',
-        date: t.transferredAt,
-        details: `${t.qty} units of ${t.materialName || 'trims'} transferred from ${t.fromLocation || 'Store'} to ${t.toLocation}`,
-        operator: t.transferredBy || 'System',
+        date: t.transferredAt || t.date || t.timestamp,
+        details: `${t.qty || t.quantity || 0} units of ${t.materialName || t.materialCode || 'trims'} transferred from ${t.fromLocation || 'Store'} to ${t.toLocation}`,
+        operator: t.transferredBy || t.operator || 'System',
         tag: 'transfer'
       });
     });
 
-    // 3. Weight Captures
+    // 4. Weight Captures
     (weightCaptures || []).forEach(wc => {
       list.push({
         id: `WC-${wc.id}`,
-        type: 'Material Add',
-        date: wc.capturedAt,
-        details: `Weighed ${wc.pieces || 0} pieces of ${wc.materialName || 'material'} (Net: ${wc.netWeightKg || 0} kg) for Lot #${wc.lotNo || '—'}`,
-        operator: wc.storeIncharge || 'Weighbridge Operator',
+        type: 'Material Weight Capture',
+        date: wc.capturedAt || wc.createdAt || wc.timestamp,
+        details: `Weighed ${wc.pieces || 0} pieces of ${wc.materialName || 'material'} (Net: ${wc.netWeightKg || wc.weight || 0} kg) for Lot #${wc.lotNo || '—'}`,
+        operator: wc.storeIncharge || wc.operator || 'Weighbridge Operator',
         tag: 'weight'
       });
     });
 
+    // 5. Scans (Gate Entry, Material Check-In, Printing, RGP)
+    (scans || []).forEach(s => {
+      const isGate = s.scan_type === 'gate_entry';
+      const isPrinting = s.scan_type === 'printing_gate_out';
+      const isRgp = s.scan_type === 'rgp_entry' || s.scan_type === 'rgp_return';
+      const isMatIn = s.scan_type === 'material_in';
+      
+      let typeLabel = 'Scan Event';
+      let desc = '';
+
+      if (isGate) {
+        typeLabel = 'Gate Entry Scan';
+        desc = `Gate pass arrival for Lot #${s.lot_number}: ${s.material_name || 'Materials'} (${s.quantity || 0} pcs) from ${s.supplier_name || 'Vendor'}`;
+      } else if (isPrinting) {
+        typeLabel = 'Printing Gate Out';
+        desc = `Dispatched for printing Lot #${s.lot_number}: ${s.quantity || 0} pcs ${s.material_name || ''}`;
+      } else if (isRgp) {
+        typeLabel = s.scan_type === 'rgp_return' ? 'RGP Return Scan' : 'RGP Gate Dispatch';
+        desc = `RGP Pass #${s.lot_number}: ${s.quantity || 0} pcs of ${s.material_name || 'Goods'} (${s.supplier_name || 'Processor'})`;
+      } else if (isMatIn) {
+        typeLabel = 'Material Check-In Scan';
+        desc = `Store check-in for Lot #${s.lot_number}: ${s.quantity || 0} pcs of ${s.material_name || 'trims'} from ${s.supplier_name || 'Vendor'}`;
+      } else {
+        typeLabel = `Scan (${s.scan_type})`;
+        desc = `Lot #${s.lot_number}: ${s.quantity || 0} pcs of ${s.material_name || ''}`;
+      }
+
+      list.push({
+        id: `SC-${s.id}`,
+        type: typeLabel,
+        date: s.scanned_at || s.timestamp,
+        details: desc,
+        operator: s.person_name || 'Scanner Operator',
+        tag: 'scan'
+      });
+    });
+
     // Sort by date descending
-    return list.sort((a, b) => new Date(b.date) - new Date(a.date));
+    return list.sort((a, b) => parseToDateObject(b.date).getTime() - parseToDateObject(a.date).getTime());
   };
 
   const applyDateFilter = (dateStr, filter) => {
     if (filter === 'all') return true;
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return true;
+    const d = parseToDateObject(dateStr);
+    if (d.getTime() === 0) return true;
     const now = new Date();
     if (filter === 'today') return d.toDateString() === now.toDateString();
     if (filter === 'week') {
@@ -282,28 +451,38 @@ export default function ReportsHistoryView({
 
   const sortByDate = (arr, dateField, order) => {
     return [...arr].sort((a, b) => {
-      const da = new Date(a[dateField] || 0);
-      const db = new Date(b[dateField] || 0);
-      return order === 'latest' ? db - da : da - db;
+      const da = parseToDateObject(a[dateField]);
+      const db = parseToDateObject(b[dateField]);
+      return order === 'latest' ? db.getTime() - da.getTime() : da.getTime() - db.getTime();
     });
   };
 
   const getStoreLogDetails = (idStr) => {
     if (!idStr) return null;
-    const [prefix, rawId] = idStr.split('-');
+    const parts = idStr.split('-');
+    const prefix = parts[0];
+    const rawId = parts.slice(1).join('-');
     const parsedId = Number(rawId);
     
     if (prefix === 'IS' || prefix === 'RT') {
-      const log = (issueLogs || []).find(l => Number(l.id) === parsedId);
+      const log = (allIssueLogs || []).find(l => Number(l.id) === parsedId || String(l.id) === rawId);
       return log ? { type: prefix, data: log } : null;
     }
+    if (prefix === 'EX') {
+      const ei = (extraMaterialIssues || []).find(e => Number(e.id) === parsedId || String(e.voucherId) === rawId || String(e.id) === rawId);
+      return ei ? { type: 'EX', data: ei } : null;
+    }
     if (prefix === 'TR') {
-      const t = (transfers || []).find(x => Number(x.id) === parsedId);
+      const t = (transfers || []).find(x => Number(x.id) === parsedId || String(x.id) === rawId);
       return t ? { type: 'TR', data: t } : null;
     }
     if (prefix === 'WC') {
-      const wc = (weightCaptures || []).find(w => Number(w.id) === parsedId);
+      const wc = (weightCaptures || []).find(w => Number(w.id) === parsedId || String(w.id) === rawId);
       return wc ? { type: 'WC', data: wc } : null;
+    }
+    if (prefix === 'SC') {
+      const s = (scans || []).find(x => Number(x.id) === parsedId || String(x.id) === rawId);
+      return s ? { type: 'SC', data: s } : null;
     }
     return null;
   };
@@ -1228,10 +1407,12 @@ export default function ReportsHistoryView({
                 style={styles.select}
               >
                 <option value="all">All Events</option>
-                <option value="issue">Issues</option>
+                <option value="issue">Standard Issues</option>
+                <option value="extra_issue">Extra Requisitions</option>
                 <option value="return">Returns</option>
                 <option value="transfer">Transfers</option>
-                <option value="weight">Material Add</option>
+                <option value="weight">Material Weight / Add</option>
+                <option value="scan">Gate & Scans</option>
               </select>
               <select
                 value={saDateFilter}
@@ -1285,12 +1466,16 @@ export default function ReportsHistoryView({
                 ) : (
                   filteredStoreAudits.map((s, idx) => {
                     const badgeColor = s.tag === 'issue'
+                      ? { backgroundColor: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' }
+                      : s.tag === 'extra_issue'
                       ? { backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' }
                       : s.tag === 'return'
                       ? { backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10b981' }
                       : s.tag === 'transfer'
                       ? { backgroundColor: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b' }
-                      : { backgroundColor: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6' };
+                      : s.tag === 'weight'
+                      ? { backgroundColor: 'rgba(139, 92, 246, 0.12)', color: '#8b5cf6' }
+                      : { backgroundColor: 'rgba(6, 182, 212, 0.12)', color: '#06b6d4' };
 
                     const detailObj = getStoreLogDetails(s.id);
                     const hasDetails = !!detailObj;
@@ -1300,14 +1485,14 @@ export default function ReportsHistoryView({
                         <tr style={{ cursor: hasDetails ? 'pointer' : 'default' }} onClick={() => hasDetails && setExpandedStoreLogId(expandedStoreLogId === s.id ? null : s.id)}>
                           <td style={{ fontWeight: 'bold', color: 'var(--text-muted)', fontSize: '12px' }}>{s.id}</td>
                           <td>
-                            <span className="status-badge" style={{ ...badgeColor, fontWeight: 'bold', fontSize: '10px' }}>
+                            <span className="status-badge" style={{ ...badgeColor, fontWeight: 'bold', fontSize: '10px', textTransform: 'uppercase' }}>
                               {s.type}
                             </span>
                           </td>
                           <td style={{ fontWeight: '600' }}>{s.operator}</td>
                           <td style={{ fontSize: '13px' }}>{s.details}</td>
-                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                            {s.date ? new Date(s.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                            {formatDateTime(s.date)}
                           </td>
                           <td style={{ textAlign: 'center' }}>
                             {hasDetails ? (
@@ -1328,54 +1513,158 @@ export default function ReportsHistoryView({
                         </tr>
                         {expandedStoreLogId === s.id && hasDetails && (
                           <tr style={{ background: 'var(--bg-primary, #f8fafc)' }}>
-                            <td colSpan="6" style={{ padding: '16px', borderLeft: '4px solid var(--accent-color)' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                <h4 style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px', marginBottom: '8px' }}>
-                                  📦 Detailed Transaction Properties — {s.type} Log ({s.id})
-                                </h4>
+                            <td colSpan="6" style={{ padding: '18px', borderLeft: '4px solid var(--accent-color)' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>
+                                  <h4 style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                    📦 Detailed Audit Log Record — {s.type} ({s.id})
+                                  </h4>
+                                  <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                                    Logged at: <strong>{formatDateTime(s.date)}</strong>
+                                  </span>
+                                </div>
                                 
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
                                   {/* Render properties dynamically depending on the log type */}
                                   {(detailObj.type === 'IS' || detailObj.type === 'RT') && (
                                     <>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Manufacturing Lot</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Manufacturing Lot</span>
                                         <strong>Lot #{detailObj.data.lotId}</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Material description</span>
-                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode})</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Issuer Person</span>
+                                        <strong>{detailObj.data.personName || detailObj.data.issuedBy || 'Store Incharge'}</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>supervisor / Department</span>
-                                        <span>{detailObj.data.supervisor} / {detailObj.data.department}</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Received Name (Receiver)</span>
+                                        <strong style={{ color: detailObj.data.receiverName ? 'var(--accent-color)' : 'inherit' }}>
+                                          {detailObj.data.receiverName || '—'}
+                                        </strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Quantity issue / return</span>
-                                        <span style={{ fontWeight: 'bold', color: detailObj.type === 'IS' ? '#ef4444' : '#10b981' }}>
-                                          {detailObj.type === 'IS' ? `${detailObj.data.qtyIssued} units issued` : `${detailObj.data.returnedQty} units returned`}
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Receiver Department / Line</span>
+                                        <span>{detailObj.data.receiverDept || 'Cutting'}</span>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Garment Category</span>
+                                        <span>{detailObj.data.category || 'N/A'}</span>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Total Quantity Issued/Returned</span>
+                                        <span style={{ fontWeight: 'bold', color: detailObj.type === 'IS' ? '#3b82f6' : '#10b981' }}>
+                                          {detailObj.data.volume || detailObj.data.qtyIssued || 0} units
                                         </span>
                                       </div>
+
+                                      {/* Materials itemized list */}
+                                      {Array.isArray(detailObj.data.materials) && detailObj.data.materials.length > 0 && (
+                                        <div style={{ gridColumn: '1 / -1', marginTop: '6px' }}>
+                                          <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-main)', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>
+                                            📋 Itemized Material Breakdown ({detailObj.data.materials.length} items):
+                                          </span>
+                                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', background: 'var(--bg-secondary)', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                            <thead>
+                                              <tr style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>
+                                                <th style={{ padding: '6px 10px' }}>BOM Component</th>
+                                                <th style={{ padding: '6px 10px' }}>Material Mapped</th>
+                                                <th style={{ padding: '6px 10px', textAlign: 'right' }}>Quantity</th>
+                                                <th style={{ padding: '6px 10px' }}>UOM</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {detailObj.data.materials.map((m, mIdx) => (
+                                                <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                  <td style={{ padding: '6px 10px', fontWeight: '600' }}>{m.bomItemName || 'Component'}</td>
+                                                  <td style={{ padding: '6px 10px' }}>{m.name || m.materialName || '—'}</td>
+                                                  <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: detailObj.type === 'IS' ? '#3b82f6' : '#10b981' }}>
+                                                    {m.qty || m.issueQty || 0}
+                                                  </td>
+                                                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{m.unit || 'pcs'}</td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
+                                    </>
+                                  )}
+
+                                  {detailObj.type === 'EX' && (
+                                    <>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Voucher Ref / Lot</span>
+                                        <strong>{detailObj.data.voucherId} (Lot #{detailObj.data.lotId})</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Issuer Person</span>
+                                        <strong>{detailObj.data.personName || 'Store Incharge'}</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Receiver Person & Dept / Line</span>
+                                        <strong>{detailObj.data.receiverName || 'Tailor'} ({detailObj.data.receiverDept || 'Cutting'})</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Status</span>
+                                        <span className="status-badge verified" style={{ textTransform: 'uppercase' }}>
+                                          {detailObj.data.status || 'Issued'}
+                                        </span>
+                                      </div>
+
+                                      {/* Extra items requisition table */}
+                                      {Array.isArray(detailObj.data.items) && detailObj.data.items.length > 0 && (
+                                        <div style={{ gridColumn: '1 / -1', marginTop: '6px' }}>
+                                          <span style={{ fontSize: '11px', fontWeight: '800', color: '#ef4444', display: 'block', marginBottom: '6px', textTransform: 'uppercase' }}>
+                                            ⚡ Extra Material Requisition Items ({detailObj.data.items.length} items):
+                                          </span>
+                                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', background: 'var(--bg-secondary)', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                            <thead>
+                                              <tr style={{ background: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>
+                                                <th style={{ padding: '6px 10px' }}>Component</th>
+                                                <th style={{ padding: '6px 10px' }}>Material</th>
+                                                <th style={{ padding: '6px 10px', textAlign: 'right' }}>Extra Qty</th>
+                                                <th style={{ padding: '6px 10px' }}>UOM</th>
+                                                <th style={{ padding: '6px 10px' }}>Reason / Remarks</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody>
+                                              {detailObj.data.items.map((it, itIdx) => (
+                                                <tr key={itIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                  <td style={{ padding: '6px 10px', fontWeight: '600' }}>{it.bomItemName || 'Component'}</td>
+                                                  <td style={{ padding: '6px 10px' }}>{it.materialName || '—'}</td>
+                                                  <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 'bold', color: '#ef4444' }}>
+                                                    +{it.totalRequired || it.qty || 0}
+                                                  </td>
+                                                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{it.unit || 'pcs'}</td>
+                                                  <td style={{ padding: '6px 10px', fontSize: '11.5px', color: 'var(--text-main)' }}>
+                                                    {it.reason || 'Extra requisition'}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      )}
                                     </>
                                   )}
 
                                   {detailObj.type === 'TR' && (
                                     <>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Material Description</span>
-                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode})</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material Description</span>
+                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode || 'Trims'})</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>From Location</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Source Location</span>
                                         <span>{detailObj.data.fromLocation || 'Store Bin'}</span>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>To Location</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Destination Location</span>
                                         <span>{detailObj.data.toLocation}</span>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Transfer quantity</span>
-                                        <strong style={{ color: 'var(--accent-color)' }}>{detailObj.data.qty} units</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Transfer quantity</span>
+                                        <strong style={{ color: 'var(--accent-color)' }}>{detailObj.data.qty || detailObj.data.quantity} units</strong>
                                       </div>
                                     </>
                                   )}
@@ -1383,20 +1672,41 @@ export default function ReportsHistoryView({
                                   {detailObj.type === 'WC' && (
                                     <>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Associated Lot</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Associated Lot</span>
                                         <strong>Lot #{detailObj.data.lotNo}</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>material name</span>
-                                        <strong>{detailObj.data.materialName}</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material Name & Code</span>
+                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode || '—'})</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Net weight / piece weight</span>
-                                        <strong>{Number(detailObj.data.netWeightKg).toFixed(3)} kg</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Net Weight / Gross</span>
+                                        <strong style={{ color: '#8b5cf6' }}>{Number(detailObj.data.netWeightKg || detailObj.data.weight || 0).toFixed(3)} kg</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10px', textTransform: 'uppercase' }}>Total pieces / Packets</span>
-                                        <span>{detailObj.data.pieces} pcs / {detailObj.data.packets} pkts</span>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Total pieces / Packets</span>
+                                        <span>{detailObj.data.pieces || 0} pcs / {detailObj.data.packets || 0} pkts</span>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {detailObj.type === 'SC' && (
+                                    <>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Scan Type & Lot</span>
+                                        <strong>{detailObj.data.scan_type} (Lot #{detailObj.data.lot_number})</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Supplier / Vendor</span>
+                                        <strong>{detailObj.data.supplier_name || '—'}</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material / Qty</span>
+                                        <strong>{detailObj.data.material_name} ({detailObj.data.quantity} pcs)</strong>
+                                      </div>
+                                      <div style={{ fontSize: '12px' }}>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Scanner Operator</span>
+                                        <span>{detailObj.data.person_name || 'Staff'}</span>
                                       </div>
                                     </>
                                   )}
