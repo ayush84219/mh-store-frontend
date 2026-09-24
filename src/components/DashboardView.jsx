@@ -211,7 +211,7 @@ export default function DashboardView({
 
           <div className="flowchart-step" onClick={() => onNavigate('zip_po')}>
             <FileText size={24} />
-            <span>ZIP & DOORI PO</span>
+            <span>ZIP, DORI & BONE PO</span>
           </div>
         </div>
       );

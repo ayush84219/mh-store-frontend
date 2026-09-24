@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     FiSearch, FiRefreshCw, FiAlertTriangle, FiUser, FiCalendar, FiX, FiCheck,
     FiScissors, FiInfo, FiPackage, FiTag, FiGrid, FiArrowLeft, FiDownload, FiPrinter,
-    FiPlus, FiTrash2, FiCheckSquare, FiSquare, FiTruck, FiLogIn, FiLock
+    FiPlus, FiTrash2, FiCheckSquare, FiSquare, FiTruck, FiLogIn, FiLock,
+    FiLayers
 } from 'react-icons/fi';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -4045,6 +4046,7 @@ export function PuneetZipForm({ prefilledLotNo = '', setPrefilledLotNo = () => {
 }
 
 import DoriOrder from './dooripogenerate';
+import BonePOView from './BonePOView';
 
 export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () => { }, initialTab = 'zip' } = {}) {
     const [activeSubTab, setActiveSubTab] = useState(initialTab);
@@ -4078,6 +4080,14 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
             gradient: 'linear-gradient(135deg, #0d9488, #059669)',
             glow: 'rgba(13, 148, 136, 0.3)',
             icon: <FiScissors />
+        },
+        {
+            id: 'bone',
+            label: 'Bone Issue',
+            subtitle: 'Issue internal bone rolls to cutting & floor masters',
+            gradient: 'linear-gradient(135deg, #0284c7, #0369a1)',
+            glow: 'rgba(2, 132, 199, 0.3)',
+            icon: <FiLayers />
         }
     ];
 
@@ -4216,7 +4226,7 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
                             <PuneetZipForm prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} />
                         </div>
                     )
-                ) : (
+                ) : activeSubTab === 'dori' ? (
                     <DoriOrder
                         prefilledLotNo={prefilledLotNo}
                         setPrefilledLotNo={setPrefilledLotNo}
@@ -4226,6 +4236,13 @@ export default function PuneetZip({ prefilledLotNo = '', setPrefilledLotNo = () 
                         setActiveSubTab={setActiveSubTab}
                         tabs={tabs}
                     />
+                ) : (
+                    <div style={{ padding: '0 4px' }}>
+                        <BonePOView
+                            prefilledLotNo={prefilledLotNo}
+                            setPrefilledLotNo={setPrefilledLotNo}
+                        />
+                    </div>
                 )}
             </div>
         </div>

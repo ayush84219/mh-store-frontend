@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ArrowLeftRight, Search, Package, MapPin, CheckCircle,
   AlertTriangle, Clock, User, Calendar, RefreshCw, Printer, ArrowLeft,
-  Plus, Minus, Check, Layers, ChevronDown, X
+  Plus, Minus, Check, Layers, ChevronDown, X, Sparkles, Sliders,
+  ArrowRight, Download, Box, ShieldCheck, Activity
 } from 'lucide-react';
 import SearchableLocationSelect from './SearchableLocationSelect';
 import { getBackendUrl } from '../utils/api';
@@ -48,27 +49,30 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           cursor: 'pointer',
           width: '100%',
           boxSizing: 'border-box',
-          padding: '10px 14px',
-          minHeight: '46px',
+          padding: '11px 14px',
+          minHeight: '48px',
           borderRadius: '12px',
-          border: isOpen ? '1.5px solid #6366f1' : '1.5px solid var(--border-color, #cbd5e1)',
-          background: 'var(--bg-primary, #ffffff)',
+          border: isOpen ? '1.5px solid var(--accent-color, #0284c7)' : '1.5px solid var(--border-color, #dbeafe)',
+          background: 'var(--bg-secondary, #ffffff)',
           color: selectedMaterial ? 'var(--text-main, #0f172a)' : 'var(--text-muted, #94a3b8)',
-          fontSize: '0.9rem',
-          transition: 'all 0.2s ease',
+          fontSize: '0.88rem',
+          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
           outline: 'none',
-          boxShadow: isOpen ? '0 0 0 3px rgba(99, 102, 241, 0.15)' : 'none'
+          boxShadow: isOpen ? '0 0 0 3px rgba(2, 132, 199, 0.15)' : 'none'
         }}
       >
         {selectedMaterial ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1, paddingRight: '8px' }}>
             <span style={{
-              background: 'rgba(99, 102, 241, 0.12)',
-              color: '#4f46e5',
-              padding: '2px 7px',
+              background: 'rgba(2, 132, 199, 0.12)',
+              color: '#0284c7',
+              border: '1px solid rgba(2, 132, 199, 0.25)',
+              padding: '2px 8px',
               borderRadius: '6px',
               fontSize: '11px',
               fontWeight: '800',
+              fontFamily: 'monospace',
+              letterSpacing: '0.5px',
               flexShrink: 0
             }}>
               {selectedMaterial.id}
@@ -76,11 +80,26 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
             <span style={{ fontWeight: '700', color: 'var(--text-main, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {selectedMaterial.name}
             </span>
+            {selectedMaterial.category && (
+              <span style={{
+                fontSize: '10.5px',
+                fontWeight: '700',
+                color: 'var(--text-muted, #64748b)',
+                backgroundColor: 'var(--bg-primary, #f0f7ff)',
+                padding: '2px 7px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-color, #dbeafe)',
+                flexShrink: 0
+              }}>
+                {selectedMaterial.category}
+              </span>
+            )}
             <span style={{
               fontSize: '11.5px',
-              fontWeight: '600',
-              color: '#10b981',
+              fontWeight: '700',
+              color: '#059669',
               backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
               padding: '2px 8px',
               borderRadius: '6px',
               flexShrink: 0,
@@ -101,19 +120,22 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
                 background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
-                padding: '2px',
+                padding: '3px',
                 display: 'flex',
                 alignItems: 'center',
                 color: 'var(--text-muted, #94a3b8)',
-                borderRadius: '4px'
+                borderRadius: '4px',
+                transition: 'color 0.15s ease'
               }}
+              onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+              onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'}
             >
               <X size={14} />
             </button>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-muted, #94a3b8)' }}>
-            <Package size={15} style={{ color: '#6366f1' }} />
+            <Package size={16} style={{ color: 'var(--accent-color, #0284c7)' }} />
             <span style={{ fontWeight: '600' }}>{placeholder}</span>
           </div>
         )}
@@ -127,17 +149,17 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           top: 'calc(100% + 6px)',
           left: 0,
           right: 0,
-          background: 'var(--panel-bg, #ffffff)',
-          border: '1.5px solid var(--border-color, #e2e8f0)',
-          borderRadius: '12px',
-          boxShadow: '0 12px 30px -4px rgba(0,0,0,0.18), 0 4px 10px rgba(0,0,0,0.08)',
-          maxHeight: '300px',
+          background: 'var(--bg-secondary, #ffffff)',
+          border: '1.5px solid var(--border-color, #dbeafe)',
+          borderRadius: '14px',
+          boxShadow: '0 16px 36px -4px rgba(2, 132, 199, 0.15), 0 4px 12px rgba(0, 0, 0, 0.06)',
+          maxHeight: '320px',
           overflowY: 'auto',
           zIndex: 100000,
-          padding: '6px'
+          padding: '8px'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--bg-secondary, #f8fafc)', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)', marginBottom: '6px' }}>
-            <Search size={14} style={{ color: '#6366f1' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'var(--bg-primary, #f0f7ff)', borderRadius: '10px', border: '1px solid var(--border-color, #dbeafe)', marginBottom: '8px' }}>
+            <Search size={14} style={{ color: 'var(--accent-color, #0284c7)' }} />
             <input 
               type="text" 
               placeholder="Search by code, material name, or location..."
@@ -160,8 +182,8 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           </div>
 
           {filtered.length === 0 ? (
-            <div style={{ padding: '16px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              No matching materials found
+            <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+              No matching materials found in warehouse catalog
             </div>
           ) : (
             filtered.map(m => {
@@ -176,36 +198,36 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
                     setSearchQuery('');
                   }}
                   style={{
-                    padding: '9px 12px',
-                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
-                    background: isSelected ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
+                    background: isSelected ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
                     marginBottom: '3px',
-                    border: isSelected ? '1px solid rgba(99, 102, 241, 0.2)' : '1px solid transparent'
+                    border: isSelected ? '1px solid rgba(2, 132, 199, 0.3)' : '1px solid transparent'
                   }}
-                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-secondary, #f1f5f9)'; }}
+                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-primary, #f0f7ff)'; }}
                   onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: '800', color: '#6366f1', background: 'rgba(99, 102, 241, 0.08)', padding: '1px 6px', borderRadius: '4px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: '#0284c7', background: 'rgba(2, 132, 199, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
                         {m.id}
                       </span>
                       <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
                         {m.name}
                       </span>
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: '800', color: '#10b981' }}>
+                    <span style={{ fontSize: '12px', fontWeight: '800', color: '#059669' }}>
                       {m.stock} {m.unit || 'Pcs'}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
-                    <MapPin size={11} style={{ color: '#6366f1' }} />
+                    <MapPin size={11} style={{ color: '#0284c7' }} />
                     <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {loc}
                     </span>
-                    <span style={{ marginLeft: 'auto', fontWeight: '600' }}>
+                    <span style={{ marginLeft: 'auto', fontWeight: '700', color: '#0284c7' }}>
                       {m.packets || 1} pkts
                     </span>
                   </div>
@@ -717,56 +739,348 @@ export default function MaterialTransferView({ currentUser }) {
     return Array.from(locMap.values());
   }, [warehouseLocations]);
 
+  const todayStr = useMemo(() => new Date().toDateString(), []);
+
+  const transfersTodayList = useMemo(() => {
+    return (history || []).filter(item => {
+      if (!item.transferredAt) return false;
+      const d = new Date(item.transferredAt);
+      return !isNaN(d.getTime()) && d.toDateString() === todayStr;
+    });
+  }, [history, todayStr]);
+
+  const packetsMovedToday = useMemo(() => {
+    return transfersTodayList.reduce((sum, item) => sum + (Number(item.quantity) || 1), 0);
+  }, [transfersTodayList]);
+
+  const distinctRacksCount = useMemo(() => {
+    const locSet = new Set();
+    (materials || []).forEach(m => {
+      const locStr = String(m.location || '');
+      if (locStr) {
+        locStr.split(',').forEach(p => {
+          const clean = p.replace(/\(\d+.*?\)/, '').trim();
+          if (clean && clean.toLowerCase() !== 'main store') locSet.add(clean.toLowerCase());
+        });
+      }
+    });
+    return locSet.size > 0 ? locSet.size : (warehouseLocations?.length || 12);
+  }, [materials, warehouseLocations]);
+
+  const handleExportCSV = () => {
+    if (!history || history.length === 0) {
+      showNotification('No transfer records available to export.', 'error');
+      return;
+    }
+    const headers = ['Date', 'Time', 'Material Code', 'Material Name', 'From Location', 'To Location', 'Packets', 'Operator'];
+    const rows = history.map(item => {
+      const d = item.transferredAt ? new Date(item.transferredAt) : null;
+      const dateStr = d && !isNaN(d.getTime()) ? d.toLocaleDateString('en-IN') : 'N/A';
+      const timeStr = d && !isNaN(d.getTime()) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : 'N/A';
+      return [
+        `"${dateStr}"`,
+        `"${timeStr}"`,
+        `"${item.materialCode || ''}"`,
+        `"${(item.materialName || '').replace(/"/g, '""')}"`,
+        `"${item.fromLocation || ''}"`,
+        `"${item.toLocation || ''}"`,
+        `"${item.quantity || 1}"`,
+        `"${item.operator || 'Admin'}"`
+      ].join(',');
+    });
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `material_transfers_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    showNotification('Exported transfer activity log successfully!');
+  };
+
   return (
-    <div style={{ padding: '24px 20px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+    <div style={{ padding: '20px 24px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
       {/* Toast Notification */}
       {toast && (
         <div style={{
           position: 'fixed', top: '24px', right: '24px', zIndex: 99999,
-          padding: '14px 20px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '10px',
-          background: toast.type === 'error' ? 'rgba(239,68,68,0.95)' : 'rgba(16,185,129,0.95)',
-          color: '#ffffff', fontWeight: '700', boxShadow: '0 10px 20px rgba(0,0,0,0.15)',
-          backdropFilter: 'blur(8px)', animation: 'slideIn 0.3s ease'
+          padding: '14px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px',
+          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'rgba(16, 185, 129, 0.95)',
+          color: '#ffffff', fontWeight: '700', boxShadow: '0 12px 28px rgba(0,0,0,0.18)',
+          backdropFilter: 'blur(8px)', animation: 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
         }}>
           {toast.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
           <span>{toast.message}</span>
         </div>
       )}
 
-      {/* Main Grid Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '24px' }}>
-        
-        {/* Left Panel: Execute Transfer */}
-        <div className="panel" style={{ padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: '0 0 4px 0', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}>
-                <ArrowLeftRight size={20} style={{ color: '#6366f1' }} /> Material Store Transfer
-              </h2>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                Relocate packet inventory across warehouse racks & shelves.
+      {/* Top Stats Banner: 4 Modern KPI Cards */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: '16px'
+      }}>
+        {/* KPI 1: Transfers Today */}
+        <div className="panel" style={{
+          padding: '18px 20px',
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%)',
+            color: '#0284c7',
+            flexShrink: 0
+          }}>
+            <ArrowLeftRight size={22} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Transfers Today
+            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                {transfersTodayList.length}
+              </span>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                {packetsMovedToday} pkts moved
               </span>
             </div>
-            {(selectedMaterialId || toLoc) && (
+          </div>
+        </div>
+
+        {/* KPI 2: Cataloged Materials */}
+        <div className="panel" style={{
+          padding: '18px 20px',
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(129, 140, 248, 0.1) 100%)',
+            color: '#4f46e5',
+            flexShrink: 0
+          }}>
+            <Package size={22} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Materials Catalog
+            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                {materials.length}
+              </span>
+              <span style={{ fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)' }}>
+                Available in stock
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 3: Active Rack Locations */}
+        <div className="panel" style={{
+          padding: '18px 20px',
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(52, 211, 153, 0.1) 100%)',
+            color: '#059669',
+            flexShrink: 0
+          }}>
+            <MapPin size={22} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Racks Utilized
+            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                {distinctRacksCount}
+              </span>
+              <span style={{ fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)' }}>
+                Slots mapped
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* KPI 4: Thermal Printer Status */}
+        <div className="panel" style={{
+          padding: '18px 20px',
+          borderRadius: '14px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: printerStatus === 'online'
+              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(52, 211, 153, 0.1) 100%)'
+              : 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.1) 100%)',
+            color: printerStatus === 'online' ? '#059669' : '#d97706',
+            flexShrink: 0
+          }}>
+            <Printer size={22} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Thermal Printer
+              </span>
+              <button
+                type="button"
+                onClick={connectPrinter}
+                title="Reconnect Printer"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--accent-color, #0284c7)',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                {printerStatus === 'online' ? 'Test' : 'Connect'}
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: printerStatus === 'online' ? '#10b981' : printerStatus === 'connecting' ? '#f59e0b' : '#ef4444',
+                boxShadow: printerStatus === 'online' ? '0 0 8px #10b981' : 'none'
+              }} />
+              <span style={{
+                fontSize: '13px',
+                fontWeight: '700',
+                color: printerStatus === 'online' ? '#059669' : 'var(--text-main, #0f172a)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {printerStatus === 'online' ? (printerName || 'Online (Ready)') : printerStatus === 'connecting' ? 'Connecting...' : 'Printer Ready'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Grid Layout */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'minmax(360px, 1.25fr) minmax(480px, 1.75fr)',
+        gap: '24px',
+        alignItems: 'start'
+      }}>
+        
+        {/* Left Panel: Execute Transfer Workstation */}
+        <div className="panel" style={{
+          padding: '24px',
+          borderRadius: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          {/* Card Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '16px', borderBottom: '1px solid var(--border-color, #dbeafe)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)',
+                flexShrink: 0
+              }}>
+                <ArrowLeftRight size={20} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main, #0f172a)', letterSpacing: '-0.3px' }}>
+                  Material Store Transfer
+                </h2>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600', marginTop: '2px', display: 'block' }}>
+                  Relocate packet inventory across warehouse racks & shelves.
+                </span>
+              </div>
+            </div>
+            {(selectedMaterialId || toLoc || fromLoc) && (
               <button
                 type="button"
                 onClick={handleResetForm}
                 style={{
-                  padding: '5px 10px',
+                  padding: '6px 12px',
                   borderRadius: '8px',
-                  border: '1px solid var(--border-color, #cbd5e1)',
-                  background: 'var(--bg-secondary, #f8fafc)',
-                  color: 'var(--text-muted, #64748b)',
-                  fontSize: '0.75rem',
+                  border: '1px solid var(--border-color, #dbeafe)',
+                  background: 'var(--bg-primary, #f0f7ff)',
+                  color: 'var(--accent-color, #0284c7)',
+                  fontSize: '12px',
                   fontWeight: '700',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '4px'
+                  gap: '5px',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.12)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-primary, #f0f7ff)';
                 }}
               >
-                <X size={12} /> Clear Form
+                <X size={13} /> Reset Form
               </button>
             )}
           </div>
@@ -774,20 +1088,20 @@ export default function MaterialTransferView({ currentUser }) {
           {/* Transfer Success Banner Card */}
           {lastTransferSuccess && (
             <div style={{
-              padding: '14px 16px',
+              padding: '16px',
               borderRadius: '12px',
-              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(99, 102, 241, 0.08) 100%)',
-              border: '1.5px solid rgba(16, 185, 129, 0.3)',
+              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(2, 132, 199, 0.08) 100%)',
+              border: '1.5px solid rgba(16, 185, 129, 0.35)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '10px',
-              boxShadow: '0 4px 12px rgba(16, 185, 129, 0.08)'
+              gap: '12px',
+              boxShadow: '0 6px 16px rgba(16, 185, 129, 0.1)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <CheckCircle size={18} style={{ color: '#10b981' }} />
-                  <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#065f46' }}>
-                    Transfer Completed Successfully!
+                  <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#065f46' }}>
+                    Stock Relocated Successfully!
                   </span>
                 </div>
                 <button
@@ -799,59 +1113,59 @@ export default function MaterialTransferView({ currentUser }) {
                 </button>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.82rem', background: 'rgba(255,255,255,0.8)', padding: '8px 12px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.15)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.82rem', background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                 <div>
-                  <span style={{ fontWeight: '800', color: '#4f46e5' }}>{lastTransferSuccess.materialCode}</span>
-                  <span style={{ fontWeight: '700', color: 'var(--text-main)', marginLeft: '6px' }}>{lastTransferSuccess.materialName}</span>
+                  <span style={{ fontWeight: '800', fontFamily: 'monospace', color: '#0284c7' }}>{lastTransferSuccess.materialCode}</span>
+                  <span style={{ fontWeight: '700', color: 'var(--text-main, #0f172a)', marginLeft: '8px' }}>{lastTransferSuccess.materialName}</span>
                 </div>
-                <span style={{ fontWeight: '800', color: '#059669', background: 'rgba(16, 185, 129, 0.15)', padding: '2px 8px', borderRadius: '6px' }}>
+                <span style={{ fontWeight: '800', color: '#059669', background: 'rgba(16, 185, 129, 0.12)', padding: '2px 8px', borderRadius: '6px' }}>
                   {lastTransferSuccess.quantity} pkt{lastTransferSuccess.quantity > 1 ? 's' : ''}
                 </span>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', fontWeight: '700' }}>
-                <span style={{ color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '3px 8px', borderRadius: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: '700' }}>
+                <span style={{ color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
                   From: {lastTransferSuccess.fromLocation}
                 </span>
-                <ArrowLeftRight size={12} style={{ color: '#94a3b8' }} />
-                <span style={{ color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '3px 8px', borderRadius: '6px' }}>
+                <ArrowRight size={14} style={{ color: '#94a3b8' }} />
+                <span style={{ color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
                   To: {lastTransferSuccess.toLocation}
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
                 <button
                   type="button"
                   onClick={() => handlePrintTransferLabel(lastTransferSuccess)}
                   style={{
                     flex: 1,
-                    padding: '8px 12px',
+                    padding: '9px 14px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: '#6366f1',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                     color: '#ffffff',
-                    fontSize: '0.8rem',
+                    fontSize: '12.5px',
                     fontWeight: '800',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '6px',
-                    boxShadow: '0 2px 6px rgba(99,102,241,0.3)'
+                    boxShadow: '0 3px 8px rgba(2, 132, 199, 0.35)'
                   }}
                 >
-                  <Printer size={14} /> Print Transfer Barcode
+                  <Printer size={15} /> Print Transfer Barcode
                 </button>
                 <button
                   type="button"
                   onClick={() => setLastTransferSuccess(null)}
                   style={{
-                    padding: '8px 12px',
+                    padding: '9px 14px',
                     borderRadius: '8px',
-                    border: '1px solid var(--border-color, #cbd5e1)',
-                    background: 'var(--bg-primary, #ffffff)',
-                    color: 'var(--text-main)',
-                    fontSize: '0.8rem',
+                    border: '1px solid var(--border-color, #dbeafe)',
+                    background: 'var(--bg-secondary, #ffffff)',
+                    color: 'var(--text-main, #0f172a)',
+                    fontSize: '12.5px',
                     fontWeight: '700',
                     cursor: 'pointer'
                   }}
@@ -862,46 +1176,143 @@ export default function MaterialTransferView({ currentUser }) {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {/* Step 1: Select Material */}
+          {/* Stepper Form Fields */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+            
+            {/* Step 1: Select Accessory Material */}
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
-                1. SELECT ACCESSORY MATERIAL
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '50%',
+                    background: selectedMaterialId ? '#10b981' : 'var(--accent-color, #0284c7)',
+                    color: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: '900'
+                  }}>
+                    {selectedMaterialId ? <Check size={13} strokeWidth={3} /> : '1'}
+                  </span>
+                  SELECT ACCESSORY MATERIAL
+                </label>
+                {selectedMaterialId && (
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                    Selected
+                  </span>
+                )}
+              </div>
+
               <SearchableMaterialSelect 
                 materials={materials}
                 value={selectedMaterialId}
                 onChange={setSelectedMaterialId}
               />
+
+              {/* Selected Material Hero Information Preview Card */}
+              {selectedMaterial && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.05) 0%, rgba(56, 189, 248, 0.03) 100%)',
+                  border: '1px solid rgba(2, 132, 199, 0.2)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(2, 132, 199, 0.12)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#0284c7'
+                    }}>
+                      <Box size={18} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: '#0284c7', background: 'rgba(2, 132, 199, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+                          {selectedMaterial.id}
+                        </span>
+                        <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                          {selectedMaterial.name}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                        <span>Category: <strong>{selectedMaterial.category || 'General'}</strong></span>
+                        {selectedMaterial.color && <span>• Color: <strong>{selectedMaterial.color}</strong></span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: '13.5px', fontWeight: '900', color: '#059669', display: 'block' }}>
+                      {Number(selectedMaterial.stock || 0).toLocaleString()} {selectedMaterial.unit || 'Pcs'}
+                    </span>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                      {selectedMaterial.packets || 1} Total Packets
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {selectedMaterial && (
-              <div style={{ padding: '12px 14px', borderRadius: '10px', background: 'rgba(99, 102, 241, 0.04)', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#6366f1', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
-                  Current Stock Status
-                </span>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.9rem', fontWeight: '900', color: 'var(--text-main)' }}>
-                    {selectedMaterial.stock} {selectedMaterial.unit}
-                  </span>
-                  <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-muted)' }}>
-                    ({selectedMaterial.packets || 1} Total Packets)
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: From Location */}
+            {/* Step 2: Source Location (From) */}
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                2. TRANSFER FROM LOCATION
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '50%',
+                    background: fromLoc ? '#10b981' : 'var(--accent-color, #0284c7)',
+                    color: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: '900'
+                  }}>
+                    {fromLoc ? <Check size={13} strokeWidth={3} /> : '2'}
+                  </span>
+                  TRANSFER FROM LOCATION (SOURCE)
+                </label>
+                {fromLoc && (
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '2px 8px', borderRadius: '4px' }}>
+                    Source Set
+                  </span>
+                )}
+              </div>
+
               {sourceLocations.length === 0 ? (
-                <div style={{ padding: '14px', borderRadius: '10px', background: 'var(--bg-secondary, #f8fafc)', color: 'var(--text-muted, #64748b)', fontSize: '0.82rem', fontWeight: '600', border: '1.5px dashed var(--border-color, #e2e8f0)', textAlign: 'center' }}>
-                  {selectedMaterialId ? 'No source stock locations found for this material.' : 'Select an accessory material in step 1 above to view source rack locations.'}
+                <div style={{
+                  padding: '16px',
+                  borderRadius: '12px',
+                  background: 'var(--bg-primary, #f0f7ff)',
+                  color: 'var(--text-muted, #64748b)',
+                  fontSize: '12.5px',
+                  fontWeight: '600',
+                  border: '1.5px dashed var(--border-color, #dbeafe)',
+                  textAlign: 'center',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <Package size={22} style={{ opacity: 0.4, color: 'var(--accent-color, #0284c7)' }} />
+                  <span>
+                    {selectedMaterialId ? 'No source rack locations mapped for this item in warehouse.' : 'Select an accessory material in step 1 to view source rack locations.'}
+                  </span>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
                   {sourceLocations.map(g => {
                     const isSelected = fromLoc === g.location;
                     return (
@@ -915,29 +1326,32 @@ export default function MaterialTransferView({ currentUser }) {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          padding: '10px 14px',
+                          padding: '10px 12px',
                           borderRadius: '10px',
-                          border: isSelected ? '1.5px solid #6366f1' : '1.5px solid var(--border-color, #e2e8f0)',
-                          background: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-primary, #ffffff)',
+                          border: isSelected ? '1.5px solid var(--accent-color, #0284c7)' : '1px solid var(--border-color, #dbeafe)',
+                          background: isSelected ? 'rgba(2, 132, 199, 0.08)' : 'var(--bg-secondary, #ffffff)',
                           cursor: 'pointer',
-                          transition: 'all 0.15s ease'
+                          transition: 'all 0.18s ease',
+                          boxShadow: isSelected ? '0 0 0 2px rgba(2, 132, 199, 0.15)' : 'none'
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <MapPin size={14} style={{ color: isSelected ? '#6366f1' : 'var(--text-muted, #64748b)' }} />
-                          <span style={{ fontSize: '13px', fontWeight: isSelected ? '800' : '600', color: isSelected ? '#4338ca' : 'var(--text-main, #0f172a)' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                          <MapPin size={15} style={{ color: isSelected ? '#0284c7' : '#94a3b8', flexShrink: 0 }} />
+                          <span style={{ fontSize: '12.5px', fontWeight: isSelected ? '800' : '700', color: isSelected ? '#0284c7' : 'var(--text-main, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {g.location}
                           </span>
                         </div>
                         <span style={{
-                          fontSize: '11.5px',
+                          fontSize: '11px',
                           fontWeight: '800',
-                          padding: '2px 8px',
+                          padding: '2px 7px',
                           borderRadius: '6px',
-                          backgroundColor: isSelected ? '#6366f1' : 'var(--bg-secondary, #f1f5f9)',
-                          color: isSelected ? '#ffffff' : 'var(--text-muted, #64748b)'
+                          backgroundColor: isSelected ? '#0284c7' : 'var(--bg-primary, #f0f7ff)',
+                          color: isSelected ? '#ffffff' : 'var(--text-muted, #64748b)',
+                          flexShrink: 0,
+                          marginLeft: '6px'
                         }}>
-                          {g.count} pkt{g.count > 1 ? 's' : ''} available
+                          {g.count} pkt{g.count > 1 ? 's' : ''}
                         </span>
                       </div>
                     );
@@ -946,79 +1360,248 @@ export default function MaterialTransferView({ currentUser }) {
               )}
             </div>
 
-            {/* Step 3: Destination Location */}
+            {/* Step 3: Destination Location (To) */}
             <div>
-              <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                3. DESTINATION LOCATION / RACK
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '50%',
+                    background: (toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase()) ? '#10b981' : 'var(--accent-color, #0284c7)',
+                    color: '#ffffff',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '11px',
+                    fontWeight: '900'
+                  }}>
+                    {(toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase()) ? <Check size={13} strokeWidth={3} /> : '3'}
+                  </span>
+                  DESTINATION RACK / SLOT (TO)
+                </label>
+                {toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase() && (
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+                    Target Set
+                  </span>
+                )}
+              </div>
+
               <SearchableLocationSelect
                 locations={destinationOptions}
                 value={toLoc}
                 onChange={setToLoc}
-                placeholder="Search destination rack or slot..."
+                placeholder="Search destination rack, hall, or custom slot..."
                 allowCustom={true}
               />
+
+              {fromLoc && toLoc && fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase() && (
+                <div style={{
+                  marginTop: '8px',
+                  padding: '8px 12px',
+                  borderRadius: '8px',
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.25)',
+                  color: '#dc2626',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <AlertTriangle size={14} />
+                  Source and Destination rack cannot be identical.
+                </div>
+              )}
             </div>
 
-            {/* Step 4: Transfer Quantity with Professional Scroll Range Slider */}
+            {/* Step 4: Transfer Quantity */}
             <div>
               {(() => {
                 const maxAvailable = sourceLocations.find(g => g.location === fromLoc)?.count || 1;
                 const totalPkts = selectedMaterial?.packets || maxAvailable;
                 const approxPcsPerPkt = selectedMaterial ? Math.round(Number(selectedMaterial.stock || 0) / Math.max(1, totalPkts)) : 0;
-                const totalPcsAvailable = maxAvailable * approxPcsPerPkt;
                 const movingPcs = transferQty * approxPcsPerPkt;
                 const remainingAfter = Math.max(0, maxAvailable - transferQty);
-                const remainingPcs = remainingAfter * approxPcsPerPkt;
 
                 return (
                   <div style={{
-                    padding: '14px 16px',
-                    borderRadius: '12px',
-                    backgroundColor: 'var(--bg-secondary, #f8fafc)',
-                    border: '1.5px solid var(--border-color, #e2e8f0)',
+                    padding: '16px',
+                    borderRadius: '14px',
+                    backgroundColor: 'var(--bg-primary, #f0f7ff)',
+                    border: '1px solid var(--border-color, #dbeafe)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '10px'
+                    gap: '12px'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontSize: '0.8rem', fontWeight: '800', color: 'var(--text-muted, #64748b)', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        4. Quantity to Transfer
+                      <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{
+                          width: '22px',
+                          height: '22px',
+                          borderRadius: '50%',
+                          background: 'var(--accent-color, #0284c7)',
+                          color: '#ffffff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '11px',
+                          fontWeight: '900'
+                        }}>
+                          4
+                        </span>
+                        QUANTITY TO TRANSFER
                       </label>
-                      <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>
-                        Available: <strong style={{ color: '#0f172a' }}>{maxAvailable} Pkt{maxAvailable > 1 ? 's' : ''}</strong> {approxPcsPerPkt > 0 ? `(~${totalPcsAvailable.toLocaleString()} ${selectedMaterial?.unit || 'Pcs'})` : ''}
+                      <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)' }}>
+                        Available: <strong style={{ color: 'var(--text-main, #0f172a)' }}>{maxAvailable} Pkt{maxAvailable > 1 ? 's' : ''}</strong>
                       </span>
                     </div>
 
-                    {/* Selected Quantity Readout */}
-                    <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '4px 0' }}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                        <span style={{ fontSize: '1.4rem', fontWeight: '800', color: '#4f46e5' }}>
-                          {transferQty}
-                        </span>
-                        <span style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
-                          {transferQty === 1 ? 'Packet' : 'Packets'}
-                        </span>
-                        {approxPcsPerPkt > 0 && (
-                          <span style={{ fontSize: '0.85rem', fontWeight: '600', color: '#6366f1' }}>
-                            • ~{movingPcs.toLocaleString()} {selectedMaterial?.unit || 'Pcs'}
+                    {/* Quick Preset Buttons */}
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>Quick Presets:</span>
+                      {[1, 2, 5].filter(q => q <= maxAvailable).map(q => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setTransferQty(q)}
+                          style={{
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            border: transferQty === q ? '1px solid var(--accent-color, #0284c7)' : '1px solid var(--border-color, #dbeafe)',
+                            backgroundColor: transferQty === q ? '#0284c7' : 'var(--bg-secondary, #ffffff)',
+                            color: transferQty === q ? '#ffffff' : 'var(--text-main, #0f172a)',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          {q} Pkt{q > 1 ? 's' : ''}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setTransferQty(maxAvailable)}
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '6px',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          border: transferQty === maxAvailable ? '1px solid #059669' : '1px solid var(--border-color, #dbeafe)',
+                          backgroundColor: transferQty === maxAvailable ? '#059669' : 'var(--bg-secondary, #ffffff)',
+                          color: transferQty === maxAvailable ? '#ffffff' : '#059669',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        All ({maxAvailable} Pkts)
+                      </button>
+                    </div>
+
+                    {/* Quantity Stepper & Readout */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'var(--bg-secondary, #ffffff)',
+                      padding: '10px 14px',
+                      borderRadius: '10px',
+                      border: '1px solid var(--border-color, #dbeafe)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setTransferQty(prev => Math.max(1, prev - 1))}
+                          disabled={transferQty <= 1}
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color, #dbeafe)',
+                            background: 'var(--bg-primary, #f0f7ff)',
+                            color: 'var(--text-main)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: transferQty <= 1 ? 'not-allowed' : 'pointer',
+                            opacity: transferQty <= 1 ? 0.4 : 1
+                          }}
+                        >
+                          <Minus size={14} />
+                        </button>
+
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                          <input
+                            type="number"
+                            min="1"
+                            max={maxAvailable}
+                            value={transferQty}
+                            onChange={(e) => {
+                              const val = Math.max(1, Math.min(maxAvailable, parseInt(e.target.value, 10) || 1));
+                              setTransferQty(val);
+                            }}
+                            style={{
+                              width: '54px',
+                              textAlign: 'center',
+                              fontSize: '1.4rem',
+                              fontWeight: '900',
+                              color: '#0284c7',
+                              border: 'none',
+                              outline: 'none',
+                              background: 'transparent'
+                            }}
+                          />
+                          <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                            {transferQty === 1 ? 'Packet' : 'Packets'}
                           </span>
-                        )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setTransferQty(prev => Math.min(maxAvailable, prev + 1))}
+                          disabled={transferQty >= maxAvailable}
+                          style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color, #dbeafe)',
+                            background: 'var(--bg-primary, #f0f7ff)',
+                            color: 'var(--text-main)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: transferQty >= maxAvailable ? 'not-allowed' : 'pointer',
+                            opacity: transferQty >= maxAvailable ? 0.4 : 1
+                          }}
+                        >
+                          <Plus size={14} />
+                        </button>
                       </div>
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        backgroundColor: remainingAfter > 0 ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)',
-                        color: remainingAfter > 0 ? '#059669' : '#d97706'
-                      }}>
-                        Remaining: {remainingAfter} pkt{remainingAfter !== 1 ? 's' : ''}
-                      </span>
+
+                      <div style={{ textAlign: 'right' }}>
+                        {approxPcsPerPkt > 0 && (
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#0284c7' }}>
+                            ~{movingPcs.toLocaleString()} {selectedMaterial?.unit || 'Pcs'}
+                          </div>
+                        )}
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          backgroundColor: remainingAfter > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                          color: remainingAfter > 0 ? '#059669' : '#d97706',
+                          display: 'inline-block',
+                          marginTop: '2px'
+                        }}>
+                          {remainingAfter > 0 ? `Remaining: ${remainingAfter} pkts` : '⚠️ Source slot will empty'}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Smooth Clean Scroll Slider */}
-                    <div style={{ position: 'relative', width: '100%' }}>
+                    {/* Smooth Range Slider */}
+                    <div style={{ position: 'relative', width: '100%', padding: '4px 0' }}>
                       <input
                         type="range"
                         min="1"
@@ -1027,16 +1610,15 @@ export default function MaterialTransferView({ currentUser }) {
                         onChange={(e) => setTransferQty(Number(e.target.value) || 1)}
                         style={{
                           width: '100%',
-                          height: '8px',
-                          accentColor: '#4f46e5',
+                          height: '6px',
+                          accentColor: '#0284c7',
                           cursor: 'pointer',
                           display: 'block'
                         }}
                       />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginTop: '6px', fontWeight: '600' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: '600' }}>
                         <span>1 Pkt</span>
-                        {maxAvailable > 1 && <span>Scroll slider to adjust (1 — {maxAvailable})</span>}
-                        <span>{maxAvailable} Pkts</span>
+                        <span>{maxAvailable} Pkts Max</span>
                       </div>
                     </div>
                   </div>
@@ -1044,31 +1626,38 @@ export default function MaterialTransferView({ currentUser }) {
               })()}
             </div>
 
-            {/* Visual Live Route Transfer Card */}
-            {selectedMaterialId && fromLoc && toLoc && (
+            {/* Visual Live Route Transfer Trajectory Card */}
+            {selectedMaterialId && fromLoc && toLoc && fromLoc.trim().toLowerCase() !== toLoc.trim().toLowerCase() && (
               <div style={{
-                padding: '12px',
-                borderRadius: '10px',
-                background: fromLoc.toLowerCase() === toLoc.toLowerCase() ? 'rgba(239, 68, 68, 0.06)' : 'rgba(16, 185, 129, 0.06)',
-                border: `1px solid ${fromLoc.toLowerCase() === toLoc.toLowerCase() ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
+                padding: '14px 16px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%)',
+                border: '1.5px solid rgba(2, 132, 199, 0.25)',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '6px'
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px', fontWeight: '700' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#4338ca' }}>
-                    <MapPin size={13} /> {fromLoc}
-                  </div>
-                  <ArrowLeftRight size={13} style={{ color: 'var(--text-muted)' }} />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#059669' }}>
-                    <MapPin size={13} /> {toLoc}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#dc2626', fontWeight: '800', fontSize: '12.5px' }}>
+                  <MapPin size={15} />
+                  <span>{fromLoc}</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flex: 1 }}>
+                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', background: 'rgba(2, 132, 199, 0.12)', padding: '2px 8px', borderRadius: '9999px' }}>
+                    Moving {transferQty} Pkt{transferQty > 1 ? 's' : ''}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%', maxWidth: '140px' }}>
+                    <div style={{ flex: 1, height: '2px', backgroundColor: '#0284c7', opacity: 0.4 }} />
+                    <ArrowRight size={14} style={{ color: '#0284c7' }} />
+                    <div style={{ flex: 1, height: '2px', backgroundColor: '#0284c7', opacity: 0.4 }} />
                   </div>
                 </div>
-                {fromLoc.toLowerCase() === toLoc.toLowerCase() && (
-                  <span style={{ fontSize: '11px', color: '#ef4444', fontWeight: '700' }}>
-                    ⚠️ Source and destination rack cannot be the same.
-                  </span>
-                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: '800', fontSize: '12.5px' }}>
+                  <CheckCircle size={15} />
+                  <span>{toLoc}</span>
+                </div>
               </div>
             )}
 
@@ -1078,74 +1667,181 @@ export default function MaterialTransferView({ currentUser }) {
               disabled={submitting || !selectedMaterialId || !toLoc.trim() || fromLoc.toLowerCase() === toLoc.trim().toLowerCase()}
               onClick={handleExecuteTransfer}
               style={{
-                width: '100%', padding: '13px', fontSize: '0.95rem', fontWeight: '800',
-                borderRadius: '12px', border: 'none', background: '#6366f1', color: '#ffffff',
+                width: '100%',
+                padding: '14px',
+                fontSize: '0.95rem',
+                fontWeight: '800',
+                borderRadius: '12px',
+                border: 'none',
+                background: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
+                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                  : 'var(--bg-secondary, #e2e8f0)',
+                color: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
+                  ? '#ffffff'
+                  : 'var(--text-muted, #94a3b8)',
                 cursor: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase()) ? 'pointer' : 'not-allowed',
-                marginTop: '4px',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                boxShadow: (!submitting && selectedMaterialId && toLoc.trim()) ? '0 4px 14px rgba(99,102,241,0.35)' : 'none',
-                opacity: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase()) ? 1 : 0.6,
-                transition: 'all 0.2s ease'
+                marginTop: '6px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
+                  ? '0 6px 18px rgba(2, 132, 199, 0.4)'
+                  : 'none',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+              onMouseEnter={(e) => {
+                if (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase()) {
+                  e.currentTarget.style.transform = 'translateY(-1.5px)';
+                  e.currentTarget.style.boxShadow = '0 8px 22px rgba(2, 132, 199, 0.5)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                if (!submitting && selectedMaterialId && toLoc.trim()) {
+                  e.currentTarget.style.boxShadow = '0 6px 18px rgba(2, 132, 199, 0.4)';
+                }
               }}
             >
-              <ArrowLeftRight size={16} />
-              {submitting ? 'Executing Transfer...' : 'Execute Transfer'}
+              {submitting ? (
+                <>
+                  <RefreshCw size={17} className="animate-spin" />
+                  Executing Stock Movement...
+                </>
+              ) : (
+                <>
+                  <ArrowLeftRight size={17} />
+                  Execute Stock Transfer
+                </>
+              )}
             </button>
           </div>
         </div>
 
-        {/* Right Panel: History and List */}
-        <div className="panel" style={{ padding: '24px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Right Panel: History and Activity Log */}
+        <div className="panel" style={{
+          padding: '24px',
+          borderRadius: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1px solid var(--border-color, #dbeafe)',
+          boxShadow: 'var(--shadow-card)'
+        }}>
+          {/* Card Header & Global Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-            <div>
-              <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-main)' }}>
-                <Clock size={20} style={{ color: '#10b981' }} /> Transfer Activity Log
-              </h2>
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                Track and print receipts for recent warehouse stock movements.
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                flexShrink: 0
+              }}>
+                <Clock size={20} />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main, #0f172a)', letterSpacing: '-0.3px' }}>
+                    Transfer Activity Log
+                  </h2>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    background: 'rgba(2, 132, 199, 0.1)',
+                    color: '#0284c7',
+                    padding: '2px 8px',
+                    borderRadius: '9999px'
+                  }}>
+                    {history.length} Movements
+                  </span>
+                </div>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600', marginTop: '2px', display: 'block' }}>
+                  Real-time warehouse audit log with 1-click thermal reprint.
+                </span>
+              </div>
             </div>
+
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              {/* CSV Export Button */}
               <button
-                onClick={connectPrinter}
+                type="button"
+                onClick={handleExportCSV}
+                title="Export Activity Log as CSV"
                 style={{
-                  padding: '6px 12px',
-                  border: `1.5px solid ${printerStatus === 'online' ? 'rgba(16,185,129,0.25)' : printerStatus === 'connecting' ? 'rgba(251,191,36,0.25)' : 'rgba(239,68,68,0.25)'}`,
+                  padding: '7px 12px',
                   borderRadius: '8px',
-                  background: printerStatus === 'online' ? 'rgba(16,185,129,0.1)' : printerStatus === 'connecting' ? 'rgba(251,191,36,0.1)' : 'rgba(239,68,68,0.1)',
-                  color: printerStatus === 'online' ? '#10b981' : printerStatus === 'connecting' ? '#f59e0b' : '#ef4444',
-                  fontSize: '0.75rem',
+                  border: '1px solid var(--border-color, #dbeafe)',
+                  background: 'var(--bg-primary, #f0f7ff)',
+                  color: 'var(--accent-color, #0284c7)',
+                  fontSize: '12px',
                   fontWeight: '700',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  transition: 'all 0.2s'
+                  transition: 'all 0.15s ease'
                 }}
-                title="Click to reconnect print service"
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.12)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-primary, #f0f7ff)'}
               >
-                <Printer size={12} />
-                {printerStatus === 'online' ? `Printer: ${printerName || 'Connected'}` : printerStatus === 'connecting' ? 'Connecting...' : 'Connect Printer'}
+                <Download size={13} /> Export CSV
               </button>
 
+              {/* Refresh Button */}
               <button 
                 onClick={fetchData}
                 disabled={loading}
+                title="Refresh log"
                 style={{
-                  padding: '6px 12px', border: '1px solid var(--border-color)', borderRadius: '8px',
-                  background: 'var(--bg-secondary)', color: 'var(--text-main)', fontSize: '0.75rem', fontWeight: '700',
-                  cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+                  padding: '7px 12px',
+                  border: '1px solid var(--border-color, #dbeafe)',
+                  borderRadius: '8px',
+                  background: 'var(--bg-secondary, #ffffff)',
+                  color: 'var(--text-main)',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
               >
-                <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Refresh
+                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
               </button>
             </div>
           </div>
 
-          {/* Search and Time Filter Bar */}
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between', background: 'var(--bg-secondary, #f8fafc)', padding: '10px 12px', borderRadius: '12px', border: '1px solid var(--border-color, #e2e8f0)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg-primary, #ffffff)', padding: '6px 12px', borderRadius: '8px', border: '1px solid var(--border-color, #cbd5e1)', flex: '1 1 200px', maxWidth: '320px' }}>
-              <Search size={14} style={{ color: '#6366f1', flexShrink: 0 }} />
+          {/* Search & Filter Toolbar */}
+          <div style={{
+            display: 'flex',
+            gap: '12px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            background: 'var(--bg-primary, #f0f7ff)',
+            padding: '10px 14px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color, #dbeafe)'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              background: 'var(--bg-secondary, #ffffff)',
+              padding: '7px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color, #dbeafe)',
+              flex: '1 1 200px',
+              maxWidth: '320px'
+            }}>
+              <Search size={14} style={{ color: 'var(--accent-color, #0284c7)', flexShrink: 0 }} />
               <input 
                 type="text"
                 placeholder="Search material, location, operator..."
@@ -1166,7 +1862,7 @@ export default function MaterialTransferView({ currentUser }) {
               )}
             </div>
 
-            {/* Time Filter Tabs */}
+            {/* Time Filter Pills */}
             <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
               {[
                 { key: 'all', label: 'All Time' },
@@ -1181,12 +1877,12 @@ export default function MaterialTransferView({ currentUser }) {
                     type="button"
                     onClick={() => setTimeFilter(tf.key)}
                     style={{
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      border: isActive ? '1px solid #6366f1' : '1px solid transparent',
-                      background: isActive ? '#6366f1' : 'transparent',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: isActive ? '1px solid var(--accent-color, #0284c7)' : '1px solid transparent',
+                      background: isActive ? '#0284c7' : 'transparent',
                       color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
-                      fontSize: '11.5px',
+                      fontSize: '12px',
                       fontWeight: '700',
                       cursor: 'pointer',
                       transition: 'all 0.15s ease'
@@ -1227,31 +1923,64 @@ export default function MaterialTransferView({ currentUser }) {
             });
 
             return (
-              <div style={{ overflowX: 'auto', flex: 1 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <div style={{
+                overflowX: 'auto',
+                flex: 1,
+                border: '1px solid var(--border-color, #dbeafe)',
+                borderRadius: '12px',
+                background: 'var(--bg-secondary, #ffffff)'
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1.5px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left', fontWeight: '800' }}>
-                      <th style={{ padding: '10px 8px', width: '130px' }}>Date & Time</th>
-                      <th style={{ padding: '10px 8px' }}>Material</th>
-                      <th style={{ padding: '10px 8px' }}>From</th>
-                      <th style={{ padding: '10px 8px' }}>To</th>
-                      <th style={{ padding: '10px 8px', textAlign: 'center', width: '80px' }}>Packets</th>
-                      <th style={{ padding: '10px 8px', width: '90px' }}>Operator</th>
-                      <th style={{ padding: '10px 8px', textAlign: 'center', width: '70px' }}>Action</th>
+                    <tr style={{
+                      backgroundColor: 'var(--bg-primary, #f0f7ff)',
+                      borderBottom: '1.5px solid var(--border-color, #dbeafe)',
+                      color: 'var(--text-muted, #64748b)',
+                      textAlign: 'left',
+                      fontWeight: '800',
+                      fontSize: '11px',
+                      letterSpacing: '0.5px',
+                      textTransform: 'uppercase'
+                    }}>
+                      <th style={{ padding: '12px 14px', width: '140px' }}>Date & Time</th>
+                      <th style={{ padding: '12px 14px' }}>Accessory Material</th>
+                      <th style={{ padding: '12px 14px' }}>From</th>
+                      <th style={{ padding: '12px 14px' }}>To</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center', width: '80px' }}>Packets</th>
+                      <th style={{ padding: '12px 14px', width: '110px' }}>Operator</th>
+                      <th style={{ padding: '12px 14px', textAlign: 'center', width: '90px' }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontWeight: '700' }}>
-                          Loading transfers log...
+                        <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontWeight: '700' }}>
+                          <RefreshCw size={24} className="animate-spin" style={{ display: 'block', margin: '0 auto 8px auto', color: '#0284c7' }} />
+                          Loading warehouse transfer records...
                         </td>
                       </tr>
                     ) : filteredHistory.length === 0 ? (
                       <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)', fontWeight: '600' }}>
-                          <Clock size={28} style={{ display: 'block', margin: '0 auto 8px auto', opacity: 0.3 }} />
-                          {logSearch || timeFilter !== 'all' ? 'No transfers match the selected filter.' : 'No material transfers logged yet.'}
+                        <td colSpan="7" style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                          <div style={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '50%',
+                            backgroundColor: 'var(--bg-primary, #f0f7ff)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            margin: '0 auto 12px auto',
+                            color: '#0284c7'
+                          }}>
+                            <ArrowLeftRight size={26} />
+                          </div>
+                          <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'block', marginBottom: '4px' }}>
+                            {logSearch || timeFilter !== 'all' ? 'No Movements Found Matching Filters' : 'No Material Transfers Logged Yet'}
+                          </span>
+                          <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                            Perform a stock transfer on the left to create live records and barcode thermal stickers.
+                          </span>
                         </td>
                       </tr>
                     ) : (
@@ -1264,139 +1993,170 @@ export default function MaterialTransferView({ currentUser }) {
 
                         return (
                           <tr key={item.id || idx} style={{
-                            borderBottom: '1px solid var(--border-color)',
+                            borderBottom: '1px solid var(--border-color, #edf4fc)',
                             color: 'var(--text-main)',
                             fontWeight: '600',
-                            background: isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : 'transparent',
-                            transition: 'background 0.3s ease'
-                          }}>
+                            backgroundColor: isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : 'transparent',
+                            transition: 'background-color 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.05)'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : 'transparent'}
+                          >
                             {/* Date & Time Column */}
-                            <td style={{ padding: '10px 8px' }}>
+                            <td style={{ padding: '12px 14px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontWeight: '700', fontSize: '0.8rem', color: 'var(--text-main)' }}>
+                                  <span style={{ fontWeight: '800', fontSize: '12.5px', color: 'var(--text-main)' }}>
                                     {dateText}
                                   </span>
                                   {isJustTransferred && (
-                                    <span style={{ fontSize: '9.5px', background: '#10b981', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                    <span style={{ fontSize: '9px', background: '#10b981', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
                                       NEW
                                     </span>
                                   )}
                                 </div>
                                 {timeText && (
-                                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                    <Clock size={10} style={{ color: '#6366f1' }} /> {timeText}
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <Clock size={10} style={{ color: '#0284c7' }} /> {timeText}
                                   </span>
                                 )}
                               </div>
                             </td>
 
                             {/* Material Column */}
-                            <td style={{ padding: '10px 8px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 <span style={{
-                                  background: 'rgba(99, 102, 241, 0.1)',
-                                  color: '#4f46e5',
-                                  padding: '1px 6px',
+                                  background: 'rgba(2, 132, 199, 0.1)',
+                                  color: '#0284c7',
+                                  border: '1px solid rgba(2, 132, 199, 0.25)',
+                                  padding: '2px 7px',
                                   borderRadius: '4px',
                                   fontSize: '11px',
-                                  fontWeight: '800'
+                                  fontWeight: '800',
+                                  fontFamily: 'monospace'
                                 }}>
                                   {item.materialCode}
                                 </span>
-                                <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-main)' }}>
+                                <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main)' }}>
                                   {item.materialName}
                                 </span>
                               </div>
                             </td>
 
                             {/* From Location Column */}
-                            <td style={{ padding: '10px 8px' }}>
+                            <td style={{ padding: '12px 14px' }}>
                               <div style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px',
+                                gap: '5px',
                                 background: 'rgba(239, 68, 68, 0.08)',
                                 color: '#dc2626',
                                 border: '1px solid rgba(239, 68, 68, 0.2)',
-                                padding: '3px 8px',
+                                padding: '3px 9px',
                                 borderRadius: '6px',
                                 fontWeight: '700',
-                                fontSize: '0.75rem',
+                                fontSize: '12px',
                                 whiteSpace: 'nowrap'
                               }}>
-                                <MapPin size={11} />
+                                <MapPin size={12} />
                                 <span>{item.fromLocation || 'Unknown'}</span>
                               </div>
                             </td>
 
                             {/* To Location Column */}
-                            <td style={{ padding: '10px 8px' }}>
+                            <td style={{ padding: '12px 14px' }}>
                               <div style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px',
+                                gap: '5px',
                                 background: 'rgba(16, 185, 129, 0.08)',
                                 color: '#059669',
                                 border: '1px solid rgba(16, 185, 129, 0.2)',
-                                padding: '3px 8px',
+                                padding: '3px 9px',
                                 borderRadius: '6px',
                                 fontWeight: '700',
-                                fontSize: '0.75rem',
+                                fontSize: '12px',
                                 whiteSpace: 'nowrap'
                               }}>
-                                <MapPin size={11} />
+                                <MapPin size={12} />
                                 <span>{item.toLocation || 'Unknown'}</span>
                               </div>
                             </td>
 
                             {/* Quantity Column */}
-                            <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                            <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                               <span style={{
-                                background: 'rgba(99, 102, 241, 0.08)',
-                                color: '#4f46e5',
-                                padding: '3px 8px',
-                                borderRadius: '6px',
+                                background: 'rgba(2, 132, 199, 0.1)',
+                                color: '#0284c7',
+                                border: '1px solid rgba(2, 132, 199, 0.2)',
+                                padding: '3px 10px',
+                                borderRadius: '9999px',
                                 fontWeight: '800',
-                                fontSize: '0.78rem'
+                                fontSize: '12px'
                               }}>
                                 {item.quantity} pkt{Number(item.quantity) > 1 ? 's' : ''}
                               </span>
                             </td>
 
                             {/* Operator Column */}
-                            <td style={{ padding: '10px 8px' }}>
-                              <span style={{
-                                fontSize: '0.75rem',
-                                color: 'var(--text-muted)',
-                                fontWeight: '700',
-                                textTransform: 'capitalize'
-                              }}>
-                                {item.operator || 'System'}
-                              </span>
+                            <td style={{ padding: '12px 14px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <div style={{
+                                  width: '24px',
+                                  height: '24px',
+                                  borderRadius: '50%',
+                                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                                  color: '#ffffff',
+                                  fontSize: '10px',
+                                  fontWeight: '800',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  flexShrink: 0
+                                }}>
+                                  {(item.operator || 'A').slice(0, 1).toUpperCase()}
+                                </div>
+                                <span style={{
+                                  fontSize: '12px',
+                                  color: 'var(--text-main)',
+                                  fontWeight: '700',
+                                  textTransform: 'capitalize'
+                                }}>
+                                  {item.operator || 'System'}
+                                </span>
+                              </div>
                             </td>
 
                             {/* Action / Print Button */}
-                            <td style={{ padding: '10px 8px', textAlign: 'center' }}>
+                            <td style={{ padding: '12px 14px', textAlign: 'center' }}>
                               <button
                                 onClick={() => handlePrintTransferLabel(item)}
-                                title="Print Stock Transfer Label"
+                                title="Print Stock Transfer Barcode Label"
                                 style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '6px',
-                                  border: '1px solid rgba(99, 102, 241, 0.3)',
-                                  background: 'rgba(99, 102, 241, 0.08)',
-                                  color: '#4f46e5',
+                                  padding: '5px 10px',
+                                  borderRadius: '8px',
+                                  border: '1px solid rgba(2, 132, 199, 0.3)',
+                                  background: 'rgba(2, 132, 199, 0.08)',
+                                  color: '#0284c7',
                                   cursor: 'pointer',
-                                  fontSize: '0.75rem',
-                                  fontWeight: '700',
+                                  fontSize: '12px',
+                                  fontWeight: '800',
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   gap: '4px',
                                   transition: 'all 0.15s ease'
                                 }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.backgroundColor = '#0284c7';
+                                  e.currentTarget.style.color = '#ffffff';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.08)';
+                                  e.currentTarget.style.color = '#0284c7';
+                                }}
                               >
-                                <Printer size={12} /> Print
+                                <Printer size={13} /> Print
                               </button>
                             </td>
                           </tr>
@@ -1443,14 +2203,14 @@ export default function MaterialTransferView({ currentUser }) {
             {/* Modal Header */}
             <div style={{
               padding: '16px 20px',
-              borderBottom: '1px solid var(--border-color, #e2e8f0)',
+              borderBottom: '1px solid var(--border-color, #dbeafe)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              background: 'var(--bg-secondary, #f8fafc)'
+              background: 'var(--bg-primary, #f0f7ff)'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Printer size={18} style={{ color: '#6366f1' }} />
+                <Printer size={18} style={{ color: 'var(--accent-color, #0284c7)' }} />
                 <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
                   Stock Transfer Barcode Label
                 </h3>
@@ -1459,8 +2219,8 @@ export default function MaterialTransferView({ currentUser }) {
                   fontWeight: '700',
                   padding: '2px 8px',
                   borderRadius: '6px',
-                  background: 'rgba(99, 102, 241, 0.1)',
-                  color: '#4f46e5'
+                  background: 'rgba(2, 132, 199, 0.12)',
+                  color: '#0284c7'
                 }}>
                   {printModalData.stickers?.length || 1} Packet Label(s)
                 </span>
@@ -1483,7 +2243,7 @@ export default function MaterialTransferView({ currentUser }) {
             </div>
 
             {/* Modal Body: Sticker Previews */}
-            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f1f5f9' }}>
+            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc' }}>
               {printModalData.stickers.map((stk, idx) => (
                 <div
                   key={stk.barcodeId || idx}
@@ -1546,15 +2306,15 @@ export default function MaterialTransferView({ currentUser }) {
             {/* Modal Footer Controls */}
             <div style={{
               padding: '14px 20px',
-              borderTop: '1px solid var(--border-color, #e2e8f0)',
+              borderTop: '1px solid var(--border-color, #dbeafe)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: '10px',
-              background: 'var(--bg-secondary, #f8fafc)'
+              background: 'var(--bg-secondary, #ffffff)'
             }}>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>
-                {printerStatus === 'online' ? `🖨️ Connected: ${printerName || 'Machine Printer'}` : '💡 Ready for direct browser & USB printing'}
+                {printerStatus === 'online' ? `🖨️ Connected: ${printerName || 'Machine Printer'}` : '💡 Ready for direct browser & thermal printing'}
               </span>
 
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -1610,7 +2370,7 @@ export default function MaterialTransferView({ currentUser }) {
                     padding: '8px 16px',
                     borderRadius: '8px',
                     border: 'none',
-                    background: '#6366f1',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
                     color: '#ffffff',
                     fontSize: '13px',
                     fontWeight: '700',
@@ -1618,7 +2378,7 @@ export default function MaterialTransferView({ currentUser }) {
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
-                    boxShadow: '0 2px 8px rgba(99,102,241,0.3)'
+                    boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)'
                   }}
                 >
                   <Printer size={15} /> Print Labels Now
@@ -1630,8 +2390,8 @@ export default function MaterialTransferView({ currentUser }) {
                   style={{
                     padding: '8px 14px',
                     borderRadius: '8px',
-                    border: '1px solid var(--border-color, #cbd5e1)',
-                    background: 'var(--bg-primary, #ffffff)',
+                    border: '1px solid var(--border-color, #dbeafe)',
+                    background: 'var(--bg-secondary, #ffffff)',
                     color: 'var(--text-main, #0f172a)',
                     fontSize: '13px',
                     fontWeight: '600',

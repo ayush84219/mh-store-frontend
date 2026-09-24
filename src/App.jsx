@@ -39,6 +39,7 @@ const MaterialTransferView = lazy(() => import('./components/MaterialTransferVie
 const POVerificationView = lazy(() => import('./components/POVerificationView'));
 const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationView'));
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
+const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 
 // Default Mock Data Arrays
 const initialMaterials = [
@@ -225,6 +226,8 @@ const hasTabAccess = (tabName, role) => {
       'rgp',
       'zip_po',
       'dori_po',
+      'bone_issue',
+      'bone_po',
       'generate_po',
       'history',
       'scanner_logs',
@@ -252,6 +255,8 @@ const hasTabAccess = (tabName, role) => {
       'rgp',
       'zip_po',
       'dori_po',
+      'bone_issue',
+      'bone_po',
       'generate_po',
       'history',
       'scanner_logs',
@@ -279,6 +284,8 @@ const hasTabAccess = (tabName, role) => {
       'approval_queue',
       'rgp',
       'generate_po',
+      'bone_issue',
+      'bone_po',
       'only_cutting'
     ].includes(tabName);
   }
@@ -296,6 +303,8 @@ const TAB_ROUTES = {
   re_download: '/re-download',
   zip_po: '/zip-po',
   dori_po: '/dori-po',
+  bone_issue: '/bone-issue',
+  bone_po: '/bone-issue',
   material_details: '/material-details',
   reports_history: '/reports-history',
   settings: '/settings',
@@ -315,7 +324,7 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   acc[path] = tab;
   acc[path.replace(/-/g, '_')] = tab;
   return acc;
-}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details' });
+}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details', '/bone-po': 'bone_issue', '/bone_po': 'bone_issue' });
 
 export default function App() {
   const navigate = useNavigate();
@@ -430,6 +439,8 @@ export default function App() {
     setPrefilledPoType(type);
     if (type === 'dori') {
       setActiveTab('dori_po');
+    } else if (type === 'bone' || type === 'bone_issue') {
+      setActiveTab('bone_issue');
     } else {
       setActiveTab('zip_po');
     }
@@ -618,6 +629,8 @@ export default function App() {
       rgp: 'Returnable Gate Pass',
       zip_po: 'Zip Purcharge Orders',
       dori_po: 'Dori Purcharge Orders',
+      bone_issue: 'Bone Issue',
+      bone_po: 'Bone Issue',
       generate_po: 'Generate PO',
       history: 'Production Work',
       scanner_logs: 'Scanner Log',
@@ -2001,7 +2014,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['design', 'material_verification', 'material_details', 'rgp', 'zip_po', 'dori_po', 'generate_po', 'history', 'scanner_logs', 'only_cutting'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['design', 'material_verification', 'material_details', 'rgp', 'zip_po', 'dori_po', 'bone_po', 'generate_po', 'history', 'scanner_logs', 'only_cutting'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2040,6 +2053,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'dori_po' ? 'active' : ''}`} onClick={() => { handleTabClick('dori_po'); setPrefilledPoType('dori'); }} title="Dori Purcharge Orders">
                       <span className="sidebar-text">Dori Purcharge Orders</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => { handleTabClick('bone_issue'); }} title="Bone Issue">
+                      <span className="sidebar-text">Bone Issue</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
@@ -2158,6 +2174,10 @@ export default function App() {
                   <FileText size={18} />
                   <span className="sidebar-text">Dori Purcharge Orders</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => { handleTabClick('bone_issue'); }} title="Bone Issue">
+                  <Layers size={18} />
+                  <span className="sidebar-text">Bone Issue</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
@@ -2209,6 +2229,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                   <ClipboardList size={18} />
                   <span className="sidebar-text">Material Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => handleTabClick('bone_issue')} title="Bone Issue">
+                  <Layers size={18} />
+                  <span className="sidebar-text">Bone Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                   <Sparkles size={18} />
@@ -2353,6 +2377,7 @@ export default function App() {
                 {activeTab === 'rgp' && 'Returnable Gate Pass'}
                 {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
                 {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
+                {(activeTab === 'bone_issue' || activeTab === 'bone_po') && 'Bone Issue'}
                 {activeTab === 'generate_po' && 'Generate PO'}
                 {activeTab === 'history' && 'Production Work'}
                 {activeTab === 'scanner_logs' && 'Scanner Log'}
@@ -2682,6 +2707,16 @@ export default function App() {
               <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="dori" />
             )}
 
+            {(activeTab === 'bone_issue' || activeTab === 'bone_po') && (
+              <BoneIssueView
+                prefilledLotNo={prefilledLotNo}
+                setPrefilledLotNo={setPrefilledLotNo}
+                currentUser={currentUser}
+                currencySymbol={currencySymbol}
+                onNavigate={setActiveTab}
+              />
+            )}
+
             {activeTab === 'material_details' && (
               <MaterialDetailsView
                 materials={materials}
@@ -2714,6 +2749,7 @@ export default function App() {
                 }}
                 onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
                 onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
+                onNavigateToBonePO={(lotNo) => handleRedirectToZipPO(lotNo, 'bone')}
                 onNavigateToMaterialIssue={(lotNo) => {
                   setPrefilledLotNo(lotNo);
                   setActiveTab('material_issue');

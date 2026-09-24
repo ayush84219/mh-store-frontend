@@ -17,6 +17,7 @@ export default function OnlyCutting({
   onNavigateToDesign,
   onNavigateToZipPO,
   onNavigateToDoriPO,
+  onNavigateToBonePO,
   onNavigateToMaterialIssue,
   onNavigateToStockAccessories,
   onRedirectToTab
@@ -273,6 +274,8 @@ export default function OnlyCutting({
       onNavigateToZipPO(target);
     } else if (path === 'dori' && onNavigateToDoriPO) {
       onNavigateToDoriPO(target);
+    } else if (path === 'bone' && onNavigateToBonePO) {
+      onNavigateToBonePO(target);
     } else if (path === 'issue' && onNavigateToMaterialIssue) {
       onNavigateToMaterialIssue(target);
     } else if (path === 'stock' && onNavigateToStockAccessories) {
@@ -281,6 +284,7 @@ export default function OnlyCutting({
       if (path === 'design') onRedirectToTab('design');
       if (path === 'zip') onRedirectToTab('zip_po');
       if (path === 'dori') onRedirectToTab('dori_po');
+      if (path === 'bone') onRedirectToTab('bone_po');
       if (path === 'issue') onRedirectToTab('material_issue');
       if (path === 'stock') onRedirectToTab('material_verification');
     } else {
@@ -288,6 +292,7 @@ export default function OnlyCutting({
         design: 'design',
         zip: 'zip-po',
         dori: 'dori-po',
+        bone: 'bone-po',
         issue: 'material-issue',
         stock: 'material-verification'
       };
