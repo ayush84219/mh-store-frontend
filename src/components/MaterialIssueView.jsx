@@ -5,7 +5,7 @@ import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCirc
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false }) {
+function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 320, isAbove: false });
@@ -58,15 +58,32 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const filtered = materials.filter(m => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    const codeStr = String(m.id || '').toLowerCase();
-    const nameStr = String(m.name || '').toLowerCase();
-    const colorStr = String(m.color || '').toLowerCase();
-    const catStr = String(m.category || '').toLowerCase();
-    return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q);
-  });
+  // Brand-aware filtering & sorting
+  const brandKeyword = (brandHint || '').toLowerCase().trim();
+  const isBrandMatch = (m) => {
+    if (!brandKeyword) return false;
+    const mName = (m.name || '').toLowerCase();
+    const mCat = (m.category || '').toLowerCase();
+    // Match if material name or category contains any word from the brand
+    return brandKeyword.split(/\s+/).some(word => word.length > 2 && (mName.includes(word) || mCat.includes(word)));
+  };
+
+  const filtered = materials
+    .filter(m => {
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const codeStr = String(m.id || '').toLowerCase();
+      const nameStr = String(m.name || '').toLowerCase();
+      const colorStr = String(m.color || '').toLowerCase();
+      const catStr = String(m.category || '').toLowerCase();
+      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q);
+    })
+    .sort((a, b) => {
+      // Brand-matched items always float to the top
+      const aMatch = isBrandMatch(a) ? 1 : 0;
+      const bMatch = isBrandMatch(b) ? 1 : 0;
+      return bMatch - aMatch;
+    });
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
@@ -234,65 +251,124 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 No materials found
               </div>
             ) : (
-              filtered.map(m => {
-                const isSelected = String(m.id) === String(value);
-                return (
-                  <div
-                    key={m.id}
-                    onClick={() => {
-                      onChange(m.id);
-                      setIsOpen(false);
-                      setSearchQuery('');
-                    }}
-                    style={{
-                      padding: '7px 10px',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      borderRadius: '5px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      backgroundColor: isSelected ? '#6366f1' : 'transparent',
-                      color: isSelected ? '#ffffff' : 'var(--text-main, #0f172a)',
-                      fontWeight: isSelected ? '700' : '400',
-                      transition: 'background-color 0.15s ease',
-                      gap: '8px'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-secondary, #f1f5f9)';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
-                      <span style={{
-                        fontFamily: 'monospace',
-                        fontWeight: '800',
-                        fontSize: '11px',
-                        backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : 'rgba(99,102,241,0.12)',
-                        color: isSelected ? '#ffffff' : '#4f46e5',
-                        padding: '1px 5px',
-                        borderRadius: '4px',
-                        flexShrink: 0
-                      }}>
-                        {m.id}
-                      </span>
-                      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</span>
-                      {m.color && m.color !== 'Default' && (
-                        <span style={{ fontSize: '11px', opacity: 0.8, flexShrink: 0 }}>
-                          ({m.color})
-                        </span>
-                      )}
-                    </div>
-                    {m.stock !== undefined && (
-                      <span style={{ fontSize: '11px', opacity: 0.85, fontWeight: '700', flexShrink: 0 }}>
-                        {m.stock} {m.unit || 'Pcs'}
-                      </span>
-                    )}
+              <>
+                {/* Brand-match section header */}
+                {brandKeyword && filtered.some(m => isBrandMatch(m)) && (
+                  <div style={{
+                    padding: '4px 10px',
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    color: '#f59e0b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    borderBottom: '1px solid rgba(245,158,11,0.2)',
+                    marginBottom: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    ⭐ {brandHint.toUpperCase()} Brand Match — Recommended
                   </div>
-                );
-              })
+                )}
+                {filtered.map((m, mIdx) => {
+                  const isSelected = String(m.id) === String(value);
+                  const isBrand = isBrandMatch(m);
+                  // Show separator between brand matches and others
+                  const prevIsBrand = mIdx > 0 ? isBrandMatch(filtered[mIdx - 1]) : false;
+                  const showSeparator = brandKeyword && mIdx > 0 && !isBrand && prevIsBrand;
+                  return (
+                    <React.Fragment key={m.id}>
+                      {showSeparator && (
+                        <div style={{
+                          padding: '3px 10px',
+                          fontSize: '10px',
+                          fontWeight: '600',
+                          color: '#64748b',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          borderTop: '1px solid var(--border-color)',
+                          marginTop: '2px'
+                        }}>
+                          Other Materials
+                        </div>
+                      )}
+                      <div
+                        onClick={() => {
+                          onChange(m.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }}
+                        style={{
+                          padding: '7px 10px',
+                          fontSize: '12px',
+                          cursor: 'pointer',
+                          borderRadius: '5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          backgroundColor: isSelected
+                            ? '#6366f1'
+                            : isBrand
+                            ? 'rgba(245,158,11,0.08)'
+                            : 'transparent',
+                          color: isSelected ? '#ffffff' : 'var(--text-main, #0f172a)',
+                          fontWeight: isSelected ? '700' : isBrand ? '600' : '400',
+                          transition: 'background-color 0.15s ease',
+                          gap: '8px',
+                          border: isBrand && !isSelected ? '1px solid rgba(245,158,11,0.25)' : '1px solid transparent',
+                          marginBottom: '1px'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.15)' : 'var(--bg-secondary, #f1f5f9)';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.08)' : 'transparent';
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontWeight: '800',
+                            fontSize: '11px',
+                            backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : isBrand ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.12)',
+                            color: isSelected ? '#ffffff' : isBrand ? '#b45309' : '#4f46e5',
+                            padding: '1px 5px',
+                            borderRadius: '4px',
+                            flexShrink: 0
+                          }}>
+                            {m.id}
+                          </span>
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</span>
+                          {m.color && m.color !== 'Default' && (
+                            <span style={{ fontSize: '11px', opacity: 0.8, flexShrink: 0 }}>
+                              ({m.color})
+                            </span>
+                          )}
+                          {isBrand && !isSelected && (
+                            <span style={{
+                              fontSize: '9px',
+                              fontWeight: '800',
+                              color: '#f59e0b',
+                              backgroundColor: 'rgba(245,158,11,0.15)',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              flexShrink: 0,
+                              letterSpacing: '0.03em'
+                            }}>
+                              ★ BRAND
+                            </span>
+                          )}
+                        </div>
+                        {m.stock !== undefined && (
+                          <span style={{ fontSize: '11px', opacity: 0.85, fontWeight: '700', flexShrink: 0 }}>
+                            {m.stock} {m.unit || 'Pcs'}
+                          </span>
+                        )}
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </>
             )}
           </div>
         </div>,
@@ -566,6 +642,10 @@ export default function MaterialIssueView({
     // Filter BOM items where status is 'Yes' (required)
     const requiredBom = selectedDesign.bom.filter(item => String(item.status).toLowerCase() === 'yes');
 
+    // Extract brand keywords from the selected design for brand-aware scoring
+    const lotBrandRaw = (selectedDesign.brand || '').toLowerCase().trim();
+    const lotBrandWords = lotBrandRaw.split(/\s+/).filter(w => w.length > 2);
+
     const initialMappings = requiredBom.map(bomItem => {
       // Find matching raw material automatically by comparing descriptions
       const detailLower = (bomItem.detail || '').toLowerCase();
@@ -578,46 +658,74 @@ export default function MaterialIssueView({
       // Load stored materialId from database, or fallback to auto-mapping score
       let matchedMaterialId = bomItem.materialId || "";
 
-      if (!matchedMaterialId && descLower) {
+      if (!matchedMaterialId) {
         // Intelligently score each inventory material to find the best match
         let bestMaterial = null;
         let highestScore = 0;
 
         materials.forEach(m => {
           const mName = m.name.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+          const mCategory = (m.category || '').toLowerCase();
           const bName = nameLower.replace(/[^a-z0-9\s]/g, '');
           const bDesc = descLower.replace(/[^a-z0-9\s]/g, '');
 
           let score = 0;
 
-          // Clean alphanumeric matches (ignoring spaces/special chars entirely)
-          const cleanStr = str => str.replace(/\s+/g, '');
-          const mClean = cleanStr(mName);
-          const bDescClean = cleanStr(bDesc);
-
-          if (mClean && bDescClean) {
-            if (mClean === bDescClean) {
-              score += 100; // Perfect match on description (e.g. "buttonnew1" vs "buttonnew1")
-            } else if (mClean.includes(bDescClean) || bDescClean.includes(mClean)) {
-              score += 80;
-            }
-          }
-
-          // Word-by-word overlap match for description
-          const mWords = mName.split(/\s+/).filter(Boolean);
-          const bDescWords = bDesc.split(/\s+/).filter(Boolean);
-          if (mWords.length > 0 && bDescWords.length > 0) {
-            let matchedDescWords = 0;
-            bDescWords.forEach(w => {
-              if (mName.includes(w)) {
-                matchedDescWords++;
+          // ─── BRAND-AWARE SCORING (highest priority) ───────────────────────
+          // If the lot has a brand (e.g. ADIDAS) and the material name contains
+          // that brand keyword, give a massive bonus so brand-specific materials
+          // always win over generic ones for their matching BOM component type.
+          if (lotBrandWords.length > 0) {
+            const brandMatchInMaterial = lotBrandWords.some(word =>
+              mName.includes(word) || mCategory.includes(word)
+            );
+            if (brandMatchInMaterial) {
+              // Also verify the material is relevant to this BOM component type
+              // (e.g., don't map a "zip" brand item to a "button" BOM row)
+              const componentTypeWords = bName.split(/\s+/).filter(Boolean);
+              const isMaterialRelevantToComponent = componentTypeWords.length === 0 ||
+                componentTypeWords.some(cw => mName.includes(cw) || cw.length <= 2) ||
+                bName.length === 0;
+              if (isMaterialRelevantToComponent || componentTypeWords.every(cw => cw.length <= 2)) {
+                score += 200; // Strong brand-match bonus
+              } else {
+                score += 30; // Mild brand affinity bonus even if component type differs
               }
-            });
-            if (matchedDescWords > 0) {
-              score += (matchedDescWords / bDescWords.length) * 50;
             }
           }
 
+          // ─── DESCRIPTION MATCH SCORING ────────────────────────────────────
+          if (bDesc) {
+            // Clean alphanumeric matches (ignoring spaces/special chars entirely)
+            const cleanStr = str => str.replace(/\s+/g, '');
+            const mClean = cleanStr(mName);
+            const bDescClean = cleanStr(bDesc);
+
+            if (mClean && bDescClean) {
+              if (mClean === bDescClean) {
+                score += 100; // Perfect match on description
+              } else if (mClean.includes(bDescClean) || bDescClean.includes(mClean)) {
+                score += 80;
+              }
+            }
+
+            // Word-by-word overlap match for description
+            const mWords = mName.split(/\s+/).filter(Boolean);
+            const bDescWords = bDesc.split(/\s+/).filter(Boolean);
+            if (mWords.length > 0 && bDescWords.length > 0) {
+              let matchedDescWords = 0;
+              bDescWords.forEach(w => {
+                if (mName.includes(w)) {
+                  matchedDescWords++;
+                }
+              });
+              if (matchedDescWords > 0) {
+                score += (matchedDescWords / bDescWords.length) * 50;
+              }
+            }
+          }
+
+          // ─── BOM COMPONENT NAME MATCH ─────────────────────────────────────
           // Base matching on standard BOM item category/name (e.g. "button" or "zip")
           if (bName && mName.includes(bName)) {
             score += 10;
@@ -629,7 +737,7 @@ export default function MaterialIssueView({
           }
         });
 
-        // Set mapped material if score is significant (e.g. score >= 15)
+        // Set mapped material if score is significant (>= 15 for desc match, or brand bonus >= 30)
         if (highestScore >= 15 && bestMaterial) {
           matchedMaterialId = bestMaterial.id;
         }
@@ -1679,6 +1787,7 @@ export default function MaterialIssueView({
                               onChange={(val) => handleMappingChange(idx, 'materialId', val)}
                               disabled={!item.issued || item.alreadyIssued}
                               hasError={!item.materialId && item.issued && !item.alreadyIssued}
+                              brandHint={selectedDesign?.brand || ''}
                             />
                           </td>
 

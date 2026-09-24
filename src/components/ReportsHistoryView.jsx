@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { getBackendUrl } from '../utils/api';
 import { 
   TrendingUp, FileText, Calendar, DollarSign, Download, Printer, ClipboardList, 
   Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
-  Scissors, AlertCircle, ExternalLink, RefreshCw
+  Scissors, AlertCircle, ExternalLink, RefreshCw, BarChart3, Activity, 
+  PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package
 } from 'lucide-react';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
@@ -894,6 +895,27 @@ export default function ReportsHistoryView({
         >
           <Scissors size={14} />
           <span>Undesigned Cutting Lots ({undesignedLots.length || 0})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('analytics_charts')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '600',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'analytics_charts' ? 'var(--accent-color)' : 'transparent',
+            color: activeReportTab === 'analytics_charts' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <BarChart3 size={14} />
+          <span>Analytics &amp; Graphs</span>
         </button>
       </div>
 
@@ -2551,6 +2573,320 @@ export default function ReportsHistoryView({
           </div>
         </div>
       )}
+
+      {/* ============================================================ */}
+      {/* ANALYTICS & GRAPHS TAB                                        */}
+      {/* ============================================================ */}
+      {activeReportTab === 'analytics_charts' && (() => {
+        // --- Compute analytics from all store audits ---
+        const allAudits = getStoreAudits();
+        const totalIssues = allAudits.filter(a => a.id.startsWith('IS-')).length;
+        const totalExtra = allAudits.filter(a => a.id.startsWith('EX-')).length;
+        const totalReturns = allAudits.filter(a => a.id.startsWith('RT-')).length;
+        const totalTransfers = allAudits.filter(a => a.id.startsWith('TR-')).length;
+        const totalWeight = allAudits.filter(a => a.id.startsWith('WC-')).length;
+        const totalScans = allAudits.filter(a => a.id.startsWith('SC-')).length;
+        const totalAll = allAudits.length || 1;
+
+        // --- Operation breakdown donut data ---
+        const donutData = [
+          { label: 'Material Issue', count: totalIssues, color: '#0284c7' },
+          { label: 'Extra Requisition', count: totalExtra, color: '#f59e0b' },
+          { label: 'Returns', count: totalReturns, color: '#8b5cf6' },
+          { label: 'Transfers', count: totalTransfers, color: '#3b82f6' },
+          { label: 'Weight Capture', count: totalWeight, color: '#10b981' },
+          { label: 'Scans', count: totalScans, color: '#06b6d4' },
+        ].filter(d => d.count > 0);
+
+        // --- SVG Donut chart helpers ---
+        const donutTotal = donutData.reduce((s, d) => s + d.count, 0) || 1;
+        const donutR = 70, donutCx = 90, donutCy = 90, strokeWidth = 28;
+        let cumAngle = -90;
+        const donutSegments = donutData.map(d => {
+          const pct = d.count / donutTotal;
+          const startAngle = cumAngle;
+          const sweep = pct * 360;
+          cumAngle += sweep;
+          const toRad = deg => (deg * Math.PI) / 180;
+          const x1 = donutCx + donutR * Math.cos(toRad(startAngle));
+          const y1 = donutCy + donutR * Math.sin(toRad(startAngle));
+          const x2 = donutCx + donutR * Math.cos(toRad(startAngle + sweep));
+          const y2 = donutCy + donutR * Math.sin(toRad(startAngle + sweep));
+          const largeArc = sweep > 180 ? 1 : 0;
+          const pathD = `M ${x1} ${y1} A ${donutR} ${donutR} 0 ${largeArc} 1 ${x2} ${y2}`;
+          return { ...d, pct, pathD, sweep };
+        });
+
+        // --- 7-day daily operation trend bar chart ---
+        const last7 = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          last7.push({ label: d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit' }), date: d.toDateString(), count: 0 });
+        }
+        allAudits.forEach(a => {
+          const d = new Date(a.date || '');
+          const ds = d.toDateString();
+          const slot = last7.find(s => s.date === ds);
+          if (slot) slot.count++;
+        });
+        const barMax = Math.max(...last7.map(d => d.count), 1);
+        const BAR_H = 120;
+        const BAR_W = 30;
+        const BAR_GAP = 14;
+        const svgBarW = last7.length * (BAR_W + BAR_GAP) + 20;
+
+        // --- Top 5 lots by issue count ---
+        const lotCountMap = {};
+        (fetchedIssueLogs || []).forEach(l => {
+          const k = String(l.lotId || 'Unknown');
+          lotCountMap[k] = (lotCountMap[k] || 0) + 1;
+        });
+        const topLots = Object.entries(lotCountMap)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5);
+        const topLotsMax = topLots.length > 0 ? topLots[0][1] : 1;
+
+        // --- PO vs Design count trend ---
+        const totalDesigns = designs.length;
+        const totalPOs = pos.length;
+
+        return (
+          <div className="animate-fade">
+            {/* KPI Cards Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px' }}>
+              {[
+                { label: 'Total Operations', value: totalAll, icon: <Activity size={20} />, color: '#0284c7', bg: '#e0f2fe' },
+                { label: 'Issues', value: totalIssues, icon: <PackageCheck size={20} />, color: '#0369a1', bg: '#dbeafe' },
+                { label: 'Extra Requisitions', value: totalExtra, icon: <Package size={20} />, color: '#d97706', bg: '#fef3c7' },
+                { label: 'Returns', value: totalReturns, icon: <RotateCcw size={20} />, color: '#7c3aed', bg: '#ede9fe' },
+                { label: 'Transfers', value: totalTransfers, icon: <ArrowRightLeft size={20} />, color: '#2563eb', bg: '#eff6ff' },
+                { label: 'Weight Captures', value: totalWeight, icon: <Gauge size={20} />, color: '#059669', bg: '#d1fae5' },
+              ].map((kpi, i) => (
+                <div key={i} className="analytics-kpi-card animate-slide-up" style={{ animationDelay: `${i * 0.06}s` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                    <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: kpi.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: kpi.color }}>
+                      {kpi.icon}
+                    </div>
+                    <span style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>{kpi.value}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{kpi.label}</div>
+                  <div style={{ marginTop: '10px', height: '3px', borderRadius: '2px', background: `linear-gradient(90deg, ${kpi.color}, ${kpi.bg})`, width: `${Math.round((kpi.value / totalAll) * 100)}%`, minWidth: '10%' }} />
+                </div>
+              ))}
+            </div>
+
+            {/* Charts Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1.9fr)', gap: '20px', marginBottom: '24px' }}>
+
+              {/* Donut Chart */}
+              <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.1s' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={16} color="var(--accent-color)" />
+                    Operation Breakdown
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Distribution of all store operations</p>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                  {donutData.length === 0 ? (
+                    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', width: '100%', fontSize: '13px' }}>No data yet</div>
+                  ) : (
+                    <>
+                      <svg width="180" height="180" viewBox="0 0 180 180" style={{ flexShrink: 0, overflow: 'visible' }}>
+                        {donutSegments.map((seg, i) => (
+                          <path
+                            key={i}
+                            d={seg.pathD}
+                            fill="none"
+                            stroke={seg.color}
+                            strokeWidth={strokeWidth}
+                            strokeLinecap="round"
+                            className="donut-slice-path"
+                            style={{ filter: `drop-shadow(0 2px 4px ${seg.color}40)` }}
+                          />
+                        ))}
+                        <text x={donutCx} y={donutCy - 8} textAnchor="middle" style={{ fontSize: '22px', fontWeight: '800', fill: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>
+                          {donutTotal}
+                        </text>
+                        <text x={donutCx} y={donutCy + 12} textAnchor="middle" style={{ fontSize: '10px', fill: 'var(--text-muted)', fontFamily: 'var(--font-family-body)' }}>
+                          Total
+                        </text>
+                      </svg>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', flex: 1, minWidth: '100px' }}>
+                        {donutSegments.map((seg, i) => (
+                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                            <div style={{ width: '10px', height: '10px', borderRadius: '3px', background: seg.color, flexShrink: 0 }} />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-main)' }}>{seg.label}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{seg.count} ({Math.round(seg.pct * 100)}%)</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* 7-Day Bar Chart */}
+              <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.15s' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Activity size={16} color="var(--accent-color)" />
+                    7-Day Operation Trend
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Daily operation count for the last 7 days</p>
+                </div>
+                <div style={{ overflowX: 'auto', paddingBottom: '8px' }}>
+                  <svg width={svgBarW} height={BAR_H + 50} viewBox={`0 0 ${svgBarW} ${BAR_H + 50}`} style={{ minWidth: '320px', width: '100%' }}>
+                    <defs>
+                      <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0284c7" stopOpacity="1" />
+                        <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.7" />
+                      </linearGradient>
+                    </defs>
+                    {/* Grid lines */}
+                    {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => {
+                      const y = BAR_H - pct * BAR_H + 8;
+                      return (
+                        <g key={i}>
+                          <line x1="10" y1={y} x2={svgBarW - 10} y2={y} stroke="var(--border-color)" strokeWidth="1" strokeDasharray="4,4" />
+                          <text x="6" y={y + 4} style={{ fontSize: '9px', fill: 'var(--text-muted)' }} textAnchor="middle">
+                            {Math.round(pct * barMax)}
+                          </text>
+                        </g>
+                      );
+                    })}
+                    {/* Bars */}
+                    {last7.map((day, i) => {
+                      const bh = barMax > 0 ? (day.count / barMax) * BAR_H : 0;
+                      const x = 18 + i * (BAR_W + BAR_GAP);
+                      const y = BAR_H - bh + 8;
+                      return (
+                        <g key={i}>
+                          {/* Background bar */}
+                          <rect x={x} y={8} width={BAR_W} height={BAR_H} rx="5" fill="#f0f7ff" />
+                          {/* Value bar */}
+                          {bh > 0 && (
+                            <rect
+                              x={x} y={y} width={BAR_W} height={bh} rx="5"
+                              fill="url(#barGrad)"
+                              className="bar-column-rect"
+                              style={{ filter: 'drop-shadow(0 2px 6px rgba(2,132,199,0.25))' }}
+                            />
+                          )}
+                          {/* Count label */}
+                          {day.count > 0 && (
+                            <text x={x + BAR_W / 2} y={y - 4} textAnchor="middle" style={{ fontSize: '9px', fontWeight: '700', fill: '#0284c7' }}>
+                              {day.count}
+                            </text>
+                          )}
+                          {/* Day label */}
+                          <text x={x + BAR_W / 2} y={BAR_H + 26} textAnchor="middle" style={{ fontSize: '9px', fill: 'var(--text-muted)' }}>
+                            {day.label.split(' ')[0]}
+                          </text>
+                          <text x={x + BAR_W / 2} y={BAR_H + 38} textAnchor="middle" style={{ fontSize: '8px', fill: 'var(--text-muted)' }}>
+                            {day.label.split(' ')[1]}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
+
+              {/* Top 5 Lots */}
+              <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.2s' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <PackageCheck size={16} color="var(--accent-color)" />
+                    Top Lots by Issues
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Most active production lots</p>
+                </div>
+                {topLots.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px' }}>No issue data yet</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {topLots.map(([lotId, count], i) => {
+                      const pct = Math.round((count / topLotsMax) * 100);
+                      const colors = ['#0284c7', '#0369a1', '#38bdf8', '#7dd3fc', '#bae6fd'];
+                      return (
+                        <div key={lotId}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>
+                              <span style={{ color: 'var(--text-muted)', marginRight: '6px' }}>#{i + 1}</span>Lot {lotId}
+                            </span>
+                            <span style={{ fontSize: '12px', fontWeight: '800', color: colors[i] }}>{count} issues</span>
+                          </div>
+                          <div style={{ height: '8px', borderRadius: '4px', background: '#e0f2fe', overflow: 'hidden' }}>
+                            <div style={{
+                              height: '100%',
+                              width: `${pct}%`,
+                              borderRadius: '4px',
+                              background: `linear-gradient(90deg, ${colors[i]}, ${colors[i]}99)`,
+                              animation: 'barGrowRight 0.6s cubic-bezier(0.4, 0, 0.2, 1) both',
+                              animationDelay: `${i * 0.1}s`
+                            }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Operation Summary Table */}
+              <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.25s' }}>
+                <div style={{ marginBottom: '16px' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <TrendingUp size={16} color="var(--accent-color)" />
+                    Portfolio Overview
+                  </h3>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Summary across all modules</p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {[
+                    { label: 'Total Design Lots', value: totalDesigns, color: '#0284c7', pct: 100 },
+                    { label: 'Purchase Orders', value: totalPOs, color: '#7c3aed', pct: totalDesigns > 0 ? Math.round((totalPOs / Math.max(totalDesigns, 1)) * 100) : 0 },
+                    { label: 'Issue Transactions', value: totalIssues, color: '#059669', pct: totalAll > 0 ? Math.round((totalIssues / totalAll) * 100) : 0 },
+                    { label: 'Store Scan Events', value: totalScans, color: '#06b6d4', pct: totalAll > 0 ? Math.round((totalScans / totalAll) * 100) : 0 },
+                    { label: 'Weight Captures', value: totalWeight, color: '#f59e0b', pct: totalAll > 0 ? Math.round((totalWeight / totalAll) * 100) : 0 },
+                  ].map((row, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: `${row.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: row.color }} />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main)' }}>{row.label}</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: row.color }}>{row.value}</span>
+                        </div>
+                        <div style={{ height: '5px', borderRadius: '3px', background: '#f0f7ff' }}>
+                          <div style={{
+                            height: '100%',
+                            width: `${Math.min(row.pct, 100)}%`,
+                            borderRadius: '3px',
+                            background: row.color,
+                            animation: 'barGrowRight 0.6s cubic-bezier(0.4, 0, 0.2, 1) both',
+                            animationDelay: `${i * 0.08}s`,
+                            opacity: 0.8
+                          }} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

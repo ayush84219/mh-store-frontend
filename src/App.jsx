@@ -1743,7 +1743,7 @@ export default function App() {
             width: '100px',
             height: '100px',
             borderRadius: '50%',
-            background: 'radial-gradient(circle, rgba(99, 102, 241, 0.4) 0%, rgba(99, 102, 241, 0) 70%)',
+            background: 'radial-gradient(circle, rgba(2, 132, 199, 0.35) 0%, rgba(2, 132, 199, 0) 70%)',
             animation: 'pulseGlow 2s infinite ease-in-out'
           }} />
 
@@ -1751,11 +1751,11 @@ export default function App() {
             width: '80px',
             height: '80px',
             borderRadius: '24px',
-            background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(99, 102, 241, 0.3)',
+            boxShadow: '0 20px 25px -5px rgba(2, 132, 199, 0.25), 0 10px 10px -5px rgba(2, 132, 199, 0.2)',
             animation: 'floatLogo 3s infinite ease-in-out',
             zIndex: 1
           }}>
@@ -1810,7 +1810,7 @@ export default function App() {
               position: 'absolute',
               height: '100%',
               width: '50%',
-              background: 'linear-gradient(90deg, #6366f1, #a5b4fc)',
+              background: 'linear-gradient(90deg, #0284c7, #38bdf8)',
               borderRadius: '2px',
               animation: 'loadingProgress 1.5s infinite ease-in-out'
             }} />
@@ -2282,7 +2282,7 @@ export default function App() {
         <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <button
             className="theme-toggle"
-            style={{ width: '100%', borderRadius: 'var(--border-radius-md)', display: 'flex', gap: '8px', color: '#fff' }}
+            style={{ width: '100%', borderRadius: 'var(--border-radius-md)', display: 'flex', gap: '8px', color: 'var(--sidebar-text, #334155)', backgroundColor: 'var(--bg-primary, #f0f7ff)', border: '1px solid var(--border-color, #dbeafe)' }}
             onClick={() => setIsDarkTheme(!isDarkTheme)}
             title={isDarkTheme ? 'Switch to Light Theme' : 'Switch to Dark Theme'}
           >

@@ -2,7 +2,8 @@ import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search, Clock, User, ClipboardList, CheckCircle, XCircle,
-  Scissors, Shuffle, Truck, QrCode, ShieldCheck, AlertCircle, FileText, Check, Download
+  Scissors, Shuffle, Truck, QrCode, ShieldCheck, AlertCircle, FileText, Check, Download,
+  BarChart3, TrendingUp, Activity
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1101,6 +1102,100 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '12px 16px', borderRadius: '8px', display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '20px' }}>
           <AlertCircle size={18} />
           <span style={{ fontSize: '13px' }}>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* === Visual Stage Overview Analytics Banner === */}
+      {filteredLotsList.length > 0 && (
+        <div className="animate-slide-up" style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+          gap: '12px',
+          marginBottom: '24px'
+        }}>
+          {/* Total Lots */}
+          {[
+            {
+              label: 'Total Lots',
+              value: filteredLotsList.length,
+              icon: <ClipboardList size={18} />,
+              color: '#0284c7',
+              bg: '#e0f2fe',
+              pct: 100
+            },
+            {
+              label: 'With Issues',
+              value: issueLogs.filter(l => filteredLotsList.some(d => String(d.id) === String(l.lotId))).length,
+              icon: <Activity size={18} />,
+              color: '#059669',
+              bg: '#d1fae5',
+              pct: filteredLotsList.length > 0 ? Math.round((new Set(issueLogs.map(l => String(l.lotId))).size / filteredLotsList.length) * 100) : 0
+            },
+            {
+              label: 'Transfers',
+              value: transfers.length,
+              icon: <Shuffle size={18} />,
+              color: '#2563eb',
+              bg: '#eff6ff',
+              pct: filteredLotsList.length > 0 ? Math.min(Math.round((transfers.length / filteredLotsList.length) * 100), 100) : 0
+            },
+            {
+              label: 'Scan Events',
+              value: scanLogs.length,
+              icon: <QrCode size={18} />,
+              color: '#06b6d4',
+              bg: '#cffafe',
+              pct: filteredLotsList.length > 0 ? Math.min(Math.round((scanLogs.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
+            },
+            {
+              label: 'Extra Issues',
+              value: extraMaterialIssues.length,
+              icon: <TrendingUp size={18} />,
+              color: '#d97706',
+              bg: '#fef3c7',
+              pct: filteredLotsList.length > 0 ? Math.min(Math.round((extraMaterialIssues.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
+            },
+            {
+              label: 'Weight Captures',
+              value: weightCaptures.length,
+              icon: <BarChart3 size={18} />,
+              color: '#7c3aed',
+              bg: '#ede9fe',
+              pct: filteredLotsList.length > 0 ? Math.min(Math.round((weightCaptures.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
+            },
+          ].map((stat, i) => (
+            <div
+              key={i}
+              className="analytics-kpi-card"
+              style={{ animationDelay: `${i * 0.05}s` }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{
+                  width: '34px', height: '34px', borderRadius: '9px',
+                  background: stat.bg, display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', color: stat.color
+                }}>
+                  {stat.icon}
+                </div>
+                <span style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>
+                  {stat.value}
+                </span>
+              </div>
+              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                {stat.label}
+              </div>
+              <div style={{ height: '4px', borderRadius: '2px', background: '#f0f7ff', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(stat.pct, 100)}%`,
+                  borderRadius: '2px',
+                  background: `linear-gradient(90deg, ${stat.color}, ${stat.bg})`,
+                  animation: 'barGrowRight 0.7s cubic-bezier(0.4, 0, 0.2, 1) both',
+                  animationDelay: `${i * 0.08}s`
+                }} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

@@ -12,7 +12,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // Reusable Searchable Material Select with Portal & Smart Positioning
-function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false }) {
+function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 320, isAbove: false });
@@ -65,15 +65,30 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const filtered = materials.filter(m => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    const codeStr = String(m.id || '').toLowerCase();
-    const nameStr = String(m.name || '').toLowerCase();
-    const colorStr = String(m.color || '').toLowerCase();
-    const catStr = String(m.category || '').toLowerCase();
-    return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q);
-  });
+  // Brand-aware filtering & sorting
+  const brandKeyword = (brandHint || '').toLowerCase().trim();
+  const isBrandMatch = (m) => {
+    if (!brandKeyword) return false;
+    const mName = (m.name || '').toLowerCase();
+    const mCat = (m.category || '').toLowerCase();
+    return brandKeyword.split(/\s+/).some(word => word.length > 2 && (mName.includes(word) || mCat.includes(word)));
+  };
+
+  const filtered = materials
+    .filter(m => {
+      const q = searchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const codeStr = String(m.id || '').toLowerCase();
+      const nameStr = String(m.name || '').toLowerCase();
+      const colorStr = String(m.color || '').toLowerCase();
+      const catStr = String(m.category || '').toLowerCase();
+      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q);
+    })
+    .sort((a, b) => {
+      const aMatch = isBrandMatch(a) ? 1 : 0;
+      const bMatch = isBrandMatch(b) ? 1 : 0;
+      return bMatch - aMatch;
+    });
 
   return (
     <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
@@ -222,62 +237,124 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 No materials match search
               </div>
             ) : (
-              filtered.map(m => {
-                const isSelected = String(m.id) === String(value);
-                return (
-                  <div
-                    key={m.id}
-                    onClick={() => {
-                      onChange(m.id);
-                      setIsOpen(false);
-                      setSearchQuery('');
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '7px 10px',
-                      borderRadius: '5px',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                      backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                      color: isSelected ? '#4f46e5' : 'var(--text-main, #0f172a)',
-                      transition: 'background-color 0.15s'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-hover, #f1f5f9)';
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
-                      <span style={{
-                        fontFamily: 'monospace',
-                        fontWeight: '700',
-                        fontSize: '11px',
-                        color: '#6366f1',
-                        flexShrink: 0
-                      }}>
-                        [{m.id}]
-                      </span>
-                      <span style={{ fontWeight: isSelected ? '700' : '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                        {m.name}
-                        {m.color && m.color !== 'Default' && ` (${m.color})`}
-                      </span>
-                    </div>
-                    <div style={{
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      color: m.stock <= 0 ? '#ef4444' : '#10b981',
-                      flexShrink: 0,
-                      marginLeft: '10px'
-                    }}>
-                      {m.stock} {m.unit || 'Pcs'}
-                    </div>
+              <>
+                {/* Brand-match section header */}
+                {brandKeyword && filtered.some(m => isBrandMatch(m)) && (
+                  <div style={{
+                    padding: '4px 10px',
+                    fontSize: '10px',
+                    fontWeight: '700',
+                    color: '#f59e0b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    borderBottom: '1px solid rgba(245,158,11,0.2)',
+                    marginBottom: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}>
+                    ⭐ {brandHint.toUpperCase()} Brand Match — Recommended
                   </div>
-                );
-              })
+                )}
+                {filtered.map((m, mIdx) => {
+                  const isSelected = String(m.id) === String(value);
+                  const isBrand = isBrandMatch(m);
+                  const prevIsBrand = mIdx > 0 ? isBrandMatch(filtered[mIdx - 1]) : false;
+                  const showSeparator = brandKeyword && mIdx > 0 && !isBrand && prevIsBrand;
+                  return (
+                    <React.Fragment key={m.id}>
+                      {showSeparator && (
+                        <div style={{
+                          padding: '3px 10px',
+                          fontSize: '10px',
+                          fontWeight: '600',
+                          color: '#64748b',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                          borderTop: '1px solid var(--border-color)',
+                          marginTop: '2px'
+                        }}>
+                          Other Materials
+                        </div>
+                      )}
+                      <div
+                        onClick={() => {
+                          onChange(m.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '7px 10px',
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          backgroundColor: isSelected
+                            ? 'rgba(99,102,241,0.12)'
+                            : isBrand
+                            ? 'rgba(245,158,11,0.08)'
+                            : 'transparent',
+                          color: isSelected ? '#4f46e5' : 'var(--text-main, #0f172a)',
+                          fontWeight: isSelected ? '700' : isBrand ? '600' : '500',
+                          transition: 'background-color 0.15s',
+                          border: isBrand && !isSelected ? '1px solid rgba(245,158,11,0.25)' : '1px solid transparent',
+                          marginBottom: '1px'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.15)' : 'var(--bg-hover, #f1f5f9)';
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.08)' : 'transparent';
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden' }}>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontWeight: '700',
+                            fontSize: '11px',
+                            color: isBrand && !isSelected ? '#b45309' : '#6366f1',
+                            backgroundColor: isBrand && !isSelected ? 'rgba(245,158,11,0.15)' : 'transparent',
+                            padding: isBrand && !isSelected ? '1px 4px' : '0',
+                            borderRadius: '3px',
+                            flexShrink: 0
+                          }}>
+                            [{m.id}]
+                          </span>
+                          <span style={{ fontWeight: isSelected ? '700' : isBrand ? '600' : '500', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {m.name}
+                            {m.color && m.color !== 'Default' && ` (${m.color})`}
+                          </span>
+                          {isBrand && !isSelected && (
+                            <span style={{
+                              fontSize: '9px',
+                              fontWeight: '800',
+                              color: '#f59e0b',
+                              backgroundColor: 'rgba(245,158,11,0.15)',
+                              padding: '1px 4px',
+                              borderRadius: '3px',
+                              flexShrink: 0,
+                              letterSpacing: '0.03em'
+                            }}>
+                              ★ BRAND
+                            </span>
+                          )}
+                        </div>
+                        <div style={{
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          color: m.stock <= 0 ? '#ef4444' : '#10b981',
+                          flexShrink: 0,
+                          marginLeft: '10px'
+                        }}>
+                          {m.stock} {m.unit || 'Pcs'}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })}
+              </>
             )}
           </div>
         </div>,
@@ -2322,6 +2399,7 @@ export default function ExtraMaterialIssueView({
                                     value={item.materialId}
                                     onChange={(val) => handleMappingChange(originalIdx, 'materialId', val)}
                                     hasError={!item.materialId && hasExtraQty}
+                                    brandHint={selectedDesign?.brand || ''}
                                   />
                                 </td>
 
