@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Settings, ShieldAlert, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield } from 'lucide-react';
+import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield } from 'lucide-react';
 import { getBackendUrl } from '../utils/api';
 
 export default function SettingsView({
@@ -26,7 +26,9 @@ export default function SettingsView({
   halls = [],
   setHalls,
   allowMaterialPhotoEdit = true,
-  onToggleAllowMaterialPhotoEdit
+  onToggleAllowMaterialPhotoEdit,
+  allowWarehouseAddRack = false,
+  onToggleAllowWarehouseAddRack
 }) {
   const [isAddingVendor, setIsAddingVendor] = useState(false);
   const [vendorName, setVendorName] = useState('');
@@ -479,7 +481,202 @@ export default function SettingsView({
                     color: allowMaterialPhotoEdit ? '#10b981' : '#64748b'
                   }}
                 >
-                  {allowMaterialPhotoEdit ? (
+                    {allowMaterialPhotoEdit ? (
+                    <CheckCircle size={14} style={{ color: '#10b981' }} />
+                  ) : (
+                    <Eye size={13} style={{ color: '#64748b' }} />
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Warehouse Add Rack & Hall Permission Control (Admin Exclusive) */}
+          <div className="panel" style={{
+            marginBottom: 0,
+            border: allowWarehouseAddRack ? '1.5px solid rgba(16, 185, 129, 0.35)' : '1.5px solid rgba(99, 102, 241, 0.35)',
+            background: allowWarehouseAddRack ? 'linear-gradient(180deg, rgba(16, 185, 129, 0.03) 0%, var(--bg-primary) 100%)' : 'linear-gradient(180deg, rgba(99, 102, 241, 0.03) 0%, var(--bg-primary) 100%)'
+          }}>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Warehouse size={18} className="text-accent" />
+                Warehouse Add Rack & Hall Permission
+              </h3>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                color: '#4f46e5',
+                border: '1px solid rgba(99, 102, 241, 0.2)'
+              }}>
+                <Shield size={11} style={{ display: 'inline', marginRight: '4px', verticalAlign: 'middle' }} />
+                Admin Only
+              </span>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '12.5px', marginBottom: '14px', lineHeight: '1.45' }}>
+              Control whether operators and users can add new racks and halls in <strong>Warehouse Locations Matrix</strong>. Turn OFF to restrict to normal view-only panel.
+            </p>
+
+            <div
+              onClick={() => {
+                if (onToggleAllowWarehouseAddRack) {
+                  onToggleAllowWarehouseAddRack(!allowWarehouseAddRack);
+                }
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 18px',
+                borderRadius: '12px',
+                backgroundColor: allowWarehouseAddRack ? 'rgba(16, 185, 129, 0.07)' : 'rgba(100, 116, 139, 0.06)',
+                border: allowWarehouseAddRack ? '1.5px solid rgba(16, 185, 129, 0.35)' : '1.5px solid rgba(100, 116, 139, 0.22)',
+                cursor: 'pointer',
+                transition: 'all 0.25s ease',
+                userSelect: 'none',
+                boxShadow: allowWarehouseAddRack ? '0 4px 16px rgba(16, 185, 129, 0.08)' : '0 2px 8px rgba(0,0,0,0.03)'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.borderColor = allowWarehouseAddRack ? '#10b981' : '#64748b';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.borderColor = allowWarehouseAddRack ? 'rgba(16, 185, 129, 0.35)' : 'rgba(100, 116, 139, 0.22)';
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: allowWarehouseAddRack
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                    : 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
+                  color: '#ffffff',
+                  boxShadow: allowWarehouseAddRack
+                    ? '0 4px 12px rgba(16, 185, 129, 0.35)'
+                    : '0 3px 8px rgba(100, 116, 139, 0.25)',
+                  transition: 'all 0.3s ease'
+                }}>
+                  {allowWarehouseAddRack ? <Plus size={22} /> : <Eye size={22} />}
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                    <span style={{
+                      fontSize: '14px',
+                      fontWeight: '800',
+                      color: allowWarehouseAddRack ? '#065f46' : 'var(--text-main)'
+                    }}>
+                      {allowWarehouseAddRack ? 'Add Rack & Hall: ACTIVE' : 'Normal View Panel: ACTIVE'}
+                    </span>
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                      padding: '2px 7px',
+                      borderRadius: '9999px',
+                      backgroundColor: allowWarehouseAddRack ? '#dcfce7' : '#e2e8f0',
+                      color: allowWarehouseAddRack ? '#15803d' : '#475569',
+                      border: allowWarehouseAddRack ? '1px solid #86efac' : '1px solid #cbd5e1',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <span style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        backgroundColor: allowWarehouseAddRack ? '#16a34a' : '#94a3b8',
+                        boxShadow: allowWarehouseAddRack ? '0 0 6px #16a34a' : 'none'
+                      }} />
+                      {allowWarehouseAddRack ? 'ON' : 'OFF'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    {allowWarehouseAddRack
+                      ? 'Users and admins can add new warehouse racks and halls directly.'
+                      : 'Add buttons are hidden. Normal operators view the clean warehouse matrix.'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Premium iOS-style Interactive Switch Pill */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: '68px',
+                  height: '36px',
+                  borderRadius: '9999px',
+                  background: allowWarehouseAddRack
+                    ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                    : 'linear-gradient(135deg, #94a3b8 0%, #64748b 100%)',
+                  boxShadow: allowWarehouseAddRack
+                    ? '0 4px 14px rgba(16, 185, 129, 0.4), inset 0 1px 2px rgba(255,255,255,0.3)'
+                    : 'inset 0 2px 4px rgba(0,0,0,0.15)',
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '3px',
+                  boxSizing: 'border-box',
+                  flexShrink: 0
+                }}
+                title={allowWarehouseAddRack ? 'Click to switch OFF (Normal View Panel)' : 'Click to switch ON (Allow Adding Racks/Halls)'}
+              >
+                {/* Track Text Indicator */}
+                <span style={{
+                  position: 'absolute',
+                  left: '10px',
+                  fontSize: '10px',
+                  fontWeight: '900',
+                  letterSpacing: '0.05em',
+                  color: '#ffffff',
+                  opacity: allowWarehouseAddRack ? 1 : 0,
+                  transform: allowWarehouseAddRack ? 'scale(1)' : 'scale(0.7)',
+                  transition: 'all 0.25s ease',
+                  pointerEvents: 'none'
+                }}>
+                  ON
+                </span>
+                <span style={{
+                  position: 'absolute',
+                  right: '9px',
+                  fontSize: '9.5px',
+                  fontWeight: '900',
+                  letterSpacing: '0.05em',
+                  color: '#ffffff',
+                  opacity: !allowWarehouseAddRack ? 1 : 0,
+                  transform: !allowWarehouseAddRack ? 'scale(1)' : 'scale(0.7)',
+                  transition: 'all 0.25s ease',
+                  pointerEvents: 'none'
+                }}>
+                  OFF
+                </span>
+
+                {/* Sliding Knob */}
+                <div
+                  style={{
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    backgroundColor: '#ffffff',
+                    boxShadow: '0 3px 8px rgba(0,0,0,0.22), 0 1px 3px rgba(0,0,0,0.1)',
+                    transform: `translateX(${allowWarehouseAddRack ? '34px' : '2px'})`,
+                    transition: 'transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: allowWarehouseAddRack ? '#10b981' : '#64748b'
+                  }}
+                >
+                  {allowWarehouseAddRack ? (
                     <CheckCircle size={14} style={{ color: '#10b981' }} />
                   ) : (
                     <Eye size={13} style={{ color: '#64748b' }} />

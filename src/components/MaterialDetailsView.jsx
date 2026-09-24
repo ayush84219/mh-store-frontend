@@ -12,6 +12,77 @@ import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import useDebounce from '../utils/useDebounce';
 
+// ─── Brand Detection Helper ─────────────────────────────────────────────────
+// Detects known fashion/garment brands from material name
+const KNOWN_BRANDS = [
+  'adidas', 'addidas', 'nike', 'coach', 'gucci', 'prada', 'hermes', 'herms',
+  'diesel', 'deisel', 'h&m', 'hm', 'zara', 'levis', "levi's", 'gap',
+  'versace', 'armani', 'puma', 'reebok', 'fila', 'tommy', 'hilfiger',
+  'hacket', 'hackett', 'burberry', 'ralph', 'lauren', 'calvin', 'klein',
+  'dior', 'chanel', 'louis', 'vuitton', 'balenciaga', 'off-white', 'supreme',
+  'moncler', 'stone island', 'cp company', 'lacoste', 'hugo', 'boss',
+  'jack', 'jones', 'pepe', 'wrangler', 'arrow', 'van heusen', 'raymond',
+  'brooksb', 'brooks', 'criminal', 'hacket'
+];
+
+// Brand color palette — each brand gets a distinct hue
+const BRAND_COLORS = {
+  adidas: { bg: 'rgba(0,0,0,0.08)', color: '#111', border: 'rgba(0,0,0,0.2)' },
+  addidas: { bg: 'rgba(0,0,0,0.08)', color: '#111', border: 'rgba(0,0,0,0.2)' },
+  nike: { bg: 'rgba(239,68,68,0.1)', color: '#b91c1c', border: 'rgba(239,68,68,0.25)' },
+  coach: { bg: 'rgba(161,97,17,0.1)', color: '#92400e', border: 'rgba(161,97,17,0.3)' },
+  gucci: { bg: 'rgba(22,101,52,0.1)', color: '#166534', border: 'rgba(22,101,52,0.25)' },
+  hermes: { bg: 'rgba(234,88,12,0.12)', color: '#c2410c', border: 'rgba(234,88,12,0.3)' },
+  herms: { bg: 'rgba(234,88,12,0.12)', color: '#c2410c', border: 'rgba(234,88,12,0.3)' },
+  diesel: { bg: 'rgba(99,102,241,0.1)', color: '#4f46e5', border: 'rgba(99,102,241,0.25)' },
+  deisel: { bg: 'rgba(99,102,241,0.1)', color: '#4f46e5', border: 'rgba(99,102,241,0.25)' },
+  default: { bg: 'rgba(245,158,11,0.12)', color: '#b45309', border: 'rgba(245,158,11,0.3)' }
+};
+
+const getBrandFromName = (name) => {
+  if (!name) return null;
+  const lower = name.toLowerCase();
+  for (const brand of KNOWN_BRANDS) {
+    if (lower.includes(brand)) {
+      return brand;
+    }
+  }
+  return null;
+};
+
+const getBrandDisplay = (brand) => {
+  const map = {
+    adidas: 'ADIDAS', addidas: 'ADIDAS',
+    nike: 'NIKE',
+    coach: 'COACH',
+    gucci: 'GUCCI',
+    hermes: 'HERMÈS', herms: 'HERMÈS',
+    diesel: 'DIESEL', deisel: 'DIESEL',
+    'h&m': 'H&M', hm: 'H&M',
+    zara: 'ZARA',
+    levis: "LEVI'S", "levi's": "LEVI'S",
+    gap: 'GAP',
+    versace: 'VERSACE',
+    armani: 'ARMANI',
+    puma: 'PUMA',
+    reebok: 'REEBOK',
+    fila: 'FILA',
+    tommy: 'TOMMY',
+    hilfiger: 'HILFIGER',
+    hacket: 'HACKETT', hackett: 'HACKETT',
+    burberry: 'BURBERRY',
+    ralph: 'RALPH LAUREN',
+    calvin: 'CALVIN KLEIN',
+    dior: 'DIOR',
+    chanel: 'CHANEL',
+    lacoste: 'LACOSTE',
+    hugo: 'HUGO BOSS', boss: 'HUGO BOSS',
+    brooksb: 'BROOKS BROTHERS', brooks: 'BROOKS BROTHERS',
+    criminal: 'CRIMINAL DAMAGE',
+  };
+  return map[brand] || brand.toUpperCase();
+};
+
 // ─── Pagination Bar Component ──────────────────────────────────────────────────
 const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5, 10, 20, 50, 100] }) => {
   const totalPages = Math.max(1, Math.ceil(totalItems / rpp));
@@ -1402,7 +1473,7 @@ export default function MaterialDetailsView({
                   backgroundColor: printServiceStatus === 'connected' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
                   padding: '3px 8px', borderRadius: '6px', border: '1px solid currentColor'
                 }}>
-                  {printServiceStatus === 'connected' ? `● Machine Ready (${printerName || 'Thermal Printer'})` : '● Print Service: ' + printServiceStatus}
+                  {printServiceStatus === 'connected' ? `Machine Ready (${printerName || 'Thermal Printer'})` : 'Print Service: ' + printServiceStatus}
                 </span>
               </div>
               <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
@@ -1922,8 +1993,34 @@ export default function MaterialDetailsView({
                           )}
                         </td>
                         <td>
-                          <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)', fontWeight: '700' }}>{m.name}</strong>
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>Threshold: {m.threshold} {m.unit}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)', fontWeight: '700' }}>{m.name}</strong>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>Threshold: {m.threshold} {m.unit}</span>
+                              {(() => {
+                                const brand = getBrandFromName(m.name);
+                                if (!brand) return null;
+                                const display = getBrandDisplay(brand);
+                                const colors = BRAND_COLORS[brand] || BRAND_COLORS.default;
+                                return (
+                                  <span style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: '900',
+                                    letterSpacing: '0.08em',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    backgroundColor: colors.bg,
+                                    color: colors.color,
+                                    border: `1px solid ${colors.border}`,
+                                    textTransform: 'uppercase',
+                                    flexShrink: 0
+                                  }}>
+                                    {display}
+                                  </span>
+                                );
+                              })()}
+                            </div>
+                          </div>
                         </td>
                         <td>
                           <span className="status-badge" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '6px' }}>

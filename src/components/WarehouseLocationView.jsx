@@ -9,7 +9,65 @@ import {
   Sliders, TrendingUp, BarChart2, Info, Send
 } from 'lucide-react';
 
-export default function WarehouseLocationView({ racks = [], materials = [], halls = [], onNavigate, currentUser }) {
+export default function WarehouseLocationView({
+  racks = [],
+  materials = [],
+  halls = [],
+  onNavigate,
+  currentUser,
+  allowWarehouseAddRack = false
+}) {
+  const [localAllowAdd, setLocalAllowAdd] = useState(() => {
+    if (allowWarehouseAddRack) return true;
+    try {
+      return localStorage.getItem('gpdms_allow_warehouse_add_rack') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    if (allowWarehouseAddRack !== undefined) {
+      setLocalAllowAdd(Boolean(allowWarehouseAddRack));
+    }
+  }, [allowWarehouseAddRack]);
+
+  // Fetch freshest settings on mount and listen to storage events
+  useEffect(() => {
+    const fetchLatestSetting = async () => {
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/settings`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.allowWarehouseAddRack !== undefined) {
+            setLocalAllowAdd(Boolean(data.allowWarehouseAddRack));
+            try {
+              localStorage.setItem('gpdms_allow_warehouse_add_rack', Boolean(data.allowWarehouseAddRack).toString());
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch settings in WarehouseLocationView:', err);
+      }
+    };
+
+    fetchLatestSetting();
+
+    const handleStorage = (e) => {
+      if (e.key === 'gpdms_allow_warehouse_add_rack') {
+        setLocalAllowAdd(e.newValue === 'true');
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  const canAddRacks = Boolean(
+    allowWarehouseAddRack ||
+    localAllowAdd ||
+    (typeof localStorage !== 'undefined' && localStorage.getItem('gpdms_allow_warehouse_add_rack') === 'true')
+  );
+
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [dbLocations, setDbLocations] = useState([]);
@@ -29,16 +87,11 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
 
   // Add Location Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addMode, setAddMode] = useState('single'); // 'single' or 'bulk'
   const [targetHallForAdd, setTargetHallForAdd] = useState('');
   const [whName, setWhName] = useState('Hall 1');
   const [customWhName, setCustomWhName] = useState('');
   const [rackName, setRackName] = useState('');
   const [capacity, setCapacity] = useState(20);
-  const [bulkPrefix, setBulkPrefix] = useState('Rack');
-  const [bulkStartNum, setBulkStartNum] = useState(1);
-  const [bulkCount, setBulkCount] = useState(10);
-  const [bulkCapacity, setBulkCapacity] = useState(20);
   const [addError, setAddError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -90,7 +143,11 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
 
   useEffect(() => {
     fetchLiveLocations(true);
-    const interval = setInterval(() => fetchLiveLocations(false), 12000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchLiveLocations(false);
+      }
+    }, 45000);
     return () => clearInterval(interval);
   }, []);
 
@@ -450,7 +507,6 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
     setCustomWhName('');
     setRackName('');
     setCapacity(20);
-    setAddMode('single');
     setIsAddModalOpen(true);
   };
 
@@ -491,7 +547,9 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
   const handleTransferSourceChange = (newSourceCode) => {
     setTransferSourceLoc(newSourceCode);
     setTransferError('');
-    const locObj = locations.find(l => l.code === newSourceCode);
+    const locObj = locations.find(l => l.code === newSourceCode) ||
+      locations.find(l => l.code.toLowerCase().trim() === (newSourceCode || '').toLowerCase().trim()) ||
+      locations.find(l => isLocMatch(l.code, newSourceCode));
     if (locObj && locObj.materialDetailsList && locObj.materialDetailsList.length > 0) {
       setTransferMaterial(locObj.materialDetailsList[0]);
       setTransferPkts(Math.min(locObj.materialDetailsList[0].packets || 1, 1));
@@ -499,8 +557,8 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
       setTransferMaterial(null);
       setTransferPkts(1);
     }
-    if (transferTargetLoc === newSourceCode) {
-      const other = locations.find(l => l.code !== newSourceCode);
+    if (transferTargetLoc.toLowerCase().trim() === (newSourceCode || '').toLowerCase().trim()) {
+      const other = locations.find(l => l.code.toLowerCase().trim() !== (newSourceCode || '').toLowerCase().trim());
       setTransferTargetLoc(other ? other.code : '');
     }
   };
@@ -531,11 +589,19 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
 
     // Resolve target material object from live materials
     const allMats = (dbMaterials && dbMaterials.length > 0) ? dbMaterials : materials;
-    const targetMatId = transferMaterial ? (transferMaterial.id || transferMaterial.materialCode) : null;
-    let matObj = allMats.find(m => String(m.id).toLowerCase() === String(targetMatId).toLowerCase()) || (transferMaterial && transferMaterial.fullMaterial);
+    const currentSourceObj = locations.find(l => l.code === transferSourceLoc) ||
+      locations.find(l => l.code.toLowerCase().trim() === (transferSourceLoc || '').toLowerCase().trim()) ||
+      locations.find(l => isLocMatch(l.code, transferSourceLoc));
+    const sourceMaterials = currentSourceObj?.materialDetailsList || [];
+    const activeMat = (transferMaterial && sourceMaterials.some(m => String(m.id) === String(transferMaterial.id)))
+      ? transferMaterial
+      : (sourceMaterials[0] || transferMaterial);
 
-    if (!matObj && transferMaterial?.name) {
-      matObj = allMats.find(m => m.name.toLowerCase() === transferMaterial.name.toLowerCase());
+    const targetMatId = activeMat ? (activeMat.id || activeMat.materialCode) : null;
+    let matObj = allMats.find(m => String(m.id).toLowerCase() === String(targetMatId).toLowerCase()) || (activeMat && activeMat.fullMaterial);
+
+    if (!matObj && activeMat?.name) {
+      matObj = allMats.find(m => m.name.toLowerCase() === activeMat.name.toLowerCase());
     }
 
     if (!matObj) {
@@ -577,7 +643,11 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
 
       // 2. Deduct from source group
       let remainingToMove = qtyToMove;
-      let sourceIndex = groups.findIndex(g => isLocMatch(g.location, transferSourceLoc));
+      let sourceIndex = groups.findIndex(g => g.location.toLowerCase().trim() === transferSourceLoc.toLowerCase().trim());
+
+      if (sourceIndex === -1) {
+        sourceIndex = groups.findIndex(g => isLocMatch(g.location, transferSourceLoc));
+      }
 
       if (sourceIndex === -1 && groups.length > 0) {
         sourceIndex = 0;
@@ -594,7 +664,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
       groups = groups.filter(g => g.count > 0);
 
       // 3. Add to destination group
-      const destIndex = groups.findIndex(g => isLocMatch(g.location, transferTargetLoc));
+      const destIndex = groups.findIndex(g => g.location.toLowerCase().trim() === transferTargetLoc.toLowerCase().trim());
       if (destIndex !== -1) {
         groups[destIndex].count += qtyToMove;
       } else {
@@ -665,54 +735,11 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
     }
   };
 
-  // Add Single / Bulk Location Submit Handler
+  // Add Location Submit Handler
   const handleAddLocationSubmit = async (e) => {
     e.preventDefault();
     const targetWh = whName === '__CUSTOM__' ? customWhName.trim() : whName.trim();
     const finalWh = targetWh || 'Hall 1';
-
-    if (addMode === 'bulk') {
-      const count = Math.min(50, Math.max(1, parseInt(bulkCount, 10) || 10));
-      const startNum = Math.max(1, parseInt(bulkStartNum, 10) || 1);
-      const cap = Math.max(1, parseInt(bulkCapacity, 10) || 20);
-      const prefix = (bulkPrefix || 'Rack').trim();
-
-      const bulkPayload = [];
-      for (let i = 0; i < count; i++) {
-        const num = startNum + i;
-        const rName = `${prefix} ${num}`;
-        const fullCode = `${finalWh} - ${rName}`;
-        bulkPayload.push({
-          warehouse: finalWh,
-          name: rName,
-          code: fullCode,
-          capacity: cap
-        });
-      }
-
-      try {
-        setIsSubmitting(true);
-        setAddError('');
-        const res = await fetch(`${getBackendUrl()}/api/warehouse-locations/bulk`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ locations: bulkPayload })
-        });
-
-        if (res.ok) {
-          await fetchLiveLocations();
-          setIsAddModalOpen(false);
-        } else {
-          const errData = await res.json();
-          setAddError(errData.error || 'Failed to bulk save warehouse locations');
-        }
-      } catch (err) {
-        setAddError('Server connection error: ' + err.message);
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
 
     const cleanRack = rackName.trim();
     if (!cleanRack) {
@@ -780,17 +807,25 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
   };
 
   const filteredLocations = useMemo(() => {
-    return locations.filter(loc => {
-      const matchesSearch = loc.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (loc.materialName && loc.materialName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        loc.warehouse.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesWarehouse = selectedWarehouse === 'All' || loc.warehouse === selectedWarehouse;
-      const matchesStatus = selectedStatus === 'All' ||
-        (selectedStatus === 'Occupied' && loc.status === 'Occupied') ||
-        (selectedStatus === 'Picking' && loc.status === 'Picking') ||
-        (selectedStatus === 'Empty' && loc.status === 'Empty');
+    const query = searchQuery ? searchQuery.trim().toLowerCase() : '';
+    const isWhAll = selectedWarehouse === 'All';
+    const isStatusAll = selectedStatus === 'All';
 
-      return matchesSearch && matchesWarehouse && matchesStatus;
+    if (!query && isWhAll && isStatusAll) {
+      return locations;
+    }
+
+    return locations.filter(loc => {
+      if (!isWhAll && loc.warehouse !== selectedWarehouse) return false;
+      if (!isStatusAll && loc.status !== selectedStatus) return false;
+      if (!query) return true;
+
+      return (
+        (loc.code && loc.code.toLowerCase().includes(query)) ||
+        (loc.rack && loc.rack.toLowerCase().includes(query)) ||
+        (loc.materialName && loc.materialName.toLowerCase().includes(query)) ||
+        (loc.warehouse && loc.warehouse.toLowerCase().includes(query))
+      );
     });
   }, [locations, searchQuery, selectedWarehouse, selectedStatus]);
 
@@ -988,36 +1023,38 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
               Stock Transfer
             </button>
 
-            <button
-              onClick={() => handleOpenAddModal()}
-              style={{
-                backgroundColor: '#4f46e5',
-                backgroundImage: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                color: '#ffffff',
-                border: 'none',
-                padding: '10px 18px',
-                borderRadius: '12px',
-                fontSize: '13px',
-                fontWeight: '700',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
-                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(99, 102, 241, 0.55)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 14px rgba(99, 102, 241, 0.4)';
-              }}
-            >
-              <Plus size={16} strokeWidth={2.5} />
-              Add Warehouse Rack
-            </button>
+            {canAddRacks && (
+              <button
+                onClick={() => handleOpenAddModal()}
+                style={{
+                  backgroundColor: '#4f46e5',
+                  backgroundImage: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '10px 18px',
+                  borderRadius: '12px',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 6px 20px rgba(99, 102, 241, 0.55)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 4px 14px rgba(99, 102, 241, 0.4)';
+                }}
+              >
+                <Plus size={16} strokeWidth={2.5} />
+                Add Warehouse Rack / Hall
+              </button>
+            )}
 
             <button
               onClick={() => fetchLiveLocations(true)}
@@ -1459,34 +1496,36 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => handleOpenAddModal(whNameKey)}
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            fontSize: '12px',
-                            fontWeight: '700',
-                            padding: '8px 14px',
-                            borderRadius: '10px',
-                            border: '1.5px solid #4f46e5',
-                            backgroundColor: 'rgba(79, 70, 229, 0.06)',
-                            color: '#4f46e5',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = '#4f46e5';
-                            e.currentTarget.style.color = '#ffffff';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.06)';
-                            e.currentTarget.style.color = '#4f46e5';
-                          }}
-                        >
-                          <Plus size={15} />
-                          Add Rack to {whNameKey}
-                        </button>
+                        {canAddRacks && (
+                          <button
+                            onClick={() => handleOpenAddModal(whNameKey)}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              padding: '8px 14px',
+                              borderRadius: '10px',
+                              border: '1.5px solid #4f46e5',
+                              backgroundColor: 'rgba(79, 70, 229, 0.06)',
+                              color: '#4f46e5',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = '#4f46e5';
+                              e.currentTarget.style.color = '#ffffff';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.06)';
+                              e.currentTarget.style.color = '#4f46e5';
+                            }}
+                          >
+                            <Plus size={15} />
+                            Add Rack to {whNameKey}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -1501,10 +1540,9 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                         const utilPct = loc.capacity > 0 ? Math.round((loc.currentPackets / loc.capacity) * 100) : 0;
 
                         return (
-                          <motion.div
+                          <div
                             key={loc.code}
-                            whileHover={{ y: -4, boxShadow: '0 16px 30px -6px rgba(0, 0, 0, 0.12)' }}
-                            transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+                            className="warehouse-rack-card"
                             onClick={() => handleCardClick(loc)}
                             style={{
                               backgroundColor: 'var(--bg-secondary)',
@@ -1519,7 +1557,6 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                               flexDirection: 'column',
                               gap: '12px',
                               boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
-                              transition: 'all 0.2s ease',
                               overflow: 'hidden'
                             }}
                           >
@@ -1674,7 +1711,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                                 }} />
                               </div>
                             </div>
-                          </motion.div>
+                          </div>
                         );
                       })}
                     </div>
@@ -1697,9 +1734,9 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                   const utilPct = loc.capacity > 0 ? Math.round((loc.currentPackets / loc.capacity) * 100) : 0;
 
                   return (
-                    <motion.div
+                    <div
                       key={loc.code}
-                      whileHover={{ scale: 1.02, boxShadow: '0 10px 24px -4px rgba(0, 0, 0, 0.1)' }}
+                      className="warehouse-matrix-card"
                       onClick={() => handleCardClick(loc)}
                       style={{
                         backgroundColor: 'var(--bg-secondary)',
@@ -1765,7 +1802,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                           <div style={{ width: `${Math.min(100, utilPct)}%`, height: '100%', background: badge.accentGradient, borderRadius: '3px' }} />
                         </div>
                       </div>
-                    </motion.div>
+                    </div>
                   );
                 })}
               </div>
@@ -1974,7 +2011,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                     Configure Warehouse Locations
                   </h3>
                   <div style={{ fontSize: '12px', color: '#64748b', marginTop: '3px' }}>
-                    Add single rack or bulk generate storage bays across halls.
+                    Add a new rack / storage bay to the warehouse layout.
                   </div>
                 </div>
                 <button
@@ -1984,55 +2021,6 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                   style={{ borderRadius: '50%', width: '32px', height: '32px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
                   <X size={16} />
-                </button>
-              </div>
-
-              {/* Add Mode Selector (Single vs Bulk) */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '8px',
-                marginTop: '16px',
-                padding: '4px',
-                backgroundColor: '#f1f5f9',
-                borderRadius: '12px',
-                border: '1px solid #e2e8f0'
-              }}>
-                <button
-                  type="button"
-                  onClick={() => setAddMode('single')}
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    backgroundColor: addMode === 'single' ? '#ffffff' : 'transparent',
-                    color: addMode === 'single' ? '#4f46e5' : '#64748b',
-                    boxShadow: addMode === 'single' ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  Single Location
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAddMode('bulk')}
-                  style={{
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    backgroundColor: addMode === 'bulk' ? '#ffffff' : 'transparent',
-                    color: addMode === 'bulk' ? '#4f46e5' : '#64748b',
-                    boxShadow: addMode === 'bulk' ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  ⚡ Bulk Bay Generator
                 </button>
               </div>
 
@@ -2115,164 +2103,87 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                   )}
                 </div>
 
-                {/* SINGLE MODE FIELDS */}
-                {addMode === 'single' ? (
-                  <>
-                    {/* Rack / Shelf Name */}
-                    <div className="form-group" style={{ marginBottom: '16px' }}>
-                      <label className="form-label" style={{ fontWeight: '700', fontSize: '13px', marginBottom: '6px', color: '#0f172a' }}>
-                        Rack / Shelf / Bin Name *
-                      </label>
-                      <input
-                        type="text"
-                        className="form-input"
-                        placeholder="e.g. Rack 1, Shelf A, Bin 101, Row 3"
-                        value={rackName}
-                        onChange={(e) => setRackName(e.target.value)}
-                        required
-                        style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                      />
+                {/* Rack / Shelf Name */}
+                <div className="form-group" style={{ marginBottom: '16px' }}>
+                  <label className="form-label" style={{ fontWeight: '700', fontSize: '13px', marginBottom: '6px', color: '#0f172a' }}>
+                    Rack / Shelf / Bin Name *
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Rack 1, Shelf A, Bin 101, Row 3"
+                    value={rackName}
+                    onChange={(e) => setRackName(e.target.value)}
+                    required
+                    style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
+                  />
 
-                      {/* Common Quick Fill Helper */}
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '8px', alignItems: 'center' }}>
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>Quick picks:</span>
-                        {['Rack 1', 'Rack 2', 'Shelf A', 'Shelf B', 'Bin 101'].map(tag => (
-                          <span
-                            key={tag}
-                            onClick={() => setRackName(tag)}
-                            style={{
-                              fontSize: '11px',
-                              backgroundColor: '#f1f5f9',
-                              color: '#475569',
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              border: '1px solid #cbd5e1',
-                              fontWeight: '600'
-                            }}
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                  {/* Common Quick Fill Helper */}
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Quick picks:</span>
+                    {['Rack 1', 'Rack 2', 'Shelf A', 'Shelf B', 'Bin 101'].map(tag => (
+                      <span
+                        key={tag}
+                        onClick={() => setRackName(tag)}
+                        style={{
+                          fontSize: '11px',
+                          backgroundColor: '#f1f5f9',
+                          color: '#475569',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          border: '1px solid #cbd5e1',
+                          fontWeight: '600'
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
 
-                    {/* Storage Capacity */}
-                    <div className="form-group" style={{ marginBottom: '20px' }}>
-                      <label className="form-label" style={{ fontWeight: '700', fontSize: '13px', display: 'flex', justifyContent: 'space-between', marginBottom: '6px', color: '#0f172a' }}>
-                        <span>Default Storage Capacity (Packets)</span>
-                        <span style={{ color: '#4f46e5', fontWeight: '800' }}>{capacity} Packets</span>
-                      </label>
+                {/* Storage Capacity */}
+                <div className="form-group" style={{ marginBottom: '20px' }}>
+                  <label className="form-label" style={{ fontWeight: '700', fontSize: '13px', display: 'flex', justifyContent: 'space-between', marginBottom: '6px', color: '#0f172a' }}>
+                    <span>Default Storage Capacity (Packets)</span>
+                    <span style={{ color: '#4f46e5', fontWeight: '800' }}>{capacity} Packets</span>
+                  </label>
 
-                      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                        <input
-                          type="range"
-                          min="1"
-                          max="100"
-                          value={capacity}
-                          onChange={(e) => setCapacity(Number(e.target.value) || 20)}
-                          style={{ flex: 1, cursor: 'pointer' }}
-                        />
-                        <input
-                          type="number"
-                          min="1"
-                          max="500"
-                          className="form-input"
-                          style={{ width: '85px', textAlign: 'center', fontWeight: '800', borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                          value={capacity}
-                          onChange={(e) => setCapacity(Number(e.target.value) || 20)}
-                          required
-                        />
-                      </div>
-                    </div>
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <input
+                      type="range"
+                      min="1"
+                      max="100"
+                      value={capacity}
+                      onChange={(e) => setCapacity(Number(e.target.value) || 20)}
+                      style={{ flex: 1, cursor: 'pointer' }}
+                    />
+                    <input
+                      type="number"
+                      min="1"
+                      max="500"
+                      className="form-input"
+                      style={{ width: '85px', textAlign: 'center', fontWeight: '800', borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
+                      value={capacity}
+                      onChange={(e) => setCapacity(Number(e.target.value) || 20)}
+                      required
+                    />
+                  </div>
+                </div>
 
-                    {/* Live Location Code Preview */}
-                    <div style={{
-                      padding: '12px 16px',
-                      backgroundColor: '#f8fafc',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: '12px',
-                      marginBottom: '22px'
-                    }}>
-                      <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>LIVE LOCATION IDENTIFIER</div>
-                      <div style={{ fontSize: '15px', fontWeight: '800', color: '#4f46e5', marginTop: '2px' }}>
-                        {whName === '__CUSTOM__' ? (customWhName || 'Warehouse') : whName} - {rackName || 'Rack Name'}
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  /* BULK GENERATOR FIELDS */
-                  <>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-                      <div>
-                        <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', color: '#0f172a' }}>Rack Name Prefix</label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          value={bulkPrefix}
-                          onChange={(e) => setBulkPrefix(e.target.value)}
-                          placeholder="e.g. Rack, Bay, Shelf"
-                          style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', color: '#0f172a' }}>Start Number</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className="form-input"
-                          value={bulkStartNum}
-                          onChange={(e) => setBulkStartNum(Number(e.target.value) || 1)}
-                          style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
-                      <div>
-                        <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', color: '#0f172a' }}>Total Racks to Create</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="50"
-                          className="form-input"
-                          value={bulkCount}
-                          onChange={(e) => setBulkCount(Number(e.target.value) || 10)}
-                          style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', color: '#0f172a' }}>Capacity Per Rack (Pkts)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max="200"
-                          className="form-input"
-                          value={bulkCapacity}
-                          onChange={(e) => setBulkCapacity(Number(e.target.value) || 20)}
-                          style={{ borderRadius: '10px', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div style={{
-                      padding: '12px 16px',
-                      backgroundColor: 'rgba(79, 70, 229, 0.06)',
-                      border: '1px solid rgba(79, 70, 229, 0.2)',
-                      borderRadius: '12px',
-                      marginBottom: '22px'
-                    }}>
-                      <div style={{ fontSize: '11px', color: '#4f46e5', fontWeight: '800' }}>⚡ BULK GENERATION PREVIEW</div>
-                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#0f172a', marginTop: '4px' }}>
-                        Will create {bulkCount} slots: <strong>{whName === '__CUSTOM__' ? (customWhName || 'Hall') : whName} - {bulkPrefix} {bulkStartNum}</strong> to <strong>{bulkPrefix} {bulkStartNum + bulkCount - 1}</strong>
-                      </div>
-                    </div>
-                  </>
-                )}
+                {/* Live Location Code Preview */}
+                <div style={{
+                  padding: '12px 16px',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  marginBottom: '22px'
+                }}>
+                  <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>LIVE LOCATION IDENTIFIER</div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#4f46e5', marginTop: '2px' }}>
+                    {whName === '__CUSTOM__' ? (customWhName || 'Warehouse') : whName} - {rackName || 'Rack Name'}
+                  </div>
+                </div>
 
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
                   <button
@@ -2301,7 +2212,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                     }}
                   >
                     <Plus size={16} />
-                    {isSubmitting ? 'Saving...' : addMode === 'bulk' ? `Generate ${bulkCount} Racks` : 'Save Location'}
+                    {isSubmitting ? 'Saving...' : 'Save Location'}
                   </button>
                 </div>
               </form>
@@ -2313,9 +2224,14 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
       {/* ── Quick Stock Transfer Modal (High z-index 20000) ────────────────── */}
       <AnimatePresence>
         {isTransferModalOpen && (() => {
-          const currentSourceObj = locations.find(l => isLocMatch(l.code, transferSourceLoc)) || locations.find(l => l.code === transferSourceLoc);
+          const currentSourceObj = locations.find(l => l.code === transferSourceLoc) ||
+            locations.find(l => l.code.toLowerCase().trim() === (transferSourceLoc || '').toLowerCase().trim()) ||
+            locations.find(l => isLocMatch(l.code, transferSourceLoc));
           const sourceMaterials = currentSourceObj?.materialDetailsList || [];
-          const maxPkts = transferMaterial ? (transferMaterial.packets || 1) : 1;
+          const activeMaterial = (transferMaterial && sourceMaterials.some(m => String(m.id) === String(transferMaterial.id)))
+            ? transferMaterial
+            : (sourceMaterials[0] || null);
+          const maxPkts = activeMaterial ? (activeMaterial.packets || 1) : 1;
 
           return (
             <div
@@ -2475,7 +2391,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                     <select
                       className="form-input"
                       style={{ borderRadius: '10px', fontWeight: '600', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
-                      value={transferMaterial ? transferMaterial.id : ''}
+                      value={activeMaterial ? activeMaterial.id : ''}
                       onChange={(e) => {
                         const m = sourceMaterials.find(item => String(item.id) === String(e.target.value));
                         if (m) {
@@ -2500,8 +2416,8 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                   {/* 3. Quantity to Relocate Slider */}
                   <div className="form-group" style={{ marginBottom: '16px' }}>
                     {(() => {
-                      const approxPcsPerPkt = transferMaterial ? Math.round(Number(transferMaterial.stock || 0) / Math.max(1, Number(transferMaterial.packets || maxPkts || 1))) : 0;
-                      const currentPkts = Number(transferPkts) || 1;
+                      const approxPcsPerPkt = activeMaterial ? Math.round(Number(activeMaterial.stock || 0) / Math.max(1, Number(activeMaterial.packets || maxPkts || 1))) : 0;
+                      const currentPkts = Math.min(Number(transferPkts) || 1, maxPkts);
                       const movingPcs = currentPkts * approxPcsPerPkt;
                       const remainingAfter = Math.max(0, maxPkts - currentPkts);
 
@@ -2535,7 +2451,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                               </span>
                               {approxPcsPerPkt > 0 && (
                                 <span style={{ fontSize: '0.85rem', fontWeight: '600', color: '#6366f1' }}>
-                                  • ~{movingPcs.toLocaleString()} {transferMaterial?.unit || 'Pcs'}
+                                  • ~{movingPcs.toLocaleString()} {activeMaterial?.unit || 'Pcs'}
                                 </span>
                               )}
                             </div>
@@ -2556,14 +2472,15 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                             <input
                               type="range"
                               min="1"
-                              max={maxPkts}
+                              max={Math.max(1, maxPkts)}
                               value={currentPkts}
+                              disabled={!activeMaterial || maxPkts <= 1}
                               onChange={(e) => setTransferPkts(Number(e.target.value) || 1)}
                               style={{
                                 width: '100%',
                                 height: '8px',
                                 accentColor: '#4f46e5',
-                                cursor: 'pointer',
+                                cursor: maxPkts > 1 ? 'pointer' : 'default',
                                 display: 'block'
                               }}
                             />
@@ -2592,7 +2509,7 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                     >
                       <option value="">— Select Target Destination Slot —</option>
                       {locations
-                        .filter(l => !isLocMatch(l.code, transferSourceLoc))
+                        .filter(l => l.code.toLowerCase().trim() !== (transferSourceLoc || '').toLowerCase().trim())
                         .map(l => (
                           <option key={l.code} value={l.code}>
                             🏢 {l.code} — {l.status} ({l.currentPackets}/{l.capacity} Pkts • {Math.max(0, l.capacity - l.currentPackets)} Free)
@@ -2971,26 +2888,6 @@ export default function WarehouseLocationView({ racks = [], materials = [], hall
                   >
                     <Plus size={15} />
                     Receive
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2px' }}>
-                  <button
-                    onClick={() => handleDeleteLocation(selectedLocation)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#ef4444',
-                      fontSize: '12px',
-                      fontWeight: '600',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}
-                  >
-                    <Trash2 size={13} />
-                    Remove this rack from warehouse
                   </button>
                 </div>
               </div>

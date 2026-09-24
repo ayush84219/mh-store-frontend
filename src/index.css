@@ -2681,3 +2681,24 @@ body.dark-theme .custom-dropdown-menu {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+/* Highly Optimized Native CSS transitions for Warehouse Cards */
+.warehouse-rack-card {
+  will-change: transform, box-shadow;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.18s ease;
+  contain: layout style paint;
+}
+.warehouse-rack-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 30px -6px rgba(0, 0, 0, 0.12) !important;
+}
+
+.warehouse-matrix-card {
+  will-change: transform, box-shadow;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  contain: layout style paint;
+}
+.warehouse-matrix-card:hover {
+  transform: scale(1.02);
+  box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.1) !important;
+}

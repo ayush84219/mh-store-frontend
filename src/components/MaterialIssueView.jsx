@@ -20,10 +20,11 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
       const spaceBelow = window.innerHeight - rect.bottom;
       const isAbove = spaceBelow < 250 && rect.top > 250;
       
+      const desiredWidth = Math.min(640, Math.max(rect.width, 520));
       setCoords({
         top: isAbove ? rect.top : rect.bottom + 4,
-        left: Math.max(10, Math.min(rect.left, window.innerWidth - 360)),
-        width: Math.max(rect.width, 320),
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - desiredWidth - 12)),
+        width: desiredWidth,
         isAbove
       });
     }
@@ -58,14 +59,35 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  // Brand-aware filtering & sorting
+  // ─── Smart Dynamic Brand Matching ─────────────────────────────────────────
+  // Works for ANY brand name — current or future — with zero code changes.
+  // Handles: "Gym Shark" ↔ "gymshark", "H&M" ↔ "hm", "Brooks Brothers" ↔ "brooksbrothers"
   const brandKeyword = (brandHint || '').toLowerCase().trim();
+
+  // Normalize a string: lowercase, strip all non-alphanumeric chars, collapse spaces
+  const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const normCompact = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
   const isBrandMatch = (m) => {
     if (!brandKeyword) return false;
-    const mName = (m.name || '').toLowerCase();
-    const mCat = (m.category || '').toLowerCase();
-    // Match if material name or category contains any word from the brand
-    return brandKeyword.split(/\s+/).some(word => word.length > 2 && (mName.includes(word) || mCat.includes(word)));
+    const mName = norm(m.name || '');
+    const mCat  = norm(m.category || '');
+    const mNameCompact = normCompact(m.name || '');
+    const brandCompact = normCompact(brandKeyword);
+    const brandNorm    = norm(brandKeyword);
+
+    // Strategy 1: full brand phrase match (space-joined words must appear in name)
+    if (mName.includes(brandNorm) || mCat.includes(brandNorm)) return true;
+
+    // Strategy 2: compact (no-space) match — "gymshark" matches "gym shark" brand
+    if (brandCompact.length >= 2 && (mNameCompact.includes(brandCompact) || normCompact(m.category || '').includes(brandCompact))) return true;
+
+    // Strategy 3: every significant word (>=2 chars) of the brand appears in material
+    const brandWords = brandNorm.split(' ').filter(w => w.length >= 2);
+    if (brandWords.length > 0 && brandWords.some(w => mName.includes(w) || mCat.includes(w))) return true;
+
+    // Strategy 4: any single-word chunk of brand name found compactly in material
+    return brandWords.some(w => mNameCompact.includes(w));
   };
 
   const filtered = materials
@@ -76,7 +98,8 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
       const nameStr = String(m.name || '').toLowerCase();
       const colorStr = String(m.color || '').toLowerCase();
       const catStr = String(m.category || '').toLowerCase();
-      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q);
+      const locStr = String(m.location || '').toLowerCase();
+      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
     })
     .sort((a, b) => {
       // Brand-matched items always float to the top
@@ -129,27 +152,43 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
             <>
               <span style={{
                 fontFamily: 'monospace',
-                fontWeight: '800',
+                fontWeight: '700',
                 fontSize: '11px',
-                backgroundColor: 'rgba(99,102,241,0.12)',
-                color: '#4f46e5',
+                backgroundColor: '#f1f5f9',
+                color: '#0f172a',
+                border: '1px solid #e2e8f0',
                 padding: '1px 5px',
                 borderRadius: '4px',
                 flexShrink: 0
               }}>
-                [{selectedMaterial.id}]
+                {selectedMaterial.id}
               </span>
-              <span style={{ fontWeight: '600' }}>
+              <span style={{ fontWeight: '600', color: '#0f172a' }}>
                 {selectedMaterial.name}
               </span>
               {selectedMaterial.color && selectedMaterial.color !== 'Default' && (
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                <span style={{ fontSize: '11px', color: '#64748b' }}>
                   ({selectedMaterial.color})
                 </span>
               )}
               {selectedMaterial.stock !== undefined && (
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>
+                <span style={{ fontSize: '11px', color: '#334155', fontWeight: '700' }}>
                   • {selectedMaterial.stock} {selectedMaterial.unit || 'Pcs'}
+                </span>
+              )}
+              {selectedMaterial.location && (
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: '600',
+                  color: '#0284c7',
+                  backgroundColor: 'rgba(2,132,199,0.08)',
+                  border: '1px solid rgba(2,132,199,0.2)',
+                  padding: '1px 5px',
+                  borderRadius: '4px',
+                  flexShrink: 0,
+                  letterSpacing: '0.01em'
+                }}>
+                  📍 {selectedMaterial.location.split(',')[0].trim()}
                 </span>
               )}
             </>
@@ -178,7 +217,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
             maxWidth: 'calc(100vw - 24px)',
             border: '1.5px solid var(--border-color, #cbd5e1)',
             borderRadius: '8px',
-            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.08)',
             backgroundColor: 'var(--bg-primary, #ffffff)',
             color: 'var(--text-main, #0f172a)',
             zIndex: 9999999,
@@ -221,7 +260,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
           </div>
 
           <div style={{
-            maxHeight: '220px',
+            maxHeight: '260px',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
@@ -252,22 +291,32 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
               </div>
             ) : (
               <>
-                {/* Brand-match section header */}
+                {/* Special Green Brand-match section header */}
                 {brandKeyword && filtered.some(m => isBrandMatch(m)) && (
                   <div style={{
-                    padding: '4px 10px',
-                    fontSize: '10px',
+                    padding: '6px 10px',
+                    fontSize: '11px',
                     fontWeight: '700',
-                    color: '#f59e0b',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    borderBottom: '1px solid rgba(245,158,11,0.2)',
-                    marginBottom: '2px',
+                    color: '#065f46',
+                    backgroundColor: '#ecfdf5',
+                    borderRadius: '5px',
+                    border: '1px solid #a7f3d0',
+                    marginBottom: '4px',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px'
+                    gap: '6px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.02em'
                   }}>
-                    ⭐ {brandHint.toUpperCase()} Brand Match — Recommended
+                    <span style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: '#10b981',
+                      display: 'inline-block',
+                      boxShadow: '0 0 0 2px rgba(16, 185, 129, 0.25)'
+                    }} />
+                    <span>RECOMMENDED FOR: <strong style={{ color: '#047857', fontWeight: '800' }}>{brandHint}</strong></span>
                   </div>
                 )}
                 {filtered.map((m, mIdx) => {
@@ -280,14 +329,14 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                     <React.Fragment key={m.id}>
                       {showSeparator && (
                         <div style={{
-                          padding: '3px 10px',
+                          padding: '6px 10px 3px 10px',
                           fontSize: '10px',
-                          fontWeight: '600',
+                          fontWeight: '700',
                           color: '#64748b',
                           textTransform: 'uppercase',
-                          letterSpacing: '0.05em',
-                          borderTop: '1px solid var(--border-color)',
-                          marginTop: '2px'
+                          letterSpacing: '0.04em',
+                          borderTop: '1px solid #e2e8f0',
+                          marginTop: '4px'
                         }}>
                           Other Materials
                         </div>
@@ -309,61 +358,108 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                           backgroundColor: isSelected
                             ? '#6366f1'
                             : isBrand
-                            ? 'rgba(245,158,11,0.08)'
+                            ? 'rgba(16, 185, 129, 0.05)'
                             : 'transparent',
-                          color: isSelected ? '#ffffff' : 'var(--text-main, #0f172a)',
-                          fontWeight: isSelected ? '700' : isBrand ? '600' : '400',
+                          color: isSelected ? '#ffffff' : '#0f172a',
+                          fontWeight: isSelected ? '700' : '400',
                           transition: 'background-color 0.15s ease',
-                          gap: '8px',
-                          border: isBrand && !isSelected ? '1px solid rgba(245,158,11,0.25)' : '1px solid transparent',
+                          gap: '10px',
+                          border: isSelected 
+                            ? '1px solid #6366f1' 
+                            : isBrand 
+                            ? '1px solid #d1fae5' 
+                            : '1px solid #f1f5f9',
+                          borderLeft: isBrand && !isSelected ? '3px solid #10b981' : undefined,
                           marginBottom: '1px'
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.15)' : 'var(--bg-secondary, #f1f5f9)';
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? '#f0fdf4' : 'var(--bg-secondary, #f1f5f9)';
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(245,158,11,0.08)' : 'transparent';
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(16, 185, 129, 0.05)' : 'transparent';
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
                           <span style={{
                             fontFamily: 'monospace',
-                            fontWeight: '800',
-                            fontSize: '11px',
-                            backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : isBrand ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.12)',
-                            color: isSelected ? '#ffffff' : isBrand ? '#b45309' : '#4f46e5',
-                            padding: '1px 5px',
+                            fontWeight: '700',
+                            fontSize: '11.5px',
+                            backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : isBrand ? '#d1fae5' : '#f1f5f9',
+                            color: isSelected ? '#ffffff' : isBrand ? '#065f46' : '#0f172a',
+                            border: isSelected ? 'none' : isBrand ? '1px solid #a7f3d0' : '1px solid #e2e8f0',
+                            padding: '2px 6px',
                             borderRadius: '4px',
                             flexShrink: 0
                           }}>
                             {m.id}
                           </span>
-                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</span>
-                          {m.color && m.color !== 'Default' && (
-                            <span style={{ fontSize: '11px', opacity: 0.8, flexShrink: 0 }}>
-                              ({m.color})
+                          <span style={{
+                            fontWeight: isSelected ? '700' : isBrand ? '700' : '600',
+                            fontSize: '12.5px',
+                            color: isSelected ? '#ffffff' : '#0f172a',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            flex: 1,
+                            minWidth: 0
+                          }}>
+                            {m.name}
+                          </span>
+                          {m.category && (
+                            <span style={{
+                              fontSize: '9.5px',
+                              fontWeight: '700',
+                              letterSpacing: '0.04em',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              flexShrink: 0,
+                              textTransform: 'uppercase',
+                              backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#f1f5f9',
+                              color: isSelected ? '#ffffff' : '#334155',
+                              border: isSelected ? 'none' : '1px solid #cbd5e1'
+                            }}>
+                              {m.category}
                             </span>
                           )}
                           {isBrand && !isSelected && (
                             <span style={{
                               fontSize: '9px',
                               fontWeight: '800',
-                              color: '#f59e0b',
-                              backgroundColor: 'rgba(245,158,11,0.15)',
-                              padding: '1px 4px',
-                              borderRadius: '3px',
+                              color: '#047857',
+                              backgroundColor: '#d1fae5',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
                               flexShrink: 0,
-                              letterSpacing: '0.03em'
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                              border: '1px solid #a7f3d0'
                             }}>
-                              ★ BRAND
+                              MATCH
                             </span>
                           )}
                         </div>
-                        {m.stock !== undefined && (
-                          <span style={{ fontSize: '11px', opacity: 0.85, fontWeight: '700', flexShrink: 0 }}>
-                            {m.stock} {m.unit || 'Pcs'}
-                          </span>
-                        )}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px', flexShrink: 0, marginLeft: '6px' }}>
+                          {m.stock !== undefined && (
+                            <span style={{ fontSize: '11.5px', fontWeight: '700', color: isSelected ? '#fff' : Number(m.stock) <= 0 ? '#ef4444' : '#0f172a' }}>
+                              {m.stock} {m.unit || 'Pcs'}
+                            </span>
+                          )}
+                          {m.location && (
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '600',
+                              color: isSelected ? 'rgba(255,255,255,0.9)' : '#0284c7',
+                              backgroundColor: isSelected ? 'rgba(255,255,255,0.15)' : 'rgba(2,132,199,0.08)',
+                              border: isSelected ? 'none' : '1px solid rgba(2,132,199,0.2)',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              letterSpacing: '0.01em',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              📍 {m.location.split(',')[0].trim()}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </React.Fragment>
                   );

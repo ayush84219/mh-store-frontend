@@ -537,6 +537,10 @@ export default function App() {
     return localStorage.getItem('gpdms_darktheme') === 'true';
   });
   const [allowMaterialPhotoEdit, setAllowMaterialPhotoEdit] = useState(true);
+  const [allowWarehouseAddRack, setAllowWarehouseAddRack] = useState(() => {
+    const saved = localStorage.getItem('gpdms_allow_warehouse_add_rack');
+    return saved !== null ? saved === 'true' : false; // OFF by default as requested
+  });
 
   // Modal State
   const [isNewDesignModalOpen, setIsNewDesignModalOpen] = useState(false);
@@ -922,6 +926,10 @@ export default function App() {
             setRacks(data.warehouseRacks);
           if (data.allowMaterialPhotoEdit !== undefined)
             setAllowMaterialPhotoEdit(Boolean(data.allowMaterialPhotoEdit));
+          if (data.allowWarehouseAddRack !== undefined) {
+            setAllowWarehouseAddRack(Boolean(data.allowWarehouseAddRack));
+            localStorage.setItem('gpdms_allow_warehouse_add_rack', Boolean(data.allowWarehouseAddRack).toString());
+          }
         }
       } catch (err) {
         console.error('Failed to fetch settings from DB:', err);
@@ -1556,6 +1564,28 @@ export default function App() {
       setTimeout(() => setToast(null), 4000);
     } catch (err) {
       console.error('Failed to save allow_material_photo_edit setting:', err);
+    }
+  };
+
+  const handleToggleAllowWarehouseAddRack = async (newValue) => {
+    setAllowWarehouseAddRack(newValue);
+    localStorage.setItem('gpdms_allow_warehouse_add_rack', newValue.toString());
+    try {
+      await fetch(`${getBackendUrl()}/api/settings/allow_warehouse_add_rack`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: newValue })
+      });
+      setToast({
+        type: 'success',
+        title: 'Warehouse Rack Control Saved',
+        message: newValue
+          ? 'Warehouse Rack & Hall Add option is now ENABLED.'
+          : 'Warehouse Rack & Hall Add option is now DISABLED (Normal View Panel Mode).'
+      });
+      setTimeout(() => setToast(null), 4000);
+    } catch (err) {
+      console.error('Failed to save allow_warehouse_add_rack setting:', err);
     }
   };
 
@@ -2722,6 +2752,8 @@ export default function App() {
                 setHalls={setHalls}
                 allowMaterialPhotoEdit={allowMaterialPhotoEdit}
                 onToggleAllowMaterialPhotoEdit={handleToggleAllowMaterialPhotoEdit}
+                allowWarehouseAddRack={allowWarehouseAddRack}
+                onToggleAllowWarehouseAddRack={handleToggleAllowWarehouseAddRack}
               />
             )}
 
@@ -2772,7 +2804,14 @@ export default function App() {
             )}
 
             {activeTab === 'warehouse_locations' && (
-              <WarehouseLocationView racks={racks} materials={materials} halls={halls} onNavigate={setActiveTab} />
+              <WarehouseLocationView
+                racks={racks}
+                materials={materials}
+                halls={halls}
+                onNavigate={setActiveTab}
+                currentUser={currentUser}
+                allowWarehouseAddRack={allowWarehouseAddRack}
+              />
             )}
 
             {activeTab === 'po_verification' && (
