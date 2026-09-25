@@ -55,8 +55,17 @@ export default function ApprovalQueueView({
   // Helper: Get Unsplash image url based on material name / category
   const getMaterialImage = (name = '') => {
     const n = name.toLowerCase();
-    if (n.includes('zipper') || n.includes('zip')) {
+    if (n.includes('zipper') || n.includes('zip') || n.includes('runner') || n.includes('slider')) {
       return 'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=150&q=80';
+    }
+    if (n.includes('tag') || n.includes('hangtag') || n.includes('price tag')) {
+      return 'https://images.unsplash.com/photo-1607083206869-4c7672e72a8a?auto=format&fit=crop&w=150&q=80';
+    }
+    if (n.includes('elastic') || n.includes('webbing')) {
+      return 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=150&q=80';
+    }
+    if (n.includes('cord') || n.includes('dori') || n.includes('doori') || n.includes('drawstring')) {
+      return 'https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&w=150&q=80';
     }
     if (n.includes('denim') || n.includes('jeans')) {
       return 'https://images.unsplash.com/photo-1582142306909-195724d33ab3?auto=format&fit=crop&w=150&q=80';
@@ -67,13 +76,13 @@ export default function ApprovalQueueView({
     if (n.includes('thread') || n.includes('spool')) {
       return 'https://images.unsplash.com/photo-1605812860427-4024433a70fd?auto=format&fit=crop&w=150&q=80';
     }
-    if (n.includes('rivet') || n.includes('button') || n.includes('metal')) {
+    if (n.includes('rivet') || n.includes('button') || n.includes('metal') || n.includes('snap')) {
       return 'https://images.unsplash.com/photo-1590534247854-e97d5e3feef6?auto=format&fit=crop&w=150&q=80';
     }
-    if (n.includes('label') || n.includes('sticker') || n.includes('satin')) {
+    if (n.includes('label') || n.includes('sticker') || n.includes('satin') || n.includes('woven')) {
       return 'https://images.unsplash.com/photo-1520004481444-76649034b3e3?auto=format&fit=crop&w=150&q=80';
     }
-    return 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTfSpxz49Egc7TT1a8a5jMmmupv9ML64rFXYH2Y0ovpDA&s=10'; // Fallback
+    return 'https://images.unsplash.com/photo-1584917865442-de89df76afd3?auto=format&fit=crop&w=150&q=80';
   };
 
   const getRequestImage = (req) => {

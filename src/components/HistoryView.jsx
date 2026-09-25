@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '';
@@ -1492,6 +1493,22 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                   >
                     Chronological Log
                   </button>
+                  <button
+                    onClick={() => setViewMode('calendar')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '6px',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      backgroundColor: viewMode === 'calendar' ? 'var(--accent-color)' : 'transparent',
+                      color: viewMode === 'calendar' ? '#ffffff' : 'var(--text-muted)'
+                    }}
+                  >
+                    📅 Daily &amp; Calendar Tracker
+                  </button>
                 </div>
 
                 <button
@@ -1529,6 +1546,25 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 <h4 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '4px' }}>No Lot Selected</h4>
                 <p style={{ fontSize: '13px', maxWidth: '360px' }}>Select an active design lot number from the left panel list to view its entire workflow sequence timeline.</p>
               </div>
+            ) : viewMode === 'calendar' ? (
+              <DailyWeeklyCalendarReport
+                issueLogs={issueLogs}
+                extraMaterialIssues={extraMaterialIssues}
+                pos={pos}
+                designs={designs}
+                scans={scanLogs}
+                transfers={transfers}
+                weightCaptures={weightCaptures}
+                zipOrders={zipOrders}
+                dooriOrders={dooriOrders}
+                designHistory={historyLogs}
+                currencySymbol={currencySymbol}
+                embeddedIn="history"
+                onSelectLot={(lot) => {
+                  setSelectedLotId(lot);
+                  setViewMode('pipeline');
+                }}
+              />
             ) : viewMode === 'pipeline' ? (
               /* Step-by-Step Pipeline View */
               <div style={{ position: 'relative', paddingLeft: '24px' }}>

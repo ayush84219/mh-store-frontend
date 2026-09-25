@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders
 } from 'lucide-react';
 import './App.css';
 
@@ -40,6 +40,7 @@ const POVerificationView = lazy(() => import('./components/POVerificationView'))
 const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationView'));
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
+const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
 
 // Default Mock Data Arrays
 const initialMaterials = [
@@ -228,6 +229,8 @@ const hasTabAccess = (tabName, role) => {
       'dori_po',
       'bone_issue',
       'bone_po',
+      'elastic_issue',
+      'elastic_po',
       'generate_po',
       'history',
       'scanner_logs',
@@ -257,6 +260,8 @@ const hasTabAccess = (tabName, role) => {
       'dori_po',
       'bone_issue',
       'bone_po',
+      'elastic_issue',
+      'elastic_po',
       'generate_po',
       'history',
       'scanner_logs',
@@ -286,6 +291,8 @@ const hasTabAccess = (tabName, role) => {
       'generate_po',
       'bone_issue',
       'bone_po',
+      'elastic_issue',
+      'elastic_po',
       'only_cutting'
     ].includes(tabName);
   }
@@ -305,6 +312,8 @@ const TAB_ROUTES = {
   dori_po: '/dori-po',
   bone_issue: '/bone-issue',
   bone_po: '/bone-issue',
+  elastic_issue: '/elastic-issue',
+  elastic_po: '/elastic-issue',
   material_details: '/material-details',
   reports_history: '/reports-history',
   settings: '/settings',
@@ -324,7 +333,7 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   acc[path] = tab;
   acc[path.replace(/-/g, '_')] = tab;
   return acc;
-}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details', '/bone-po': 'bone_issue', '/bone_po': 'bone_issue' });
+}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details', '/bone-po': 'bone_issue', '/bone_po': 'bone_issue', '/elastic-po': 'elastic_issue', '/elastic_po': 'elastic_issue' });
 
 export default function App() {
   const navigate = useNavigate();
@@ -441,6 +450,8 @@ export default function App() {
       setActiveTab('dori_po');
     } else if (type === 'bone' || type === 'bone_issue') {
       setActiveTab('bone_issue');
+    } else if (type === 'elastic' || type === 'elastic_issue') {
+      setActiveTab('elastic_issue');
     } else {
       setActiveTab('zip_po');
     }
@@ -631,6 +642,8 @@ export default function App() {
       dori_po: 'Dori Purcharge Orders',
       bone_issue: 'Bone Issue',
       bone_po: 'Bone Issue',
+      elastic_issue: 'Elastic Issue',
+      elastic_po: 'Elastic Issue',
       generate_po: 'Generate PO',
       history: 'Production Work',
       scanner_logs: 'Scanner Log',
@@ -686,6 +699,35 @@ export default function App() {
       }
     };
     fetchSyncedLots();
+  }, []);
+
+  // Continuous 1-minute Keep-Alive Health Heartbeat to prevent backend sleep mode
+  useEffect(() => {
+    const keepAlivePing = () => {
+      fetch(`${getBackendUrl()}/api/health`, {
+        method: 'GET',
+        headers: { 'Cache-Control': 'no-cache' }
+      }).catch(() => {});
+    };
+
+    // Ping once on mount / reload
+    keepAlivePing();
+
+    // Ping every 1 minute (60,000 ms) continuously
+    const keepAliveInterval = setInterval(keepAlivePing, 60 * 1000);
+
+    // Also ping when browser tab becomes active or phone wakes up
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        keepAlivePing();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(keepAliveInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Fetch designs from database via backend on mount
@@ -2057,6 +2099,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => { handleTabClick('bone_issue'); }} title="Bone Issue">
                       <span className="sidebar-text">Bone Issue</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_issue'); }} title="Elastic Issue">
+                      <span className="sidebar-text">Elastic Issue</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
@@ -2178,6 +2223,10 @@ export default function App() {
                   <Layers size={18} />
                   <span className="sidebar-text">Bone Issue</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_issue'); }} title="Elastic Issue">
+                  <Sliders size={18} />
+                  <span className="sidebar-text">Elastic Issue</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
@@ -2233,6 +2282,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => handleTabClick('bone_issue')} title="Bone Issue">
                   <Layers size={18} />
                   <span className="sidebar-text">Bone Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_issue')} title="Elastic Issue">
+                  <Sliders size={18} />
+                  <span className="sidebar-text">Elastic Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                   <Sparkles size={18} />
@@ -2378,6 +2431,7 @@ export default function App() {
                 {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
                 {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
                 {(activeTab === 'bone_issue' || activeTab === 'bone_po') && 'Bone Issue'}
+                {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && 'Elastic Issue'}
                 {activeTab === 'generate_po' && 'Generate PO'}
                 {activeTab === 'history' && 'Production Work'}
                 {activeTab === 'scanner_logs' && 'Scanner Log'}
@@ -2709,6 +2763,16 @@ export default function App() {
 
             {(activeTab === 'bone_issue' || activeTab === 'bone_po') && (
               <BoneIssueView
+                prefilledLotNo={prefilledLotNo}
+                setPrefilledLotNo={setPrefilledLotNo}
+                currentUser={currentUser}
+                currencySymbol={currencySymbol}
+                onNavigate={setActiveTab}
+              />
+            )}
+
+            {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && (
+              <ElasticIssueView
                 prefilledLotNo={prefilledLotNo}
                 setPrefilledLotNo={setPrefilledLotNo}
                 currentUser={currentUser}

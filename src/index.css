@@ -2702,3 +2702,177 @@ body.dark-theme .custom-dropdown-menu {
   transform: scale(1.02);
   box-shadow: 0 10px 24px -4px rgba(0, 0, 0, 0.1) !important;
 }
+
+/* ── Formal Print Styles & Document Border Framing ──────────────────────────── */
+.print-only {
+  display: none !important;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm 10mm 10mm;
+  }
+
+  html, body {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    font-size: 11pt !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body.dark-theme {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .app-container {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
+
+  .sidebar,
+  .app-header,
+  .print-hide,
+  button,
+  input,
+  select,
+  .form-input,
+  .nav-tabs,
+  .pagination,
+  .search-box {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .main-content {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    width: 100% !important;
+  }
+
+  .daily-weekly-report-container {
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Formal Outer Border & Document Framing */
+  .formal-report-print-frame {
+    border: 2px solid #1e293b !important;
+    border-radius: 6px !important;
+    padding: 12px 14px !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    page-break-inside: auto !important;
+  }
+
+  .print-doc-header {
+    border-bottom: 2px solid #0f172a !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 12px !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+  }
+
+  .print-kpi-grid {
+    display: grid !important;
+    grid-template-columns: repeat(6, 1fr) !important;
+    gap: 6px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .print-kpi-card {
+    border: 1px solid #64748b !important;
+    border-radius: 4px !important;
+    padding: 6px 8px !important;
+    background-color: #f8fafc !important;
+    text-align: center !important;
+    page-break-inside: avoid !important;
+  }
+
+  .print-7day-grid {
+    display: grid !important;
+    grid-template-columns: repeat(7, 1fr) !important;
+    gap: 4px !important;
+    margin-bottom: 12px !important;
+    width: 100% !important;
+  }
+
+  .print-7day-card {
+    border: 1px solid #475569 !important;
+    border-radius: 4px !important;
+    padding: 6px 4px !important;
+    background-color: #ffffff !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* Tables in print */
+  .custom-table-container, .panel {
+    border: 1px solid #475569 !important;
+    box-shadow: none !important;
+    margin-bottom: 12px !important;
+    background-color: #ffffff !important;
+    border-radius: 4px !important;
+    overflow: visible !important;
+  }
+
+  .custom-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 8.5pt !important;
+  }
+
+  .custom-table th {
+    background-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    border: 1px solid #64748b !important;
+    padding: 5px 6px !important;
+    font-weight: 800 !important;
+  }
+
+  .custom-table td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 4px 6px !important;
+    color: #1e293b !important;
+  }
+
+  .custom-table tr {
+    page-break-inside: avoid !important;
+  }
+
+  /* Sign-Off Footer on Print */
+  .print-sign-off-footer {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 16px !important;
+    margin-top: 20px !important;
+    padding-top: 14px !important;
+    border-top: 1.5px solid #0f172a !important;
+    page-break-inside: avoid !important;
+  }
+
+  .sign-off-box {
+    text-align: center !important;
+    font-size: 8.5pt !important;
+  }
+
+  .sign-off-line {
+    height: 35px !important;
+    border-bottom: 1px dashed #475569 !important;
+    margin-bottom: 4px !important;
+  }
+}

@@ -364,6 +364,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         date: now.toLocaleDateString('en-IN'),
         po: form.poNumber || 'N/A',
         material: form.materialName,
+        category: form.category || '',
         weight: '0.000',
         netWeightKg: 0,
         pieces: totalPieces,
@@ -617,7 +618,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       return;
     }
     const csvHeaders = [
-      'ID', 'Material Code', 'Date', 'Time', 'PO Number', 'Material Name',
+      'ID', 'Material Code', 'Date', 'Time', 'PO Number', 'Material Name', 'Category',
       'Quantity (Pieces)', 'Packets', 'Unit', 'Barcode ID', 'Invoice Number',
       'Location', 'Operator', 'Status'
     ];
@@ -628,6 +629,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       row.time || '',
       row.po || '',
       row.material || '',
+      row.category || '',
       row.pieces ?? '',
       row.packets ?? '',
       row.unit || '',
@@ -699,6 +701,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       .filter(r => {
         const matchesQ = !ql ||
           (r.material && r.material.toLowerCase().includes(ql)) ||
+          (r.category && r.category.toLowerCase().includes(ql)) ||
           (r.po && r.po.toLowerCase().includes(ql)) ||
           (r.operator && r.operator.toLowerCase().includes(ql)) ||
           (r.status && r.status.toLowerCase().includes(ql)) ||
@@ -1488,6 +1491,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                   ['TIME', 'time'],
                   ['PO NUMBER', 'po'],
                   ['MATERIAL NAME', 'material'],
+                  ['CATEGORY', 'category'],
                   ['QUANTITY (PIECES)', 'pieces'],
                   ['PACKETS', 'packets'],
                   ['LOCATION', 'location'],
@@ -1511,7 +1515,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             <tbody>
               {paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No inward logs found in database.</td>
+                  <td colSpan="11" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No inward logs found in database.</td>
                 </tr>
               ) : (
                 paginatedData.map((row, idx) => (
@@ -1595,6 +1599,21 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                         )}
                       </td>
 
+                      {/* CATEGORY */}
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                        {row.category ? (
+                          <span style={{
+                            display: 'inline-block', padding: '4px 10px', borderRadius: '6px',
+                            background: '#fef3c7', color: '#92400e', fontWeight: '800', fontSize: '11.5px',
+                            border: '1px solid rgba(217, 119, 6, 0.25)', textTransform: 'uppercase'
+                          }}>
+                            🏷️ {row.category}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                        )}
+                      </td>
+
                       {/* QUANTITY */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: '900', color: '#2563eb', fontSize: '15px' }}>
@@ -1672,7 +1691,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                     {/* EXPANDED ROW DETAILS */}
                     {expandedRow === row.id && (
                       <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan="10" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
+                        <td colSpan="11" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
                           <div style={{
                             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px',
                             background: '#ffffff', padding: '16px', borderRadius: '8px', border: '1.5px solid #cbd5e1'
@@ -1683,6 +1702,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
                               </span>
                               <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <div><strong style={{ color: '#64748b' }}>Material:</strong> <span style={{ fontWeight: '800', color: '#0f172a' }}>{row.material}</span></div>
+                                <div><strong style={{ color: '#64748b' }}>Category:</strong> <span style={{ fontWeight: '800', color: '#b45309', textTransform: 'uppercase' }}>{row.category || 'N/A'}</span></div>
                                 <div><strong style={{ color: '#64748b' }}>Total Quantity:</strong> <span style={{ fontWeight: '800', color: '#2563eb' }}>{row.pieces.toLocaleString()} {row.unit || 'Pcs'}</span></div>
                                 <div><strong style={{ color: '#64748b' }}>Total Packets:</strong> <span style={{ fontWeight: '800', color: '#0f172a' }}>{row.packets || 1} packet(s)</span></div>
                                 <div><strong style={{ color: '#64748b' }}>Inward Method:</strong> <span style={{ fontWeight: '800', color: '#2563eb' }}>{row.entryMode || 'Manually'}</span></div>

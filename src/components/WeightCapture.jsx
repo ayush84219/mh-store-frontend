@@ -448,6 +448,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       .filter(r => {
         const matchesQ = !ql ||
           (r.material && r.material.toLowerCase().includes(ql)) ||
+          (r.category && r.category.toLowerCase().includes(ql)) ||
           (r.po && r.po.toLowerCase().includes(ql)) ||
           (r.operator && r.operator.toLowerCase().includes(ql)) ||
           (r.status && r.status.toLowerCase().includes(ql)) ||
@@ -482,7 +483,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       return;
     }
     const csvHeaders = [
-      'ID', 'Material Code', 'Date', 'Time', 'PO Number', 'Material Name',
+      'ID', 'Material Code', 'Date', 'Time', 'PO Number', 'Material Name', 'Category',
       'Gross Weight (KG)', 'Net Weight (KG)', 'Avg Wt/Piece (g)',
       'Sample Qty (Pcs)', 'Sample Wt (KG)', 'Total Pieces',
       'Packets', 'Unit', 'Barcode ID', 'Invoice Number',
@@ -495,6 +496,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       row.time || '',
       row.po || '',
       row.material || '',
+      row.category || '',
       row.weight || '',
       row.netWeightKg ?? '',
       row.wpp || '',
@@ -713,6 +715,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
         date: now.toLocaleDateString('en-IN'),
         po: form.poNumber || 'N/A',
         material: form.materialName,
+        category: form.category || '',
         weight: grossWeight,
         netWeightKg: netKg,
         wpp: weightPerPiece,
@@ -2145,6 +2148,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
                   ['TIME', 'time'],
                   ['PO NUMBER', 'po'],
                   ['MATERIAL NAME', 'material'],
+                  ['CATEGORY', 'category'],
                   ['SAMPLE (PCS / WT)', null],
                   ['AVG WT / PC', null],
                   ['GROSS WEIGHT', 'weight'],
@@ -2170,7 +2174,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
             <tbody>
               {paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan="12" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No weight logs found in database.</td>
+                  <td colSpan="13" style={{ textAlign: 'center', padding: '32px', color: '#94a3b8', fontWeight: '600' }}>No weight logs found in database.</td>
                 </tr>
               ) : (
                 paginatedData.map((row, idx) => (
@@ -2251,6 +2255,21 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
                               🏷️ {row.barcodeId}
                             </span>
                           </div>
+                        )}
+                      </td>
+
+                      {/* CATEGORY */}
+                      <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                        {row.category ? (
+                          <span style={{
+                            display: 'inline-block', padding: '4px 10px', borderRadius: '6px',
+                            background: '#fef3c7', color: '#92400e', fontWeight: '800', fontSize: '11.5px',
+                            border: '1px solid rgba(217, 119, 6, 0.25)', textTransform: 'uppercase'
+                          }}>
+                            🏷️ {row.category}
+                          </span>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
                         )}
                       </td>
 
@@ -2341,7 +2360,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
                     {/* EXPANDED ROW DETAILS */}
                     {expandedRow === row.id && (
                       <tr style={{ background: '#f8fafc' }}>
-                        <td colSpan="11" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
+                        <td colSpan="13" style={{ padding: '16px 20px', borderBottom: '2px solid #e2e8f0' }}>
                           <div style={{
                             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px',
                             background: '#ffffff', padding: '16px', borderRadius: '8px', border: '1.5px solid #cbd5e1'
@@ -2368,6 +2387,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
                               </span>
                               <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                 <div><strong style={{ color: '#64748b' }}>Material Code:</strong> <span style={{ fontWeight: '800', fontFamily: 'monospace', color: '#0f172a' }}>{row.materialCode}</span></div>
+                                <div><strong style={{ color: '#64748b' }}>Category:</strong> <span style={{ fontWeight: '800', color: '#b45309', textTransform: 'uppercase' }}>{row.category || 'N/A'}</span></div>
                                 <div><strong style={{ color: '#64748b' }}>Barcode ID:</strong> <span style={{ fontWeight: '800', color: '#4338ca', fontFamily: 'monospace' }}>{row.barcodeId || 'N/A'}</span></div>
                                 <div><strong style={{ color: '#64748b' }}>Total Packets:</strong> <span style={{ fontWeight: '800', color: '#0f172a' }}>{row.packets || 1} packet(s)</span></div>
                                 <div><strong style={{ color: '#64748b' }}>PO Number:</strong> <span style={{ fontWeight: '800', color: '#0f172a' }}>{row.po}</span></div>

@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
+import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '—';
@@ -181,7 +182,7 @@ export default function ReportsHistoryView({
       transition: 'all 0.2s'
     }
   };
-  const [activeReportTab, setActiveReportTab] = useState('material_ledger'); // 'material_ledger', 'designer_audits', 'store_audits'
+  const [activeReportTab, setActiveReportTab] = useState('daily_weekly_calendar'); // 'daily_weekly_calendar', 'material_ledger', 'designer_audits', 'store_audits'
   const [selectedLotId, setSelectedLotId] = useState('');
   
   // Audit states
@@ -793,6 +794,27 @@ export default function ReportsHistoryView({
       }}>
         <button
           type="button"
+          onClick={() => setActiveReportTab('daily_weekly_calendar')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'daily_weekly_calendar' ? 'var(--accent-color)' : 'transparent',
+            color: activeReportTab === 'daily_weekly_calendar' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <Calendar size={14} />
+          <span>Daily &amp; Weekly Calendar</span>
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveReportTab('material_ledger')}
           style={{
             padding: '8px 16px',
@@ -919,6 +941,23 @@ export default function ReportsHistoryView({
         </button>
       </div>
 
+
+      {activeReportTab === 'daily_weekly_calendar' && (
+        <DailyWeeklyCalendarReport
+          issueLogs={allIssueLogs}
+          extraMaterialIssues={extraMaterialIssues}
+          pos={pos}
+          designs={designs}
+          scans={scans}
+          transfers={transfers}
+          weightCaptures={weightCaptures}
+          zipOrders={zipOrders}
+          dooriOrders={dooriOrders}
+          designHistory={designHistory}
+          currencySymbol={currencySymbol}
+          embeddedIn="report"
+        />
+      )}
 
       {activeReportTab === 'material_ledger' && (
         <div className="animate-scale">
