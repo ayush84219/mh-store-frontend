@@ -1,4 +1,4 @@
-import { getBackendUrl } from './utils/api';
+import { getBackendUrl, isTokenExpired, clearAuthSession, getAuthToken } from './utils/api';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -340,6 +340,7 @@ export default function App() {
   const location = useLocation();
 
   const [currentUser, setCurrentUser] = useState(null);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState('');
   const [isVerifyingToken, setIsVerifyingToken] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
 
@@ -1014,10 +1015,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    // Session token validation check on mount
+    // Session token validation check on mount (enforces 12-hour expiration)
     const verifySession = async () => {
-      const token = localStorage.getItem('gpdms_jwt_token');
+      const token = getAuthToken();
       if (!token) {
+        setIsVerifyingToken(false);
+        return;
+      }
+
+      // Check if the 12-hour session validity period has lapsed
+      if (isTokenExpired()) {
+        const expiredMsg = 'Your 12-hour secure session has expired. Please log in again to continue.';
+        clearAuthSession(expiredMsg);
+        setSessionExpiredNotice(expiredMsg);
+        setCurrentUser(null);
         setIsVerifyingToken(false);
         return;
       }
@@ -1028,10 +1039,16 @@ export default function App() {
         });
         const data = await response.json();
 
-        if (response.ok) {
+        if (response.ok && data.user) {
           setCurrentUser(data.user);
         } else {
-          localStorage.removeItem('gpdms_jwt_token');
+          const isExpired = response.status === 401 || data.expired || data.code === 'TOKEN_EXPIRED';
+          const msg = isExpired
+            ? 'Your 12-hour secure session has expired. Please log in again to continue.'
+            : 'Session could not be verified. Please log in again.';
+          clearAuthSession(msg);
+          setSessionExpiredNotice(msg);
+          setCurrentUser(null);
         }
       } catch (err) {
         console.error('Session verification error:', err);
@@ -1043,11 +1060,51 @@ export default function App() {
     verifySession();
   }, []);
 
-  const handleLogout = () => {
-    localStorage.removeItem('gpdms_jwt_token');
+  const handleLogout = (reasonMsg = null) => {
+    clearAuthSession(reasonMsg);
+    if (reasonMsg) {
+      setSessionExpiredNotice(reasonMsg);
+    }
     setCurrentUser(null);
     setActiveTab('dashboard');
   };
+
+  // Active 12-Hour Session Expiration Watcher & Tab Focus Listener
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const checkSessionExpiry = () => {
+      if (isTokenExpired()) {
+        handleLogout('Your 12-hour secure session has expired. Please log in again to secure your application.');
+      }
+    };
+
+    // Periodic check every 30 seconds
+    const intervalId = setInterval(checkSessionExpiry, 30000);
+
+    // Immediate check when user returns to browser tab or wakes device
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkSessionExpiry();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    // Listen for custom auth:expired events
+    const handleAuthExpiredEvent = (e) => {
+      handleLogout(e.detail?.message || 'Your 12-hour session has expired. Please log in again.');
+    };
+    window.addEventListener('auth:expired', handleAuthExpiredEvent);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      window.removeEventListener('auth:expired', handleAuthExpiredEvent);
+    };
+  }, [currentUser]);
 
   const getInitials = (name) => {
     if (!name) return 'AD';
@@ -1946,7 +2003,13 @@ export default function App() {
         >
           {isDarkTheme ? <Sun size={20} /> : <Moon size={20} />}
         </button>
-        <AuthView onLoginSuccess={setCurrentUser} />
+        <AuthView
+          sessionExpiredMessage={sessionExpiredNotice}
+          onLoginSuccess={(user) => {
+            setSessionExpiredNotice('');
+            setCurrentUser(user);
+          }}
+        />
       </Suspense>
     );
   }
@@ -2617,13 +2680,32 @@ export default function App() {
               </div>
               <div className="user-info">
                 <span className="user-name">{currentUser.name}</span>
-                <span className="user-role">{currentUser.role}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span className="user-role">{currentUser.role}</span>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                      color: '#10b981',
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.25)',
+                      padding: '1px 6px',
+                      borderRadius: '10px',
+                      fontWeight: '600'
+                    }}
+                    title="Session is tokenized and securely expires 12 hours after login"
+                  >
+                    <ShieldCheck size={10} /> 12h Token
+                  </span>
+                </div>
               </div>
             </div>
 
             <button
               className="btn btn-secondary btn-sm"
-              onClick={handleLogout}
+              onClick={() => handleLogout()}
               style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
               title="Sign Out"
             >

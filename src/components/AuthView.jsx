@@ -1,10 +1,10 @@
-import { getBackendUrl } from '../utils/api';
+import { getBackendUrl, setAuthSession, SESSION_EXPIRED_MSG_KEY } from '../utils/api';
 import { useState, useEffect, useRef } from 'react';
-import { Mail, Lock, User, Eye, EyeOff, Layers3, ArrowRight, ShieldAlert, Check, X } from 'lucide-react';
+import { Mail, Lock, User, Eye, EyeOff, Layers3, ArrowRight, ShieldAlert, Check, X, ShieldCheck, Clock } from 'lucide-react';
 
 const API_BASE_URL = `${getBackendUrl()}/api/auth`;
 
-export default function AuthView({ onLoginSuccess }) {
+export default function AuthView({ onLoginSuccess, sessionExpiredMessage }) {
   const [activeTab, setActiveTab] = useState('login');
 
   // Login State
@@ -26,6 +26,17 @@ export default function AuthView({ onLoginSuccess }) {
   const [success, setSuccess] = useState('');
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [expiredNotice, setExpiredNotice] = useState(() => {
+    if (sessionExpiredMessage) return sessionExpiredMessage;
+    if (typeof window !== 'undefined') {
+      const msg = sessionStorage.getItem(SESSION_EXPIRED_MSG_KEY);
+      if (msg) {
+        sessionStorage.removeItem(SESSION_EXPIRED_MSG_KEY);
+        return msg;
+      }
+    }
+    return '';
+  });
 
   // Auto-dismiss toast after 15 seconds
   useEffect(() => {
@@ -73,12 +84,12 @@ export default function AuthView({ onLoginSuccess }) {
         return;
       }
 
-      setSuccess('Login successful! Redirecting...');
-      localStorage.setItem('gpdms_jwt_token', data.token);
+      setSuccess('Login successful! Secure 12-hour session established...');
+      setAuthSession(data.token, data.expiresAt);
 
       setTimeout(() => {
         onLoginSuccess(data.user);
-      }, 800);
+      }, 700);
     } catch (err) {
       console.error('Login error:', err);
       setError('Cannot connect to the backend server. Please verify it is running.');
@@ -215,6 +226,38 @@ export default function AuthView({ onLoginSuccess }) {
         </div>
 
         {/* Alert Messages */}
+        {expiredNotice && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '12px 14px',
+            marginBottom: '16px',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '10px',
+            color: '#f87171',
+            fontSize: '13px',
+            lineHeight: '1.4'
+          }}>
+            <Clock size={18} style={{ flexShrink: 0, color: '#ef4444' }} />
+            <div style={{ flex: 1 }}>
+              <strong style={{ display: 'block', color: '#fca5a5', fontSize: '13px', marginBottom: '2px' }}>
+                12-Hour Session Expired
+              </strong>
+              <span>{expiredNotice}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExpiredNotice('')}
+              style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: '2px' }}
+              title="Dismiss"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {error && (
           <div className="auth-alert error">
             <ShieldAlert size={18} style={{ flexShrink: 0 }} />
@@ -283,6 +326,21 @@ export default function AuthView({ onLoginSuccess }) {
               <span>{loading ? 'Signing In...' : 'Sign In'}</span>
               {!loading && <ArrowRight size={16} />}
             </button>
+
+            {/* 12-Hour Tokenization Security Badge */}
+            <div style={{
+              marginTop: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              fontSize: '11px',
+              color: 'var(--text-secondary, #94a3b8)',
+              letterSpacing: '0.2px'
+            }}>
+              <ShieldCheck size={14} style={{ color: '#10b981' }} />
+              <span>Protected by 12-Hour Tokenized Session Security</span>
+            </div>
           </form>
         )}
 
