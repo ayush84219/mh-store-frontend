@@ -403,6 +403,7 @@ export default function MaterialTransferView({
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState(null);
   const [printModalData, setPrintModalData] = useState(null);
+  const [labelCopies, setLabelCopies] = useState(1);
   const [lastTransferSuccess, setLastTransferSuccess] = useState(null);
 
   // Live timer matching ManuallyWeightCapture
@@ -776,6 +777,7 @@ export default function MaterialTransferView({
       stickers,
       material
     });
+    setLabelCopies(stickers.length);
 
     try {
       const pws = new WebSocket('ws://localhost:8765');
@@ -799,6 +801,24 @@ export default function MaterialTransferView({
         }
       };
     } catch (_) {}
+  };
+
+  // Helper: build exactly `count` stickers, generating new ones (A11, A12...) if count > original
+  const getExpandedStickers = (originalStickers, count) => {
+    if (!originalStickers || count <= 0) return [];
+    if (count <= originalStickers.length) return originalStickers.slice(0, count);
+    // Need more stickers than generated — create extras based on the first sticker's template
+    const result = [...originalStickers];
+    const template = originalStickers[0];
+    for (let pkt = originalStickers.length + 1; result.length < count; pkt++) {
+      const newBarcodeId = `${template.materialCode}-A${String(pkt).padStart(2, '0')}`;
+      result.push({
+        ...template,
+        barcodeId: newBarcodeId,
+        packetNo: pkt,
+      });
+    }
+    return result;
   };
 
   const destinationOptions = useMemo(() => {
@@ -1427,8 +1447,8 @@ export default function MaterialTransferView({
               locations={destinationOptions}
               value={toLoc}
               onChange={setToLoc}
-              placeholder="Search destination rack or type new slot..."
-              allowCustom={true}
+              placeholder="Search destination configured rack..."
+              allowCustom={false}
             />
 
             {fromLoc && toLoc && fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase() && (
@@ -1990,21 +2010,71 @@ export default function MaterialTransferView({
                   Stock Transfer Barcode Label
                 </h3>
                 <span style={{ fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: 'var(--accent-color, #0284c7)' }}>
-                  {printModalData.stickers?.length || 1} Label(s)
+                  {labelCopies} Label(s)
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => setPrintModalData(null)}
+                onClick={() => { setPrintModalData(null); setLabelCopies(1); }}
                 style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', padding: '4px' }}
               >
                 <X size={18} />
               </button>
             </div>
 
+            {/* Copies Input */}
+            <div style={{
+              padding: '12px 20px', borderBottom: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', gap: '12px', background: '#fffbeb'
+            }}>
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#92400e' }}>🔢 How many labels to print?</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setLabelCopies(c => Math.max(1, c - 1))}
+                  style={{
+                    width: '30px', height: '30px', borderRadius: '6px',
+                    border: '1.5px solid #d97706', background: labelCopies <= 1 ? '#f5f5f4' : '#fef3c7',
+                    color: labelCopies <= 1 ? '#a8a29e' : '#92400e', cursor: labelCopies <= 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                  disabled={labelCopies <= 1}
+                >−</button>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={labelCopies}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (!isNaN(v) && v >= 1 && v <= 100) setLabelCopies(v);
+                    else if (e.target.value === '') setLabelCopies(1);
+                  }}
+                  style={{
+                    width: '52px', height: '30px', textAlign: 'center', borderRadius: '6px',
+                    border: '1.5px solid #d97706', fontSize: '14px', fontWeight: '800',
+                    color: '#92400e', background: '#ffffff', outline: 'none'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setLabelCopies(c => Math.min(100, c + 1))}
+                  style={{
+                    width: '30px', height: '30px', borderRadius: '6px',
+                    border: '1.5px solid #d97706', background: '#fef3c7',
+                    color: '#92400e', cursor: 'pointer',
+                    fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                  }}
+                >+</button>
+              </div>
+              <span style={{ fontSize: '11px', color: '#b45309', fontWeight: '600' }}>
+                Will print exactly {labelCopies} label(s)
+              </span>
+            </div>
+
             {/* Modal Body */}
             <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', background: '#f1f5f9' }}>
-              {printModalData.stickers.map((stk, idx) => (
+              {getExpandedStickers(printModalData.stickers, labelCopies).map((stk, idx) => (
                 <div
                   key={stk.barcodeId || idx}
                   style={{
@@ -2072,7 +2142,8 @@ export default function MaterialTransferView({
                       alert('Please allow popups to print label.');
                       return;
                     }
-                    const cardsHtml = printModalData.stickers.map(stk => `
+                    const labelsToPrint = getExpandedStickers(printModalData.stickers, labelCopies);
+                    const cardsHtml = labelsToPrint.map(stk => `
                       <div style="width: 2.4in; padding: 6px; border: 1.5px solid #000; box-sizing: border-box; page-break-after: always; font-family: Arial, sans-serif; background: #fff;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 10px; border: 1px solid #000; margin-bottom: 6px;">
                           <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold; width: 38%;">BARCODE ID</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold; font-family: monospace;">${stk.barcodeId}</td></tr>
@@ -2124,7 +2195,7 @@ export default function MaterialTransferView({
 
                 <button
                   type="button"
-                  onClick={() => setPrintModalData(null)}
+                  onClick={() => { setPrintModalData(null); setLabelCopies(1); }}
                   className="btn btn-secondary"
                   style={{ padding: '8px 14px', fontSize: '12.5px', fontWeight: '700' }}
                 >

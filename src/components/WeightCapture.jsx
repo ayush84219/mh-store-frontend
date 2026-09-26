@@ -60,33 +60,36 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
     fetchLocations();
   }, []);
 
-  // Compute dynamic slot options from the racks configuration or live locations
+  // Compute dynamic slot options from the racks configuration, live locations, and materials
   const generatedLocations = useMemo(() => {
     const slotMap = new Map();
-    const source = (racks && racks.length > 0) ? racks : liveLocations;
+    const addSlot = (rawCode, wh) => {
+      const codeStr = String(rawCode || '').trim();
+      if (!codeStr || codeStr === 'N/A' || codeStr === 'null') return;
+      const warehouse = wh || (codeStr.includes(' - ') ? codeStr.split(' - ')[0].trim() : 'Main Store');
+      const displayLabel = codeStr.includes(' - ') ? codeStr : `${warehouse} - ${codeStr.toLowerCase().startsWith('rack') ? codeStr : `Rack ${codeStr}`}`;
+      if (!slotMap.has(displayLabel)) {
+        slotMap.set(displayLabel, {
+          code: displayLabel,
+          label: displayLabel,
+          rawCode: codeStr,
+          warehouse
+        });
+      }
+    };
 
-    if (source && source.length > 0) {
-      source.forEach(rack => {
-        const warehouse = rack.warehouse || 'Main Store';
-        const rawCode = String(rack.code || '').trim();
-        const displayLabel = rack.warehouse && rawCode.includes(rack.warehouse)
-          ? rawCode
-          : `${warehouse} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
-        if (!slotMap.has(displayLabel)) {
-          slotMap.set(displayLabel, {
-            code: displayLabel,
-            label: displayLabel,
-            rawCode: rawCode,
-            warehouse: warehouse
-          });
-        }
+    (liveLocations || []).forEach(l => addSlot(l.code || l.rack || l.name, l.warehouse));
+    (racks || []).forEach(r => addSlot(r.code || r.name || r.rack, r.warehouse));
+    (dbMaterials || []).forEach(m => {
+      if (!m.location) return;
+      m.location.split(',').forEach(p => {
+        const clean = p.replace(/\(\d+\s*pkts?\)/i, '').trim();
+        addSlot(clean);
       });
-    }
-
-
+    });
 
     return Array.from(slotMap.values());
-  }, [racks, liveLocations]);
+  }, [racks, liveLocations, dbMaterials]);
   const [now, setNow] = useState(new Date());
   const [page, setPage] = useState(0);
   const [rpp, setRpp] = useState(5);

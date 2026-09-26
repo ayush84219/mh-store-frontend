@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, MapPin, Check, ChevronDown, X, Plus } from 'lucide-react';
+import { Search, MapPin, Check, ChevronDown, X } from 'lucide-react';
 
 export default function SearchableLocationSelect({
   locations = [],
@@ -7,7 +7,7 @@ export default function SearchableLocationSelect({
   onChange,
   placeholder = '-- Select Configured Location Slot --',
   required = false,
-  allowCustom = true,
+  allowCustom = false,
   disabled = false,
   className = '',
   style = {},
@@ -120,12 +120,6 @@ export default function SearchableLocationSelect({
     if (onChange) onChange(code);
     setIsOpen(false);
     setSearchQuery('');
-  };
-
-  const handleCustomApply = () => {
-    if (searchQuery.trim()) {
-      handleSelect(searchQuery.trim());
-    }
   };
 
   return (
@@ -279,8 +273,6 @@ export default function SearchableLocationSelect({
                     e.preventDefault();
                     if (filteredLocations.length > 0) {
                       handleSelect(filteredLocations[0].code);
-                    } else if (allowCustom && searchQuery.trim()) {
-                      handleCustomApply();
                     }
                   } else if (e.key === 'Escape') {
                     setIsOpen(false);
@@ -379,31 +371,13 @@ export default function SearchableLocationSelect({
             }}
           >
             {filteredLocations.length === 0 ? (
-              <div style={{ padding: '16px 12px', textAlign: 'center' }}>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', display: 'block', marginBottom: '8px' }}>
+              <div style={{ padding: '24px 14px', textAlign: 'center' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-muted, #64748b)', display: 'block', fontWeight: '600' }}>
                   No configured location matched "{searchQuery}"
                 </span>
-                {allowCustom && searchQuery.trim() && (
-                  <button
-                    type="button"
-                    onClick={handleCustomApply}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid #3b82f6',
-                      background: 'rgba(59, 130, 246, 0.08)',
-                      color: '#2563eb',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <Plus size={13} /> Use custom: "{searchQuery.trim()}"
-                  </button>
-                )}
+                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginTop: '6px' }}>
+                  Please select an existing configured rack or location
+                </span>
               </div>
             ) : (
               filteredLocations.map(loc => {
@@ -447,7 +421,7 @@ export default function SearchableLocationSelect({
           {/* Footer info showing total locations */}
           <div
             style={{
-              padding: '6px 10px',
+              padding: '8px 12px',
               borderTop: '1px solid var(--border-color, #e2e8f0)',
               background: 'var(--bg-secondary, #f8fafc)',
               display: 'flex',
@@ -459,14 +433,6 @@ export default function SearchableLocationSelect({
             }}
           >
             <span>{filteredLocations.length} locations available</span>
-            {allowCustom && searchQuery.trim() && (
-              <span
-                onClick={handleCustomApply}
-                style={{ color: '#2563eb', cursor: 'pointer', fontWeight: '700' }}
-              >
-                + Custom slot
-              </span>
-            )}
           </div>
         </div>
       )}
