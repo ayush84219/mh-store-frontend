@@ -1,10 +1,11 @@
 import { getBackendUrl } from '../utils/api';
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   FileText, PlusCircle, Trash2, Download, RefreshCw,
   CheckCircle, AlertTriangle, Play, Settings, X, Search,
   Briefcase, Truck, Award, UserCheck, Shield, ChevronDown, History,
-  ChevronLeft, ChevronRight, Layers
+  ChevronLeft, ChevronRight, Layers, Check
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
@@ -890,7 +891,7 @@ async function postPOToSheet(webAppUrl, payload, { maxRetries = 3 } = {}) {
 }
 
 /** =========================
- * SmartDropdown Component
+ * SmartDropdown Component (Portal-based)
  * ========================= */
 function SmartDropdown({
   value,
@@ -904,36 +905,97 @@ function SmartDropdown({
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value || "");
   const [filteredOptions, setFilteredOptions] = useState(options);
-  const dropdownRef = useRef(null);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 220, isAbove: false });
 
-  useEffect(() => { setInputValue(value || ""); }, [value]);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const portalRef = useRef(null);
+  const listRef = useRef(null);
+
+  useEffect(() => {
+    setInputValue(value || "");
+  }, [value]);
 
   useEffect(() => {
     if (!inputValue || inputValue.trim() === "") {
       setFilteredOptions(options);
     } else {
+      const q = inputValue.toLowerCase().trim();
       const filtered = options.filter(opt =>
-        String(opt).toLowerCase().includes(inputValue.toLowerCase())
+        String(opt).toLowerCase().includes(q)
       );
       setFilteredOptions(filtered);
     }
   }, [inputValue, options]);
 
+  const updateCoords = useCallback(() => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+      // Flip up if space below < 210px and space above is greater
+      const isAbove = spaceBelow < 210 && spaceAbove > spaceBelow;
+
+      const width = Math.max(rect.width, 240);
+      let left = rect.left;
+      if (left + width > window.innerWidth - 12) {
+        left = Math.max(8, window.innerWidth - width - 12);
+      }
+
+      setCoords({
+        top: isAbove ? rect.top - 4 : rect.bottom + 4,
+        left,
+        width,
+        isAbove
+      });
+    }
+  }, []);
+
   useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      const handleReposition = () => updateCoords();
+      window.addEventListener('resize', handleReposition);
+      window.addEventListener('scroll', handleReposition, true);
+      return () => {
+        window.removeEventListener('resize', handleReposition);
+        window.removeEventListener('scroll', handleReposition, true);
+      };
+    }
+  }, [isOpen, updateCoords]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (
+        containerRef.current && !containerRef.current.contains(event.target) &&
+        portalRef.current && !portalRef.current.contains(event.target)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [isOpen]);
+
+  useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [filteredOptions, isOpen]);
+
+  useEffect(() => {
+    if (highlightedIndex >= 0 && listRef.current) {
+      const el = listRef.current.children[highlightedIndex];
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedIndex]);
 
   const handleInputChange = (e) => {
     const newValue = e.target.value;
     setInputValue(newValue);
     onChange(newValue);
     setIsOpen(true);
+    updateCoords();
   };
 
   const handleSelectOption = (option) => {
@@ -955,39 +1017,133 @@ function SmartDropdown({
     }, 200);
   };
 
+  const handleKeyDown = (e) => {
+    if (!isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setIsOpen(true);
+        updateCoords();
+        return;
+      }
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (filteredOptions.length > 0) {
+        setHighlightedIndex(prev => (prev + 1 >= filteredOptions.length ? 0 : prev + 1));
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (filteredOptions.length > 0) {
+        setHighlightedIndex(prev => (prev <= 0 ? filteredOptions.length - 1 : prev - 1));
+      }
+    } else if (e.key === 'Enter') {
+      if (isOpen && highlightedIndex >= 0 && highlightedIndex < filteredOptions.length) {
+        e.preventDefault();
+        handleSelectOption(filteredOptions[highlightedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+    }
+  };
+
   return (
-    <div className="smart-dropdown" ref={dropdownRef} style={{ position: 'relative', zIndex: isOpen ? 9999 : 1 }}>
+    <div className="smart-dropdown" ref={containerRef} style={{ position: 'relative', width: '100%' }}>
       <input
+        ref={inputRef}
         type="text"
         className={`form-input ${required && !value ? 'required-field' : ''}`}
         value={inputValue}
         onChange={handleInputChange}
-        onFocus={() => setIsOpen(true)}
+        onFocus={() => {
+          setIsOpen(true);
+          updateCoords();
+        }}
         onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
         placeholder={placeholder}
         autoComplete="off"
         required={required}
-        style={{ width: '100%' }}
+        style={{ width: '100%', boxSizing: 'border-box' }}
       />
-      {isOpen && filteredOptions.length > 0 && (
-        <div className="dropdown-options" style={{
-          position: 'absolute', top: '100%', left: 0, right: 0,
-          background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
-          borderRadius: '8px', zIndex: 100, maxHeight: '160px', overflowY: 'auto',
-          boxShadow: 'var(--shadow-lg)'
-        }}>
-          {filteredOptions.map((option, index) => (
-            <div
-              key={index}
-              className="dropdown-option"
-              onClick={() => handleSelectOption(option)}
-              style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-color)' }}
-              onMouseDown={(e) => e.preventDefault()} // Prevents blur before click
-            >
-              {option}
-            </div>
-          ))}
-        </div>
+      {isOpen && (filteredOptions.length > 0 || (inputValue && inputValue.trim())) && createPortal(
+        <div
+          ref={portalRef}
+          className="smart-dropdown-portal-menu"
+          style={{
+            position: 'fixed',
+            ...(coords.isAbove
+              ? { bottom: `${window.innerHeight - coords.top}px` }
+              : { top: `${coords.top}px` }),
+            left: `${coords.left}px`,
+            width: `${coords.width}px`,
+            backgroundColor: 'var(--bg-primary, #ffffff)',
+            border: '1.5px solid var(--border-color, #cbd5e1)',
+            borderRadius: '8px',
+            boxShadow: '0 12px 32px rgba(15, 23, 42, 0.18), 0 4px 12px rgba(15, 23, 42, 0.08)',
+            zIndex: 9999999,
+            maxHeight: '220px',
+            overflowY: 'auto',
+            padding: '5px',
+            boxSizing: 'border-box',
+            fontFamily: 'inherit'
+          }}
+          onMouseDown={(e) => e.preventDefault()} // Prevents blur before click
+        >
+          <div ref={listRef} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option, index) => {
+                const isSelected = String(option).toLowerCase().trim() === String(inputValue).toLowerCase().trim();
+                const isHighlighted = index === highlightedIndex;
+                return (
+                  <div
+                    key={index}
+                    className="dropdown-option"
+                    onClick={() => handleSelectOption(option)}
+                    onMouseEnter={() => setHighlightedIndex(index)}
+                    style={{
+                      padding: '7px 11px',
+                      cursor: 'pointer',
+                      borderRadius: '6px',
+                      fontSize: '12.5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      backgroundColor: isHighlighted
+                        ? 'rgba(2, 132, 199, 0.12)'
+                        : isSelected
+                        ? 'rgba(2, 132, 199, 0.06)'
+                        : 'transparent',
+                      color: isHighlighted || isSelected ? '#0284c7' : 'var(--text-main, #0f172a)',
+                      fontWeight: isSelected ? '600' : '400',
+                      transition: 'background-color 0.15s ease'
+                    }}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {option}
+                    </span>
+                    {isSelected && <Check size={14} style={{ color: '#0284c7', flexShrink: 0 }} />}
+                  </div>
+                );
+              })
+            ) : (
+              <div
+                style={{
+                  padding: '8px 12px',
+                  fontSize: '12px',
+                  color: 'var(--text-muted, #94a3b8)',
+                  fontStyle: 'italic',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>Press Enter to use "<b>{inputValue}</b>"</span>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );

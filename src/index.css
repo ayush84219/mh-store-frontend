@@ -1058,6 +1058,28 @@ body {
   background-color: #ffffff;
 }
 
+/* Seamless, Box-Free Search Inputs */
+.seamless-search-input {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.seamless-search-input:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

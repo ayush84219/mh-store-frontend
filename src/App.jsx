@@ -477,7 +477,7 @@ export default function App() {
       return b.id.localeCompare(a.id);
     });
   });
-  const [materials, setMaterials] = useState(initialMaterials);
+  const [materials, setMaterials] = useState([]);
   // POs — backed by database
   const [pos, setPOs] = useState(initialPOs);
   // Vendors — backed by database
@@ -776,7 +776,7 @@ export default function App() {
         const response = await fetch(`${getBackendUrl()}/api/materials`);
         if (response.ok) {
           const data = await response.json();
-          if (data.length > 0) setMaterials(data);
+          setMaterials(Array.isArray(data) ? data : []);
         }
       } catch (err) {
         console.error('Failed to fetch materials from DB:', err);
@@ -2982,7 +2982,12 @@ export default function App() {
             )}
 
             {activeTab === 'material_transfer' && currentUser && (
-              <MaterialTransferView currentUser={currentUser} />
+              <MaterialTransferView
+                currentUser={currentUser}
+                racks={racks}
+                halls={halls}
+                materials={materials}
+              />
             )}
 
             {activeTab === 'warehouse_locations' && (

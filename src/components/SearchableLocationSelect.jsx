@@ -256,20 +256,19 @@ export default function SearchableLocationSelect({
             animation: 'fadeIn 0.15s ease'
           }}
         >
-          {/* Search Header */}
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #f8fafc)' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                background: 'var(--bg-primary, #ffffff)',
-                border: '1px solid var(--border-color, #cbd5e1)',
-                borderRadius: '8px',
-                padding: '6px 10px',
-              }}
-            >
-              <Search size={14} style={{ color: '#3b82f6', flexShrink: 0 }} />
+          {/* Seamless Search Header (No box-in-a-box) */}
+          <div style={{
+            padding: '10px 14px 8px',
+            background: 'var(--bg-secondary, #ffffff)',
+            borderBottom: '1px solid var(--border-color, #e2e8f0)',
+            flexShrink: 0
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px'
+            }}>
+              <Search size={15} style={{ color: '#3b82f6', flexShrink: 0 }} />
               <input
                 ref={searchInputRef}
                 type="text"
@@ -288,14 +287,25 @@ export default function SearchableLocationSelect({
                   }
                 }}
                 placeholder="Search rack / slot (e.g. RACK 12, Hall 1)..."
+                className="seamless-search-input"
                 style={{
                   border: 'none',
                   outline: 'none',
+                  boxShadow: 'none',
                   background: 'transparent',
+                  backgroundColor: 'transparent',
+                  WebkitAppearance: 'none',
+                  MozAppearance: 'none',
+                  appearance: 'none',
                   width: '100%',
-                  fontSize: '12.5px',
+                  flex: 1,
+                  fontSize: '13px',
                   fontWeight: '600',
-                  color: 'var(--text-main, #0f172a)'
+                  color: 'var(--text-main, #0f172a)',
+                  padding: '0',
+                  margin: '0',
+                  height: 'auto',
+                  lineHeight: '1.4'
                 }}
               />
               {searchQuery && (
@@ -306,12 +316,18 @@ export default function SearchableLocationSelect({
                     border: 'none',
                     background: 'transparent',
                     cursor: 'pointer',
-                    padding: '0',
+                    padding: '2px',
                     color: 'var(--text-muted, #94a3b8)',
-                    display: 'flex'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '50%',
+                    transition: 'color 0.15s ease'
                   }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'}
                 >
-                  <X size={13} />
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -322,7 +338,7 @@ export default function SearchableLocationSelect({
                 style={{
                   display: 'flex',
                   gap: '4px',
-                  marginTop: '6px',
+                  marginTop: '8px',
                   overflowX: 'auto',
                   paddingBottom: '2px',
                   scrollbarWidth: 'none'

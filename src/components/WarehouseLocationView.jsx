@@ -71,13 +71,13 @@ export default function WarehouseLocationView({
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [dbLocations, setDbLocations] = useState([]);
-  const [dbMaterials, setDbMaterials] = useState(materials);
+  const [dbMaterials, setDbMaterials] = useState(() => (Array.isArray(materials) ? materials : []));
   const [captures, setCaptures] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // Sync props to state if props change
   useEffect(() => {
-    if (materials && materials.length > 0) {
+    if (Array.isArray(materials)) {
       setDbMaterials(materials);
     }
   }, [materials]);
@@ -439,9 +439,9 @@ export default function WarehouseLocationView({
         materialName: materialDetailsList.map(m => m.name).join(', ') || 'Empty Slot',
         materialDetailsList,
         matchedMaterials: matchedMaterialsEntries.map(e => e.material),
-        poNumber: poNumbers[0] || (matchedMaterialsEntries[0] ? `PO-${matchedMaterialsEntries[0].material.id}` : 'N/A'),
+        poNumber: poNumbers[0] || (matchedMaterialsEntries[0]?.material?.poNumber || 'N/A'),
         lotNumber: lotNumbers[0] || 'N/A',
-        weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : (totalQty > 0 ? `${Math.round(totalQty * 0.05)} kg` : '0 kg'),
+        weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : (totalQty > 0 ? `${totalQty} ${unit || 'Pcs'}` : '0 kg'),
         storeIncharge: storeIncharges[0] || 'Store Team',
         lastUpdated: lastUpdated || 'Active'
       });
@@ -456,7 +456,7 @@ export default function WarehouseLocationView({
   // Extract unique warehouses
   const warehouses = useMemo(() => {
     const list = [...new Set(locations.map(r => r.warehouse).filter(Boolean))];
-    if (list.length === 0) return ['All', 'Hall 1', 'Main Store'];
+    if (list.length === 0) return ['All'];
     return ['All', ...list];
   }, [locations]);
 
@@ -894,7 +894,7 @@ export default function WarehouseLocationView({
 
   const availableHallsList = useMemo(() => {
     const existing = [...new Set([...(halls || []), ...warehouses.filter(w => w !== 'All')])];
-    return existing.length > 0 ? existing : ['Hall 1', 'Hall 2', 'Hall 3', 'Main Store', 'Warehouse A'];
+    return existing.length > 0 ? existing : (halls && halls.length > 0 ? halls : ['Main Store']);
   }, [halls, warehouses]);
 
   return (
@@ -1912,56 +1912,82 @@ export default function WarehouseLocationView({
           border: '2px dashed var(--border-color)',
           boxShadow: '0 4px 16px rgba(0,0,0,0.02)'
         }}>
-          <div style={{
-            width: '80px',
-            height: '80px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
-            color: '#4f46e5',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '18px'
-          }}>
-            <Warehouse size={40} />
-          </div>
-          <h4 style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 8px 0' }}>
-            {locations.length === 0 ? 'No Warehouse Locations Added' : 'No Locations Found Matching Filter'}
-          </h4>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '460px', margin: '0 0 24px 0', lineHeight: 1.6 }}>
-            {locations.length === 0
-              ? 'Organize your physical inventory across halls and aisles. Add single racks or use the bulk rack generator.'
-              : 'Try clearing your search query or reset filters to see all available storage slots.'}
-          </p>
-          {locations.length === 0 ? (
-            <button
-              onClick={() => handleOpenAddModal()}
-              style={{
-                backgroundColor: '#4f46e5',
-                color: '#ffffff',
-                border: 'none',
-                padding: '12px 26px',
-                fontSize: '14px',
-                fontWeight: '700',
-                borderRadius: '12px',
-                display: 'inline-flex',
+          {loading && locations.length === 0 ? (
+            <>
+              <div style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
+                color: '#4f46e5',
+                display: 'flex',
                 alignItems: 'center',
-                gap: '8px',
-                cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(79, 70, 229, 0.4)'
-              }}
-            >
-              <Plus size={18} />
-              Add Your First Warehouse Location
-            </button>
+                justifyContent: 'center',
+                margin: '0 auto 18px'
+              }}>
+                <RefreshCw size={32} className="animate-spin" />
+              </div>
+              <h4 style={{ fontSize: '19px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 8px 0' }}>
+                Loading Warehouse Locations...
+              </h4>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0 }}>
+                Fetching live rack slots and accessory inventory from database...
+              </p>
+            </>
           ) : (
-            <button
-              onClick={handleResetFilters}
-              className="btn btn-secondary"
-              style={{ padding: '10px 24px', fontSize: '13px', borderRadius: '10px', fontWeight: '700' }}
-            >
-              Reset Filters
-            </button>
+            <>
+              <div style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #e0e7ff 0%, #ede9fe 100%)',
+                color: '#4f46e5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '18px'
+              }}>
+                <Warehouse size={40} />
+              </div>
+              <h4 style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 8px 0' }}>
+                {locations.length === 0 ? 'No Warehouse Locations Added' : 'No Locations Found Matching Filter'}
+              </h4>
+              <p style={{ fontSize: '13px', color: 'var(--text-muted)', maxWidth: '460px', margin: '0 0 24px 0', lineHeight: 1.6 }}>
+                {locations.length === 0
+                  ? 'Organize your physical inventory across halls and aisles. Add single racks or use the bulk rack generator.'
+                  : 'Try clearing your search query or reset filters to see all available storage slots.'}
+              </p>
+              {locations.length === 0 ? (
+                <button
+                  onClick={() => handleOpenAddModal()}
+                  style={{
+                    backgroundColor: '#4f46e5',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '12px 26px',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    borderRadius: '12px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(79, 70, 229, 0.4)'
+                  }}
+                >
+                  <Plus size={18} />
+                  Add Your First Warehouse Location
+                </button>
+              ) : (
+                <button
+                  onClick={handleResetFilters}
+                  className="btn btn-secondary"
+                  style={{ padding: '10px 24px', fontSize: '13px', borderRadius: '10px', fontWeight: '700' }}
+                >
+                  Reset Filters
+                </button>
+              )}
+            </>
           )}
         </div>
       )}

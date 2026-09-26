@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  ArrowLeftRight, Search, Package, MapPin, CheckCircle,
+  ArrowLeftRight, Search, Package, MapPin, CheckCircle, CheckCircle2,
   AlertTriangle, Clock, User, Calendar, RefreshCw, Printer, ArrowLeft,
-  Plus, Minus, Check, Layers, ChevronDown, X, Sparkles, Sliders,
-  ArrowRight, Download, Box, ShieldCheck, Activity
+  Plus, Minus, Check, Layers, ChevronDown, ChevronRight, X, Sparkles, Sliders,
+  ArrowRight, Download, Box, ShieldCheck, Activity, Menu, Filter, ArrowUpRight,
+  Edit3
 } from 'lucide-react';
 import SearchableLocationSelect from './SearchableLocationSelect';
 import { getBackendUrl } from '../utils/api';
@@ -49,14 +50,15 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           cursor: 'pointer',
           width: '100%',
           boxSizing: 'border-box',
-          padding: '11px 14px',
-          minHeight: '48px',
-          borderRadius: '12px',
-          border: isOpen ? '1.5px solid var(--accent-color, #0284c7)' : '1.5px solid var(--border-color, #dbeafe)',
+          padding: '10px 14px',
+          minHeight: '44px',
+          borderRadius: '8px',
+          border: isOpen ? '1.5px solid var(--accent-color, #0284c7)' : '1.5px solid var(--border-color, #cbd5e1)',
           background: 'var(--bg-secondary, #ffffff)',
           color: selectedMaterial ? 'var(--text-main, #0f172a)' : 'var(--text-muted, #94a3b8)',
-          fontSize: '0.88rem',
-          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+          fontSize: '13px',
+          fontWeight: '700',
+          transition: 'all 0.2s ease',
           outline: 'none',
           boxShadow: isOpen ? '0 0 0 3px rgba(2, 132, 199, 0.15)' : 'none'
         }}
@@ -65,10 +67,10 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1, paddingRight: '8px' }}>
             <span style={{
               background: 'rgba(2, 132, 199, 0.12)',
-              color: '#0284c7',
+              color: 'var(--accent-color, #0284c7)',
               border: '1px solid rgba(2, 132, 199, 0.25)',
               padding: '2px 8px',
-              borderRadius: '6px',
+              borderRadius: '4px',
               fontSize: '11px',
               fontWeight: '800',
               fontFamily: 'monospace',
@@ -87,7 +89,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
                 color: 'var(--text-muted, #64748b)',
                 backgroundColor: 'var(--bg-primary, #f0f7ff)',
                 padding: '2px 7px',
-                borderRadius: '6px',
+                borderRadius: '4px',
                 border: '1px solid var(--border-color, #dbeafe)',
                 flexShrink: 0
               }}>
@@ -101,7 +103,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
               backgroundColor: 'rgba(16, 185, 129, 0.1)',
               border: '1px solid rgba(16, 185, 129, 0.25)',
               padding: '2px 8px',
-              borderRadius: '6px',
+              borderRadius: '4px',
               flexShrink: 0,
               marginLeft: 'auto'
             }}>
@@ -150,104 +152,162 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
           left: 0,
           right: 0,
           background: 'var(--bg-secondary, #ffffff)',
-          border: '1.5px solid var(--border-color, #dbeafe)',
-          borderRadius: '14px',
-          boxShadow: '0 16px 36px -4px rgba(2, 132, 199, 0.15), 0 4px 12px rgba(0, 0, 0, 0.06)',
-          maxHeight: '320px',
-          overflowY: 'auto',
+          border: '1.5px solid var(--border-color, #cbd5e1)',
+          borderRadius: '10px',
+          boxShadow: '0 14px 34px -4px rgba(0, 0, 0, 0.16), 0 4px 12px rgba(0, 0, 0, 0.06)',
           zIndex: 100000,
-          padding: '8px'
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px', background: 'var(--bg-primary, #f0f7ff)', borderRadius: '10px', border: '1px solid var(--border-color, #dbeafe)', marginBottom: '8px' }}>
-            <Search size={14} style={{ color: 'var(--accent-color, #0284c7)' }} />
+          {/* Seamless Pinned Search Bar Header (No box-in-a-box) */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '10px 14px',
+            background: 'var(--bg-secondary, #ffffff)',
+            borderBottom: '1px solid var(--border-color, #e2e8f0)',
+            flexShrink: 0
+          }}>
+            <Search size={15} style={{ color: 'var(--accent-color, #0284c7)', flexShrink: 0 }} />
             <input 
               type="text" 
               placeholder="Search by code, material name, or location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               autoFocus
+              className="seamless-search-input"
               style={{
                 border: 'none',
-                background: 'transparent',
-                width: '100%',
-                fontSize: '12.5px',
-                fontWeight: '600',
                 outline: 'none',
-                color: 'var(--text-main, #0f172a)'
+                boxShadow: 'none',
+                background: 'transparent',
+                backgroundColor: 'transparent',
+                WebkitAppearance: 'none',
+                MozAppearance: 'none',
+                appearance: 'none',
+                width: '100%',
+                flex: 1,
+                fontSize: '13px',
+                fontWeight: '600',
+                color: 'var(--text-main, #0f172a)',
+                padding: '0',
+                margin: '0',
+                height: 'auto',
+                lineHeight: '1.4'
               }}
             />
             {searchQuery && (
-              <X size={13} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setSearchQuery('')} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted, #94a3b8)', background: 'var(--bg-primary, #f0f7ff)', padding: '1px 6px', borderRadius: '4px' }}>
+                  {filtered.length} found
+                </span>
+                <button
+                  type="button"
+                  title="Clear search"
+                  onClick={() => setSearchQuery('')}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--text-muted, #94a3b8)',
+                    borderRadius: '50%',
+                    transition: 'color 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                  onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-muted, #94a3b8)'}
+                >
+                  <X size={14} />
+                </button>
+              </div>
             )}
           </div>
 
-          {filtered.length === 0 ? (
-            <div style={{ padding: '20px', textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-              No matching materials found in warehouse catalog
-            </div>
-          ) : (
-            filtered.map(m => {
-              const isSelected = String(value) === String(m.id);
-              const loc = m.location || (m.color && (m.color.toLowerCase().includes('hall') || m.color.toLowerCase().includes('rack') || m.color.toLowerCase().includes('store')) ? m.color : 'Main Store');
-              return (
-                <div 
-                  key={m.id}
-                  onClick={() => {
-                    onChange(m.id);
-                    setIsOpen(false);
-                    setSearchQuery('');
-                  }}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    background: isSelected ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
-                    marginBottom: '3px',
-                    border: isSelected ? '1px solid rgba(2, 132, 199, 0.3)' : '1px solid transparent'
-                  }}
-                  onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-primary, #f0f7ff)'; }}
-                  onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: '#0284c7', background: 'rgba(2, 132, 199, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
-                        {m.id}
-                      </span>
-                      <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
-                        {m.name}
+          {/* Scrollable Results Area */}
+          <div style={{
+            maxHeight: '260px',
+            overflowY: 'auto',
+            padding: '6px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px'
+          }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '20px 16px', textAlign: 'center', color: 'var(--text-muted, #64748b)' }}>
+                <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main, #0f172a)', marginBottom: '4px' }}>
+                  No matching materials
+                </div>
+                <div style={{ fontSize: '11.5px', fontWeight: '500' }}>
+                  {searchQuery ? `No results found for "${searchQuery}"` : 'No materials available in catalog'}
+                </div>
+              </div>
+            ) : (
+              filtered.map(m => {
+                const isSelected = String(value) === String(m.id);
+                const loc = m.location || (m.color && (m.color.toLowerCase().includes('hall') || m.color.toLowerCase().includes('rack') || m.color.toLowerCase().includes('store')) ? m.color : 'Main Store');
+                return (
+                  <div 
+                    key={m.id}
+                    onClick={() => {
+                      onChange(m.id);
+                      setIsOpen(false);
+                      setSearchQuery('');
+                    }}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      background: isSelected ? 'rgba(2, 132, 199, 0.1)' : 'transparent',
+                      border: isSelected ? '1px solid rgba(2, 132, 199, 0.3)' : '1px solid transparent'
+                    }}
+                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-primary, #f0f7ff)'; }}
+                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: 'var(--accent-color, #0284c7)', background: 'rgba(2, 132, 199, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
+                          {m.id}
+                        </span>
+                        <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+                          {m.name}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#059669' }}>
+                        {m.stock} {m.unit || 'Pcs'}
                       </span>
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: '800', color: '#059669' }}>
-                      {m.stock} {m.unit || 'Pcs'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
+                      <MapPin size={11} style={{ color: 'var(--accent-color, #0284c7)' }} />
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {loc}
+                      </span>
+                      <span style={{ marginLeft: 'auto', fontWeight: '700', color: 'var(--accent-color, #0284c7)' }}>
+                        {m.packets || 1} pkts
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
-                    <MapPin size={11} style={{ color: '#0284c7' }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {loc}
-                    </span>
-                    <span style={{ marginLeft: 'auto', fontWeight: '700', color: '#0284c7' }}>
-                      {m.packets || 1} pkts
-                    </span>
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-// Barcode Renderer Component (Guaranteed crisp black/white Code-128 visual style)
+// Barcode Renderer Component
 const BarcodeVisual = ({ code }) => {
   const str = String(code || 'MT1000-A01');
   let currentX = 4;
   const bars = [];
 
-  // Code 128 Start B pattern [2, 1, 1, 2, 1, 4]
   const startPattern = [2, 1, 1, 2, 1, 4];
   let isBar = true;
   startPattern.forEach((w, idx) => {
@@ -258,7 +318,6 @@ const BarcodeVisual = ({ code }) => {
     isBar = !isBar;
   });
 
-  // Render ASCII character bars with guaranteed white space gaps
   for (let i = 0; i < str.length; i++) {
     const charCode = str.charCodeAt(i);
     const b1 = (charCode % 3) + 1;
@@ -279,7 +338,6 @@ const BarcodeVisual = ({ code }) => {
     });
   }
 
-  // Stop pattern [2, 3, 3, 1, 1, 1, 2]
   [2, 3, 3, 1, 1, 1, 2].forEach((w, idx) => {
     bars.push(<rect key={`sp-${idx}`} x={currentX} y={0} width={w * 1.3} height={45} fill="#000000" />);
     currentX += w * 1.3;
@@ -319,14 +377,25 @@ const BarcodeVisual = ({ code }) => {
   );
 };
 
-export default function MaterialTransferView({ currentUser }) {
-  const [materials, setMaterials] = useState([]);
+export default function MaterialTransferView({
+  currentUser,
+  racks: propRacks = [],
+  halls: propHalls = [],
+  materials: propMaterials = []
+}) {
+  const [materials, setMaterials] = useState(() => (Array.isArray(propMaterials) && propMaterials.length > 0 ? propMaterials : []));
   const [warehouseLocations, setWarehouseLocations] = useState([]);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
   const [sourceLocations, setSourceLocations] = useState([]);
   const [fromLoc, setFromLoc] = useState('');
   const [toLoc, setToLoc] = useState('');
   const [transferQty, setTransferQty] = useState(1);
+  const [operatorName, setOperatorName] = useState(() => currentUser?.name || 'Admin');
+  useEffect(() => {
+    if (currentUser?.name && (!operatorName || operatorName === 'Admin')) {
+      setOperatorName(currentUser.name);
+    }
+  }, [currentUser]);
   const [history, setHistory] = useState([]);
   const [logSearch, setLogSearch] = useState('');
   const [timeFilter, setTimeFilter] = useState('all');
@@ -335,6 +404,19 @@ export default function MaterialTransferView({ currentUser }) {
   const [toast, setToast] = useState(null);
   const [printModalData, setPrintModalData] = useState(null);
   const [lastTransferSuccess, setLastTransferSuccess] = useState(null);
+
+  // Live timer matching ManuallyWeightCapture
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Pagination & Sorting for Activity Log Table
+  const [page, setPage] = useState(0);
+  const [rpp, setRpp] = useState(10);
+  const [orderBy, setOrderBy] = useState('transferredAt');
+  const [order, setOrder] = useState('desc');
 
   // Printer connection state
   const [printerStatus, setPrinterStatus] = useState('offline');
@@ -427,7 +509,46 @@ export default function MaterialTransferView({ currentUser }) {
     setFromLoc('');
     setToLoc('');
     setTransferQty(1);
+    setOperatorName(currentUser?.name || 'Admin');
     setLastTransferSuccess(null);
+  };
+
+  // Robust case-insensitive location parser
+  const parseLocationString = (locStr, packetsTotal = 1) => {
+    if (!locStr) return [{ location: 'Main Store', count: packetsTotal }];
+    
+    if (!/pkt/i.test(locStr) && !locStr.includes('(')) {
+      return [{ location: locStr.trim(), count: packetsTotal }];
+    }
+
+    const parts = locStr.split(',');
+    const list = [];
+    parts.forEach(part => {
+      const trimmed = part.trim();
+      if (!trimmed) return;
+      const match = trimmed.match(/^(.+?)\s*\(\s*(\d+)\s*(?:pkts?|packets?)?\s*\)$/i) || trimmed.match(/(.+?)\s*\((\d+)/i);
+      if (match) {
+        list.push({
+          location: match[1].trim(),
+          count: parseInt(match[2], 10) || 1
+        });
+      } else {
+        list.push({
+          location: trimmed,
+          count: 1
+        });
+      }
+    });
+    return list.length > 0 ? list : [{ location: 'Main Store', count: packetsTotal }];
+  };
+
+  const serializeLocations = (groups) => {
+    const active = groups.filter(g => g.location.trim() && g.count > 0);
+    if (active.length === 0) return 'Main Store';
+    if (active.length === 1 && active[0].count === 1) return active[0].location.trim();
+    return active
+      .map(g => `${g.location.trim()} (${g.count} pkt${g.count > 1 ? 's' : ''})`)
+      .join(', ');
   };
 
   // Parse source locations when material selection changes
@@ -442,7 +563,6 @@ export default function MaterialTransferView({ currentUser }) {
     const locStr = selectedMaterial.location || (selectedMaterial.color && (selectedMaterial.color.toLowerCase().includes('hall') || selectedMaterial.color.toLowerCase().includes('rack') || selectedMaterial.color.toLowerCase().includes('store')) ? selectedMaterial.color : 'Main Store');
     const pkts = Math.max(1, selectedMaterial.packets || 1);
     
-    // Parse locations string e.g. "hall 1 rack 2 (8 pkts), hall 2 rack 3 (2 pkts)"
     const parsed = parseLocationString(locStr, pkts);
     setSourceLocations(parsed);
     if (parsed.length > 0) {
@@ -451,59 +571,26 @@ export default function MaterialTransferView({ currentUser }) {
     }
   }, [selectedMaterialId, materials]);
 
-  const parseLocationString = (locStr, packetsTotal = 1) => {
-    if (!locStr) return [{ location: 'Main Store', count: packetsTotal }];
-    if (!locStr.includes('pkt') && !locStr.includes('(')) {
-      return [{ location: locStr.trim(), count: packetsTotal }];
-    }
-    const parts = locStr.split(',');
-    const list = [];
-    parts.forEach(part => {
-      const match = part.match(/(.+)\((\d+)\s*pkt/);
-      if (match) {
-        list.push({
-          location: match[1].trim(),
-          count: parseInt(match[2], 10) || 1
-        });
-      } else {
-        list.push({
-          location: part.trim(),
-          count: 1
-        });
-      }
-    });
-    return list;
-  };
-
-  const serializeLocations = (groups) => {
-    const active = groups.filter(g => g.location.trim() && g.count > 0);
-    if (active.length === 0) return 'Main Store';
-    if (active.length === 1 && active[0].count === 1) return active[0].location.trim();
-    return active
-      .map(g => `${g.location.trim()} (${g.count} pkt${g.count > 1 ? 's' : ''})`)
-      .join(', ');
-  };
-
   const showNotification = (msg, type = 'success') => {
     setToast({ message: msg, type });
-    setTimeout(() => setToast(null), 3000);
+    setTimeout(() => setToast(null), 3500);
   };
 
   const handleExecuteTransfer = async () => {
     if (!selectedMaterialId) {
-      showNotification('Please select a material first.', 'error');
+      showNotification('Please select an accessory material first.', 'error');
       return;
     }
     if (!fromLoc) {
-      showNotification('Please select a source location.', 'error');
+      showNotification('Please select a source rack location.', 'error');
       return;
     }
     if (!toLoc.trim()) {
-      showNotification('Please specify a destination location.', 'error');
+      showNotification('Please specify a destination rack or slot.', 'error');
       return;
     }
     if (fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase()) {
-      showNotification('Source and destination locations cannot be the same.', 'error');
+      showNotification('Source and destination rack cannot be the same.', 'error');
       return;
     }
 
@@ -513,8 +600,19 @@ export default function MaterialTransferView({ currentUser }) {
       return;
     }
 
-    if (transferQty > sourceGroup.count) {
+    const qty = parseInt(transferQty, 10);
+    if (isNaN(qty) || qty <= 0) {
+      showNotification('Please enter a valid transfer quantity (at least 1 packet).', 'error');
+      return;
+    }
+
+    if (qty > sourceGroup.count) {
       showNotification(`Insufficient packet count at ${fromLoc}. Max available: ${sourceGroup.count}`, 'error');
+      return;
+    }
+
+    if (!operatorName || !operatorName.trim()) {
+      showNotification('Please enter the Operator / Transferred By name.', 'error');
       return;
     }
 
@@ -523,7 +621,7 @@ export default function MaterialTransferView({ currentUser }) {
       // 1. Calculate updated locations list
       let updatedGroups = sourceLocations.map(g => {
         if (g.location === fromLoc) {
-          return { ...g, count: g.count - transferQty };
+          return { ...g, count: g.count - qty };
         }
         return g;
       });
@@ -531,16 +629,15 @@ export default function MaterialTransferView({ currentUser }) {
       // Add to destination location group
       const destIndex = updatedGroups.findIndex(g => g.location.toLowerCase() === toLoc.trim().toLowerCase());
       if (destIndex !== -1) {
-        updatedGroups[destIndex].count += transferQty;
+        updatedGroups[destIndex].count += qty;
       } else {
-        updatedGroups.push({ location: toLoc.trim(), count: transferQty });
+        updatedGroups.push({ location: toLoc.trim(), count: qty });
       }
 
-      // Filter out zero count locations
       updatedGroups = updatedGroups.filter(g => g.count > 0);
       const newLocSummary = serializeLocations(updatedGroups);
 
-      // 2. Send PUT request to update material's location
+      // 2. PUT request to update material's location
       const updatedMaterial = {
         ...selectedMaterial,
         location: newLocSummary
@@ -552,7 +649,7 @@ export default function MaterialTransferView({ currentUser }) {
         body: JSON.stringify(updatedMaterial)
       });
 
-      if (!putRes.ok) throw new Error('Failed to update material location');
+      if (!putRes.ok) throw new Error('Failed to update material location in database');
 
       // 3. Post transfer log to API
       const logPayload = {
@@ -560,9 +657,9 @@ export default function MaterialTransferView({ currentUser }) {
         materialName: selectedMaterial.name,
         fromLocation: fromLoc,
         toLocation: toLoc.trim(),
-        quantity: transferQty,
+        quantity: qty,
         transferType: 'packet',
-        operator: currentUser?.name || 'Admin'
+        operator: operatorName.trim() || currentUser?.name || 'Admin'
       };
 
       const logRes = await fetch(`${getBackendUrl()}/api/transfers`, {
@@ -573,28 +670,27 @@ export default function MaterialTransferView({ currentUser }) {
 
       if (!logRes.ok) throw new Error('Failed to log transfer history');
 
-      // Save success summary for quick actions & sticker printing
+      // Completed transfer metadata
       const completedTransfer = {
         id: Date.now(),
         materialCode: selectedMaterialId,
         materialName: selectedMaterial.name,
         fromLocation: fromLoc,
         toLocation: toLoc.trim(),
-        quantity: transferQty,
-        operator: currentUser?.name || 'Admin',
+        quantity: qty,
+        operator: operatorName.trim() || currentUser?.name || 'Admin',
         transferredAt: new Date().toISOString()
       };
       setLastTransferSuccess(completedTransfer);
 
-      // Automatically dismiss the success banner after exactly 3 seconds
       if (window._transferSuccessTimer) clearTimeout(window._transferSuccessTimer);
       window._transferSuccessTimer = setTimeout(() => {
         setLastTransferSuccess(null);
-      }, 3000);
+      }, 5000);
 
-      showNotification(`Successfully transferred ${transferQty} packet(s) of ${selectedMaterial.name} to ${toLoc}!`);
+      showNotification(`Successfully transferred ${qty} packet(s) of ${selectedMaterial.name} to ${toLoc}!`);
       
-      // Cleanly reset all transfer form fields
+      // Cleanly reset form
       setSelectedMaterialId('');
       setSourceLocations([]);
       setFromLoc('');
@@ -638,7 +734,6 @@ export default function MaterialTransferView({ currentUser }) {
     const totalPkts = material ? Math.max(1, material.packets || totalToPrint) : totalToPrint;
     const pktQty = material ? Math.round((Number(material.stock || 0) / totalPkts) * 100) / 100 : totalToPrint;
 
-    // Generate accurate stickers matching Weight Capture inward addition format
     const stickers = [];
     for (let pkt = 1; pkt <= totalToPrint; pkt++) {
       const pktBarcodeId = `${item.materialCode}-A${String(pkt).padStart(2, '0')}`;
@@ -676,14 +771,12 @@ export default function MaterialTransferView({ currentUser }) {
       });
     }
 
-    // Open Sticker Preview & Direct Print Modal
     setPrintModalData({
       item,
       stickers,
       material
     });
 
-    // Also attempt Python Print Service if available
     try {
       const pws = new WebSocket('ws://localhost:8765');
       let nextPkt = 0;
@@ -711,33 +804,102 @@ export default function MaterialTransferView({ currentUser }) {
   const destinationOptions = useMemo(() => {
     const locMap = new Map();
 
-    // 1. Add configured warehouse locations
-    if (warehouseLocations && warehouseLocations.length > 0) {
-      warehouseLocations.forEach(rack => {
-        const warehouse = rack.warehouse || 'Main Store';
-        const rawCode = String(rack.code || '').trim();
-        const label = rack.warehouse && rawCode.includes(rack.warehouse)
-          ? rawCode
-          : `${warehouse} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
-        if (!locMap.has(label)) {
-          locMap.set(label, { code: label, label, warehouse });
+    const addLocation = (rawCode, warehouseHint = '') => {
+      if (!rawCode) return;
+      const str = String(rawCode).trim();
+      if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return;
+
+      let warehouse = warehouseHint ? warehouseHint.trim() : '';
+      let cleanCode = str;
+
+      if (str.includes(' - ')) {
+        const parts = str.split(' - ');
+        warehouse = parts[0].trim();
+        cleanCode = `${warehouse} - ${parts.slice(1).join(' - ').trim()}`;
+      } else if (/^hall\s*\d+/i.test(str)) {
+        const m = str.match(/^hall\s*\d+/i);
+        warehouse = m[0].replace(/\s+/g, ' ');
+        const remainder = str.replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '').trim();
+        cleanCode = remainder ? `${warehouse} - ${remainder}` : `${warehouse} - Rack 1`;
+      } else if (/^main\s*store/i.test(str)) {
+        warehouse = 'Main Store';
+        const remainder = str.replace(/^main\s*store\s*[-–]?\s*/i, '').trim();
+        cleanCode = remainder ? `Main Store - ${remainder}` : `Main Store - Rack 1`;
+      } else if (/^store/i.test(str)) {
+        warehouse = 'Store';
+        const remainder = str.replace(/^store\s*[-–]?\s*/i, '').trim();
+        cleanCode = remainder ? `Store - ${remainder}` : `Store - Rack 1`;
+      }
+
+      if (!warehouse) {
+        warehouse = 'Main Store';
+      }
+
+      // Format rack title consistently (e.g. "rack 1" -> "Rack 1")
+      cleanCode = cleanCode.replace(/\brack\s*(\d+)/i, (_, n) => `Rack ${n}`);
+
+      const key = cleanCode.toLowerCase().replace(/\s+/g, ' ');
+      if (!locMap.has(key)) {
+        locMap.set(key, {
+          code: cleanCode,
+          label: cleanCode,
+          warehouse: warehouse
+        });
+      }
+    };
+
+    // 1. Add all official custom locations from warehouse_locations DB
+    (warehouseLocations || []).forEach(w => {
+      addLocation(w.code || w.label || w.id, w.warehouse);
+    });
+
+    // 2. Add all locations from prop racks & localStorage racks
+    const allRacks = (propRacks && propRacks.length > 0) ? propRacks : (() => {
+      try {
+        const s = localStorage.getItem('warehouse_racks');
+        return s ? JSON.parse(s) : [];
+      } catch { return []; }
+    })();
+    (allRacks || []).forEach(r => {
+      const code = r.code && String(r.code).includes('-') ? r.code : `${r.warehouse || 'Main Store'} - ${r.name || `Rack ${r.code}`}`;
+      addLocation(code, r.warehouse);
+    });
+
+    // 3. Add all locations actively referenced by materials in the warehouse catalog
+    const allMaterials = (materials && materials.length > 0) ? materials : propMaterials;
+    (allMaterials || []).forEach(m => {
+      const locStr = String(m.location || '').trim();
+      if (!locStr) return;
+      const parts = locStr.split(',');
+      parts.forEach(p => {
+        const clean = p.replace(/\(\d+.*?\)/i, '').trim();
+        if (clean && clean.toLowerCase() !== 'n/a' && clean.toLowerCase() !== 'null') {
+          addLocation(clean);
         }
       });
-    }
+    });
 
-    // 2. Fallback defaults if no warehouse locations in DB yet
+    // Fallback only if no real locations were discovered anywhere
     if (locMap.size === 0) {
-      ['Main Store', 'Hall 1', 'Hall 2', 'Hall 3'].forEach(hall => {
-        const count = hall === 'Main Store' ? 50 : 30;
-        for (let i = 1; i <= count; i++) {
-          const label = `${hall} - Rack ${i}`;
-          locMap.set(label, { code: label, label, warehouse: hall });
-        }
-      });
+      addLocation('Main Store - Rack 1', 'Main Store');
     }
 
-    return Array.from(locMap.values());
-  }, [warehouseLocations]);
+    // Sort locations logically: by warehouse, then by numeric rack number
+    const list = Array.from(locMap.values());
+    list.sort((a, b) => {
+      if (a.warehouse !== b.warehouse) {
+        return a.warehouse.localeCompare(b.warehouse);
+      }
+      const numA = parseInt((a.label.match(/\d+/) || [0])[0], 10);
+      const numB = parseInt((b.label.match(/\d+/) || [0])[0], 10);
+      if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+        return numA - numB;
+      }
+      return a.label.localeCompare(b.label, undefined, { numeric: true });
+    });
+
+    return list;
+  }, [warehouseLocations, propRacks, materials, propMaterials]);
 
   const todayStr = useMemo(() => new Date().toDateString(), []);
 
@@ -799,1469 +961,1058 @@ export default function MaterialTransferView({ currentUser }) {
     showNotification('Exported transfer activity log successfully!');
   };
 
+  // Filtered and Sorted History Data
+  const filteredHistory = useMemo(() => {
+    let list = (history || []).filter(item => {
+      if (logSearch.trim()) {
+        const q = logSearch.toLowerCase().trim();
+        const matchStr = `${item.materialCode || ''} ${item.materialName || ''} ${item.fromLocation || ''} ${item.toLocation || ''} ${item.operator || ''}`.toLowerCase();
+        if (!matchStr.includes(q)) return false;
+      }
+
+      if (timeFilter !== 'all' && item.transferredAt) {
+        const itemDate = new Date(item.transferredAt);
+        const curDate = new Date();
+        if (timeFilter === 'today') {
+          if (itemDate.toDateString() !== curDate.toDateString()) return false;
+        } else if (timeFilter === 'yesterday') {
+          const yesterday = new Date(curDate);
+          yesterday.setDate(curDate.getDate() - 1);
+          if (itemDate.toDateString() !== yesterday.toDateString()) return false;
+        } else if (timeFilter === 'week') {
+          const sevenDaysAgo = new Date(curDate);
+          sevenDaysAgo.setDate(curDate.getDate() - 7);
+          if (itemDate < sevenDaysAgo) return false;
+        }
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      let av = a[orderBy] ?? '';
+      let bv = b[orderBy] ?? '';
+      if (orderBy === 'transferredAt') {
+        av = new Date(av || 0).getTime();
+        bv = new Date(bv || 0).getTime();
+      } else if (typeof av === 'string') {
+        av = av.toLowerCase();
+        bv = bv.toLowerCase();
+      }
+      if (av < bv) return order === 'asc' ? -1 : 1;
+      if (av > bv) return order === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [history, logSearch, timeFilter, orderBy, order]);
+
+  const paginatedHistory = useMemo(() => {
+    const start = page * rpp;
+    return filteredHistory.slice(start, start + rpp);
+  }, [filteredHistory, page, rpp]);
+
+  const totalPages = Math.ceil(filteredHistory.length / rpp) || 1;
+
+  const handleSort = (col) => {
+    if (orderBy === col) {
+      setOrder(o => o === 'asc' ? 'desc' : 'asc');
+    } else {
+      setOrderBy(col);
+      setOrder('desc');
+    }
+  };
+
+  // Helper calculations for quantity card
+  const maxAvailable = sourceLocations.find(g => g.location === fromLoc)?.count || 1;
+  const totalPkts = selectedMaterial?.packets || maxAvailable;
+  const approxPcsPerPkt = selectedMaterial ? Math.round(Number(selectedMaterial.stock || 0) / Math.max(1, totalPkts)) : 0;
+  const movingPcs = (Number(transferQty) || 0) * approxPcsPerPkt;
+  const remainingAfter = maxAvailable - (Number(transferQty) || 0);
+
   return (
-    <div style={{ padding: '20px 24px', width: '100%', maxWidth: '100%', margin: '0', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div className="page-container" style={{ padding: '16px', maxWidth: '100%', boxSizing: 'border-box' }}>
       
-      {/* Toast Notification */}
+      {/* Scoped CSS Styles to guarantee identical styling with the application */}
+      <style>{`
+        .wcs-input {
+          padding: 10px 14px;
+          border: 1.5px solid var(--border-color, #cbd5e1);
+          border-radius: 8px;
+          background: var(--bg-secondary, #ffffff);
+          color: var(--text-main, #0f172a);
+          font-size: 13.5px;
+          font-weight: 700;
+          outline: none;
+          width: 100%;
+          box-sizing: border-box;
+          transition: all 0.2s ease;
+        }
+        .wcs-input:focus {
+          border-color: var(--accent-color, #3b82f6);
+          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        .wcs-label {
+          font-size: 11.5px;
+          font-weight: 800;
+          color: var(--text-main, #1e293b);
+          text-transform: uppercase;
+          display: block;
+          margin-bottom: 6px;
+          letter-spacing: 0.5px;
+        }
+      `}</style>
+
+      {/* Toast Popup Notification */}
       {toast && (
-        <div style={{
-          position: 'fixed', top: '24px', right: '24px', zIndex: 99999,
-          padding: '14px 20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '10px',
-          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : 'rgba(16, 185, 129, 0.95)',
-          color: '#ffffff', fontWeight: '700', boxShadow: '0 12px 28px rgba(0,0,0,0.18)',
-          backdropFilter: 'blur(8px)', animation: 'slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
-        }}>
-          {toast.type === 'error' ? <AlertTriangle size={18} /> : <CheckCircle size={18} />}
-          <span>{toast.message}</span>
+        <div className="notification-toast animate-scale" style={{ position: 'fixed', top: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 1200 }}>
+          {toast.type === 'error' ? <AlertTriangle style={{ color: '#ef4444' }} /> : <CheckCircle2 style={{ color: '#10b981' }} />}
+          <div className="notification-content">
+            <div className="notification-title" style={{ color: toast.type === 'error' ? '#ef4444' : '#10b981' }}>
+              {toast.type === 'error' ? 'ALERT' : 'SUCCESS'}
+            </div>
+            <div className="notification-body">{toast.message}</div>
+          </div>
         </div>
       )}
 
-      {/* Top Stats Banner: 4 Modern KPI Cards */}
+      {/* ── 1. UNIFIED APPLICATION HEADER ────────────────────────────────────────── */}
+      <div className="panel" style={{ padding: '16px 24px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #ffffff)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '42px', height: '42px', background: 'var(--accent-color, #0284c7)', color: '#ffffff', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)' }}>
+            <ArrowLeftRight size={22} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: '800', margin: 0, color: 'var(--text-main, #0f172a)' }}>Material Store Transfer</h2>
+            <span style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)' }}>Warehouse Internal Stock Relocation & Rack Tracking</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          {/* Live Date & Time Clock */}
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', display: 'block' }}>
+              {now.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
+            <span style={{ fontSize: '15px', fontWeight: '700', fontFamily: 'monospace', color: 'var(--text-main, #0f172a)' }}>
+              {now.toTimeString().slice(0, 8)}
+            </span>
+          </div>
+
+          <div style={{ borderLeft: '1px solid var(--border-color, #cbd5e1)', height: '24px' }}></div>
+
+          {/* Operator Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '32px', height: '32px', background: 'var(--accent-color, #0284c7)', color: '#ffffff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '12px' }}>
+              {(currentUser?.name || 'A')[0].toUpperCase()}
+            </div>
+            <div>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', display: 'block' }}>Operator</span>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>{currentUser?.name || 'Admin'}</span>
+            </div>
+          </div>
+
+          {/* Mode Badge */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '6px',
+            backgroundColor: 'rgba(2, 132, 199, 0.1)', color: 'var(--accent-color, #0284c7)',
+            border: '1.5px solid rgba(2, 132, 199, 0.25)', fontWeight: '700', fontSize: '12px'
+          }}>
+            <ArrowLeftRight size={14} />
+            <span>Stock Relocate</span>
+          </div>
+
+          {/* Printer Status Badge */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            padding: '6px 12px', borderRadius: '6px', fontWeight: '700', fontSize: '12px',
+            backgroundColor: printerStatus === 'online'
+              ? 'rgba(16, 185, 129, 0.1)'
+              : printerStatus === 'connecting'
+                ? 'rgba(251, 191, 36, 0.1)'
+                : 'rgba(239, 68, 68, 0.1)',
+            color: printerStatus === 'online' ? '#10b981'
+              : printerStatus === 'connecting' ? '#f59e0b'
+                : '#ef4444',
+            border: `1.5px solid ${printerStatus === 'online' ? 'rgba(16, 185, 129, 0.25)'
+              : printerStatus === 'connecting' ? 'rgba(251, 191, 36, 0.25)'
+                : 'rgba(239, 68, 68, 0.25)'}`,
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+            onClick={connectPrinter}
+            title={printerStatus === 'online' ? `Default Printer: ${printerName || 'USB Printer'} (Click to reconnect)` : 'Click to connect print service'}
+          >
+            <Printer size={14} />
+            <span>{printerStatus === 'connecting' ? 'Connecting...' : (printerStatus === 'online' ? (printerName || 'USB Printer Ready') : 'Printer Offline')}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={fetchData}
+            title="Refresh Data"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: '34px', height: '34px', borderRadius: '6px',
+              border: '1.5px solid var(--border-color, #cbd5e1)', background: 'var(--bg-secondary, #ffffff)',
+              color: 'var(--text-main, #0f172a)', cursor: 'pointer', transition: 'all 0.2s ease', padding: 0
+            }}
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── 2. STEP-BY-STEP OPERATING INSTRUCTIONS WORKFLOW BANNER ──────────────────── */}
+      <div className="panel" style={{
+        padding: '18px 24px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)',
+        marginBottom: '20px', background: 'var(--bg-secondary, #ffffff)', boxShadow: '0 4px 12px rgba(0,0,0,0.02)'
+      }}>
+        <h3 style={{ fontSize: '14.5px', fontWeight: '900', color: 'var(--text-main, #0f172a)', margin: '0 0 14px 0', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          📋 Operating Instructions: Step-by-Step Material Transfer Workflow
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+          {/* Step 1 */}
+          <div style={{
+            padding: '12px 14px', borderRadius: '8px', border: `1.5px solid ${selectedMaterialId ? '#10b981' : 'var(--border-color, #cbd5e1)'}`,
+            background: selectedMaterialId ? 'rgba(16, 185, 129, 0.06)' : 'var(--bg-primary, #f0f7ff)', transition: 'all 0.3s'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{
+                display: 'inline-flex', width: '20px', height: '20px', borderRadius: '50%',
+                backgroundColor: selectedMaterialId ? '#10b981' : 'var(--accent-color, #0284c7)', color: '#ffffff',
+                fontSize: '11px', fontWeight: '800', alignItems: 'center', justifyContent: 'center', marginRight: '8px'
+              }}>
+                {selectedMaterialId ? <Check size={12} strokeWidth={3} /> : '1'}
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>Select Accessory Material</span>
+            </div>
+            <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0, lineHeight: '1.4' }}>
+              {selectedMaterial ? `${selectedMaterial.name} (${selectedMaterial.stock} ${selectedMaterial.unit || 'Pcs'})` : 'Select accessory material from warehouse catalog.'}
+            </p>
+          </div>
+
+          {/* Step 2 */}
+          <div style={{
+            padding: '12px 14px', borderRadius: '8px', border: `1.5px solid ${fromLoc ? '#10b981' : 'var(--border-color, #cbd5e1)'}`,
+            background: fromLoc ? 'rgba(16, 185, 129, 0.06)' : 'var(--bg-primary, #f0f7ff)', transition: 'all 0.3s'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{
+                display: 'inline-flex', width: '20px', height: '20px', borderRadius: '50%',
+                backgroundColor: fromLoc ? '#10b981' : 'var(--accent-color, #0284c7)', color: '#ffffff',
+                fontSize: '11px', fontWeight: '800', alignItems: 'center', justifyContent: 'center', marginRight: '8px'
+              }}>
+                {fromLoc ? <Check size={12} strokeWidth={3} /> : '2'}
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>Identify Source Rack</span>
+            </div>
+            <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0, lineHeight: '1.4' }}>
+              {fromLoc ? `Source slot set: ${fromLoc}` : 'Verify source rack containing stock packets.'}
+            </p>
+          </div>
+
+          {/* Step 3 */}
+          <div style={{
+            padding: '12px 14px', borderRadius: '8px', border: `1.5px solid ${(toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? '#10b981' : 'var(--border-color, #cbd5e1)'}`,
+            background: (toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? 'rgba(16, 185, 129, 0.06)' : 'var(--bg-primary, #f0f7ff)', transition: 'all 0.3s'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{
+                display: 'inline-flex', width: '20px', height: '20px', borderRadius: '50%',
+                backgroundColor: (toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? '#10b981' : 'var(--accent-color, #0284c7)', color: '#ffffff',
+                fontSize: '11px', fontWeight: '800', alignItems: 'center', justifyContent: 'center', marginRight: '8px'
+              }}>
+                {(toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? <Check size={12} strokeWidth={3} /> : '3'}
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>Assign Destination Rack</span>
+            </div>
+            <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0, lineHeight: '1.4' }}>
+              {toLoc ? `Target rack: ${toLoc}` : 'Select destination rack from master location slots.'}
+            </p>
+          </div>
+
+          {/* Step 4 */}
+          <div style={{
+            padding: '12px 14px', borderRadius: '8px', border: `1.5px solid ${(transferQty > 0 && selectedMaterialId && toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? '#10b981' : 'var(--border-color, #cbd5e1)'}`,
+            background: (transferQty > 0 && selectedMaterialId && toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? 'rgba(16, 185, 129, 0.06)' : 'var(--bg-primary, #f0f7ff)', transition: 'all 0.3s'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '6px' }}>
+              <span style={{
+                display: 'inline-flex', width: '20px', height: '20px', borderRadius: '50%',
+                backgroundColor: (transferQty > 0 && selectedMaterialId && toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? '#10b981' : 'var(--accent-color, #0284c7)', color: '#ffffff',
+                fontSize: '11px', fontWeight: '800', alignItems: 'center', justifyContent: 'center', marginRight: '8px'
+              }}>
+                {(transferQty > 0 && selectedMaterialId && toLoc && toLoc.toLowerCase() !== fromLoc.toLowerCase()) ? <Check size={12} strokeWidth={3} /> : '4'}
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>Quantity & Execute</span>
+            </div>
+            <p style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', margin: 0, lineHeight: '1.4' }}>
+              {transferQty > 0 ? `Move ${transferQty} packet(s) (~${movingPcs} Pcs)` : 'Set quantity and confirm transfer.'}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 3. MATERIAL TRANSFER WORKSTATION PANEL ─────────────────────────────────── */}
+      <div className="panel" style={{
+        padding: '24px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)',
+        marginBottom: '24px', background: 'var(--bg-secondary, #ffffff)', boxShadow: '0 4px 16px rgba(0,0,0,0.04)'
+      }}>
+        {/* Panel Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '14px', borderBottom: '1px solid var(--border-color, #e2e8f0)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Layers size={20} style={{ color: 'var(--accent-color, #0284c7)' }} />
+            <div>
+              <h3 style={{ fontSize: '16px', fontWeight: '800', color: 'var(--text-main, #0f172a)', margin: 0 }}>
+                Stock Relocation Workstation
+              </h3>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>Move packets between warehouse racks with live piece and slot synchronization</span>
+            </div>
+          </div>
+
+          {(selectedMaterialId || fromLoc || toLoc) && (
+            <button
+              type="button"
+              onClick={handleResetForm}
+              className="btn btn-secondary"
+              style={{ padding: '6px 14px', fontSize: '12px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <X size={13} /> Reset Form
+            </button>
+          )}
+        </div>
+
+        {/* Success Banner if recently transferred */}
+        {lastTransferSuccess && (
+          <div style={{
+            padding: '14px 18px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.08)',
+            border: '1.5px solid rgba(16, 185, 129, 0.3)', marginBottom: '20px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <CheckCircle size={20} style={{ color: '#10b981' }} />
+              <div>
+                <strong style={{ color: '#065f46', fontSize: '13px' }}>Transfer Completed Successfully!</strong>
+                <div style={{ fontSize: '12px', color: '#047857', marginTop: '2px' }}>
+                  Moved <strong>{lastTransferSuccess.quantity} packet(s)</strong> of {lastTransferSuccess.materialName} ({lastTransferSuccess.materialCode}) from <strong>{lastTransferSuccess.fromLocation}</strong> to <strong>{lastTransferSuccess.toLocation}</strong>.
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handlePrintTransferLabel(lastTransferSuccess)}
+              style={{
+                padding: '6px 14px', borderRadius: '6px', border: 'none', background: '#10b981', color: '#fff',
+                fontSize: '12px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+              }}
+            >
+              <Printer size={14} /> Print Sticker
+            </button>
+          </div>
+        )}
+
+        {/* Form Fields Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+          
+          {/* Field 1: Material Selection */}
+          <div style={{ gridColumn: '1 / -1' }}>
+            <label className="wcs-label">
+              1. Select Accessory Material to Relocate <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <SearchableMaterialSelect
+              materials={materials}
+              value={selectedMaterialId}
+              onChange={setSelectedMaterialId}
+            />
+
+            {/* Selected Material Information Card */}
+            {selectedMaterial && (
+              <div style={{
+                marginTop: '12px', padding: '14px 18px', borderRadius: '8px',
+                background: 'var(--bg-primary, #f0f7ff)', border: '1.5px solid var(--border-color, #cbd5e1)',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'var(--bg-secondary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-color, #0284c7)' }}>
+                    <Box size={20} />
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: 'var(--accent-color, #0284c7)', background: 'rgba(2, 132, 199, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
+                        {selectedMaterial.id}
+                      </span>
+                      <strong style={{ fontSize: '14px', color: 'var(--text-main, #0f172a)' }}>
+                        {selectedMaterial.name}
+                      </strong>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', marginTop: '3px' }}>
+                      Category: <strong>{selectedMaterial.category || 'General'}</strong> • Shade: <strong>{selectedMaterial.color || 'Default'}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', display: 'block' }}>Total Stock</span>
+                    <strong style={{ fontSize: '15px', color: '#059669' }}>
+                      {Number(selectedMaterial.stock || 0).toLocaleString()} {selectedMaterial.unit || 'Pcs'}
+                    </strong>
+                  </div>
+                  <div style={{ borderLeft: '1px solid var(--border-color, #cbd5e1)', height: '24px' }}></div>
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', display: 'block' }}>Total Packets</span>
+                    <strong style={{ fontSize: '15px', color: 'var(--text-main, #0f172a)' }}>
+                      {selectedMaterial.packets || 1} Pkts
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Field 2: Source Rack (From) */}
+          <div>
+            <label className="wcs-label">
+              2. Source Rack / Location (From) <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            {sourceLocations.length === 0 ? (
+              <div style={{ padding: '12px 14px', borderRadius: '8px', background: 'var(--bg-primary, #f0f7ff)', border: '1.5px dashed var(--border-color, #cbd5e1)', color: 'var(--text-muted, #64748b)', fontSize: '12px', fontWeight: '600', textAlign: 'center' }}>
+                {selectedMaterialId ? 'No active warehouse slots mapped for this material.' : 'Select an accessory material in step 1 to view source racks.'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {sourceLocations.map(g => {
+                  const isSelected = fromLoc === g.location;
+                  return (
+                    <div
+                      key={g.location}
+                      onClick={() => {
+                        setFromLoc(g.location);
+                        if (transferQty > g.count) setTransferQty(g.count);
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '10px 14px', borderRadius: '8px', cursor: 'pointer',
+                        border: isSelected ? '1.5px solid var(--accent-color, #0284c7)' : '1.5px solid var(--border-color, #cbd5e1)',
+                        background: isSelected ? 'rgba(2, 132, 199, 0.08)' : 'var(--bg-secondary, #ffffff)',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <MapPin size={16} style={{ color: isSelected ? 'var(--accent-color, #0284c7)' : '#94a3b8' }} />
+                        <span style={{ fontSize: '13px', fontWeight: isSelected ? '800' : '700', color: isSelected ? 'var(--accent-color, #0284c7)' : 'var(--text-main, #0f172a)' }}>
+                          {g.location}
+                        </span>
+                      </div>
+                      <span style={{
+                        fontSize: '11.5px', fontWeight: '800', padding: '2px 8px', borderRadius: '4px',
+                        backgroundColor: isSelected ? 'var(--accent-color, #0284c7)' : 'var(--bg-primary, #f0f7ff)',
+                        color: isSelected ? '#ffffff' : 'var(--text-muted, #64748b)'
+                      }}>
+                        {g.count} pkt{g.count > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Field 3: Destination Rack (To) */}
+          <div>
+            <label className="wcs-label">
+              3. Destination Rack / Slot (To) <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <SearchableLocationSelect
+              locations={destinationOptions}
+              value={toLoc}
+              onChange={setToLoc}
+              placeholder="Search destination rack or type new slot..."
+              allowCustom={true}
+            />
+
+            {fromLoc && toLoc && fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase() && (
+              <div style={{ marginTop: '8px', padding: '8px 12px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#dc2626', fontSize: '12px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertTriangle size={14} />
+                Source and Destination rack cannot be identical.
+              </div>
+            )}
+          </div>
+
+          {/* Field 4: Quantity to Transfer (Manual Input) */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="wcs-label" style={{ margin: 0 }}>
+                4. Quantity to Transfer (Packets) <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              {fromLoc && (
+                <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)' }}>
+                  Available in {fromLoc}: <strong style={{ color: 'var(--text-main, #0f172a)' }}>{maxAvailable} Pkt{maxAvailable > 1 ? 's' : ''}</strong>
+                </span>
+              )}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="number"
+                min="1"
+                max={maxAvailable > 0 ? maxAvailable : undefined}
+                className="wcs-input"
+                placeholder="Enter packet quantity (e.g. 1)"
+                value={transferQty}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '') {
+                    setTransferQty('');
+                  } else {
+                    const parsedVal = parseInt(val, 10);
+                    setTransferQty(isNaN(parsedVal) ? '' : parsedVal);
+                  }
+                }}
+                required
+                style={{
+                  height: '42px',
+                  fontSize: '14px',
+                  fontWeight: '700',
+                  color: '#0f172a',
+                  paddingRight: '75px',
+                  borderColor: (Number(transferQty) > maxAvailable || (transferQty !== '' && Number(transferQty) <= 0)) ? '#ef4444' : undefined
+                }}
+              />
+              <span style={{
+                position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)',
+                fontSize: '12px', fontWeight: '800', color: 'var(--text-muted, #64748b)', pointerEvents: 'none'
+              }}>
+                Packet{Number(transferQty) > 1 ? 's' : ''}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11.5px', marginTop: '6px', minHeight: '16px' }}>
+              <span style={{ fontWeight: '700', color: 'var(--accent-color, #0284c7)' }}>
+                {approxPcsPerPkt > 0 && Number(transferQty) > 0 ? `~${movingPcs.toLocaleString()} ${selectedMaterial?.unit || 'Pcs'} moving` : ''}
+              </span>
+              <span style={{ fontWeight: '700', color: Number(transferQty) > maxAvailable ? '#dc2626' : (remainingAfter > 0 ? '#059669' : '#d97706') }}>
+                {Number(transferQty) > maxAvailable
+                  ? `⚠️ Exceeds source stock (${maxAvailable} max)`
+                  : (remainingAfter > 0 ? `Remaining at source: ${remainingAfter} Pkt${remainingAfter > 1 ? 's' : ''}` : (selectedMaterialId && fromLoc && Number(transferQty) === maxAvailable ? '⚠️ Source slot will empty' : ''))}
+              </span>
+            </div>
+          </div>
+
+          {/* Field 5: Operator Name / Transferred By */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+              <label className="wcs-label" style={{ margin: 0 }}>
+                5. Operator Name / Transferred By <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              {currentUser?.name && (
+                <span style={{ fontSize: '11px', fontWeight: '700', color: '#059669', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                  <User size={12} /> Logged in: {currentUser.name}
+                </span>
+              )}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                className="wcs-input"
+                placeholder="Enter operator name (e.g. Pooja / Admin)"
+                value={operatorName}
+                onChange={(e) => setOperatorName(e.target.value)}
+                required
+                style={{ paddingLeft: '36px', height: '42px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
+              />
+              <User
+                size={16}
+                style={{
+                  position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)',
+                  color: 'var(--text-muted, #64748b)', pointerEvents: 'none'
+                }}
+              />
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', marginTop: '6px', fontWeight: '600' }}>
+              Person performing the transfer (recorded in audit logs & transfer sticker).
+            </div>
+          </div>
+
+          {/* Live Route Transfer Trajectory Card */}
+          {selectedMaterialId && fromLoc && toLoc && fromLoc.trim().toLowerCase() !== toLoc.trim().toLowerCase() && Number(transferQty) > 0 && (
+            <div style={{
+              gridColumn: '1 / -1', padding: '14px 18px', borderRadius: '8px',
+              background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.06) 0%, rgba(16, 185, 129, 0.06) 100%)',
+              border: '1.5px solid rgba(2, 132, 199, 0.25)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#dc2626', fontWeight: '800', fontSize: '13px' }}>
+                <MapPin size={16} />
+                <span>{fromLoc}</span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ height: '2px', width: '30px', background: 'var(--border-color, #cbd5e1)' }}></div>
+                <div style={{
+                  padding: '4px 12px', borderRadius: '9999px', background: 'var(--accent-color, #0284c7)', color: '#ffffff',
+                  fontSize: '11.5px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '5px'
+                }}>
+                  Moving {transferQty} Pkt{Number(transferQty) > 1 ? 's' : ''} {operatorName ? `by ${operatorName.trim()}` : ''} <ArrowRight size={13} />
+                </div>
+                <div style={{ height: '2px', width: '30px', background: 'var(--border-color, #cbd5e1)' }}></div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: '800', fontSize: '13px' }}>
+                <MapPin size={16} />
+                <span>{toLoc}</span>
+              </div>
+            </div>
+          )}
+
+        </div>
+
+        {/* Action Buttons */}
+        <div style={{ marginTop: '24px', display: 'flex', gap: '12px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handleResetForm}
+            className="btn btn-secondary"
+            style={{ padding: '12px 20px', fontWeight: '800' }}
+          >
+            Clear Form
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExecuteTransfer}
+            disabled={
+              submitting ||
+              !selectedMaterialId ||
+              !fromLoc ||
+              !toLoc.trim() ||
+              fromLoc.toLowerCase() === toLoc.trim().toLowerCase() ||
+              !operatorName ||
+              !operatorName.trim() ||
+              !transferQty ||
+              Number(transferQty) <= 0 ||
+              Number(transferQty) > maxAvailable
+            }
+            style={{
+              padding: '13px 28px',
+              fontSize: '14.5px',
+              fontWeight: '800',
+              color: '#ffffff',
+              background: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase() && operatorName && operatorName.trim() && transferQty && Number(transferQty) > 0 && Number(transferQty) <= maxAvailable)
+                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                : '#94a3b8',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase() && operatorName && operatorName.trim() && transferQty && Number(transferQty) > 0 && Number(transferQty) <= maxAvailable)
+                ? 'pointer'
+                : 'not-allowed',
+              boxShadow: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase() && operatorName && operatorName.trim() && transferQty && Number(transferQty) > 0 && Number(transferQty) <= maxAvailable)
+                ? '0 4px 14px rgba(16, 185, 129, 0.35)'
+                : 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            {submitting ? (
+              <>
+                <RefreshCw size={17} className="animate-spin" />
+                Executing Stock Movement...
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={18} />
+                Execute Stock Transfer & Print
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* ── 4. STATISTICAL METRICS RECORD (AFTER & BELOW WORKSTATION) ───────────────── */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: '16px'
+        gap: '16px',
+        marginBottom: '20px'
       }}>
-        {/* KPI 1: Transfers Today */}
-        <div className="panel" style={{
-          padding: '18px 20px',
-          borderRadius: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.15) 0%, rgba(56, 189, 248, 0.1) 100%)',
-            color: '#0284c7',
-            flexShrink: 0
-          }}>
-            <ArrowLeftRight size={22} />
+        {/* KPI 1 */}
+        <div className="panel" style={{ padding: '16px 20px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #ffffff)', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(2, 132, 199, 0.1)', color: 'var(--accent-color, #0284c7)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ArrowLeftRight size={20} />
           </div>
-          <div style={{ flex: 1 }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Transfers Today
-            </span>
+          <div>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Transfers Today</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
-              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                {transfersTodayList.length}
-              </span>
-              <span style={{ fontSize: '12px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
+              <span style={{ fontSize: '1.4rem', fontWeight: '900', color: 'var(--text-main, #0f172a)' }}>{transfersTodayList.length}</span>
+              <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
                 {packetsMovedToday} pkts moved
               </span>
             </div>
           </div>
         </div>
 
-        {/* KPI 2: Cataloged Materials */}
-        <div className="panel" style={{
-          padding: '18px 20px',
-          borderRadius: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(129, 140, 248, 0.1) 100%)',
-            color: '#4f46e5',
-            flexShrink: 0
-          }}>
-            <Package size={22} />
+        {/* KPI 2 */}
+        <div className="panel" style={{ padding: '16px 20px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #ffffff)', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Package size={20} />
           </div>
-          <div style={{ flex: 1 }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Materials Catalog
-            </span>
+          <div>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Materials Catalog</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
-              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                {materials.length}
-              </span>
-              <span style={{ fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)' }}>
-                Available in stock
-              </span>
+              <span style={{ fontSize: '1.4rem', fontWeight: '900', color: 'var(--text-main, #0f172a)' }}>{materials.length}</span>
+              <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted, #64748b)' }}>active items</span>
             </div>
           </div>
         </div>
 
-        {/* KPI 3: Active Rack Locations */}
-        <div className="panel" style={{
-          padding: '18px 20px',
-          borderRadius: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(52, 211, 153, 0.1) 100%)',
-            color: '#059669',
-            flexShrink: 0
-          }}>
-            <MapPin size={22} />
+        {/* KPI 3 */}
+        <div className="panel" style={{ padding: '16px 20px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #ffffff)', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.1)', color: '#10b981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <MapPin size={20} />
           </div>
-          <div style={{ flex: 1 }}>
-            <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Racks Utilized
-            </span>
+          <div>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Racks Utilized</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '2px' }}>
-              <span style={{ fontSize: '1.5rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                {distinctRacksCount}
-              </span>
-              <span style={{ fontSize: '11.5px', fontWeight: '600', color: 'var(--text-muted)' }}>
-                Slots mapped
-              </span>
+              <span style={{ fontSize: '1.4rem', fontWeight: '900', color: 'var(--text-main, #0f172a)' }}>{distinctRacksCount}</span>
+              <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted, #64748b)' }}>warehouse slots</span>
             </div>
           </div>
         </div>
 
-        {/* KPI 4: Thermal Printer Status */}
-        <div className="panel" style={{
-          padding: '18px 20px',
-          borderRadius: '14px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: printerStatus === 'online'
-              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(52, 211, 153, 0.1) 100%)'
-              : 'linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(251, 191, 36, 0.1) 100%)',
-            color: printerStatus === 'online' ? '#059669' : '#d97706',
-            flexShrink: 0
-          }}>
-            <Printer size={22} />
+        {/* KPI 4 */}
+        <div className="panel" style={{ padding: '16px 20px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)', background: 'var(--bg-secondary, #ffffff)', display: 'flex', alignItems: 'center', gap: '14px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <div style={{ width: '42px', height: '42px', borderRadius: '8px', background: printerStatus === 'online' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(245, 158, 11, 0.1)', color: printerStatus === 'online' ? '#10b981' : '#f59e0b', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Printer size={20} />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Thermal Printer
-              </span>
-              <button
-                type="button"
-                onClick={connectPrinter}
-                title="Reconnect Printer"
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--accent-color, #0284c7)',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  padding: 0
-                }}
-              >
-                {printerStatus === 'online' ? 'Test' : 'Connect'}
-              </button>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-              <span style={{
-                width: '8px',
-                height: '8px',
-                borderRadius: '50%',
-                backgroundColor: printerStatus === 'online' ? '#10b981' : printerStatus === 'connecting' ? '#f59e0b' : '#ef4444',
-                boxShadow: printerStatus === 'online' ? '0 0 8px #10b981' : 'none'
-              }} />
-              <span style={{
-                fontSize: '13px',
-                fontWeight: '700',
-                color: printerStatus === 'online' ? '#059669' : 'var(--text-main, #0f172a)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap'
-              }}>
-                {printerStatus === 'online' ? (printerName || 'Online (Ready)') : printerStatus === 'connecting' ? 'Connecting...' : 'Printer Ready'}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Thermal Machine</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: printerStatus === 'online' ? '#10b981' : '#f59e0b' }} />
+              <span style={{ fontSize: '13px', fontWeight: '800', color: printerStatus === 'online' ? '#059669' : 'var(--text-main, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {printerStatus === 'online' ? (printerName || 'Online (Ready)') : 'Ready to Connect'}
               </span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Main Grid Layout */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'minmax(360px, 1.25fr) minmax(480px, 1.75fr)',
-        gap: '24px',
-        alignItems: 'start'
+      {/* ── 5. RECENT TRANSFER LOGS REGISTER (MATCHING MANUALLY WEIGHT CAPTURE) ─────── */}
+      <div className="panel" style={{
+        padding: '24px', borderRadius: '12px', border: '1.5px solid var(--border-color, #e2e8f0)',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.04)', background: 'var(--bg-secondary, #ffffff)'
       }}>
-        
-        {/* Left Panel: Execute Transfer Workstation */}
-        <div className="panel" style={{
-          padding: '24px',
-          borderRadius: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '20px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          {/* Card Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', paddingBottom: '16px', borderBottom: '1px solid var(--border-color, #dbeafe)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffffff',
-                boxShadow: '0 4px 12px rgba(2, 132, 199, 0.3)',
-                flexShrink: 0
-              }}>
-                <ArrowLeftRight size={20} />
-              </div>
-              <div>
-                <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main, #0f172a)', letterSpacing: '-0.3px' }}>
-                  Material Store Transfer
-                </h2>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600', marginTop: '2px', display: 'block' }}>
-                  Relocate packet inventory across warehouse racks & shelves.
-                </span>
-              </div>
+        {/* Table Header and Global Controls */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Menu size={20} style={{ color: '#334155' }} />
+            <div>
+              <h3 style={{ fontSize: '17px', fontWeight: '900', color: 'var(--text-main, #0f172a)', margin: 0 }}>
+                Recent Transfer Logs (material_transfers)
+              </h3>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>
+                {filteredHistory.length} Total Relocation Record(s) Found
+              </span>
             </div>
-            {(selectedMaterialId || toLoc || fromLoc) && (
-              <button
-                type="button"
-                onClick={handleResetForm}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color, #dbeafe)',
-                  background: 'var(--bg-primary, #f0f7ff)',
-                  color: 'var(--accent-color, #0284c7)',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '5px',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.12)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = 'var(--bg-primary, #f0f7ff)';
-                }}
-              >
-                <X size={13} /> Reset Form
-              </button>
-            )}
           </div>
 
-          {/* Transfer Success Banner Card */}
-          {lastTransferSuccess && (
-            <div style={{
-              padding: '16px',
-              borderRadius: '12px',
-              background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(2, 132, 199, 0.08) 100%)',
-              border: '1.5px solid rgba(16, 185, 129, 0.35)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-              boxShadow: '0 6px 16px rgba(16, 185, 129, 0.1)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <CheckCircle size={18} style={{ color: '#10b981' }} />
-                  <span style={{ fontSize: '0.88rem', fontWeight: '800', color: '#065f46' }}>
-                    Stock Relocated Successfully!
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setLastTransferSuccess(null)}
-                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px' }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.82rem', background: '#ffffff', padding: '10px 14px', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                <div>
-                  <span style={{ fontWeight: '800', fontFamily: 'monospace', color: '#0284c7' }}>{lastTransferSuccess.materialCode}</span>
-                  <span style={{ fontWeight: '700', color: 'var(--text-main, #0f172a)', marginLeft: '8px' }}>{lastTransferSuccess.materialName}</span>
-                </div>
-                <span style={{ fontWeight: '800', color: '#059669', background: 'rgba(16, 185, 129, 0.12)', padding: '2px 8px', borderRadius: '6px' }}>
-                  {lastTransferSuccess.quantity} pkt{lastTransferSuccess.quantity > 1 ? 's' : ''}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: '700' }}>
-                <span style={{ color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                  From: {lastTransferSuccess.fromLocation}
-                </span>
-                <ArrowRight size={14} style={{ color: '#94a3b8' }} />
-                <span style={{ color: '#059669', background: 'rgba(16, 185, 129, 0.08)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                  To: {lastTransferSuccess.toLocation}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
-                <button
-                  type="button"
-                  onClick={() => handlePrintTransferLabel(lastTransferSuccess)}
-                  style={{
-                    flex: 1,
-                    padding: '9px 14px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                    color: '#ffffff',
-                    fontSize: '12.5px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    boxShadow: '0 3px 8px rgba(2, 132, 199, 0.35)'
-                  }}
-                >
-                  <Printer size={15} /> Print Transfer Barcode
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLastTransferSuccess(null)}
-                  style={{
-                    padding: '9px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color, #dbeafe)',
-                    background: 'var(--bg-secondary, #ffffff)',
-                    color: 'var(--text-main, #0f172a)',
-                    fontSize: '12.5px',
-                    fontWeight: '700',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Transfer Another
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Stepper Form Fields */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-            
-            {/* Step 1: Select Accessory Material */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{
-                    width: '22px',
-                    height: '22px',
-                    borderRadius: '50%',
-                    background: selectedMaterialId ? '#10b981' : 'var(--accent-color, #0284c7)',
-                    color: '#ffffff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: '900'
-                  }}>
-                    {selectedMaterialId ? <Check size={13} strokeWidth={3} /> : '1'}
-                  </span>
-                  SELECT ACCESSORY MATERIAL
-                </label>
-                {selectedMaterialId && (
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                    Selected
-                  </span>
-                )}
-              </div>
-
-              <SearchableMaterialSelect 
-                materials={materials}
-                value={selectedMaterialId}
-                onChange={setSelectedMaterialId}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search size={14} style={{ position: 'absolute', left: '12px', color: '#94a3b8' }} />
+              <input
+                type="text"
+                className="wcs-input"
+                placeholder="Search material, rack, operator..."
+                value={logSearch}
+                onChange={e => { setLogSearch(e.target.value); setPage(0); }}
+                style={{ paddingLeft: '34px', height: '36px', width: '220px', fontSize: '12.5px' }}
               />
-
-              {/* Selected Material Hero Information Preview Card */}
-              {selectedMaterial && (
-                <div style={{
-                  marginTop: '10px',
-                  padding: '12px 14px',
-                  borderRadius: '12px',
-                  background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.05) 0%, rgba(56, 189, 248, 0.03) 100%)',
-                  border: '1px solid rgba(2, 132, 199, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '8px',
-                      backgroundColor: 'rgba(2, 132, 199, 0.12)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#0284c7'
-                    }}>
-                      <Box size={18} />
-                    </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: '#0284c7', background: 'rgba(2, 132, 199, 0.1)', padding: '1px 6px', borderRadius: '4px' }}>
-                          {selectedMaterial.id}
-                        </span>
-                        <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                          {selectedMaterial.name}
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                        <span>Category: <strong>{selectedMaterial.category || 'General'}</strong></span>
-                        {selectedMaterial.color && <span>• Color: <strong>{selectedMaterial.color}</strong></span>}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <span style={{ fontSize: '13.5px', fontWeight: '900', color: '#059669', display: 'block' }}>
-                      {Number(selectedMaterial.stock || 0).toLocaleString()} {selectedMaterial.unit || 'Pcs'}
-                    </span>
-                    <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>
-                      {selectedMaterial.packets || 1} Total Packets
-                    </span>
-                  </div>
-                </div>
+              {logSearch && (
+                <X size={13} style={{ position: 'absolute', right: '10px', cursor: 'pointer', color: '#94a3b8' }} onClick={() => setLogSearch('')} />
               )}
             </div>
 
-            {/* Step 2: Source Location (From) */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{
-                    width: '22px',
-                    height: '22px',
-                    borderRadius: '50%',
-                    background: fromLoc ? '#10b981' : 'var(--accent-color, #0284c7)',
-                    color: '#ffffff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: '900'
-                  }}>
-                    {fromLoc ? <Check size={13} strokeWidth={3} /> : '2'}
-                  </span>
-                  TRANSFER FROM LOCATION (SOURCE)
-                </label>
-                {fromLoc && (
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#dc2626', background: 'rgba(239, 68, 68, 0.08)', padding: '2px 8px', borderRadius: '4px' }}>
-                    Source Set
-                  </span>
-                )}
-              </div>
+            {/* Time Filter Select */}
+            <select
+              value={timeFilter}
+              onChange={e => { setTimeFilter(e.target.value); setPage(0); }}
+              className="wcs-input"
+              style={{ width: '130px', height: '36px', fontSize: '12px', padding: '0 8px', cursor: 'pointer' }}
+            >
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="week">Last 7 Days</option>
+            </select>
 
-              {sourceLocations.length === 0 ? (
-                <div style={{
-                  padding: '16px',
-                  borderRadius: '12px',
-                  background: 'var(--bg-primary, #f0f7ff)',
-                  color: 'var(--text-muted, #64748b)',
-                  fontSize: '12.5px',
-                  fontWeight: '600',
-                  border: '1.5px dashed var(--border-color, #dbeafe)',
-                  textAlign: 'center',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}>
-                  <Package size={22} style={{ opacity: 0.4, color: 'var(--accent-color, #0284c7)' }} />
-                  <span>
-                    {selectedMaterialId ? 'No source rack locations mapped for this item in warehouse.' : 'Select an accessory material in step 1 to view source rack locations.'}
-                  </span>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px' }}>
-                  {sourceLocations.map(g => {
-                    const isSelected = fromLoc === g.location;
-                    return (
-                      <div
-                        key={g.location}
-                        onClick={() => {
-                          setFromLoc(g.location);
-                          if (transferQty > g.count) setTransferQty(g.count);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '10px 12px',
-                          borderRadius: '10px',
-                          border: isSelected ? '1.5px solid var(--accent-color, #0284c7)' : '1px solid var(--border-color, #dbeafe)',
-                          background: isSelected ? 'rgba(2, 132, 199, 0.08)' : 'var(--bg-secondary, #ffffff)',
-                          cursor: 'pointer',
-                          transition: 'all 0.18s ease',
-                          boxShadow: isSelected ? '0 0 0 2px rgba(2, 132, 199, 0.15)' : 'none'
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                          <MapPin size={15} style={{ color: isSelected ? '#0284c7' : '#94a3b8', flexShrink: 0 }} />
-                          <span style={{ fontSize: '12.5px', fontWeight: isSelected ? '800' : '700', color: isSelected ? '#0284c7' : 'var(--text-main, #0f172a)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {g.location}
-                          </span>
-                        </div>
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: '800',
-                          padding: '2px 7px',
-                          borderRadius: '6px',
-                          backgroundColor: isSelected ? '#0284c7' : 'var(--bg-primary, #f0f7ff)',
-                          color: isSelected ? '#ffffff' : 'var(--text-muted, #64748b)',
-                          flexShrink: 0,
-                          marginLeft: '6px'
-                        }}>
-                          {g.count} pkt{g.count > 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Step 3: Destination Location (To) */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{
-                    width: '22px',
-                    height: '22px',
-                    borderRadius: '50%',
-                    background: (toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase()) ? '#10b981' : 'var(--accent-color, #0284c7)',
-                    color: '#ffffff',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '11px',
-                    fontWeight: '900'
-                  }}>
-                    {(toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase()) ? <Check size={13} strokeWidth={3} /> : '3'}
-                  </span>
-                  DESTINATION RACK / SLOT (TO)
-                </label>
-                {toLoc && fromLoc.toLowerCase() !== toLoc.toLowerCase() && (
-                  <span style={{ fontSize: '11px', fontWeight: '700', color: '#059669', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 8px', borderRadius: '4px' }}>
-                    Target Set
-                  </span>
-                )}
-              </div>
-
-              <SearchableLocationSelect
-                locations={destinationOptions}
-                value={toLoc}
-                onChange={setToLoc}
-                placeholder="Search destination rack, hall, or custom slot..."
-                allowCustom={true}
-              />
-
-              {fromLoc && toLoc && fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase() && (
-                <div style={{
-                  marginTop: '8px',
-                  padding: '8px 12px',
-                  borderRadius: '8px',
-                  background: 'rgba(239, 68, 68, 0.08)',
-                  border: '1px solid rgba(239, 68, 68, 0.25)',
-                  color: '#dc2626',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}>
-                  <AlertTriangle size={14} />
-                  Source and Destination rack cannot be identical.
-                </div>
-              )}
-            </div>
-
-            {/* Step 4: Transfer Quantity */}
-            <div>
-              {(() => {
-                const maxAvailable = sourceLocations.find(g => g.location === fromLoc)?.count || 1;
-                const totalPkts = selectedMaterial?.packets || maxAvailable;
-                const approxPcsPerPkt = selectedMaterial ? Math.round(Number(selectedMaterial.stock || 0) / Math.max(1, totalPkts)) : 0;
-                const movingPcs = transferQty * approxPcsPerPkt;
-                const remainingAfter = Math.max(0, maxAvailable - transferQty);
-
-                return (
-                  <div style={{
-                    padding: '16px',
-                    borderRadius: '14px',
-                    backgroundColor: 'var(--bg-primary, #f0f7ff)',
-                    border: '1px solid var(--border-color, #dbeafe)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '12px'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{
-                          width: '22px',
-                          height: '22px',
-                          borderRadius: '50%',
-                          background: 'var(--accent-color, #0284c7)',
-                          color: '#ffffff',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '11px',
-                          fontWeight: '900'
-                        }}>
-                          4
-                        </span>
-                        QUANTITY TO TRANSFER
-                      </label>
-                      <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted, #64748b)' }}>
-                        Available: <strong style={{ color: 'var(--text-main, #0f172a)' }}>{maxAvailable} Pkt{maxAvailable > 1 ? 's' : ''}</strong>
-                      </span>
-                    </div>
-
-                    {/* Quick Preset Buttons */}
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>Quick Presets:</span>
-                      {[1, 2, 5].filter(q => q <= maxAvailable).map(q => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => setTransferQty(q)}
-                          style={{
-                            padding: '3px 10px',
-                            borderRadius: '6px',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            border: transferQty === q ? '1px solid var(--accent-color, #0284c7)' : '1px solid var(--border-color, #dbeafe)',
-                            backgroundColor: transferQty === q ? '#0284c7' : 'var(--bg-secondary, #ffffff)',
-                            color: transferQty === q ? '#ffffff' : 'var(--text-main, #0f172a)',
-                            cursor: 'pointer',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          {q} Pkt{q > 1 ? 's' : ''}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setTransferQty(maxAvailable)}
-                        style={{
-                          padding: '3px 10px',
-                          borderRadius: '6px',
-                          fontSize: '11px',
-                          fontWeight: '800',
-                          border: transferQty === maxAvailable ? '1px solid #059669' : '1px solid var(--border-color, #dbeafe)',
-                          backgroundColor: transferQty === maxAvailable ? '#059669' : 'var(--bg-secondary, #ffffff)',
-                          color: transferQty === maxAvailable ? '#ffffff' : '#059669',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        All ({maxAvailable} Pkts)
-                      </button>
-                    </div>
-
-                    {/* Quantity Stepper & Readout */}
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      background: 'var(--bg-secondary, #ffffff)',
-                      padding: '10px 14px',
-                      borderRadius: '10px',
-                      border: '1px solid var(--border-color, #dbeafe)'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <button
-                          type="button"
-                          onClick={() => setTransferQty(prev => Math.max(1, prev - 1))}
-                          disabled={transferQty <= 1}
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '8px',
-                            border: '1px solid var(--border-color, #dbeafe)',
-                            background: 'var(--bg-primary, #f0f7ff)',
-                            color: 'var(--text-main)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: transferQty <= 1 ? 'not-allowed' : 'pointer',
-                            opacity: transferQty <= 1 ? 0.4 : 1
-                          }}
-                        >
-                          <Minus size={14} />
-                        </button>
-
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
-                          <input
-                            type="number"
-                            min="1"
-                            max={maxAvailable}
-                            value={transferQty}
-                            onChange={(e) => {
-                              const val = Math.max(1, Math.min(maxAvailable, parseInt(e.target.value, 10) || 1));
-                              setTransferQty(val);
-                            }}
-                            style={{
-                              width: '54px',
-                              textAlign: 'center',
-                              fontSize: '1.4rem',
-                              fontWeight: '900',
-                              color: '#0284c7',
-                              border: 'none',
-                              outline: 'none',
-                              background: 'transparent'
-                            }}
-                          />
-                          <span style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-main)' }}>
-                            {transferQty === 1 ? 'Packet' : 'Packets'}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setTransferQty(prev => Math.min(maxAvailable, prev + 1))}
-                          disabled={transferQty >= maxAvailable}
-                          style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '8px',
-                            border: '1px solid var(--border-color, #dbeafe)',
-                            background: 'var(--bg-primary, #f0f7ff)',
-                            color: 'var(--text-main)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: transferQty >= maxAvailable ? 'not-allowed' : 'pointer',
-                            opacity: transferQty >= maxAvailable ? 0.4 : 1
-                          }}
-                        >
-                          <Plus size={14} />
-                        </button>
-                      </div>
-
-                      <div style={{ textAlign: 'right' }}>
-                        {approxPcsPerPkt > 0 && (
-                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#0284c7' }}>
-                            ~{movingPcs.toLocaleString()} {selectedMaterial?.unit || 'Pcs'}
-                          </div>
-                        )}
-                        <span style={{
-                          fontSize: '11px',
-                          fontWeight: '700',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          backgroundColor: remainingAfter > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-                          color: remainingAfter > 0 ? '#059669' : '#d97706',
-                          display: 'inline-block',
-                          marginTop: '2px'
-                        }}>
-                          {remainingAfter > 0 ? `Remaining: ${remainingAfter} pkts` : '⚠️ Source slot will empty'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Smooth Range Slider */}
-                    <div style={{ position: 'relative', width: '100%', padding: '4px 0' }}>
-                      <input
-                        type="range"
-                        min="1"
-                        max={maxAvailable}
-                        value={transferQty}
-                        onChange={(e) => setTransferQty(Number(e.target.value) || 1)}
-                        style={{
-                          width: '100%',
-                          height: '6px',
-                          accentColor: '#0284c7',
-                          cursor: 'pointer',
-                          display: 'block'
-                        }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', fontWeight: '600' }}>
-                        <span>1 Pkt</span>
-                        <span>{maxAvailable} Pkts Max</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Visual Live Route Transfer Trajectory Card */}
-            {selectedMaterialId && fromLoc && toLoc && fromLoc.trim().toLowerCase() !== toLoc.trim().toLowerCase() && (
-              <div style={{
-                padding: '14px 16px',
-                borderRadius: '12px',
-                background: 'linear-gradient(135deg, rgba(2, 132, 199, 0.08) 0%, rgba(16, 185, 129, 0.08) 100%)',
-                border: '1.5px solid rgba(2, 132, 199, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#dc2626', fontWeight: '800', fontSize: '12.5px' }}>
-                  <MapPin size={15} />
-                  <span>{fromLoc}</span>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', flex: 1 }}>
-                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', background: 'rgba(2, 132, 199, 0.12)', padding: '2px 8px', borderRadius: '9999px' }}>
-                    Moving {transferQty} Pkt{transferQty > 1 ? 's' : ''}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', width: '100%', maxWidth: '140px' }}>
-                    <div style={{ flex: 1, height: '2px', backgroundColor: '#0284c7', opacity: 0.4 }} />
-                    <ArrowRight size={14} style={{ color: '#0284c7' }} />
-                    <div style={{ flex: 1, height: '2px', backgroundColor: '#0284c7', opacity: 0.4 }} />
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#059669', fontWeight: '800', fontSize: '12.5px' }}>
-                  <CheckCircle size={15} />
-                  <span>{toLoc}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Execute Button */}
+            {/* Export CSV */}
             <button
               type="button"
-              disabled={submitting || !selectedMaterialId || !toLoc.trim() || fromLoc.toLowerCase() === toLoc.trim().toLowerCase()}
-              onClick={handleExecuteTransfer}
-              style={{
-                width: '100%',
-                padding: '14px',
-                fontSize: '0.95rem',
-                fontWeight: '800',
-                borderRadius: '12px',
-                border: 'none',
-                background: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
-                  ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
-                  : 'var(--bg-secondary, #e2e8f0)',
-                color: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
-                  ? '#ffffff'
-                  : 'var(--text-muted, #94a3b8)',
-                cursor: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase()) ? 'pointer' : 'not-allowed',
-                marginTop: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                boxShadow: (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase())
-                  ? '0 6px 18px rgba(2, 132, 199, 0.4)'
-                  : 'none',
-                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-              onMouseEnter={(e) => {
-                if (!submitting && selectedMaterialId && toLoc.trim() && fromLoc.toLowerCase() !== toLoc.trim().toLowerCase()) {
-                  e.currentTarget.style.transform = 'translateY(-1.5px)';
-                  e.currentTarget.style.boxShadow = '0 8px 22px rgba(2, 132, 199, 0.5)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                if (!submitting && selectedMaterialId && toLoc.trim()) {
-                  e.currentTarget.style.boxShadow = '0 6px 18px rgba(2, 132, 199, 0.4)';
-                }
-              }}
+              onClick={handleExportCSV}
+              className="btn btn-secondary"
+              style={{ height: '36px', padding: '0 14px', fontSize: '12px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
-              {submitting ? (
-                <>
-                  <RefreshCw size={17} className="animate-spin" />
-                  Executing Stock Movement...
-                </>
-              ) : (
-                <>
-                  <ArrowLeftRight size={17} />
-                  Execute Stock Transfer
-                </>
-              )}
+              <Download size={14} /> Export CSV
+            </button>
+
+            {/* Refresh */}
+            <button
+              type="button"
+              onClick={fetchData}
+              disabled={loading}
+              className="btn btn-secondary"
+              style={{ height: '36px', width: '36px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              title="Refresh Logs"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
 
-        {/* Right Panel: History and Activity Log */}
-        <div className="panel" style={{
-          padding: '24px',
-          borderRadius: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1px solid var(--border-color, #dbeafe)',
-          boxShadow: 'var(--shadow-card)'
-        }}>
-          {/* Card Header & Global Controls */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                width: '42px',
-                height: '42px',
-                borderRadius: '10px',
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#ffffff',
-                boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                flexShrink: 0
+        {/* Data Table */}
+        <div style={{ overflowX: 'auto', border: '1.5px solid var(--border-color, #e2e8f0)', borderRadius: '8px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <thead>
+              <tr style={{
+                backgroundColor: 'var(--bg-primary, #f0f7ff)',
+                borderBottom: '2px solid var(--border-color, #cbd5e1)',
+                color: 'var(--text-main, #1e293b)',
+                textAlign: 'left',
+                fontWeight: '900',
+                fontSize: '11px',
+                letterSpacing: '0.5px',
+                textTransform: 'uppercase'
               }}>
-                <Clock size={20} />
-              </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <h2 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main, #0f172a)', letterSpacing: '-0.3px' }}>
-                    Transfer Activity Log
-                  </h2>
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: '800',
-                    background: 'rgba(2, 132, 199, 0.1)',
-                    color: '#0284c7',
-                    padding: '2px 8px',
-                    borderRadius: '9999px'
-                  }}>
-                    {history.length} Movements
-                  </span>
-                </div>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600', marginTop: '2px', display: 'block' }}>
-                  Real-time warehouse audit log with 1-click thermal reprint.
-                </span>
-              </div>
-            </div>
+                <th style={{ padding: '12px 14px', cursor: 'pointer', width: '140px' }} onClick={() => handleSort('transferredAt')}>
+                  Date & Time {orderBy === 'transferredAt' ? (order === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th style={{ padding: '12px 14px', cursor: 'pointer', width: '130px' }} onClick={() => handleSort('materialCode')}>
+                  Material Code {orderBy === 'materialCode' ? (order === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th style={{ padding: '12px 14px', cursor: 'pointer' }} onClick={() => handleSort('materialName')}>
+                  Material Name {orderBy === 'materialName' ? (order === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th style={{ padding: '12px 14px' }}>From Location</th>
+                <th style={{ padding: '12px 14px' }}>To Location</th>
+                <th style={{ padding: '12px 14px', textAlign: 'center', width: '90px' }}>Packets</th>
+                <th style={{ padding: '12px 14px', width: '120px' }}>Operator</th>
+                <th style={{ padding: '12px 14px', textAlign: 'center', width: '100px' }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted, #64748b)', fontWeight: '700' }}>
+                    <RefreshCw size={22} className="animate-spin" style={{ display: 'block', margin: '0 auto 8px auto', color: 'var(--accent-color, #0284c7)' }} />
+                    Loading material transfers register...
+                  </td>
+                </tr>
+              ) : paginatedHistory.length === 0 ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted, #64748b)', fontWeight: '700' }}>
+                    <ArrowLeftRight size={30} style={{ opacity: 0.3, display: 'block', margin: '0 auto 8px auto' }} />
+                    No transfer activity found matching criteria.
+                  </td>
+                </tr>
+              ) : (
+                paginatedHistory.map((row, idx) => {
+                  const d = row.transferredAt ? new Date(row.transferredAt) : null;
+                  const isValidDate = d && !isNaN(d.getTime());
+                  const dateText = isValidDate ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+                  const timeText = isValidDate ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
 
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {/* CSV Export Button */}
-              <button
-                type="button"
-                onClick={handleExportCSV}
-                title="Export Activity Log as CSV"
-                style={{
-                  padding: '7px 12px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color, #dbeafe)',
-                  background: 'var(--bg-primary, #f0f7ff)',
-                  color: 'var(--accent-color, #0284c7)',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  transition: 'all 0.15s ease'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.12)'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-primary, #f0f7ff)'}
-              >
-                <Download size={13} /> Export CSV
-              </button>
+                  return (
+                    <tr
+                      key={row.id || idx}
+                      style={{
+                        borderBottom: '1px solid var(--border-color, #e2e8f0)',
+                        backgroundColor: idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : '#ffffff',
+                        transition: 'background-color 0.15s ease'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.05)'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : '#ffffff'}
+                    >
+                      {/* Date & Time */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{ fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'block' }}>{dateText}</span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)' }}>{timeText}</span>
+                      </td>
 
-              {/* Refresh Button */}
-              <button 
-                onClick={fetchData}
-                disabled={loading}
-                title="Refresh log"
-                style={{
-                  padding: '7px 12px',
-                  border: '1px solid var(--border-color, #dbeafe)',
-                  borderRadius: '8px',
-                  background: 'var(--bg-secondary, #ffffff)',
-                  color: 'var(--text-main)',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> Refresh
-              </button>
-            </div>
-          </div>
+                      {/* Material Code */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          background: 'rgba(2, 132, 199, 0.1)', color: 'var(--accent-color, #0284c7)',
+                          border: '1px solid rgba(2, 132, 199, 0.25)', padding: '2px 8px', borderRadius: '4px',
+                          fontSize: '11.5px', fontWeight: '800', fontFamily: 'monospace'
+                        }}>
+                          {row.materialCode}
+                        </span>
+                      </td>
 
-          {/* Search & Filter Toolbar */}
-          <div style={{
-            display: 'flex',
-            gap: '12px',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            justifyContent: 'space-between',
-            background: 'var(--bg-primary, #f0f7ff)',
-            padding: '10px 14px',
-            borderRadius: '12px',
-            border: '1px solid var(--border-color, #dbeafe)'
-          }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              background: 'var(--bg-secondary, #ffffff)',
-              padding: '7px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-color, #dbeafe)',
-              flex: '1 1 200px',
-              maxWidth: '320px'
-            }}>
-              <Search size={14} style={{ color: 'var(--accent-color, #0284c7)', flexShrink: 0 }} />
-              <input 
-                type="text"
-                placeholder="Search material, location, operator..."
-                value={logSearch}
-                onChange={(e) => setLogSearch(e.target.value)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  width: '100%',
-                  fontSize: '12px',
-                  fontWeight: '600',
-                  outline: 'none',
-                  color: 'var(--text-main, #0f172a)'
-                }}
-              />
-              {logSearch && (
-                <X size={13} style={{ cursor: 'pointer', color: 'var(--text-muted)' }} onClick={() => setLogSearch('')} />
-              )}
-            </div>
+                      {/* Material Name */}
+                      <td style={{ padding: '12px 14px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+                        {row.materialName}
+                      </td>
 
-            {/* Time Filter Pills */}
-            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-              {[
-                { key: 'all', label: 'All Time' },
-                { key: 'today', label: 'Today' },
-                { key: 'yesterday', label: 'Yesterday' },
-                { key: 'week', label: 'Last 7 Days' }
-              ].map(tf => {
-                const isActive = timeFilter === tf.key;
-                return (
-                  <button
-                    key={tf.key}
-                    type="button"
-                    onClick={() => setTimeFilter(tf.key)}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: isActive ? '1px solid var(--accent-color, #0284c7)' : '1px solid transparent',
-                      background: isActive ? '#0284c7' : 'transparent',
-                      color: isActive ? '#ffffff' : 'var(--text-muted, #64748b)',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      cursor: 'pointer',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    {tf.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                      {/* From Location */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          fontSize: '12px', fontWeight: '700', color: '#dc2626',
+                          background: 'rgba(239, 68, 68, 0.08)', padding: '3px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(239, 68, 68, 0.2)'
+                        }}>
+                          {row.fromLocation}
+                        </span>
+                      </td>
 
-          {/* Activity Log Table */}
-          {(() => {
-            const filteredHistory = history.filter(item => {
-              if (logSearch.trim()) {
-                const q = logSearch.toLowerCase().trim();
-                const matchStr = `${item.materialCode || ''} ${item.materialName || ''} ${item.fromLocation || ''} ${item.toLocation || ''} ${item.operator || ''}`.toLowerCase();
-                if (!matchStr.includes(q)) return false;
-              }
+                      {/* To Location */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          fontSize: '12px', fontWeight: '700', color: '#059669',
+                          background: 'rgba(16, 185, 129, 0.08)', padding: '3px 8px', borderRadius: '4px',
+                          border: '1px solid rgba(16, 185, 129, 0.2)'
+                        }}>
+                          {row.toLocation}
+                        </span>
+                      </td>
 
-              if (timeFilter !== 'all' && item.transferredAt) {
-                const itemDate = new Date(item.transferredAt);
-                const now = new Date();
-                if (timeFilter === 'today') {
-                  if (itemDate.toDateString() !== now.toDateString()) return false;
-                } else if (timeFilter === 'yesterday') {
-                  const yesterday = new Date(now);
-                  yesterday.setDate(now.getDate() - 1);
-                  if (itemDate.toDateString() !== yesterday.toDateString()) return false;
-                } else if (timeFilter === 'week') {
-                  const sevenDaysAgo = new Date(now);
-                  sevenDaysAgo.setDate(now.getDate() - 7);
-                  if (itemDate < sevenDaysAgo) return false;
-                }
-              }
-              return true;
-            });
+                      {/* Packets */}
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        <span style={{
+                          fontSize: '12px', fontWeight: '900', color: '#0284c7',
+                          background: 'rgba(2, 132, 199, 0.1)', padding: '2px 8px', borderRadius: '9999px'
+                        }}>
+                          {row.quantity} pkt{Number(row.quantity) > 1 ? 's' : ''}
+                        </span>
+                      </td>
 
-            return (
-              <div style={{
-                overflowX: 'auto',
-                flex: 1,
-                border: '1px solid var(--border-color, #dbeafe)',
-                borderRadius: '12px',
-                background: 'var(--bg-secondary, #ffffff)'
-              }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead>
-                    <tr style={{
-                      backgroundColor: 'var(--bg-primary, #f0f7ff)',
-                      borderBottom: '1.5px solid var(--border-color, #dbeafe)',
-                      color: 'var(--text-muted, #64748b)',
-                      textAlign: 'left',
-                      fontWeight: '800',
-                      fontSize: '11px',
-                      letterSpacing: '0.5px',
-                      textTransform: 'uppercase'
-                    }}>
-                      <th style={{ padding: '12px 14px', width: '140px' }}>Date & Time</th>
-                      <th style={{ padding: '12px 14px' }}>Accessory Material</th>
-                      <th style={{ padding: '12px 14px' }}>From</th>
-                      <th style={{ padding: '12px 14px' }}>To</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'center', width: '80px' }}>Packets</th>
-                      <th style={{ padding: '12px 14px', width: '110px' }}>Operator</th>
-                      <th style={{ padding: '12px 14px', textAlign: 'center', width: '90px' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {loading ? (
-                      <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontWeight: '700' }}>
-                          <RefreshCw size={24} className="animate-spin" style={{ display: 'block', margin: '0 auto 8px auto', color: '#0284c7' }} />
-                          Loading warehouse transfer records...
-                        </td>
-                      </tr>
-                    ) : filteredHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan="7" style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-muted)', fontWeight: '600' }}>
-                          <div style={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: '50%',
-                            backgroundColor: 'var(--bg-primary, #f0f7ff)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 12px auto',
-                            color: '#0284c7'
-                          }}>
-                            <ArrowLeftRight size={26} />
+                      {/* Operator */}
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ width: '22px', height: '22px', borderRadius: '50%', background: 'var(--accent-color, #0284c7)', color: '#fff', fontSize: '10px', fontWeight: '800', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {(row.operator || 'A')[0].toUpperCase()}
                           </div>
-                          <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'block', marginBottom: '4px' }}>
-                            {logSearch || timeFilter !== 'all' ? 'No Movements Found Matching Filters' : 'No Material Transfers Logged Yet'}
+                          <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+                            {row.operator || 'Admin'}
                           </span>
-                          <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
-                            Perform a stock transfer on the left to create live records and barcode thermal stickers.
-                          </span>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredHistory.map((item, idx) => {
-                        const d = item.transferredAt ? new Date(item.transferredAt) : null;
-                        const isValidDate = d && !isNaN(d.getTime());
-                        const dateText = isValidDate ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-                        const timeText = isValidDate ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '';
-                        const isJustTransferred = lastTransferSuccess && String(item.materialCode) === String(lastTransferSuccess.materialCode) && item.toLocation === lastTransferSuccess.toLocation && idx === 0;
+                        </div>
+                      </td>
 
-                        return (
-                          <tr key={item.id || idx} style={{
-                            borderBottom: '1px solid var(--border-color, #edf4fc)',
-                            color: 'var(--text-main)',
-                            fontWeight: '600',
-                            backgroundColor: isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : 'transparent',
-                            transition: 'background-color 0.2s ease'
+                      {/* Action */}
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintTransferLabel(row)}
+                          title="Print Stock Transfer Barcode Label"
+                          style={{
+                            padding: '4px 10px', borderRadius: '6px',
+                            border: '1px solid rgba(2, 132, 199, 0.3)', background: 'rgba(2, 132, 199, 0.08)',
+                            color: 'var(--accent-color, #0284c7)', cursor: 'pointer', fontSize: '11.5px',
+                            fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px'
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.05)'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isJustTransferred ? 'rgba(16, 185, 129, 0.06)' : idx % 2 === 1 ? 'rgba(240, 247, 255, 0.4)' : 'transparent'}
-                          >
-                            {/* Date & Time Column */}
-                            <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontWeight: '800', fontSize: '12.5px', color: 'var(--text-main)' }}>
-                                    {dateText}
-                                  </span>
-                                  {isJustTransferred && (
-                                    <span style={{ fontSize: '9px', background: '#10b981', color: '#fff', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
-                                      NEW
-                                    </span>
-                                  )}
-                                </div>
-                                {timeText && (
-                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                    <Clock size={10} style={{ color: '#0284c7' }} /> {timeText}
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-
-                            {/* Material Column */}
-                            <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <span style={{
-                                  background: 'rgba(2, 132, 199, 0.1)',
-                                  color: '#0284c7',
-                                  border: '1px solid rgba(2, 132, 199, 0.25)',
-                                  padding: '2px 7px',
-                                  borderRadius: '4px',
-                                  fontSize: '11px',
-                                  fontWeight: '800',
-                                  fontFamily: 'monospace'
-                                }}>
-                                  {item.materialCode}
-                                </span>
-                                <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main)' }}>
-                                  {item.materialName}
-                                </span>
-                              </div>
-                            </td>
-
-                            {/* From Location Column */}
-                            <td style={{ padding: '12px 14px' }}>
-                              <div style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                background: 'rgba(239, 68, 68, 0.08)',
-                                color: '#dc2626',
-                                border: '1px solid rgba(239, 68, 68, 0.2)',
-                                padding: '3px 9px',
-                                borderRadius: '6px',
-                                fontWeight: '700',
-                                fontSize: '12px',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                <MapPin size={12} />
-                                <span>{item.fromLocation || 'Unknown'}</span>
-                              </div>
-                            </td>
-
-                            {/* To Location Column */}
-                            <td style={{ padding: '12px 14px' }}>
-                              <div style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                background: 'rgba(16, 185, 129, 0.08)',
-                                color: '#059669',
-                                border: '1px solid rgba(16, 185, 129, 0.2)',
-                                padding: '3px 9px',
-                                borderRadius: '6px',
-                                fontWeight: '700',
-                                fontSize: '12px',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                <MapPin size={12} />
-                                <span>{item.toLocation || 'Unknown'}</span>
-                              </div>
-                            </td>
-
-                            {/* Quantity Column */}
-                            <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                              <span style={{
-                                background: 'rgba(2, 132, 199, 0.1)',
-                                color: '#0284c7',
-                                border: '1px solid rgba(2, 132, 199, 0.2)',
-                                padding: '3px 10px',
-                                borderRadius: '9999px',
-                                fontWeight: '800',
-                                fontSize: '12px'
-                              }}>
-                                {item.quantity} pkt{Number(item.quantity) > 1 ? 's' : ''}
-                              </span>
-                            </td>
-
-                            {/* Operator Column */}
-                            <td style={{ padding: '12px 14px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <div style={{
-                                  width: '24px',
-                                  height: '24px',
-                                  borderRadius: '50%',
-                                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                                  color: '#ffffff',
-                                  fontSize: '10px',
-                                  fontWeight: '800',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  flexShrink: 0
-                                }}>
-                                  {(item.operator || 'A').slice(0, 1).toUpperCase()}
-                                </div>
-                                <span style={{
-                                  fontSize: '12px',
-                                  color: 'var(--text-main)',
-                                  fontWeight: '700',
-                                  textTransform: 'capitalize'
-                                }}>
-                                  {item.operator || 'System'}
-                                </span>
-                              </div>
-                            </td>
-
-                            {/* Action / Print Button */}
-                            <td style={{ padding: '12px 14px', textAlign: 'center' }}>
-                              <button
-                                onClick={() => handlePrintTransferLabel(item)}
-                                title="Print Stock Transfer Barcode Label"
-                                style={{
-                                  padding: '5px 10px',
-                                  borderRadius: '8px',
-                                  border: '1px solid rgba(2, 132, 199, 0.3)',
-                                  background: 'rgba(2, 132, 199, 0.08)',
-                                  color: '#0284c7',
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  fontWeight: '800',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '4px',
-                                  transition: 'all 0.15s ease'
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.backgroundColor = '#0284c7';
-                                  e.currentTarget.style.color = '#ffffff';
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.backgroundColor = 'rgba(2, 132, 199, 0.08)';
-                                  e.currentTarget.style.color = '#0284c7';
-                                }}
-                              >
-                                <Printer size={13} /> Print
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
+                        >
+                          <Printer size={13} /> Print
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
         </div>
 
+        {/* Pagination Footer */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600' }}>
+            <span>Rows per page:</span>
+            <select
+              value={rpp}
+              onChange={e => { setRpp(Number(e.target.value)); setPage(0); }}
+              className="wcs-input"
+              style={{ width: '70px', height: '32px', fontSize: '12px', padding: '0 6px' }}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+            </select>
+            <span>Showing {filteredHistory.length > 0 ? page * rpp + 1 : 0}–{Math.min(filteredHistory.length, (page + 1) * rpp)} of {filteredHistory.length}</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => setPage(p => Math.max(0, p - 1))}
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '700', opacity: page === 0 ? 0.5 : 1 }}
+            >
+              Previous
+            </button>
+            <span style={{ fontSize: '12px', fontWeight: '800', padding: '0 8px', color: 'var(--text-main, #0f172a)' }}>
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(p => p + 1)}
+              className="btn btn-secondary"
+              style={{ padding: '6px 12px', fontSize: '12px', fontWeight: '700', opacity: page >= totalPages - 1 ? 0.5 : 1 }}
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Transfer Sticker Print Modal */}
+      {/* ── 6. THERMAL BARCODE LABEL PRINT MODAL ────────────────────────────────────── */}
       {printModalData && (
         <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(15, 23, 42, 0.65)',
-          backdropFilter: 'blur(4px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 999999,
-          padding: '20px'
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 999999, padding: '20px'
         }}>
           <div style={{
-            background: 'var(--panel-bg, #ffffff)',
-            borderRadius: '16px',
-            border: '1.5px solid var(--border-color, #e2e8f0)',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
-            width: '100%',
-            maxWidth: '540px',
-            maxHeight: '90vh',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
+            background: '#ffffff', borderRadius: '14px', border: '1.5px solid #cbd5e1',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', width: '100%', maxWidth: '520px',
+            maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden'
           }}>
             {/* Modal Header */}
             <div style={{
-              padding: '16px 20px',
-              borderBottom: '1px solid var(--border-color, #dbeafe)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: 'var(--bg-primary, #f0f7ff)'
+              padding: '16px 20px', borderBottom: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              background: '#f8fafc'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Printer size={18} style={{ color: 'var(--accent-color, #0284c7)' }} />
-                <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
                   Stock Transfer Barcode Label
                 </h3>
-                <span style={{
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  padding: '2px 8px',
-                  borderRadius: '6px',
-                  background: 'rgba(2, 132, 199, 0.12)',
-                  color: '#0284c7'
-                }}>
-                  {printModalData.stickers?.length || 1} Packet Label(s)
+                <span style={{ fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '4px', background: 'rgba(2, 132, 199, 0.12)', color: 'var(--accent-color, #0284c7)' }}>
+                  {printModalData.stickers?.length || 1} Label(s)
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setPrintModalData(null)}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  color: 'var(--text-muted, #64748b)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '4px'
-                }}
+                style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#64748b', padding: '4px' }}
               >
                 <X size={18} />
               </button>
             </div>
 
-            {/* Modal Body: Sticker Previews */}
-            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', background: '#f8fafc' }}>
+            {/* Modal Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', background: '#f1f5f9' }}>
               {printModalData.stickers.map((stk, idx) => (
                 <div
                   key={stk.barcodeId || idx}
-                  className="thermal-sticker-card"
                   style={{
-                    background: '#ffffff',
-                    padding: '14px',
-                    borderRadius: '8px',
-                    border: '2px solid #000000',
-                    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
-                    maxWidth: '380px',
-                    margin: '0 auto',
-                    width: '100%',
-                    fontFamily: 'Arial, sans-serif',
-                    color: '#000000'
+                    background: '#ffffff', padding: '14px', borderRadius: '8px',
+                    border: '2px solid #000000', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                    maxWidth: '380px', margin: '0 auto', width: '100%', color: '#000000'
                   }}
                 >
-                  {/* Exact 2.4" x 1.75" Thermal Grid Layout */}
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', margin: '0 0 10px 0', border: '1.5px solid #000000' }}>
                     <tbody>
                       <tr>
@@ -2295,7 +2046,6 @@ export default function MaterialTransferView({ currentUser }) {
                     </tbody>
                   </table>
 
-                  {/* 1D Barcode with code text */}
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <BarcodeVisual code={stk.barcodeId} />
                   </div>
@@ -2303,17 +2053,13 @@ export default function MaterialTransferView({ currentUser }) {
               ))}
             </div>
 
-            {/* Modal Footer Controls */}
+            {/* Modal Footer */}
             <div style={{
-              padding: '14px 20px',
-              borderTop: '1px solid var(--border-color, #dbeafe)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '10px',
-              background: 'var(--bg-secondary, #ffffff)'
+              padding: '14px 20px', borderTop: '1px solid #e2e8f0',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: '10px', background: '#ffffff'
             }}>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>
+              <span style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', fontWeight: '600' }}>
                 {printerStatus === 'online' ? `🖨️ Connected: ${printerName || 'Machine Printer'}` : '💡 Ready for direct browser & thermal printing'}
               </span>
 
@@ -2367,36 +2113,20 @@ export default function MaterialTransferView({ currentUser }) {
                     printWin.document.close();
                   }}
                   style={{
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                    color: '#ffffff',
-                    fontSize: '13px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)'
+                    padding: '8px 16px', borderRadius: '6px', border: 'none',
+                    background: 'var(--accent-color, #0284c7)', color: '#ffffff',
+                    fontSize: '12.5px', fontWeight: '800', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: '6px'
                   }}
                 >
-                  <Printer size={15} /> Print Labels Now
+                  <Printer size={14} /> Print Now
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setPrintModalData(null)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color, #dbeafe)',
-                    background: 'var(--bg-secondary, #ffffff)',
-                    color: 'var(--text-main, #0f172a)',
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    cursor: 'pointer'
-                  }}
+                  className="btn btn-secondary"
+                  style={{ padding: '8px 14px', fontSize: '12.5px', fontWeight: '700' }}
                 >
                   Close
                 </button>

@@ -94,16 +94,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       });
     }
 
-    // Fallback if neither racks nor live locations have returned data yet
-    if (slotMap.size === 0) {
-      ['Hall 1', 'Hall 2', 'Hall 3'].forEach(hall => {
-        const count = hall === 'Hall 1' ? 150 : 100;
-        for (let i = 1; i <= count; i++) {
-          const label = `${hall} - Rack ${i}`;
-          slotMap.set(label, { code: label, label, rawCode: String(i), warehouse: hall });
-        }
-      });
-    }
+
 
     return Array.from(slotMap.values());
   }, [racks, liveLocations]);
