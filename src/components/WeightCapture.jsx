@@ -11,17 +11,6 @@ import {
 } from 'lucide-react';
 import SearchableLocationSelect from './SearchableLocationSelect';
 
-// ─── Dummy Data matching user Weight Capture records ───────────────────────────────
-const DUMMY_CAPTURES = [
-  { id: 16, materialCode: 'MT1016', time: '14:03:00', date: '6/7/2026', po: 'po-0006', material: 'zip', category: 'zip', weight: '45.001', pieces: 2285, wpp: '19.578', packets: 8, location: 'hall 5 rack 1', operator: 'punnet', barcodeId: 'MT1016-A01', isReissue: true },
-  { id: 15, materialCode: 'MT1015', time: '12:36:48 pm', date: '6/7/2026', po: 'PO-008', material: 'lastic', category: 'lastic', weight: '45.003', pieces: 223, wpp: '200.200', packets: 5, location: 'hall 3 rack 9', operator: 'ANSHU', barcodeId: 'MT1015-A08' },
-  { id: 14, materialCode: 'MT1014', time: '12:17:54 pm', date: '6/7/2026', po: 'PO-007', material: 'zip', category: 'zip', weight: '45.000', pieces: 2225, wpp: '20.110', packets: 10, location: 'hall 4', operator: 'anup', barcodeId: 'MT1014-A10' },
-  { id: 13, materialCode: 'MT1013', time: '11:56:54 am', date: '6/7/2026', po: 'po-345', material: 'fabric', category: 'fabric', weight: '45.000', pieces: 223, wpp: '200.300', packets: 7, location: 'hall 3 rack 8', operator: 'sumit', barcodeId: 'MT1013-A07' },
-  { id: 12, materialCode: 'MT1012', time: '11:22:36 am', date: '6/7/2026', po: 'PO-999', material: 'BUTTON', category: 'button', weight: '30.253', pieces: 1511, wpp: '20.010', packets: 5, location: 'HALL 3 RACK 4', operator: 'AMAN', barcodeId: 'MT1012-A05' },
-  { id: 11, materialCode: 'MT1011', time: '11:01:08 am', date: '6/7/2026', po: 'PO-456', material: 'ZIP', category: 'zip', weight: '40.002', pieces: 2097, wpp: '19.067', packets: 20, location: 'HALL 3 RACK 7', operator: 'AMIT', barcodeId: 'MT1011-A20' },
-  { id: 10, materialCode: 'MT1010', time: '10:39:31 am', date: '6/7/2026', po: 'PO-0007', material: 'COTTON', category: 'cotton', weight: '40.000', pieces: 1987, wpp: '20.000', packets: 10, location: 'hall 1 rack 2', operator: 'AMIT', barcodeId: 'MT1010-A10' },
-];
-
 // ─── Helper: parse number from MT-code string ─────────────────────────────
 const parseMTNum = (code) => {
   const m = String(code || '').match(/MT(\d+)/);
@@ -45,7 +34,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
   const [grossWeight, setGrossWeight] = useState('30.250');
   const [tareWeight, setTareWeight] = useState('0.250');
   const [useTareWeight, setUseTareWeight] = useState(true);
-  const [captures, setCaptures] = useState(DUMMY_CAPTURES);
+  const [captures, setCaptures] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saveDialog, setSaveDialog] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
@@ -78,7 +67,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
 
     if (source && source.length > 0) {
       source.forEach(rack => {
-        const warehouse = rack.warehouse || 'Hall 1';
+        const warehouse = rack.warehouse || 'Main Store';
         const rawCode = String(rack.code || '').trim();
         const displayLabel = rack.warehouse && rawCode.includes(rack.warehouse)
           ? rawCode
@@ -112,7 +101,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
   const [filterOperator, setFilterOperator] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [expandedRow, setExpandedRow] = useState(null);
-  const [mode, setMode] = useState('demo'); // 'demo' or 'original'
+  const [mode, setMode] = useState('original'); // 'demo' or 'original'
   const [printerStatus, setPrinterStatus] = useState('offline');
   const [printerName, setPrinterName] = useState('');
   // nextCodeNum: the running MT-series counter — only ever increases
@@ -193,7 +182,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
     return parts.length > 0 ? parts.join(', ') : (form.storeLocation || 'Main Store');
   };
 
-  // Auto-connect and display live weight if starting in Demo mode
+  // Auto-connect and display live weight when in Demo mode
   useEffect(() => {
     if (mode === 'demo') {
       setConnected(true);
@@ -205,7 +194,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       setStable(false);
       setLiveWeight('00.000');
     }
-  }, []);
+  }, [mode]);
 
   // ── Fetch captures log and highest material code from DB on mount ───────────────
   const [dbMaterials, setDbMaterials] = useState([]);

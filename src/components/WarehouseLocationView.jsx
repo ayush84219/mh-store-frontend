@@ -1,12 +1,11 @@
 import { getBackendUrl } from '../utils/api';
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Database, Search, Clock, ArrowLeftRight,
-  CheckCircle, AlertTriangle, Layers, FileText, ChevronRight, X, Plus, ChevronDown,
-  Warehouse, Box, LayoutGrid, List, Sparkles, Filter, RefreshCw, Eye, Package,
-  Maximize2, ArrowUpRight, Trash2, Edit3, ShieldAlert, ArrowRight, Check, Grid,
-  Sliders, TrendingUp, BarChart2, Info, Send
+  CheckCircle, AlertTriangle, Layers, X, Plus, ChevronDown,
+  Warehouse, Box, LayoutGrid, List, Filter, RefreshCw, Package,
+  ArrowRight, Grid, Send
 } from 'lucide-react';
 
 export default function WarehouseLocationView({
@@ -87,7 +86,6 @@ export default function WarehouseLocationView({
 
   // Add Location Modal State
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [targetHallForAdd, setTargetHallForAdd] = useState('');
   const [whName, setWhName] = useState('Hall 1');
   const [customWhName, setCustomWhName] = useState('');
   const [rackName, setRackName] = useState('');
@@ -129,10 +127,8 @@ export default function WarehouseLocationView({
       }
       if (matRes && matRes.ok) {
         const mData = await matRes.json();
-        const mList = Array.isArray(mData) ? mData : (mData.data || []);
-        if (mList && mList.length > 0) {
-          setDbMaterials(mList);
-        }
+        const mList = (Array.isArray(mData) ? mData : (mData.data || [])).filter(m => Number(m.stock) > 0);
+        setDbMaterials(mList);
       }
     } catch (err) {
       console.warn("Could not fetch warehouse locations from DB:", err);
@@ -191,46 +187,22 @@ export default function WarehouseLocationView({
     return false;
   };
 
-  /**
-   * Helper to parse how many packets of a material are stored in a specific location string.
-   */
-  const getPacketsInLocation = (m, locCode) => {
-    const locStr = String(m.location || '').trim();
-    const pktsTotal = Math.max(1, Number(m.packets) || 1);
-    if (!locStr) return 0;
-
-    const parts = locStr.split(',');
-    let count = 0;
-
-    parts.forEach(part => {
-      const cleanPart = part.trim();
-      const pureLoc = cleanPart.replace(/\(\d+\s*pkts?\)/i, '').trim();
-
-      if (isLocMatch(pureLoc, locCode)) {
-        const match = cleanPart.match(/\((\d+)\s*pkt/);
-        if (match) {
-          count += parseInt(match[1], 10) || 1;
-        } else {
-          count += pktsTotal;
-        }
-      }
-    });
-    return count;
-  };
 
   /**
    * Construct locations array strictly from manually configured / DB entries
    * HIGH-PERFORMANCE PRE-INDEXED RESOLUTION FOR LARGE DATASETS
    */
   const locations = useMemo(() => {
-    const slotMap = new Map();
-    const activeMaterials = (dbMaterials && dbMaterials.length > 0) ? dbMaterials : materials;
+    const rawMaterialsList = (dbMaterials && dbMaterials.length > 0) ? dbMaterials : materials;
+    const activeMaterials = (rawMaterialsList || []).filter(m => Number(m.stock) > 0);
 
     const normalizeSlotCode = (rawCode) => {
       const trimmed = String(rawCode || '').trim();
       if (!trimmed || trimmed === 'N/A' || trimmed === 'null') return null;
       return trimmed.toUpperCase();
     };
+
+    const slotMap = new Map();
 
     // 1. Add official locations from warehouse_locations DB table
     dbLocations.forEach(d => {
@@ -249,7 +221,6 @@ export default function WarehouseLocationView({
 
     // 2. Add configured racks from settings if not already in DB
     (racks || []).forEach(r => {
-      const rawCode = String(r.name || r.code || '').trim();
       const fullDisplay = r.code && String(r.code).includes('-') ? r.code : `${r.warehouse || 'Main Store'} - ${r.name || `Rack ${r.code}`}`;
       const codeKey = normalizeSlotCode(fullDisplay);
       if (!codeKey) return;
@@ -502,7 +473,7 @@ export default function WarehouseLocationView({
     } else if (warehouses.length > 1 && warehouses[1] !== 'All') {
       setWhName(warehouses[1]);
     } else {
-      setWhName('Hall 1');
+      setWhName(warehouses.find(w => w !== 'All') || 'Main Store');
     }
     setCustomWhName('');
     setRackName('');
@@ -783,26 +754,6 @@ export default function WarehouseLocationView({
       setAddError('Server connection error: ' + err.message);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleDeleteLocation = async (loc) => {
-    if (!loc) return;
-    if (window.confirm(`Are you sure you want to remove ${loc.code} from the warehouse layout?`)) {
-      try {
-        const res = await fetch(`${getBackendUrl()}/api/warehouse-locations/${encodeURIComponent(loc.id || loc.code)}`, {
-          method: 'DELETE'
-        });
-        if (res.ok) {
-          setIsDrawerOpen(false);
-          setSelectedLocation(null);
-          await fetchLiveLocations();
-        } else {
-          alert('Could not delete location.');
-        }
-      } catch (e) {
-        alert('Error removing location: ' + e.message);
-      }
     }
   };
 

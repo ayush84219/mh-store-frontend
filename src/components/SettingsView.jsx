@@ -50,7 +50,12 @@ export default function SettingsView({
   const [newRackName, setNewRackName] = useState('');
   const [newRackCapacity, setNewRackCapacity] = useState(20);
   const [rackActionMsg, setRackActionMsg] = useState(null);
-  const [isDeletingRackId, setIsDeletingRackId] = useState(null);
+  const [isEditingRack, setIsEditingRack] = useState(false);
+  const [editingRack, setEditingRack] = useState(null);
+  const [editRackWarehouse, setEditRackWarehouse] = useState('Main Store');
+  const [editCustomRackWh, setEditCustomRackWh] = useState('');
+  const [editRackName, setEditRackName] = useState('');
+  const [editRackCapacity, setEditRackCapacity] = useState(20);
 
   // Fetch live warehouse locations from backend
   const fetchLiveLocations = async () => {
@@ -98,11 +103,17 @@ export default function SettingsView({
   const uniqueWarehouses = useMemo(() => {
     const s = new Set();
     allLocationsList.forEach(l => {
-      if (l.warehouse) s.add(l.warehouse);
+      const w = (l.warehouse || '').trim();
+      if (w) s.add(w);
     });
-    ['Main Store', 'Hall 1', 'Hall 2', 'Hall 3'].forEach(h => s.add(h));
-    return Array.from(s);
+    return Array.from(s).sort();
   }, [allLocationsList]);
+
+  useEffect(() => {
+    if (selectedRackWarehouse !== 'All' && !uniqueWarehouses.includes(selectedRackWarehouse)) {
+      setSelectedRackWarehouse('All');
+    }
+  }, [uniqueWarehouses, selectedRackWarehouse]);
 
   const filteredRacks = useMemo(() => {
     return allLocationsList.filter(loc => {
@@ -113,32 +124,74 @@ export default function SettingsView({
     });
   }, [allLocationsList, rackSearchQuery, selectedRackWarehouse]);
 
-  // Handle Delete Rack
-  const handleDeleteRack = async (loc) => {
-    const identifier = loc.id || loc.code;
-    const label = loc.code || identifier;
-    if (!window.confirm(`Are you sure you want to delete rack "${label}"? This will remove it from all location selection menus.`)) {
-      return;
+  // Handle Start Edit Rack
+  const handleStartEditRack = (loc) => {
+    setEditingRack(loc);
+    const wh = loc.warehouse || 'Main Store';
+    if (uniqueWarehouses.includes(wh)) {
+      setEditRackWarehouse(wh);
+      setEditCustomRackWh('');
+    } else {
+      setEditRackWarehouse('__custom__');
+      setEditCustomRackWh(wh);
     }
-    setIsDeletingRackId(identifier);
+
+    let raw = loc.code || '';
+    if (raw.toLowerCase().startsWith(wh.toLowerCase() + ' - ')) {
+      raw = raw.substring(wh.length + 3);
+    }
+    setEditRackName(raw);
+    setEditRackCapacity(loc.capacity || 20);
+    setIsEditingRack(true);
+  };
+
+  // Handle Edit Rack Submit
+  const handleEditRackSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingRack) return;
+    const finalWh = editRackWarehouse === '__custom__' ? (editCustomRackWh.trim() || 'Main Store') : editRackWarehouse;
+    const raw = editRackName.trim();
+    if (!raw) return;
+    const fullCode = raw.toLowerCase().includes(finalWh.toLowerCase()) ? raw : `${finalWh} - ${raw.replace(/^rack\s*/i, 'RACK ')}`;
+    const identifier = editingRack.id || editingRack.code;
+
     try {
       const res = await fetch(`${getBackendUrl()}/api/warehouse-locations/${encodeURIComponent(identifier)}`, {
-        method: 'DELETE'
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          warehouse: finalWh,
+          code: fullCode,
+          capacity: Number(editRackCapacity) || 20
+        })
       });
+
       if (res.ok) {
-        setDbLocations(prev => prev.filter(l => l.id !== identifier && l.code !== identifier && l.code !== loc.code));
+        await fetchLiveLocations();
         if (setRacks) {
-          setRacks(prev => prev.filter(r => r.id !== identifier && r.code !== identifier && `${r.warehouse} - ${r.code}` !== loc.code));
+          setRacks(prev => prev.map(r => {
+            if (r.id === identifier || r.code === identifier || `${r.warehouse} - ${r.code}` === identifier || `${r.warehouse} - ${r.name}` === identifier) {
+              return {
+                ...r,
+                warehouse: finalWh,
+                code: fullCode,
+                name: fullCode,
+                capacity: Number(editRackCapacity) || 20
+              };
+            }
+            return r;
+          }));
         }
-        setRackActionMsg({ type: 'success', text: `Rack "${label}" deleted successfully.` });
+        setIsEditingRack(false);
+        setEditingRack(null);
+        setRackActionMsg({ type: 'success', text: `Rack "${fullCode}" updated successfully.` });
       } else {
         const errData = await res.json().catch(() => ({}));
-        setRackActionMsg({ type: 'error', text: errData.error || 'Failed to delete rack.' });
+        setRackActionMsg({ type: 'error', text: errData.error || 'Failed to update rack.' });
       }
     } catch (err) {
-      setRackActionMsg({ type: 'error', text: 'Server connection error: ' + err.message });
+      setRackActionMsg({ type: 'error', text: 'Error: ' + err.message });
     } finally {
-      setIsDeletingRackId(null);
       setTimeout(() => setRackActionMsg(null), 4000);
     }
   };
@@ -173,29 +226,6 @@ export default function SettingsView({
       }
     } catch (err) {
       setRackActionMsg({ type: 'error', text: 'Error: ' + err.message });
-    } finally {
-      setTimeout(() => setRackActionMsg(null), 4000);
-    }
-  };
-
-  // Handle Clear All Racks
-  const handleClearAllRacks = async () => {
-    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL warehouse racks? This cannot be undone.')) {
-      return;
-    }
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        setDbLocations([]);
-        if (setRacks) setRacks([]);
-        setRackActionMsg({ type: 'success', text: 'All warehouse racks cleared successfully.' });
-      } else {
-        setRackActionMsg({ type: 'error', text: 'Failed to clear warehouse racks.' });
-      }
-    } catch (err) {
-      setRackActionMsg({ type: 'error', text: err.message });
     } finally {
       setTimeout(() => setRackActionMsg(null), 4000);
     }
@@ -274,8 +304,9 @@ export default function SettingsView({
     setMatError('');
   };
 
-  // Filter materials based on Search input
+  // Filter materials: only show present materials (stock > 0)
   const filteredMaterials = (materials || []).filter(m => {
+    if (Number(m.stock) <= 0) return false;
     const q = matSearchQuery.toLowerCase();
     return (
       (m.name || '').toLowerCase().includes(q) ||
@@ -1004,27 +1035,17 @@ export default function SettingsView({
                 setIsAddingRack(true);
                 setNewRackName('');
                 setNewRackCapacity(20);
-                setNewRackWarehouse('Main Store');
+                setNewRackWarehouse(uniqueWarehouses[0] || 'Main Store');
               }}
               style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
             >
               <PlusCircle size={14} /> Add New Rack
             </button>
-            {allLocationsList.length > 0 && (
-              <button
-                className="btn btn-danger btn-sm"
-                onClick={handleClearAllRacks}
-                title="Delete all configured warehouse racks"
-                style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-              >
-                <Trash2 size={13} /> Clear All
-              </button>
-            )}
           </div>
         </div>
 
         <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '14px' }}>
-          Configure, search, add, or <strong>delete warehouse racks & slots</strong>. Deleted racks will be removed in real-time from Inward Weight Capture, Manual Entry, and Material Transfer dropdowns.
+          Configure, search, add, or <strong>edit warehouse racks & storage slots</strong>. Updates will sync in real-time across Inward Weight Capture, Manual Entry, and Material Transfer dropdowns.
         </p>
 
         {/* Action Status Banner */}
@@ -1109,7 +1130,6 @@ export default function SettingsView({
                 </tr>
               ) : (
                 filteredRacks.map((loc) => {
-                  const isDeleting = isDeletingRackId === (loc.id || loc.code);
                   return (
                     <tr key={loc.id || loc.code}>
                       <td>
@@ -1138,21 +1158,22 @@ export default function SettingsView({
                       <td style={{ textAlign: 'right' }}>
                         <button
                           type="button"
-                          className="btn btn-danger btn-sm"
-                          onClick={() => handleDeleteRack(loc)}
-                          disabled={isDeleting}
-                          title={`Delete rack ${loc.code}`}
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleStartEditRack(loc)}
+                          title={`Edit rack ${loc.code}`}
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '5px',
-                            padding: '4px 10px',
+                            padding: '4px 12px',
                             fontSize: '12px',
-                            fontWeight: '700'
+                            fontWeight: '700',
+                            borderColor: 'var(--accent-color, #3b82f6)',
+                            color: 'var(--accent-color, #3b82f6)'
                           }}
                         >
-                          <Trash2 size={13} />
-                          <span>{isDeleting ? 'Deleting...' : 'Delete Rack'}</span>
+                          <Edit size={13} />
+                          <span>Edit Rack</span>
                         </button>
                       </td>
                     </tr>
@@ -1169,7 +1190,7 @@ export default function SettingsView({
         <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 className="panel-title">
             <Package size={18} className="text-accent" />
-            Raw Materials Inventory Database ({materials.length})
+            Raw Materials Inventory Database ({filteredMaterials.length})
           </h3>
           <button
             className="btn btn-primary btn-sm"
@@ -1191,7 +1212,7 @@ export default function SettingsView({
         </div>
 
         <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '16px' }}>
-          View, edit details, or delete raw materials from the active inventory database. Changes will update stock valuations and BOM calculations in real-time.
+          Real-time catalog of all active raw materials with available inventory (materials present in stock). Zero-stock or depleted records are automatically excluded.
         </p>
 
         {/* Search bar inside Settings for materials */}
@@ -1639,12 +1660,9 @@ export default function SettingsView({
                   onChange={(e) => setNewRackWarehouse(e.target.value)}
                   style={{ height: '38px', fontSize: '13px' }}
                 >
-                  <option value="Main Store">Main Store</option>
-                  <option value="Hall 1">Hall 1</option>
-                  <option value="Hall 2">Hall 2</option>
-                  <option value="Hall 3">Hall 3</option>
-                  <option value="Hall 4">Hall 4</option>
-                  <option value="Hall 5">Hall 5</option>
+                  {uniqueWarehouses.map(wh => (
+                    <option key={wh} value={wh}>{wh}</option>
+                  ))}
                   <option value="__custom__">+ Custom Warehouse / Hall...</option>
                 </select>
               </div>
@@ -1708,6 +1726,115 @@ export default function SettingsView({
                   className="btn btn-primary"
                 >
                   Create Rack Slot
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Warehouse Rack Modal */}
+      {isEditingRack && editingRack && (
+        <div className="modal-overlay" style={{ zIndex: 1200 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '480px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Edit size={20} style={{ color: 'var(--accent-color)' }} />
+                <span>Edit Warehouse Rack / Slot</span>
+              </h3>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setIsEditingRack(false);
+                  setEditingRack(null);
+                }}
+                style={{ padding: '4px 8px' }}
+              >
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={handleEditRackSubmit}>
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Warehouse / Hall
+                </label>
+                <select
+                  className="form-input"
+                  value={editRackWarehouse}
+                  onChange={(e) => setEditRackWarehouse(e.target.value)}
+                  style={{ height: '38px', fontSize: '13px' }}
+                >
+                  {uniqueWarehouses.map(wh => (
+                    <option key={wh} value={wh}>{wh}</option>
+                  ))}
+                  <option value="__custom__">+ Custom Warehouse / Hall...</option>
+                </select>
+              </div>
+
+              {editRackWarehouse === '__custom__' && (
+                <div className="form-group" style={{ marginBottom: '14px' }}>
+                  <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                    Custom Hall / Zone Name
+                  </label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Hall 6, Secondary Warehouse"
+                    value={editCustomRackWh}
+                    onChange={(e) => setEditCustomRackWh(e.target.value)}
+                    required
+                    style={{ height: '38px', fontSize: '13px' }}
+                  />
+                </div>
+              )}
+
+              <div className="form-group" style={{ marginBottom: '14px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Rack Name / Number <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. RACK 1, Slot A"
+                  value={editRackName}
+                  onChange={(e) => setEditRackName(e.target.value)}
+                  required
+                  style={{ height: '38px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '18px' }}>
+                <label className="form-label" style={{ fontSize: '12px', fontWeight: '700', marginBottom: '6px' }}>
+                  Default Packet Capacity
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  className="form-input"
+                  value={editRackCapacity}
+                  onChange={(e) => setEditRackCapacity(e.target.value)}
+                  style={{ height: '38px', fontSize: '13px' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setIsEditingRack(false);
+                    setEditingRack(null);
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

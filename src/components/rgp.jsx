@@ -1560,16 +1560,6 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     }
   };
 
-  const handleDepartmentChange = (idx, value) => {
-    updateEntry(idx, "department", value);
-    if (value !== "Other") setCustomDepartments(prev => ({ ...prev, [idx]: "" }));
-  };
-
-  const handleUomChange = (idx, value) => {
-    updateEntry(idx, "uom", value);
-    if (value !== "Other") setCustomUoms(prev => ({ ...prev, [idx]: "" }));
-  };
-
   // Calculate total quantity for display
   const totalQuantity = (form.entries || []).reduce((sum, entry) => sum + (Number(entry.qty1) || 0), 0);
 

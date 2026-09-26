@@ -90,8 +90,9 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
     return brandWords.some(w => mNameCompact.includes(w));
   };
 
-  const filtered = materials
+  const filtered = (materials || [])
     .filter(m => {
+      if (Number(m.stock) <= 0) return false;
       const q = searchQuery.toLowerCase().trim();
       if (!q) return true;
       const codeStr = String(m.id || '').toLowerCase();

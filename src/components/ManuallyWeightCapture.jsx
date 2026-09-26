@@ -57,7 +57,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
     if (source && source.length > 0) {
       source.forEach(rack => {
-        const warehouse = rack.warehouse || 'Hall 1';
+        const warehouse = rack.warehouse || 'Main Store';
         const rawCode = String(rack.code || '').trim();
         const displayLabel = rack.warehouse && rawCode.includes(rack.warehouse)
           ? rawCode

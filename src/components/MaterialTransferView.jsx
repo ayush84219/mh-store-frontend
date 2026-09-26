@@ -29,7 +29,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
   }, []);
 
   const filtered = matList.filter(m => {
-    if (!m) return false;
+    if (!m || Number(m.stock) <= 0) return false;
     const loc = String(m.location || m.color || '');
     const label = `${m.id || ''} ${m.name || ''} ${loc} ${m.category || ''}`.toLowerCase();
     return label.includes(searchQuery.toLowerCase().trim());

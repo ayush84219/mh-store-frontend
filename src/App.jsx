@@ -41,174 +41,10 @@ const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationV
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
+import ErrorBoundary from './components/ErrorBoundary';
 
-// Default Mock Data Arrays
-const initialMaterials = [
-  { id: 'MT1008', name: 'COTTON', category: 'DYEING', stock: 1987, unit: 'Pcs', cost: 0, threshold: 50, color: 'White', location: 'hall 1 rack 2 (8 pkts), hall 2 rack 3 (2 pkts)', packets: 10 },
-  { id: 'MT1009', name: 'ZIP', category: 'DYEING', stock: 2097, unit: 'Pcs', cost: 0, threshold: 50, color: 'Blue', location: 'HALL 3 RACK 7', packets: 20 },
-  { id: 'MT1010', name: 'BUTTON', category: 'DYEING', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'Red', location: 'HALL 3 RACK 4', packets: 5 },
-  { id: 'MT1011', name: 'fabric', category: 'Dyeing', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'Black', location: 'hall 3 rack 8', packets: 7 },
-  { id: 'MT1012', name: 'BUTTON', category: 'button', stock: 1511, unit: 'Pcs', cost: 0, threshold: 50, color: 'Gold', location: 'HALL 3 RACK 4', packets: 5 },
-  { id: 'MT1013', name: 'lastic', category: 'Zipper', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'White', location: 'HALL 3 RACK 9', packets: 5 },
-  { id: 'MT1014', name: 'zip', category: 'zip', stock: 2225, unit: 'Pcs', cost: 0, threshold: 50, color: 'Black', location: 'hall 4', packets: 10 },
-  { id: 'MT1015', name: 'lastic', category: 'lastic', stock: 223, unit: 'Pcs', cost: 0, threshold: 50, color: 'Silver', location: 'HALL 3 RACK 9', packets: 5 },
-  { id: 'MT1016', name: 'zip', category: 'zip', stock: 2285, unit: 'Pcs', cost: 0, threshold: 50, color: 'Grey', location: 'hall 5 rack 1', packets: 8 },
-  { id: 'M1302', name: 'Organic Cotton Fabric Roll', category: 'Fabric', stock: 2400, unit: 'meters', cost: 25.00, threshold: 200, color: 'Pure White', location: 'Main Store' },
-  { id: 'M1303', name: 'Indigo Denim Raw Roll', category: 'Fabric', stock: 850, unit: 'meters', cost: 45.00, threshold: 150, color: 'Raw Deep Indigo', location: 'Main Store' },
-  { id: 'M1304', name: 'YKK Brass Zippers (15cm)', category: 'Trim', stock: 150, unit: 'pieces', cost: 2.50, threshold: 200, color: 'Matte Gold', location: 'Main Store' },
-  { id: 'M1305', name: 'Polyester Thread Spool', category: 'Trim', stock: 45, unit: 'rolls', cost: 8.00, threshold: 50, color: 'Neutral Gray', location: 'Main Store' },
-  { id: 'M1306', name: 'Metal Rivets (Pack of 100)', category: 'Trim', stock: 60, unit: 'pieces', cost: 5.00, threshold: 20, color: 'Silver Metallic', location: 'Main Store' },
-  { id: 'M1307', name: 'Printed Satin Brand Labels', category: 'Accessory', stock: 500, unit: 'pieces', cost: 0.80, threshold: 100, color: 'Glossy White', location: 'Main Store' }
-];
+// No hardcoded demo data: All data is loaded directly from live MySQL database.
 
-const initialDesigns = [
-  {
-    id: '11000',
-    name: 'Summer Denim Jacket',
-    lotNo2: 'MH-4458',
-    brand: 'Zara',
-    category: 'JACKET',
-    designer: 'Admin',
-    fabricType: 'Raw Denim Cotton 100%',
-    targetSizes: 'S, M, L, XL',
-    colorCode: '#1e40af',
-    status: 'In Verification',
-    date: '10/08/2023',
-    comments: '',
-    section: 'Men',
-    season: 'Winter',
-    style: 'ST-9921',
-    tapeLace: 'No',
-    bottomType: 'N/A',
-    zip: 'Yes',
-    sticker: 'No',
-    collar: 'No',
-    bone: 'No',
-    fullBaju: 'No',
-    bom: [
-      { name: 'Zip', status: 'Yes', detail: '1', description: 'YKK Brass Zippers (15cm)', materialId: 'M1304' },
-      { name: 'Button', status: 'Yes', detail: '6', description: 'Metal Rivets (Pack of 100)', materialId: 'M1306' },
-      { name: 'Elastic', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Tape / Lace', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Rib', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Collar', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Sticker / Label', status: 'Yes', detail: '1', description: 'Printed Satin Brand Labels', materialId: 'M1307' },
-      { name: 'Thread', status: 'Yes', detail: '1', description: 'Polyester Thread Spool', materialId: 'M1305' },
-      { name: 'Pocket', status: 'Yes', detail: '2', description: 'Chest pockets', materialId: '' },
-      { name: 'Drawstring / Nara', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Hook, buckle, velcro', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Interlining / fusing', status: 'Yes', detail: '1', description: 'Placket fusing', materialId: '' }
-    ],
-    totalCost: 0
-  },
-  {
-    id: '11001',
-    name: 'Organic Cotton Polo Shirt',
-    lotNo2: 'MH-4459',
-    brand: 'Nike',
-    category: 'T-SHIRT COLLAR',
-    designer: 'Admin',
-    fabricType: 'Pima Cotton Pique',
-    targetSizes: 'M, L, XL',
-    colorCode: '#059669',
-    status: 'Approved',
-    date: '08/08/2023',
-    comments: '',
-    section: 'Men',
-    season: 'Summer',
-    style: 'TS-2201',
-    tapeLace: 'No',
-    bottomType: 'N/A',
-    zip: 'No',
-    sticker: 'No',
-    collar: 'Yes',
-    bone: 'No',
-    fullBaju: 'No',
-    bom: [
-      { name: 'Zip', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Button', status: 'Yes', detail: '3', description: 'Polo neck buttons', materialId: '' },
-      { name: 'Elastic', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Tape / Lace', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Rib', status: 'Yes', detail: '2', description: 'Collar & cuff rib', materialId: '' },
-      { name: 'Collar', status: 'Yes', detail: '1', description: 'Flat knit collar', materialId: '' },
-      { name: 'Sticker / Label', status: 'Yes', detail: '1', description: 'Printed Satin Brand Labels', materialId: 'M1307' },
-      { name: 'Thread', status: 'Yes', detail: '1', description: 'Polyester Thread Spool', materialId: 'M1305' },
-      { name: 'Pocket', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Drawstring / Nara', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Hook, buckle, velcro', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Interlining / fusing', status: 'Yes', detail: '1', description: 'Collar stand fusing', materialId: '' }
-    ],
-    totalCost: 0
-  },
-  {
-    id: '11002',
-    name: 'Linen Comfort Trousers',
-    lotNo2: 'MH-4460',
-    brand: 'H&M',
-    category: 'LOWER',
-    designer: 'Admin',
-    fabricType: 'Pure Linen Weave',
-    targetSizes: 'S, M, L',
-    colorCode: '#d97706',
-    status: 'Approved',
-    date: '02/08/2023',
-    comments: '',
-    section: 'Women',
-    season: 'Summer',
-    style: 'TR-3304',
-    tapeLace: 'No',
-    bottomType: 'Elastic mohri',
-    zip: 'No',
-    sticker: 'No',
-    collar: 'No',
-    bone: 'No',
-    fullBaju: 'No',
-    bom: [
-      { name: 'Zip', status: 'Yes', detail: '1', description: 'YKK Fly Zipper', materialId: '' },
-      { name: 'Button', status: 'Yes', detail: '1', description: 'Waistband button', materialId: '' },
-      { name: 'Elastic', status: 'Yes', detail: '1', description: 'Waistband elastic', materialId: '' },
-      { name: 'Tape / Lace', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Rib', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Collar', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Sticker / Label', status: 'Yes', detail: '1', description: 'Brand Label', materialId: '' },
-      { name: 'Thread', status: 'Yes', detail: '1', description: 'Polyester Thread Spool', materialId: 'M1305' },
-      { name: 'Pocket', status: 'Yes', detail: '2', description: 'Side pockets', materialId: '' },
-      { name: 'Drawstring / Nara', status: 'Yes', detail: '1', description: 'Waist drawstring', materialId: '' },
-      { name: 'Hook, buckle, velcro', status: 'No', detail: '', description: '', materialId: '' },
-      { name: 'Interlining / fusing', status: 'Yes', detail: '1', description: 'Waistband fusing', materialId: '' }
-    ],
-    totalCost: 0
-  }
-];
-
-const initialPOs = [
-  {
-    id: 'PO1301',
-    poNumber: 'PO-11000',
-    vendorName: 'YKK Trim Solutions',
-    vendorEmail: 'sales@ykk-trims.com',
-    vendorAddress: 'Industrial Block C, Mumbai',
-    designName: 'Summer Denim Jacket',
-    designCategory: 'JACKET',
-    items: [
-      { name: 'YKK Brass Zippers (15cm)', qty: 500, unit: 'pieces', price: 2.50 },
-      { name: 'Metal Rivets (Pack of 100)', qty: 627, unit: 'pieces', price: 5.00 }
-    ],
-    subtotal: 4385,
-    taxRate: 18,
-    tax: 789.3,
-    total: 38500, // matches R 38,500 in dashboard image
-    date: '23/02/2023',
-    deliveryDate: '15/03/2023',
-    status: 'Sent to Vendor'
-  }
-];
-
-const initialVendors = [
-  { id: 'V101', name: 'YKK Trim Solutions', email: 'sales@ykk-trims.com', address: 'Industrial Block C, Mumbai', materialsJoined: 'Metal Buttons & Rivets' },
-  { id: 'V102', name: 'EuroCotton Mills', email: 'orders@eurocotton.co', address: 'Textile Center Hub, Gujarat', materialsJoined: 'Fabrics & Yarn' },
-  { id: 'V103', name: 'Global Tags & Trims', email: 'info@globaltags.com', address: 'Apparel Center Complex, Mumbai', materialsJoined: 'Labels, Tags & Hangers' }
-];
 
 const getRolePanel = (role) => {
   const r = (role || '').toLowerCase();
@@ -466,22 +302,30 @@ export default function App() {
     setActiveTab('rgp');
   };
   const [designs, setDesigns] = useState(() => {
-    const saved = localStorage.getItem('gpdms_designs');
-    const parsed = saved ? JSON.parse(saved) : initialDesigns;
-    return [...parsed].sort((a, b) => {
-      const numA = parseInt(a.id, 10);
-      const numB = parseInt(b.id, 10);
-      if (!isNaN(numA) && !isNaN(numB)) {
-        return numB - numA;
-      }
-      return b.id.localeCompare(a.id);
-    });
+    try {
+      const saved = localStorage.getItem('gpdms_designs');
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      // Clean out any legacy demo designs
+      const cleaned = parsed.filter(d => d.id !== '11000' && d.id !== '11001' && d.id !== '11002' && !String(d.name || '').includes('Summer Denim') && !String(d.name || '').includes('Cotton Polo') && !String(d.name || '').includes('Comfort Trousers'));
+      return cleaned.sort((a, b) => {
+        const numA = parseInt(a.id, 10);
+        const numB = parseInt(b.id, 10);
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return numB - numA;
+        }
+        return (b.id || '').localeCompare(a.id || '');
+      });
+    } catch (e) {
+      return [];
+    }
   });
   const [materials, setMaterials] = useState([]);
   // POs — backed by database
-  const [pos, setPOs] = useState(initialPOs);
+  const [pos, setPOs] = useState([]);
   // Vendors — backed by database
-  const [vendors, setVendors] = useState(initialVendors);
+  const [vendors, setVendors] = useState([]);
 
   const settingsHydratedRef = useRef(false);
 
@@ -702,7 +546,7 @@ export default function App() {
     fetchSyncedLots();
   }, []);
 
-  // Continuous 1-minute Keep-Alive Health Heartbeat to prevent backend sleep mode
+  // Continuous 5-minute (300 seconds) Keep-Alive Health Heartbeat to prevent backend sleep mode with minimal load
   useEffect(() => {
     const keepAlivePing = () => {
       fetch(`${getBackendUrl()}/api/health`, {
@@ -714,8 +558,8 @@ export default function App() {
     // Ping once on mount / reload
     keepAlivePing();
 
-    // Ping every 1 minute (60,000 ms) continuously
-    const keepAliveInterval = setInterval(keepAlivePing, 60 * 1000);
+    // Ping every 5 minutes (300,000 ms = 300 seconds) continuously
+    const keepAliveInterval = setInterval(keepAlivePing, 300 * 1000);
 
     // Also ping when browser tab becomes active or phone wakes up
     const handleVisibilityChange = () => {
@@ -731,9 +575,10 @@ export default function App() {
     };
   }, []);
 
-  // Fetch designs from database via backend on mount
+  // Fetch designs from database via backend on mount & relaxed sync
   useEffect(() => {
     const fetchDesigns = async () => {
+      if (document.hidden) return;
       try {
         const response = await fetch(`${getBackendUrl()}/api/designs`);
         if (response.ok) {
@@ -764,33 +609,46 @@ export default function App() {
     };
     fetchDesigns();
 
-    // Poll every 5 seconds so designs stay synced across panels in real-time
-    const pollInterval = setInterval(fetchDesigns, 5000);
-    return () => clearInterval(pollInterval);
+    // Poll every 20 seconds only when tab is active
+    const pollInterval = setInterval(fetchDesigns, 20000);
+    const onVisibility = () => { if (!document.hidden) fetchDesigns(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
-  // Fetch materials from database on mount & poll every 3 seconds for live sync
-  useEffect(() => {
-    const fetchMaterials = async () => {
-      try {
-        const response = await fetch(`${getBackendUrl()}/api/materials`);
-        if (response.ok) {
-          const data = await response.json();
-          setMaterials(Array.isArray(data) ? data : []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch materials from DB:', err);
+  // Fetch materials from database on mount & poll every 15 seconds only when active
+  const fetchMaterials = async () => {
+    if (document.hidden) return;
+    try {
+      const response = await fetch(`${getBackendUrl()}/api/materials`);
+      if (response.ok) {
+        const data = await response.json();
+        setMaterials(Array.isArray(data) ? data : []);
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch materials from DB:', err);
+    }
+  };
+
+  useEffect(() => {
     fetchMaterials();
 
-    const interval = setInterval(fetchMaterials, 3000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchMaterials, 15000);
+    const onVisibility = () => { if (!document.hidden) fetchMaterials(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
-  // Fetch approval requests from database on mount
+  // Fetch approval requests from database on mount & poll every 15 seconds
   useEffect(() => {
     const fetchApprovalRequests = async () => {
+      if (document.hidden) return;
       try {
         const response = await fetch(`${getBackendUrl()}/api/approval-requests`);
         if (response.ok) {
@@ -808,9 +666,14 @@ export default function App() {
     };
     fetchApprovalRequests();
 
-    // Poll every 5 seconds so notifications trigger promptly
-    const pollInterval = setInterval(fetchApprovalRequests, 5000);
-    return () => clearInterval(pollInterval);
+    // Poll every 15 seconds only when tab is active
+    const pollInterval = setInterval(fetchApprovalRequests, 15000);
+    const onVisibility = () => { if (!document.hidden) fetchApprovalRequests(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   const playNotificationSound = () => {
@@ -927,9 +790,10 @@ export default function App() {
     prevRequestsRef.current = approvalRequests;
   }, [approvalRequests, currentUser]);
 
-  // Fetch purchase orders from database with periodic sync
+  // Fetch purchase orders from database with periodic sync (30s, active tab only)
   useEffect(() => {
     const fetchPOs = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch(`${getBackendUrl()}/api/pos`);
         if (res.ok) {
@@ -941,13 +805,19 @@ export default function App() {
       }
     };
     fetchPOs();
-    const poInterval = setInterval(fetchPOs, 5000);
-    return () => clearInterval(poInterval);
+    const poInterval = setInterval(fetchPOs, 30000);
+    const onVisibility = () => { if (!document.hidden) fetchPOs(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(poInterval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
-  // Fetch vendors from database with periodic sync
+  // Fetch vendors from database with periodic sync (60s, active tab only)
   useEffect(() => {
     const fetchVendors = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch(`${getBackendUrl()}/api/vendors`);
         if (res.ok) {
@@ -959,13 +829,19 @@ export default function App() {
       }
     };
     fetchVendors();
-    const vendorInterval = setInterval(fetchVendors, 10000);
-    return () => clearInterval(vendorInterval);
+    const vendorInterval = setInterval(fetchVendors, 60000);
+    const onVisibility = () => { if (!document.hidden) fetchVendors(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(vendorInterval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
-  // Fetch settings (accessories & designers lists, warehouse halls & racks) from database with periodic sync
+  // Fetch settings (accessories & designers lists, warehouse halls & racks) from database with periodic sync (60s, active tab only)
   useEffect(() => {
     const fetchSettings = async () => {
+      if (document.hidden) return;
       try {
         const res = await fetch(`${getBackendUrl()}/api/settings`);
         if (res.ok) {
@@ -994,8 +870,13 @@ export default function App() {
       }
     };
     fetchSettings();
-    const settingsInterval = setInterval(fetchSettings, 10000);
-    return () => clearInterval(settingsInterval);
+    const settingsInterval = setInterval(fetchSettings, 60000);
+    const onVisibility = () => { if (!document.hidden) fetchSettings(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      clearInterval(settingsInterval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   // Fetch issue logs from database on mount
@@ -1216,40 +1097,6 @@ export default function App() {
     }
   };
 
-  const handleUpdateDesignStatus = async (id, status, comment = '') => {
-    setDesigns(designs.map(d => {
-      if (d.id === id) {
-        return { ...d, status, comments: comment };
-      }
-      return d;
-    }));
-
-    // Trigger toast notification
-    setToast({
-      message: `Lot ${id} has been ${status === 'Approved' ? 'Verified & Approved' : 'Rejected for Revision'}.`,
-      type: status === 'Approved' ? 'success' : 'error'
-    });
-
-    // Auto-dismiss after 4 seconds
-    setTimeout(() => {
-      setToast(prev => {
-        if (prev && prev.message.includes(id)) {
-          return null;
-        }
-        return prev;
-      });
-    }, 4000);
-
-    try {
-      await fetch(`${getBackendUrl()}/api/designs/${id}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status, comments: comment, actorName: currentUser?.name || 'Admin' })
-      });
-    } catch (err) {
-      console.error('Failed to update design status in SQLite:', err);
-    }
-  };
 
   // Helper to sync material stock updates to backend (must be defined before handlers that use it)
   const syncMaterialsToDb = async (updatedMaterials) => {
@@ -1577,37 +1424,29 @@ export default function App() {
     setConfirmResetOpen(true);
   };
 
-  const executeResetDatabase = () => {
-    const sortedInitial = [...initialDesigns].sort((a, b) => {
-      const numA = parseInt(a.id, 10);
-      const numB = parseInt(b.id, 10);
-      if (!isNaN(numA) && !isNaN(numB)) {
-        return numB - numA;
-      }
-      return b.id.localeCompare(a.id);
-    });
-    setDesigns(sortedInitial);
-    setMaterials(initialMaterials);
-    setPOs(initialPOs);
-    setVendors(initialVendors);
-    setCurrencySymbol('R');
-    setDefaultTax(18);
-    setIsDarkTheme(false);
-    setAccessoriesList([
-      'Zip', 'Button', 'Elastic', 'Tape / Lace', 'Rib', 'Collar',
-      'Sticker / Label', 'Thread', 'Pocket', 'Drawstring / Nara',
-      'Hook, buckle, velcro', 'Interlining / fusing', 'Bone', 'Full Baju'
-    ]);
-    setDesignersList(['Admin']);
-    setRacks([]);
-    setHalls(['Hall 1']);
-    localStorage.clear();
-    setToast({
-      type: 'success',
-      title: 'Database Restored',
-      message: 'Database restored successfully!'
-    });
-    setTimeout(() => setToast(null), 5000);
+  const executeResetDatabase = async () => {
+    try {
+      localStorage.clear();
+      setCurrencySymbol('R');
+      setDefaultTax(18);
+      setIsDarkTheme(false);
+      setRacks([]);
+      setHalls(['Main Store']);
+      await Promise.all([
+        fetchMaterials(),
+        fetch(`${getBackendUrl()}/api/designs`).then(r => r.json()).then(d => setDesigns(Array.isArray(d) ? d : [])).catch(() => {}),
+        fetch(`${getBackendUrl()}/api/pos`).then(r => r.json()).then(p => setPOs(Array.isArray(p) ? p : [])).catch(() => {}),
+        fetch(`${getBackendUrl()}/api/vendors`).then(r => r.json()).then(v => setVendors(Array.isArray(v) ? v : [])).catch(() => {})
+      ]);
+      setToast({
+        type: 'success',
+        title: 'System Cache Cleared',
+        message: 'Local storage reset and live database records re-synchronized.'
+      });
+      setTimeout(() => setToast(null), 5000);
+    } catch (err) {
+      console.error('Reset error:', err);
+    }
   };
 
   const handleAddAccessory = (name) => {
@@ -2717,7 +2556,8 @@ export default function App() {
 
         {/* Content Wrapper */}
         <div className="page-container">
-          <Suspense fallback={
+          <ErrorBoundary>
+            <Suspense fallback={
             <div style={{
               display: 'flex',
               flexDirection: 'column',
@@ -3005,6 +2845,7 @@ export default function App() {
               <POVerificationView currencySymbol={currencySymbol} currentUser={currentUser} />
             )}
           </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
 
