@@ -1300,17 +1300,23 @@ export default function MaterialDetailsView({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Material Category</label>
-                <select
+                <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
                   className="form-input"
+                  placeholder="e.g. ZIPPERS / TRIMS (type or select)"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="Fabric">Fabric (Cotton, Denim, Silk)</option>
-                  <option value="Trim">Trim (Zippers, Buttons, Rivets)</option>
-                  <option value="Accessory">Accessory (Labels, Tags, Hangers)</option>
-                  <option value="Packaging">Packaging (Poly bags, Cartons)</option>
-                </select>
+                  list="mdv-category-suggestions"
+                  autoComplete="on"
+                  style={{ fontWeight: '600' }}
+                  required
+                />
+                <datalist id="mdv-category-suggestions">
+                  {['ZIPPERS', 'BUTTONS', 'ELASTICS', 'TRIMS', 'FABRICS', 'ACCESSORIES', 'LABELS', 'PACKAGING', 'THREADS', 'CORDS', 'BUCKLES', 'RIVETS', 'TAPES', 'HOOKS', 'FABRIC', 'TRIM', 'ACCESSORY'].map((c, idx) => (
+                    <option key={idx} value={c} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
@@ -1329,17 +1335,20 @@ export default function MaterialDetailsView({
 
               <div className="form-group">
                 <label className="form-label">Unit of Measure</label>
-                <select
+                <input
+                  type="text"
                   className="form-input"
+                  placeholder="e.g. Pcs, Mtr, Kg (type or select)"
                   value={unit}
                   onChange={(e) => setUnit(e.target.value)}
-                >
-                  <option value="meters">Meters</option>
-                  <option value="yards">Yards</option>
-                  <option value="rolls">Rolls</option>
-                  <option value="pieces">Pieces</option>
-                  <option value="kg">Kgs</option>
-                </select>
+                  list="mdv-unit-suggestions"
+                  autoComplete="on"
+                />
+                <datalist id="mdv-unit-suggestions">
+                  {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch', 'meters', 'yards', 'rolls', 'pieces', 'kg'].map((u, idx) => (
+                    <option key={idx} value={u} />
+                  ))}
+                </datalist>
               </div>
             </div>
 

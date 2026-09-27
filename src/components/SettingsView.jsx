@@ -236,14 +236,27 @@ export default function SettingsView({
   const [isAddingMaterial, setIsAddingMaterial] = useState(false);
   const [matSearchQuery, setMatSearchQuery] = useState('');
   const [matName, setMatName] = useState('');
-  const [matCategory, setMatCategory] = useState('Fabric');
+  const [matCategory, setMatCategory] = useState('FABRICS');
   const [matStock, setMatStock] = useState('');
-  const [matUnit, setMatUnit] = useState('meters');
+  const [matUnit, setMatUnit] = useState('Pcs');
   const [matCost, setMatCost] = useState('');
   const [matThreshold, setMatThreshold] = useState('50');
   const [matColor, setMatColor] = useState('');
   const [matLocation, setMatLocation] = useState('');
   const [matError, setMatError] = useState('');
+
+  const categorySuggestions = useMemo(() => {
+    const set = new Set();
+    (materials || []).forEach(m => {
+      if (m.category && m.category.trim()) set.add(m.category.trim().toUpperCase());
+    });
+    [
+      'ZIPPERS', 'BUTTONS', 'ELASTICS', 'TRIMS', 'FABRICS', 'ACCESSORIES',
+      'LABELS', 'PACKAGING', 'THREADS', 'CORDS', 'BUCKLES', 'RIVETS', 'TAPES', 'HOOKS',
+      'FABRIC', 'TRIM', 'ACCESSORY'
+    ].forEach(p => set.add(p));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [materials]);
 
   // Handle Edit Material Update Submit
   const handleUpdateSubmit = (e) => {
@@ -255,9 +268,9 @@ export default function SettingsView({
     const updated = {
       ...editingMaterial,
       name: matName.trim(),
-      category: matCategory,
+      category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
-      unit: matUnit,
+      unit: matUnit ? matUnit.trim() : 'Pcs',
       cost: parseFloat(matCost) || 0,
       threshold: parseFloat(matThreshold) || 50,
       color: matColor ? matColor.trim() : 'Default',
@@ -281,9 +294,9 @@ export default function SettingsView({
     const newMat = {
       id: newId,
       name: matName.trim(),
-      category: matCategory,
+      category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
-      unit: matUnit,
+      unit: matUnit ? matUnit.trim() : 'Pcs',
       cost: parseFloat(matCost) || 0,
       threshold: parseFloat(matThreshold) || 50,
       color: matColor ? matColor.trim() : 'Default',
@@ -297,8 +310,11 @@ export default function SettingsView({
     }
     setIsAddingMaterial(false);
     setMatName('');
+    setMatCategory('FABRICS');
     setMatStock('');
+    setMatUnit('Pcs');
     setMatCost('');
+    setMatThreshold('50');
     setMatColor('');
     setMatLocation('');
     setMatError('');
@@ -1285,12 +1301,12 @@ export default function SettingsView({
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
                             setEditingMaterial(m);
-                            setMatName(m.name);
-                            setMatCategory(m.category);
-                            setMatStock(m.stock);
-                            setMatUnit(m.unit);
-                            setMatCost(m.cost);
-                            setMatThreshold(m.threshold || 50);
+                            setMatName(m.name || '');
+                            setMatCategory(m.category || 'FABRICS');
+                            setMatStock(m.stock !== undefined ? m.stock : '');
+                            setMatUnit(m.unit || 'Pcs');
+                            setMatCost(m.cost !== undefined ? m.cost : 0);
+                            setMatThreshold(m.threshold !== undefined ? m.threshold : 50);
                             setMatColor(m.color || '');
                             setMatLocation(m.location || '');
                             setMatError('');
@@ -1299,18 +1315,6 @@ export default function SettingsView({
                           title="Edit material details"
                         >
                           <Edit size={14} />
-                        </button>
-                        <button
-                          className="btn btn-danger btn-sm"
-                          onClick={() => {
-                            if (window.confirm(`Are you sure you want to delete material "${m.name}"?`)) {
-                              onDeleteMaterial(m.id);
-                            }
-                          }}
-                          style={{ padding: '6px' }}
-                          title="Delete material from database"
-                        >
-                          <Trash2 size={14} />
                         </button>
                       </div>
                     </td>
@@ -1362,17 +1366,23 @@ export default function SettingsView({
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Material Category</label>
-                  <select
+                  <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    type="text"
                     className="form-input"
                     value={matCategory}
                     onChange={(e) => setMatCategory(e.target.value)}
-                  >
-                    <option value="Fabric">Fabric (Cotton, Denim, Silk)</option>
-                    <option value="Trim">Trim (Zippers, Buttons, Rivets)</option>
-                    <option value="Accessory">Accessory (Labels, Tags, Hangers)</option>
-                    <option value="Packaging">Packaging (Poly bags, Cartons)</option>
-                  </select>
+                    list="settings-category-suggestions"
+                    placeholder="e.g. ZIPPERS / TRIMS (type or select)"
+                    autoComplete="on"
+                    style={{ fontWeight: '600' }}
+                    required
+                  />
+                  <datalist id="settings-category-suggestions">
+                    {categorySuggestions.map((cat, idx) => (
+                      <option key={idx} value={cat} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
@@ -1391,17 +1401,20 @@ export default function SettingsView({
 
                 <div className="form-group">
                   <label className="form-label">Unit of Measure</label>
-                  <select
+                  <input
+                    type="text"
                     className="form-input"
                     value={matUnit}
                     onChange={(e) => setMatUnit(e.target.value)}
-                  >
-                    <option value="meters">Meters</option>
-                    <option value="yards">Yards</option>
-                    <option value="rolls">Rolls</option>
-                    <option value="pieces">Pieces</option>
-                    <option value="kg">Kgs</option>
-                  </select>
+                    list="settings-unit-suggestions"
+                    placeholder="e.g. Pcs, Mtr, Kg (type or select)"
+                    autoComplete="on"
+                  />
+                  <datalist id="settings-unit-suggestions">
+                    {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch', 'meters', 'yards', 'rolls', 'pieces', 'kg'].map((u, idx) => (
+                      <option key={idx} value={u} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
@@ -1515,17 +1528,23 @@ export default function SettingsView({
                 </div>
 
                 <div className="form-group">
-                  <label className="form-label">Material Category</label>
-                  <select
+                  <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
+                  <input
+                    type="text"
                     className="form-input"
+                    placeholder="e.g. ZIPPERS / TRIMS (type or select)"
                     value={matCategory}
                     onChange={(e) => setMatCategory(e.target.value)}
-                  >
-                    <option value="Fabric">Fabric (Cotton, Denim, Silk)</option>
-                    <option value="Trim">Trim (Zippers, Buttons, Rivets)</option>
-                    <option value="Accessory">Accessory (Labels, Tags, Hangers)</option>
-                    <option value="Packaging">Packaging (Poly bags, Cartons)</option>
-                  </select>
+                    list="settings-category-suggestions"
+                    autoComplete="on"
+                    style={{ fontWeight: '600' }}
+                    required
+                  />
+                  <datalist id="settings-category-suggestions">
+                    {categorySuggestions.map((cat, idx) => (
+                      <option key={idx} value={cat} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
@@ -1545,17 +1564,20 @@ export default function SettingsView({
 
                 <div className="form-group">
                   <label className="form-label">Unit of Measure</label>
-                  <select
+                  <input
+                    type="text"
                     className="form-input"
+                    placeholder="e.g. Pcs, Mtr, Kg (type or select)"
                     value={matUnit}
                     onChange={(e) => setMatUnit(e.target.value)}
-                  >
-                    <option value="meters">Meters</option>
-                    <option value="yards">Yards</option>
-                    <option value="rolls">Rolls</option>
-                    <option value="pieces">Pieces</option>
-                    <option value="kg">Kgs</option>
-                  </select>
+                    list="settings-unit-suggestions"
+                    autoComplete="on"
+                  />
+                  <datalist id="settings-unit-suggestions">
+                    {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch', 'meters', 'yards', 'rolls', 'pieces', 'kg'].map((u, idx) => (
+                      <option key={idx} value={u} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 
