@@ -36,6 +36,36 @@ export default function SettingsView({
   const [vendorAddress, setVendorAddress] = useState('');
   const [materialsJoined, setMaterialsJoined] = useState('Fabrics & Trims');
   const [vendorError, setVendorError] = useState('');
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [vendorToDelete, setVendorToDelete] = useState(null);
+  const [accToDelete, setAccToDelete] = useState(null);
+  const [designerToDelete, setDesignerToDelete] = useState(null);
+
+  // Handle Add Vendor function
+  const handleAddVendor = (e) => {
+    e.preventDefault();
+    if (!vendorName || !vendorName.trim()) {
+      setVendorError('Please provide a Supplier Company Name.');
+      return;
+    }
+    const newVendor = {
+      id: `V${Date.now().toString().slice(-4)}`,
+      name: vendorName.trim(),
+      email: vendorEmail.trim() || 'vendor@mohit.com',
+      address: vendorAddress.trim() || 'Factory / Store Location',
+      materialsJoined: (materialsJoined && materialsJoined.trim()) ? materialsJoined.trim() : 'General Accessories'
+    };
+
+    if (typeof onAddVendor === 'function') {
+      onAddVendor(newVendor);
+    }
+    setVendorName('');
+    setVendorEmail('');
+    setVendorAddress('');
+    setMaterialsJoined('');
+    setIsAddingVendor(false);
+    setVendorError('');
+  };
 
 
 
@@ -777,7 +807,7 @@ export default function SettingsView({
                       <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-main)' }}>{acc}</span>
                       <button
                         type="button"
-                        onClick={() => onDeleteAccessory(acc)}
+                        onClick={() => setAccToDelete(acc)}
                         style={{
                           background: 'none',
                           border: 'none',
@@ -787,7 +817,7 @@ export default function SettingsView({
                           display: 'flex',
                           alignItems: 'center'
                         }}
-                        title={`Remove ${acc} permanently`}
+                        title={`Remove ${acc}`}
                       >
                         <Trash2 size={14} style={{ color: 'var(--danger)' }} />
                       </button>
@@ -866,7 +896,7 @@ export default function SettingsView({
                       <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-main)' }}>{designerName}</span>
                       <button
                         type="button"
-                        onClick={() => onDeleteDesigner(designerName)}
+                        onClick={() => setDesignerToDelete(designerName)}
                         style={{
                           background: 'none',
                           border: 'none',
@@ -913,119 +943,188 @@ export default function SettingsView({
         </div>
 
         {/* Right Column: Suppliers Management */}
-        <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-header">
-            <h3 className="panel-title">
-              <Users size={18} className="text-accent" />
-              Associated Suppliers & Vendors ({vendors.length})
-            </h3>
-            {!isAddingVendor && (
-              <button className="btn btn-primary btn-sm" onClick={() => { setIsAddingVendor(true); setVendorError(''); }}>
-                <PlusCircle size={14} /> Add Vendor
-              </button>
-            )}
-          </div>
+        {(() => {
+          const safeVendors = Array.isArray(vendors) ? vendors : [];
+          const filteredVendors = safeVendors.filter(v => {
+            if (!vendorSearch.trim()) return true;
+            const q = vendorSearch.toLowerCase();
+            return (
+              String(v.name || '').toLowerCase().includes(q) ||
+              String(v.email || '').toLowerCase().includes(q) ||
+              String(v.address || '').toLowerCase().includes(q) ||
+              String(v.materialsJoined || '').toLowerCase().includes(q)
+            );
+          });
 
-          {isAddingVendor && (
-            <form onSubmit={handleAddVendor} className="animate-scale" style={{ marginBottom: '20px', padding: '16px', border: '1px solid var(--border-color)', borderRadius: '8px', backgroundColor: 'var(--bg-primary)' }}>
-              <h4 style={{ fontSize: '13px', fontWeight: '700', marginBottom: '12px', color: 'var(--text-main)', textTransform: 'uppercase' }}>New Vendor Information</h4>
-              {vendorError && (
-                <div className="auth-alert error" style={{ padding: '8px 12px', marginBottom: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <ShieldAlert size={15} style={{ flexShrink: 0 }} />
-                  <span>{vendorError}</span>
+          return (
+            <div className="panel" style={{ marginBottom: 0 }}>
+              <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                <h3 className="panel-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Users size={18} className="text-accent" />
+                  Associated Suppliers & Vendors ({safeVendors.length})
+                </h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ position: 'relative', width: '180px' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Search vendors..."
+                      value={vendorSearch}
+                      onChange={(e) => setVendorSearch(e.target.value)}
+                      style={{ padding: '6px 10px 6px 28px', fontSize: '12px', height: '32px' }}
+                    />
+                    <Search size={13} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  </div>
+                  {!isAddingVendor && (
+                    <button className="btn btn-primary btn-sm" onClick={() => { setIsAddingVendor(true); setVendorError(''); setMaterialsJoined(''); }} style={{ height: '32px' }}>
+                      <PlusCircle size={14} /> Add Vendor
+                    </button>
+                  )}
                 </div>
+              </div>
+
+              {isAddingVendor && (
+                <form onSubmit={handleAddVendor} className="animate-scale" style={{ marginBottom: '20px', padding: '16px', border: '1.5px solid var(--border-color)', borderRadius: '10px', backgroundColor: 'var(--bg-primary)' }}>
+                  <h4 style={{ fontSize: '13px', fontWeight: '800', marginBottom: '12px', color: 'var(--text-main)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <PlusCircle size={15} color="var(--primary-color)" />
+                    <span>New Supplier / Vendor Information</span>
+                  </h4>
+                  {vendorError && (
+                    <div className="auth-alert error" style={{ padding: '8px 12px', marginBottom: '12px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                      <ShieldAlert size={15} style={{ flexShrink: 0 }} />
+                      <span>{vendorError}</span>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: '700' }}>Company Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. YKK Trim Solutions"
+                        value={vendorName}
+                        onChange={(e) => setVendorName(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: '700' }}>Contact Email</label>
+                      <input
+                        type="email"
+                        className="form-input"
+                        placeholder="e.g. sales@vendor.com"
+                        value={vendorEmail}
+                        onChange={(e) => setVendorEmail(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginBottom: '14px' }}>
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: '700' }}>Office / Factory Location</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Industrial Area Phase 1"
+                        value={vendorAddress}
+                        onChange={(e) => setVendorAddress(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ margin: 0 }}>
+                      <label className="form-label" style={{ fontSize: '11px', fontWeight: '700' }}>
+                        Materials Supplied <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>(type custom or select)</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Elastic, Dori, Custom Trims (type manually)"
+                        value={materialsJoined}
+                        onChange={(e) => setMaterialsJoined(e.target.value)}
+                        list="vendor-materials-datalist"
+                        autoComplete="off"
+                        required
+                      />
+                      <datalist id="vendor-materials-datalist">
+                        <option value="Fabrics & Yarn" />
+                        <option value="Buttons, Zippers & Trims" />
+                        <option value="Labels, Tags & Hangers" />
+                        <option value="Elastic, Dori & Tape" />
+                        <option value="Full Apparel Accessories" />
+                        <option value="Threads, Cords & Ropes" />
+                        <option value="Interlining & Fusing" />
+                        <option value="Poly Bags & Packaging" />
+                        <option value="Metal Rivets & Eyelets" />
+                        <option value="Bones & Plastic Stiffeners" />
+                      </datalist>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsAddingVendor(false)}>Cancel</button>
+                    <button type="submit" className="btn btn-primary btn-sm">Save Vendor</button>
+                  </div>
+                </form>
               )}
 
-              <div className="form-group">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Supplier Company Name"
-                  value={vendorName}
-                  onChange={(e) => setVendorName(e.target.value)}
-                  required
-                />
+              <div className="custom-table-container" style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                <table className="custom-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg-primary)', borderBottom: '2px solid var(--border-color)', textAlign: 'left' }}>
+                      <th style={{ padding: '10px 12px' }}>Vendor ID</th>
+                      <th style={{ padding: '10px 12px' }}>Supplier / Company</th>
+                      <th style={{ padding: '10px 12px' }}>Materials Supplied</th>
+                      <th style={{ padding: '10px 12px' }}>Location</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredVendors.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                          {safeVendors.length === 0 ? 'No vendors added yet. Click "+ Add Vendor" to create one.' : 'No vendors matching your search.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredVendors.map((v) => (
+                        <tr key={v.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: '800', color: 'var(--primary-color)' }}>
+                            {v.id}
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)' }}>{v.name}</strong>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{v.email || '—'}</span>
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <span className="status-badge" style={{ backgroundColor: 'rgba(5, 150, 105, 0.1)', color: '#059669', fontSize: '11px', fontWeight: '700', padding: '3px 8px', borderRadius: '4px' }}>
+                              {v.materialsJoined || 'General Accessories'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '10px 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                            {v.address || '—'}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-sm"
+                              onClick={() => setVendorToDelete(v)}
+                              title="Delete Vendor"
+                              style={{ padding: '5px 8px' }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-
-              <div className="form-group">
-                <input
-                  type="email"
-                  className="form-input"
-                  placeholder="Contact Email Address"
-                  value={vendorEmail}
-                  onChange={(e) => setVendorEmail(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Office/Factory Address"
-                  value={vendorAddress}
-                  onChange={(e) => setVendorAddress(e.target.value)}
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" style={{ fontSize: '12px' }}>Materials Supplied</label>
-                <select
-                  className="form-input"
-                  value={materialsJoined}
-                  onChange={(e) => setMaterialsJoined(e.target.value)}
-                >
-                  <option value="Fabrics & Yarn">Fabrics & Yarn</option>
-                  <option value="Metal Buttons & Rivets">Buttons, Zippers & Trims</option>
-                  <option value="Labels, Tags & Hangers">Labels, Tags & Hangers</option>
-                  <option value="Full Apparel Accessories">Full Apparel Accessories</option>
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setIsAddingVendor(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-sm">Add Vendor</button>
-              </div>
-            </form>
-          )}
-
-          <div className="custom-table-container" style={{ maxHeight: '380px', overflowY: 'auto' }}>
-            <table className="custom-table">
-              <thead>
-                <tr>
-                  <th>Vendor</th>
-                  <th>Category</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vendors.map((v) => (
-                  <tr key={v.id}>
-                    <td>
-                      <strong style={{ display: 'block', fontSize: '14px' }}>{v.name}</strong>
-                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{v.email}</span>
-                    </td>
-                    <td>
-                      <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', fontSize: '11px' }}>
-                        {v.materialsJoined}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        className="btn btn-danger btn-sm"
-                        onClick={() => onDeleteVendor(v.id)}
-                        disabled={vendors.length <= 2} // keep at least a couple default vendors
-                        style={{ padding: '6px' }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Warehouse Racks & Storage Slots Management */}
@@ -1860,6 +1959,214 @@ export default function SettingsView({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Vendor Modal */}
+      {vendorToDelete && (
+        <div className="modal-overlay" style={{ zIndex: 1300 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '460px', padding: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '16px' }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                color: 'var(--danger, #ef4444)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <AlertTriangle size={26} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>
+                  Confirm Delete Vendor?
+                </h3>
+                <p style={{ margin: '3px 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                  Please take a moment to think before deleting.
+                </p>
+              </div>
+            </div>
+
+            <div style={{
+              backgroundColor: 'var(--bg-secondary, #f8fafc)',
+              border: '1.5px solid var(--border-color)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: '16px',
+              fontSize: '13px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Vendor ID:</span>
+                <strong style={{ color: 'var(--primary-color)' }}>{vendorToDelete.id}</strong>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Company Name:</span>
+                <strong style={{ color: 'var(--danger)' }}>{vendorToDelete.name}</strong>
+              </div>
+              {vendorToDelete.email && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Email:</span>
+                  <span>{vendorToDelete.email}</span>
+                </div>
+              )}
+              {vendorToDelete.materialsJoined && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Materials:</span>
+                  <span>{vendorToDelete.materialsJoined}</span>
+                </div>
+              )}
+              {vendorToDelete.address && (
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Location:</span>
+                  <span>{vendorToDelete.address}</span>
+                </div>
+              )}
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '22px', lineHeight: '1.45' }}>
+              ⚠️ Are you sure you want to permanently delete <strong>{vendorToDelete.name}</strong> from the database? This action cannot be undone.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setVendorToDelete(null)}
+                style={{ padding: '9px 18px', fontSize: '13px', fontWeight: '600' }}
+              >
+                Cancel / Keep Vendor
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  if (typeof onDeleteVendor === 'function') {
+                    onDeleteVendor(vendorToDelete.id);
+                  }
+                  setVendorToDelete(null);
+                }}
+                style={{ padding: '9px 18px', fontSize: '13px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Trash2 size={14} />
+                <span>Yes, Delete Vendor</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Accessory Modal */}
+      {accToDelete && (
+        <div className="modal-overlay" style={{ zIndex: 1300 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '420px', padding: '22px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                color: 'var(--danger, #ef4444)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>Remove Accessory?</h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Confirm before deleting from catalog.
+                </p>
+              </div>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-main)', marginBottom: '20px' }}>
+              Are you sure you want to remove <strong>"{accToDelete}"</strong> from the Garment Accessories checklist?
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setAccToDelete(null)}
+                style={{ padding: '8px 16px', fontSize: '13px' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  if (typeof onDeleteAccessory === 'function') {
+                    onDeleteAccessory(accToDelete);
+                  }
+                  setAccToDelete(null);
+                }}
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '5px' }}
+              >
+                <Trash2 size={14} />
+                <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Designer Modal */}
+      {designerToDelete && (
+        <div className="modal-overlay" style={{ zIndex: 1300 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '420px', padding: '22px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '14px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                color: 'var(--danger, #ef4444)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800' }}>Remove Designer?</h3>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Confirm before deleting from directory.
+                </p>
+              </div>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-main)', marginBottom: '20px' }}>
+              Are you sure you want to remove designer <strong>"{designerToDelete}"</strong>?
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setDesignerToDelete(null)}
+                style={{ padding: '8px 16px', fontSize: '13px' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => {
+                  if (typeof onDeleteDesigner === 'function') {
+                    onDeleteDesigner(designerToDelete);
+                  }
+                  setDesignerToDelete(null);
+                }}
+                style={{ padding: '8px 16px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '5px' }}
+              >
+                <Trash2 size={14} />
+                <span>Delete</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -729,7 +729,7 @@ export default function OnlyCutting({
                                       {matrix.rows.map((r, mIdx) => (
                                         <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
                                           <td style={{ padding: '8px 14px', fontWeight: '600', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{r.color}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>{r.cuttingTable || 1}</td>
+                                          <td style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>{r.cuttingTable || 6}</td>
                                           <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.M ?? 0}</td>
                                           <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.L ?? 0}</td>
                                           <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.XL ?? 0}</td>
@@ -738,6 +738,26 @@ export default function OnlyCutting({
                                         </tr>
                                       ))}
                                     </tbody>
+                                    <tfoot>
+                                      {(() => {
+                                        const totalM = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.M) || 0), 0);
+                                        const totalL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.L) || 0), 0);
+                                        const totalXL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.XL) || 0), 0);
+                                        const totalXXL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.XXL) || 0), 0);
+                                        const totalAllPcs = matrix.rows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+                                        return (
+                                          <tr style={{ backgroundColor: 'var(--bg-secondary)', borderTop: '2px solid var(--border-color)', fontWeight: '800' }}>
+                                            <td style={{ padding: '9px 14px', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>Total</td>
+                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>—</td>
+                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalM}</td>
+                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalL}</td>
+                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalXL}</td>
+                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalXXL}</td>
+                                            <td style={{ padding: '9px 14px', textAlign: 'right', color: '#10b981', fontSize: '13px' }}>{totalAllPcs}</td>
+                                          </tr>
+                                        );
+                                      })()}
+                                    </tfoot>
                                   </table>
                                 </div>
                               ) : (
