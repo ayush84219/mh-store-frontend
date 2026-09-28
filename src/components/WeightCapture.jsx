@@ -41,6 +41,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
   const [toastType, setToastType] = useState('success');
 
   const [liveLocations, setLiveLocations] = useState([]);
+  const [dbMaterials, setDbMaterials] = useState([]);
 
   useEffect(() => {
     const fetchLocations = async () => {
@@ -200,7 +201,6 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
   }, [mode]);
 
   // ── Fetch captures log and highest material code from DB on mount ───────────────
-  const [dbMaterials, setDbMaterials] = useState([]);
 
   useEffect(() => {
     fetch(`${getBackendUrl()}/api/materials`)
