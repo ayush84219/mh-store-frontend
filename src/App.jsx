@@ -42,6 +42,9 @@ const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
 import ErrorBoundary from './components/ErrorBoundary';
+import FastSearchModal from './components/FastSearchModal';
+import { clientDSA } from './utils/dsaSearchEngine';
+import { Search, Zap } from 'lucide-react';
 
 // No hardcoded demo data: All data is loaded directly from live MySQL database.
 
@@ -322,10 +325,23 @@ export default function App() {
     }
   });
   const [materials, setMaterials] = useState([]);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   // POs — backed by database
   const [pos, setPOs] = useState([]);
   // Vendors — backed by database
   const [vendors, setVendors] = useState([]);
+
+  // Global keyboard shortcut for DSA Fast Search (Ctrl+K or Cmd+K)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const settingsHydratedRef = useRef(false);
 
@@ -626,7 +642,9 @@ export default function App() {
       const response = await fetch(`${getBackendUrl()}/api/materials`);
       if (response.ok) {
         const data = await response.json();
-        setMaterials(Array.isArray(data) ? data : []);
+        const mats = Array.isArray(data) ? data : [];
+        setMaterials(mats);
+        clientDSA.loadDataset(mats);
       }
     } catch (err) {
       console.error('Failed to fetch materials from DB:', err);
@@ -2355,6 +2373,39 @@ export default function App() {
           </div>
 
           <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* DSA Global Fast Search Trigger Button */}
+            <button
+              type="button"
+              onClick={() => setIsSearchOpen(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 12px',
+                borderRadius: '10px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-secondary)',
+                color: 'var(--text-main)',
+                fontSize: '12.5px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                transition: 'all 0.15s'
+              }}
+              title="Search 10,000+ accessories with In-Memory DSA Index (Ctrl+K)"
+            >
+              <Search size={14} color="#6366f1" />
+              <span className="search-label-desktop">Fast Search</span>
+              <kbd style={{
+                fontSize: '10px',
+                padding: '2px 5px',
+                borderRadius: '4px',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-muted)',
+                fontWeight: '700'
+              }}>Ctrl K</kbd>
+            </button>
+
             {/* Notification Bell Icon */}
             <div style={{ position: 'relative' }}>
               <button
@@ -3189,6 +3240,15 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* DSA Global Fast Search Modal (Ctrl+K) */}
+      <FastSearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onNavigate={(tab, params) => {
+          setActiveTab(tab);
+        }}
+      />
     </div>
   );
 }
