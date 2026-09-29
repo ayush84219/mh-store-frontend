@@ -574,6 +574,7 @@ export default function DesignView({
       setLastFetchedLotNo(targetLot);
 
       // Successfully fetched data! Update state fields
+      if (data.lotNo2) setLotNo2(data.lotNo2);
       if (data.brand) setBrand(data.brand);
       if (data.style) setStyle(data.style);
       if (data.fabric) setFabricType(data.fabric);
