@@ -182,7 +182,43 @@ export default function OnlyCutting({
     startAutoSyncTimer();
   };
 
-  // Helper: Validate cutting lot and STRICTLY OMIT ANY LOT THAT HAS BEEN DESIGNED
+  // Cutoff date for cutting reports: 1 June 2026 onwards
+  const CUTTING_DATA_CUTOFF = new Date('2026-06-01T00:00:00.000Z');
+
+  const isDateOnOrAfterJune1 = (lot) => {
+    if (!lot) return false;
+    const dateCandidates = [
+      lot.Saved_At,
+      lot.Date_of_Issue,
+      lot.JobOrder_Date,
+      lot.Zip_Order_Date
+    ];
+
+    for (const raw of dateCandidates) {
+      if (!raw || typeof raw !== 'string') continue;
+      const str = raw.trim();
+      if (!str) continue;
+
+      const d = new Date(str);
+      if (!isNaN(d.getTime()) && d.getFullYear() > 2000) {
+        return d >= CUTTING_DATA_CUTOFF;
+      }
+
+      const dmyMatch = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+      if (dmyMatch) {
+        const day = parseInt(dmyMatch[1], 10);
+        const month = parseInt(dmyMatch[2], 10) - 1;
+        const year = parseInt(dmyMatch[3], 10);
+        const parsed = new Date(year, month, day);
+        if (!isNaN(parsed.getTime())) {
+          return parsed >= CUTTING_DATA_CUTOFF;
+        }
+      }
+    }
+    return true;
+  };
+
+  // Helper: Validate cutting lot, STRICTLY OMIT ANY LOT THAT HAS BEEN DESIGNED, & FILTER DATA FROM 1 JUNE ONWARDS
   const isValidLot = (lot) => {
     if (!lot || !lot.Lot_Number) return false;
     const lotStr = String(lot.Lot_Number).trim();
@@ -193,6 +229,11 @@ export default function OnlyCutting({
     // Double Check: If lot exists in designs table, strictly LEAVE OUT / OMIT
     const cleanLot = lotStr.toLowerCase();
     if (designedLotIds.has(cleanLot)) {
+      return false;
+    }
+
+    // Filter to only include lots on or after 1 June 2026
+    if (!isDateOnOrAfterJune1(lot)) {
       return false;
     }
 
@@ -210,10 +251,10 @@ export default function OnlyCutting({
     return Array.from(set).sort();
   }, [lots]);
 
-  // Filtered lots: AUTOMATICALLY & STRICTLY FILTERED BY Saved_At ON OR AFTER 10 AUG 2026
+  // Filtered lots: AUTOMATICALLY & STRICTLY FILTERED BY DATE ON OR AFTER 1 JUNE 2026
   const filteredLots = useMemo(() => {
     return lots.filter(lot => {
-      // 1. Mandatory Validity & Saved_At Date Filter: >= 10 AUGUST 2026
+      // 1. Mandatory Validity & Cutoff Date Filter: >= 1 JUNE 2026
       if (!isValidLot(lot)) return false;
 
       // 2. Search Query
@@ -415,7 +456,7 @@ export default function OnlyCutting({
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
-                  Auto-sync every 30 mins to reduce server load &bull; Click refresh anytime for instant live sync.
+                  Showing lots from 1 June onwards &bull; Auto-sync every 30 mins &bull; Click refresh anytime for live sync.
                 </span>
                 {lastRefreshedAt && (
                   <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', opacity: 0.85 }}>
@@ -571,7 +612,7 @@ export default function OnlyCutting({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Table size={18} className="text-accent" />
             <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>
-              Cutting Data Grid ({filteredLots.length} records on or after 10 Aug 2026)
+              Cutting Data Grid ({filteredLots.length} records on or after 1 June 2026)
             </strong>
           </div>
 
