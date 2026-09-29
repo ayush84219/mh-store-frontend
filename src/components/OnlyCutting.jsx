@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getBackendUrl } from '../utils/api';
 import {
   Scissors, Search, Download, RefreshCw, ExternalLink,
@@ -7,9 +7,11 @@ import {
   ClipboardList, CheckSquare, Truck, Package, ChevronLeft, ChevronRight,
   TrendingUp, BarChart2, Hash, Calendar, User, SlidersHorizontal,
   ArrowRight, ShieldCheck, Shirt, CircleDot, Table, LayoutGrid, X,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, Clock
 } from 'lucide-react';
 import { GARMENT_CATEGORIES, getCleanImageUrl } from '../utils/designHelpers';
+
+const AUTO_FETCH_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes auto-sync interval
 
 export default function OnlyCutting({
   currentUser,
@@ -32,6 +34,10 @@ export default function OnlyCutting({
   const [syncing, setSyncing] = useState(false);
   const [syncSuccess, setSyncSuccess] = useState('');
   const [workerStats, setWorkerStats] = useState(null);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState(null);
+
+  // Auto-sync interval reference
+  const intervalRef = useRef(null);
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -83,6 +89,8 @@ export default function OnlyCutting({
 
       const list = Array.isArray(lotsData) ? lotsData : [];
       setLots(list);
+      setLastRefreshedAt(new Date());
+
       if (isLive) {
         setSyncSuccess(`✓ Live Google Sheet synchronized! ${list.length} cutting lots active in MySQL.`);
         setTimeout(() => setSyncSuccess(''), 4000);
@@ -99,7 +107,11 @@ export default function OnlyCutting({
   // Background silent synchronization without UI blocking
   const syncInBackground = async () => {
     try {
-      const res = await fetch(`${getBackendUrl()}/api/sync-google-sheets`, { method: 'POST' });
+      const res = await fetch(`${getBackendUrl()}/api/sync-google-sheets`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: false })
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.inserted > 0 || data.updated > 0) {
@@ -115,22 +127,28 @@ export default function OnlyCutting({
         const statusData = await statusRes.json();
         setWorkerStats(statusData?.workerStats || null);
       }
+      setLastRefreshedAt(new Date());
     } catch (_) {}
+  };
+
+  // Start or reset the 30-minute recurring auto-sync timer
+  const startAutoSyncTimer = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      syncInBackground();
+    }, AUTO_FETCH_INTERVAL_MS);
   };
 
   useEffect(() => {
     // 1. Instant load from local/indexed MySQL DB (<20ms, zero lag)
     fetchLots(false);
 
-    // 2. Non-blocking background sync with Google Sheets
-    syncInBackground();
+    // 2. Start 30-minute auto-sync timer
+    startAutoSyncTimer();
 
-    // 3. Auto-sync check every 30 seconds in the background
-    const interval = setInterval(() => {
-      syncInBackground();
-    }, 30000);
-
-    return () => clearInterval(interval);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, []);
 
   // Fetch Matrix for expanded lot
@@ -158,9 +176,10 @@ export default function OnlyCutting({
     }
   };
 
-  // Sync Google Sheets manually on demand
+  // Sync Google Sheets manually on demand & reset the 30-minute timer
   const handleSyncSheets = async () => {
     await fetchLots(true);
+    startAutoSyncTimer();
   };
 
   // Helper: Validate cutting lot and STRICTLY OMIT ANY LOT THAT HAS BEEN DESIGNED
@@ -378,10 +397,32 @@ export default function OnlyCutting({
                 }}>
                   MySQL Indexed
                 </span>
+                <span style={{
+                  padding: '3px 8px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(107, 114, 128, 0.1)',
+                  color: 'var(--text-muted, #64748b)',
+                  border: '1px solid rgba(107, 114, 128, 0.25)',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}>
+                  <Clock size={11} />
+                  Auto-sync: 30 min
+                </span>
               </div>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                Incremental worker ingests Google Sheet into MySQL &bull; Express API serves React instantly with zero lag.
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                  Auto-sync every 30 mins to reduce server load &bull; Click refresh anytime for instant live sync.
+                </span>
+                {lastRefreshedAt && (
+                  <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', opacity: 0.85 }}>
+                    (Last fetched: {lastRefreshedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </div>
