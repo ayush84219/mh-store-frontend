@@ -546,11 +546,11 @@ export default function DesignView({
   useEffect(() => {
     if (!isCreating || editingDesignId) return;
     const trimmed = lotNo.trim();
-    if (!trimmed || trimmed.length < 3) return;
+    if (!trimmed || trimmed.length < 4) return;
 
     const delayDebounceFn = setTimeout(() => {
       handleFetchLotData(trimmed, false);
-    }, 600);
+    }, 1000);
 
     return () => clearTimeout(delayDebounceFn);
   }, [lotNo, isCreating, editingDesignId]);
@@ -691,8 +691,10 @@ export default function DesignView({
 
       setBomItems(updatedBom);
 
-      // Set overridden Lot No to the fetched lot number
-      setLotNo(data.lotNo);
+      // Only overwrite Lot No input if externally passed (e.g. from browsing or selection)
+      if (overrideLot) {
+        setLotNo(data.lotNo || targetLot);
+      }
 
       setFetchMessage({
         type: 'success',
@@ -701,10 +703,12 @@ export default function DesignView({
 
     } catch (err) {
       console.error(err);
-      setFetchMessage({
-        type: 'error',
-        text: err.message || 'Failed to fetch lot details.'
-      });
+      if (isManual) {
+        setFetchMessage({
+          type: 'error',
+          text: err.message || 'Failed to fetch lot details.'
+        });
+      }
     } finally {
       setIsFetching(false);
     }
