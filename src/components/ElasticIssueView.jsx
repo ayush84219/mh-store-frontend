@@ -24,7 +24,8 @@ export default function ElasticIssueView({
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
 
-  // Step 1.5: Automatic Size to Meter Backend Calculation State
+  // Step 1.5: Automatic Size to Meter Backend Calculation State & Switch Mode
+  const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'both'
   const [elasticSizeInput, setElasticSizeInput] = useState('50');
   const [elasticUnit, setElasticUnit] = useState('inch'); // 'inch' or 'cm'
   const [tapeSizeInput, setTapeSizeInput] = useState('62');
@@ -41,10 +42,13 @@ export default function ElasticIssueView({
   });
   const [calculating, setCalculating] = useState(false);
 
-  // Step 2: Elastic Issue Details
-  const [rollCount, setRollCount] = useState(1);
+  // Step 2: Elastic & Tape Issue Details
+  const [rollCount, setRollCount] = useState(31);
+  const [tapeRollCount, setTapeRollCount] = useState(15);
   const [elasticWidth, setElasticWidth] = useState('1 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
+  const [tapeWidth, setTapeWidth] = useState('0.5 Inch (Standard)');
+  const [customTapeWidth, setCustomTapeWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
 
   // Issuer & Receiver
@@ -1051,11 +1055,11 @@ export default function ElasticIssueView({
               border: '1.5px solid #059669',
               boxShadow: '0 4px 14px rgba(5, 150, 105, 0.08)'
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{
                     width: '32px', height: '32px', borderRadius: '8px',
-                    background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                    background: materialMode === 'tape' ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
                   }}>
                     <Calculator size={18} />
@@ -1070,152 +1074,249 @@ export default function ElasticIssueView({
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{
-                    fontSize: '11px', fontWeight: '700', padding: '3px 8px', borderRadius: '4px',
-                    background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0'
-                  }}>
-                    {calcResult.formulaExplanation || 'Backend Process Active'}
-                  </span>
+                {/* MATERIAL SWITCH CONTROLS */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  background: '#f1f5f9',
+                  padding: '4px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('elastic')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'elastic' ? '#059669' : 'transparent',
+                      color: materialMode === 'elastic' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: materialMode === 'elastic' ? '0 2px 8px rgba(5, 150, 105, 0.35)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'elastic' ? '#a7f3d0' : '#059669' }}></span>
+                    Elastic Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('tape')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'tape' ? '#2563eb' : 'transparent',
+                      color: materialMode === 'tape' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: materialMode === 'tape' ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'tape' ? '#bfdbfe' : '#2563eb' }}></span>
+                    Tape Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('both')}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'both' ? '#0f172a' : 'transparent',
+                      color: materialMode === 'both' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      boxShadow: materialMode === 'both' ? '0 2px 8px rgba(15, 23, 42, 0.35)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <Sliders size={13} />
+                    Both
+                  </button>
                 </div>
               </div>
 
-              {/* INPUT CONTROLS: ELASTIC & TAPE */}
+              {/* INPUT CONTROLS: ELASTIC OR TAPE (BASED ON SWITCH) */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
                 gap: '16px',
                 padding: '16px',
                 borderRadius: '12px',
                 background: '#f8fafc',
                 border: '1px solid #e2e8f0'
               }}>
-                {/* ELASTIC INPUT */}
-                <div style={{ padding: '12px', borderRadius: '10px', background: '#ffffff', border: '1.5px solid #86efac' }}>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>ELASTIC SIZE INPUT</span>
-                    <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 6px', borderRadius: '4px' }}>Formula: {elasticUnit === 'cm' ? '÷ 100' : '× 0.0254'}</span>
-                  </label>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={elasticSizeInput}
-                      onChange={(e) => setElasticSizeInput(e.target.value)}
-                      placeholder="e.g. 50"
-                      style={{
-                        flex: 1, padding: '8px 12px', borderRadius: '8px',
-                        border: '1.5px solid #059669', fontSize: '15px', fontWeight: '800',
-                        color: '#0f172a', background: '#ffffff'
-                      }}
-                    />
-                    <select
-                      value={elasticUnit}
-                      onChange={(e) => setElasticUnit(e.target.value)}
-                      style={{
-                        padding: '8px 10px', borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1', fontSize: '12.5px', fontWeight: '800',
-                        background: '#ffffff', color: '#0f172a', cursor: 'pointer'
-                      }}
-                    >
-                      <option value="inch">Inch</option>
-                      <option value="cm">CM</option>
-                    </select>
-                  </div>
-
-                  {/* Elastic Presets */}
-                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '8px' }}>
-                    {[
-                      { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
-                      { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
-                      { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
-                    ].map(p => (
-                      <button
-                        key={p.label}
-                        type="button"
-                        onClick={() => {
-                          setElasticSizeInput(p.size);
-                          setElasticUnit(p.u);
-                        }}
+                {/* ELASTIC INPUT (Shown if 'elastic' or 'both') */}
+                {(materialMode === 'elastic' || materialMode === 'both') && (
+                  <div style={{
+                    padding: '14px',
+                    borderRadius: '10px',
+                    background: '#ffffff',
+                    border: '1.5px solid #86efac',
+                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
+                  }}>
+                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                        ELASTIC SIZE INPUT
+                      </span>
+                      <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                        Formula: {elasticUnit === 'cm' ? '÷ 100' : '× 0.0254'}
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={elasticSizeInput}
+                        onChange={(e) => setElasticSizeInput(e.target.value)}
+                        placeholder="e.g. 50"
                         style={{
-                          padding: '3px 7px', borderRadius: '5px',
-                          border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                          background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
-                          color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
-                          fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                          flex: 1, padding: '10px 14px', borderRadius: '8px',
+                          border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
+                          color: '#0f172a', background: '#ffffff', outline: 'none'
+                        }}
+                      />
+                      <select
+                        value={elasticUnit}
+                        onChange={(e) => setElasticUnit(e.target.value)}
+                        style={{
+                          padding: '10px 14px', borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: '800',
+                          background: '#ffffff', color: '#0f172a', cursor: 'pointer'
                         }}
                       >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                        <option value="inch">Inch</option>
+                        <option value="cm">CM</option>
+                      </select>
+                    </div>
 
-                {/* TAPE INPUT */}
-                <div style={{ padding: '12px', borderRadius: '10px', background: '#ffffff', border: '1.5px solid #93c5fd' }}>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span>TAPE SIZE INPUT</span>
-                    <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px' }}>Formula: {tapeUnit === 'cm' ? '÷ 100' : '× 0.0254'}</span>
-                  </label>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={tapeSizeInput}
-                      onChange={(e) => setTapeSizeInput(e.target.value)}
-                      placeholder="e.g. 62"
-                      style={{
-                        flex: 1, padding: '8px 12px', borderRadius: '8px',
-                        border: '1.5px solid #3b82f6', fontSize: '15px', fontWeight: '800',
-                        color: '#0f172a', background: '#ffffff'
-                      }}
-                    />
-                    <select
-                      value={tapeUnit}
-                      onChange={(e) => setTapeUnit(e.target.value)}
-                      style={{
-                        padding: '8px 10px', borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1', fontSize: '12.5px', fontWeight: '800',
-                        background: '#ffffff', color: '#0f172a', cursor: 'pointer'
-                      }}
-                    >
-                      <option value="cm">CM</option>
-                      <option value="inch">Inch</option>
-                    </select>
+                    {/* Elastic Presets */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                      {[
+                        { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
+                        { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
+                        { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => {
+                            setElasticSizeInput(p.size);
+                            setElasticUnit(p.u);
+                          }}
+                          style={{
+                            padding: '4px 9px', borderRadius: '6px',
+                            border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                            background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
+                            color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
+                            fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                )}
 
-                  {/* Tape Presets */}
-                  <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '8px' }}>
-                    {[
-                      { label: '62 CM (0.62m)', size: '62', u: 'cm' },
-                      { label: '50 CM (0.50m)', size: '50', u: 'cm' },
-                      { label: '24 Inch (0.61m)', size: '24', u: 'inch' }
-                    ].map(p => (
-                      <button
-                        key={p.label}
-                        type="button"
-                        onClick={() => {
-                          setTapeSizeInput(p.size);
-                          setTapeUnit(p.u);
-                        }}
+                {/* TAPE INPUT (Shown if 'tape' or 'both') */}
+                {(materialMode === 'tape' || materialMode === 'both') && (
+                  <div style={{
+                    padding: '14px',
+                    borderRadius: '10px',
+                    background: '#ffffff',
+                    border: '1.5px solid #93c5fd',
+                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.06)'
+                  }}>
+                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                        TAPE SIZE INPUT
+                      </span>
+                      <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                        Formula: {tapeUnit === 'cm' ? '÷ 100' : '× 0.0254'}
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={tapeSizeInput}
+                        onChange={(e) => setTapeSizeInput(e.target.value)}
+                        placeholder="e.g. 62"
                         style={{
-                          padding: '3px 7px', borderRadius: '5px',
-                          border: tapeSizeInput === p.size && tapeUnit === p.u ? '1.5px solid #3b82f6' : '1px solid #cbd5e1',
-                          background: tapeSizeInput === p.size && tapeUnit === p.u ? '#dbeafe' : '#ffffff',
-                          color: tapeSizeInput === p.size && tapeUnit === p.u ? '#1d4ed8' : '#475569',
-                          fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                          flex: 1, padding: '10px 14px', borderRadius: '8px',
+                          border: '1.5px solid #3b82f6', fontSize: '16px', fontWeight: '800',
+                          color: '#0f172a', background: '#ffffff', outline: 'none'
+                        }}
+                      />
+                      <select
+                        value={tapeUnit}
+                        onChange={(e) => setTapeUnit(e.target.value)}
+                        style={{
+                          padding: '10px 14px', borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: '800',
+                          background: '#ffffff', color: '#0f172a', cursor: 'pointer'
                         }}
                       >
-                        {p.label}
-                      </button>
-                    ))}
+                        <option value="cm">CM</option>
+                        <option value="inch">Inch</option>
+                      </select>
+                    </div>
+
+                    {/* Tape Presets */}
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                      {[
+                        { label: '62 CM (0.62m)', size: '62', u: 'cm' },
+                        { label: '50 CM (0.50m)', size: '50', u: 'cm' },
+                        { label: '24 Inch (0.61m)', size: '24', u: 'inch' }
+                      ].map(p => (
+                        <button
+                          key={p.label}
+                          type="button"
+                          onClick={() => {
+                            setTapeSizeInput(p.size);
+                            setTapeUnit(p.u);
+                          }}
+                          style={{
+                            padding: '4px 9px', borderRadius: '6px',
+                            border: tapeSizeInput === p.size && tapeUnit === p.u ? '1.5px solid #3b82f6' : '1px solid #cbd5e1',
+                            background: tapeSizeInput === p.size && tapeUnit === p.u ? '#dbeafe' : '#ffffff',
+                            color: tapeSizeInput === p.size && tapeUnit === p.u ? '#1d4ed8' : '#475569',
+                            fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
 
-              {/* EXACT BREAKDOWN TABLE: ELASTIC & TAPE */}
+              {/* EXACT BREAKDOWN TABLE: ELASTIC OR TAPE */}
               <div style={{ marginTop: '16px', overflowX: 'auto', borderRadius: '10px', border: '1.5px solid #cbd5e1', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
                   <thead>
@@ -1229,7 +1330,6 @@ export default function ElasticIssueView({
                     </tr>
                   </thead>
                   <tbody>
-                    {/* ELASTIC ROW */}
                     {(() => {
                       const effPcs = parseInt(lotDetails?.quantity || 600, 10);
                       const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
@@ -1240,54 +1340,59 @@ export default function ElasticIssueView({
 
                       return (
                         <>
-                          <tr style={{ background: '#ffffff', borderBottom: '1px solid #e2e8f0' }}>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                              Elastic
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                              {elasticSizeInput || 0} {elasticUnit === 'cm' ? 'CM' : 'Inch'}
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                              <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                {elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`}
-                              </code>
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
-                              {ePerPc} m
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                              {effPcs}
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#065f46', fontSize: '15px', background: '#dcfce7' }}>
-                              {eTotal} m
-                            </td>
-                          </tr>
+                          {/* ELASTIC ROW */}
+                          {(materialMode === 'elastic' || materialMode === 'both') && (
+                            <tr style={{ background: '#ffffff', borderBottom: materialMode === 'both' ? '1px solid #e2e8f0' : 'none' }}>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                                Elastic
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                {elasticSizeInput || 0} {elasticUnit === 'cm' ? 'CM' : 'Inch'}
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                  {elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`}
+                                </code>
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
+                                {ePerPc} m
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                {effPcs}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#065f46', fontSize: '15px', background: '#dcfce7' }}>
+                                {eTotal} m
+                              </td>
+                            </tr>
+                          )}
 
                           {/* TAPE ROW */}
-                          <tr style={{ background: '#ffffff' }}>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                              Tape
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                              {tapeSizeInput || 0} {tapeUnit === 'cm' ? 'CM' : 'Inch'}
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                              <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                {tapeUnit === 'cm' ? `${tapeSizeInput || 0} ÷ 100` : `${tapeSizeInput || 0} × 0.0254`}
-                              </code>
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#1d4ed8', fontSize: '14px', background: '#eff6ff' }}>
-                              {tPerPc} m
-                            </td>
-                            <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                              {effPcs}
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
-                              {tTotal} m
-                            </td>
-                          </tr>
+                          {(materialMode === 'tape' || materialMode === 'both') && (
+                            <tr style={{ background: '#ffffff' }}>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                                Tape
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                {tapeSizeInput || 0} {tapeUnit === 'cm' ? 'CM' : 'Inch'}
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                  {tapeUnit === 'cm' ? `${tapeSizeInput || 0} ÷ 100` : `${tapeSizeInput || 0} × 0.0254`}
+                                </code>
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#1d4ed8', fontSize: '14px', background: '#eff6ff' }}>
+                                {tPerPc} m
+                              </td>
+                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                {effPcs}
+                              </td>
+                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
+                                {tTotal} m
+                              </td>
+                            </tr>
+                          )}
                         </>
                       );
                     })()}
@@ -1300,11 +1405,13 @@ export default function ElasticIssueView({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                   <span style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Table size={14} color="#059669" />
-                    <span>Excel Sheet Output Preview:</span>
+                    <span>Excel Sheet Output Preview ({materialMode === 'elastic' ? 'Elastic' : materialMode === 'tape' ? 'Tape' : 'Both'}):</span>
                   </span>
-                  <span style={{ fontSize: '11px', color: '#64748b' }}>
-                    Suggested Elastic Rolls: <strong>{calcResult.recommendedRolls || 1} Rolls (25m/roll)</strong>
-                  </span>
+                  {materialMode !== 'tape' && (
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      Suggested Elastic Rolls: <strong>{calcResult.recommendedRolls || 1} Rolls (25m/roll)</strong>
+                    </span>
+                  )}
                 </div>
 
                 <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
@@ -1316,8 +1423,12 @@ export default function ElasticIssueView({
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs</th>
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Tape Per Pc (In mtr.)</th>
-                        <th style={{ padding: '8px 10px' }}>Elastic Per Pc (In mtr.)</th>
+                        {(materialMode === 'tape' || materialMode === 'both') && (
+                          <th style={{ padding: '8px 10px', borderRight: materialMode === 'both' ? '1px solid #e2e8f0' : 'none' }}>Tape Per Pc (In mtr.)</th>
+                        )}
+                        {(materialMode === 'elastic' || materialMode === 'both') && (
+                          <th style={{ padding: '8px 10px' }}>Elastic Per Pc (In mtr.)</th>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
@@ -1335,12 +1446,16 @@ export default function ElasticIssueView({
                         <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
                           {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
                         </td>
-                        <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '700', color: '#1d4ed8' }}>
-                          {calcResult.tapePerPcMtr > 0 ? `${calcResult.tapePerPcMtr}` : '—'}
-                        </td>
-                        <td style={{ padding: '8px 10px', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
-                          {calcResult.elasticPerPcMtr || 0}
-                        </td>
+                        {(materialMode === 'tape' || materialMode === 'both') && (
+                          <td style={{ padding: '8px 10px', borderRight: materialMode === 'both' ? '1px solid #e2e8f0' : 'none', fontWeight: '700', color: '#1d4ed8' }}>
+                            {calcResult.tapePerPcMtr > 0 ? `${calcResult.tapePerPcMtr}` : '—'}
+                          </td>
+                        )}
+                        {(materialMode === 'elastic' || materialMode === 'both') && (
+                          <td style={{ padding: '8px 10px', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
+                            {calcResult.elasticPerPcMtr || 0}
+                          </td>
+                        )}
                       </tr>
                     </tbody>
                   </table>
