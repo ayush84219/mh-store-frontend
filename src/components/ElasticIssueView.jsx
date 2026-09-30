@@ -320,7 +320,7 @@ export default function ElasticIssueView({
 
       const data = await res.json();
       setLotDetails(data);
-      triggerCalculation(elasticSizeInput, sizeUnit, tapeSizeInput, data);
+      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, data);
 
       // Extract primary shade if available
       let primaryShade = '';
