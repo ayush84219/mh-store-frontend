@@ -1463,25 +1463,36 @@ export default function ElasticIssueView({
               </div>
 
             </div>
-          </div>
 
-          {/* STEP 2: ELASTIC ISSUE DETAILS */}
-          <div className="panel" style={{
-            padding: '22px 24px',
-            borderRadius: '16px',
-            background: 'var(--bg-card, #ffffff)',
-            border: '1px solid var(--border-color, #dbeafe)',
-            boxShadow: 'var(--shadow-card)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
-              <span style={{
-                width: '26px', height: '26px', borderRadius: '50%',
-                background: '#059669', color: '#ffffff', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
-              }}>2</span>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                Issue Details (Quantity of Rolls, Width & Issuer / Receiver)
-              </h3>
+            {/* STEP 2: ELASTIC ISSUE DETAILS (INTEGRATED IN UNIFIED CARD) */}
+            <div style={{
+              marginTop: '28px',
+              paddingTop: '22px',
+              borderTop: '2px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '18px',
+              flexWrap: 'wrap',
+              gap: '8px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  width: '28px', height: '28px', borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  color: '#ffffff', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800',
+                  boxShadow: '0 2px 8px rgba(5, 150, 105, 0.35)'
+                }}>2</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                    Issue Details (Quantity of Rolls, Width & Issuer / Receiver)
+                  </h3>
+                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                    Specify roll allocation, master issuer & receiver details
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
@@ -1534,49 +1545,6 @@ export default function ElasticIssueView({
                       fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
                     }}
                   />
-                </div>
-
-                {/* Elastic Width */}
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                    <Sliders size={15} color="#059669" />
-                    <span>Elastic Width:</span>
-                  </label>
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {['0.5 Inch', '0.75 Inch', '1 Inch (Standard)', '1.5 Inch', '2 Inch', '3 Inch', 'Custom'].map(w => (
-                      <button
-                        key={w}
-                        type="button"
-                        onClick={() => setElasticWidth(w)}
-                        style={{
-                          padding: '5px 12px',
-                          borderRadius: '6px',
-                          border: elasticWidth === w ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                          background: elasticWidth === w ? '#dcfce7' : '#ffffff',
-                          color: elasticWidth === w ? '#059669' : '#334155',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {w}
-                      </button>
-                    ))}
-                  </div>
-                  {elasticWidth === 'Custom' && (
-                    <input
-                      type="text"
-                      value={customWidth}
-                      onChange={(e) => setCustomWidth(e.target.value)}
-                      placeholder="e.g. 2.5 Inch"
-                      style={{
-                        marginTop: '8px',
-                        width: '100%', padding: '8px 12px', borderRadius: '8px',
-                        border: '1.5px solid #059669', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  )}
                 </div>
 
                 {/* Issue Date & Remarks */}
@@ -1710,7 +1678,7 @@ export default function ElasticIssueView({
                 </div>
 
                 <div style={{ fontSize: '13px', fontWeight: '700', color: '#059669', background: '#dcfce7', padding: '10px 14px', borderRadius: '8px', border: '1px solid #86efac', marginTop: '6px' }}>
-                  Issue Summary: <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Elastic ({effectiveWidth})
+                  Issue Summary: <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Elastic
                 </div>
               </div>
 

@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck
 } from 'lucide-react';
 import './App.css';
 
@@ -41,6 +41,7 @@ const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationV
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
+const MaterialQuickUpdateView = lazy(() => import('./components/MaterialQuickUpdateView'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -63,6 +64,7 @@ const hasTabAccess = (tabName, role) => {
       'dashboard',
       'design',
       'material_verification',
+      'material_update',
       'rgp',
       'zip_po',
       'dori_po',
@@ -94,6 +96,7 @@ const hasTabAccess = (tabName, role) => {
       'dashboard',
       'design',
       'material_verification',
+      'material_update',
       'rgp',
       'zip_po',
       'dori_po',
@@ -114,6 +117,7 @@ const hasTabAccess = (tabName, role) => {
   if (panel === 'store') {
     return [
       'dashboard',
+      'material_update',
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
@@ -142,6 +146,7 @@ const TAB_ROUTES = {
   dashboard: '/dashboard',
   design: '/design',
   material_verification: '/material-verification',
+  material_update: '/material-update',
   material_issue: '/material-issue',
   extra_material_issue: '/extra-material-issue',
   return_material: '/return-material',
@@ -2004,6 +2009,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                       <span className="sidebar-text">Stock Accessories</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
+                      <span className="sidebar-text">Material Quick Update</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                       <span className="sidebar-text">Material Detail</span>
                     </li>
@@ -2043,7 +2051,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_update', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2070,6 +2078,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                       <span className="sidebar-text">Manual Material Add</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
+                      <span className="sidebar-text">Material Quick Update</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                       <span className="sidebar-text">Material Issue</span>
@@ -2122,6 +2133,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                   <CheckSquare size={18} />
                   <span className="sidebar-text">Stock Accessories</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
+                  <Boxes size={18} />
+                  <span className="sidebar-text">Material Quick Update</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                   <Layers size={18} />
@@ -2194,6 +2209,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                   <Layers size={18} />
                   <span className="sidebar-text">Manual Material Add</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
+                  <Boxes size={18} />
+                  <span className="sidebar-text">Material Quick Update</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                   <ClipboardList size={18} />
@@ -2347,6 +2366,7 @@ export default function App() {
                 {activeTab === 'dashboard' && 'Dashboard Overview'}
                 {activeTab === 'design' && 'Below of Material'}
                 {activeTab === 'material_verification' && 'Stock Accessories'}
+                {activeTab === 'material_update' && 'Quick Material Inward & Details Update'}
                 {activeTab === 'rgp' && 'Returnable Gate Pass'}
                 {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
                 {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
@@ -2666,6 +2686,16 @@ export default function App() {
                 onRedirectToZipPO={handleRedirectToZipPO}
                 onRedirectToPO={handleRedirectToPO}
                 onRedirectToRGP={handleRedirectToRGP}
+              />
+            )}
+
+            {activeTab === 'material_update' && (
+              <MaterialQuickUpdateView
+                materials={materials}
+                racks={racks}
+                onUpdateMaterial={handleUpdateMaterial}
+                currentUser={currentUser}
+                currencySymbol={currencySymbol}
               />
             )}
 

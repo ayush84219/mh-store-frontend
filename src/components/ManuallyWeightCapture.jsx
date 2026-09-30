@@ -646,6 +646,272 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     showToast('CSV Downloaded successfully!');
   };
 
+  const handlePrintLogs = () => {
+    if (filteredCaptures.length === 0) {
+      showToast('No log data available to print.', 'error');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=1150,height=800');
+    if (!printWindow) {
+      showToast('Pop-up blocked. Please allow pop-ups for printing.', 'error');
+      return;
+    }
+
+    let totalPieces = 0;
+    let totalPackets = 0;
+    filteredCaptures.forEach(r => {
+      totalPieces += Number(r.pieces) || 0;
+      totalPackets += Number(r.packets) || 0;
+    });
+
+    const rowsHtml = filteredCaptures.map((r, i) => `
+      <tr>
+        <td style="text-align: center; font-weight: bold;">${i + 1}</td>
+        <td style="font-weight: bold; font-family: monospace; font-size: 11.5px;">${r.materialCode || '-'}</td>
+        <td>
+          <div style="font-weight: 600;">${r.time || ''}</div>
+          <div style="font-size: 9.5px; color: #444;">${r.date || ''}</div>
+        </td>
+        <td>${r.po || 'N/A'}</td>
+        <td style="font-weight: 600;">${r.material || '-'}</td>
+        <td>${r.category || '-'}</td>
+        <td style="text-align: right; font-weight: bold;">${r.pieces !== undefined ? Number(r.pieces).toLocaleString() : '-'} ${r.unit || 'Pcs'}</td>
+        <td style="text-align: right; font-weight: bold;">${r.packets || 1} Pkts</td>
+        <td>${r.location || 'Main Store'}</td>
+        <td>${r.invoiceNo || 'N/A'}</td>
+        <td>${r.operator || 'Store'}</td>
+        <td style="text-align: center; font-weight: 600;">${r.status || 'Manually'}</td>
+      </tr>
+    `).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>Material Inward Logs Report</title>
+        <style>
+          @page {
+            size: A4 landscape;
+            margin: 8mm 10mm;
+          }
+          * {
+            box-sizing: border-box;
+          }
+          body {
+            font-family: Arial, Helvetica, sans-serif;
+            color: #000;
+            background: #fff;
+            margin: 0;
+            padding: 16px;
+            font-size: 11px;
+            line-height: 1.35;
+          }
+          .no-print-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f1f5f9;
+            border: 1.5px solid #0f172a;
+            padding: 10px 18px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+          }
+          .btn-print {
+            background: #000000;
+            color: #ffffff;
+            border: none;
+            padding: 8px 20px;
+            font-weight: 800;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          .btn-close {
+            background: #ffffff;
+            color: #000000;
+            border: 1.5px solid #000000;
+            padding: 8px 16px;
+            font-weight: 800;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-left: 8px;
+          }
+          @media print {
+            .no-print-bar {
+              display: none !important;
+            }
+            body {
+              padding: 0;
+            }
+          }
+          .print-frame {
+            border: 2px solid #000000;
+            padding: 14px 16px;
+            border-radius: 4px;
+          }
+          .header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            border-bottom: 2px solid #000000;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+          }
+          .doc-title {
+            font-size: 17px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 3px 0;
+          }
+          .doc-sub {
+            font-size: 11px;
+            color: #222;
+            font-weight: 500;
+          }
+          .meta-info {
+            text-align: right;
+            font-size: 10.5px;
+          }
+          .summary-box {
+            display: flex;
+            gap: 22px;
+            background: #f4f4f4;
+            border: 1px solid #000000;
+            padding: 6px 12px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-bottom: 12px;
+          }
+          table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+          }
+          table.data-table th {
+            background: #e8e8e8;
+            color: #000000;
+            border: 1px solid #000000;
+            padding: 6px 6px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 10px;
+          }
+          table.data-table td {
+            border: 1px solid #888888;
+            padding: 5px 6px;
+            vertical-align: middle;
+          }
+          table.data-table tr:nth-child(even) td {
+            background: #fafafa;
+          }
+          .footer-sigs {
+            margin-top: 32px;
+            padding-top: 10px;
+            display: flex;
+            justify-content: space-between;
+          }
+          .sig-item {
+            width: 28%;
+            text-align: center;
+          }
+          .sig-line {
+            border-top: 1.5px solid #000000;
+            margin-bottom: 5px;
+          }
+          .sig-label {
+            font-size: 10.5px;
+            font-weight: bold;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print-bar">
+          <div>
+            <strong>Print Preview:</strong> Material Inward Logs (${filteredCaptures.length} records)
+          </div>
+          <div>
+            <button class="btn-print" onclick="window.print()">🖨️ Print Document</button>
+            <button class="btn-close" onclick="window.close()">✖ Close Window</button>
+          </div>
+        </div>
+
+        <div class="print-frame">
+          <div class="header-row">
+            <div>
+              <h1 class="doc-title">MATERIAL INWARD LOGS REPORT</h1>
+              <div class="doc-sub">Official Warehouse Inward & Verification Logs (Black & White Format)</div>
+            </div>
+            <div class="meta-info">
+              <div><strong>Date & Time:</strong> ${new Date().toLocaleString('en-IN')}</div>
+              <div><strong>Generated By:</strong> ${currentUser?.name || 'Store In-Charge'}</div>
+            </div>
+          </div>
+
+          <div class="summary-box">
+            <div>Total Records: <strong>${filteredCaptures.length}</strong></div>
+            <div>Total Pieces: <strong>${totalPieces.toLocaleString()}</strong></div>
+            <div>Total Packets: <strong>${totalPackets} pkts</strong></div>
+            ${q ? `<div>Search: <em>"${q}"</em></div>` : ''}
+          </div>
+
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width: 22px; text-align: center;">#</th>
+                <th style="width: 70px;">Code</th>
+                <th style="width: 75px;">Time / Date</th>
+                <th style="width: 80px;">PO Number</th>
+                <th>Material Name</th>
+                <th style="width: 85px;">Category</th>
+                <th style="width: 80px; text-align: right;">Quantity</th>
+                <th style="width: 65px; text-align: right;">Packets</th>
+                <th style="width: 100px;">Location</th>
+                <th style="width: 75px;">Bill No</th>
+                <th style="width: 70px;">Operator</th>
+                <th style="width: 70px; text-align: center;">Mode</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer-sigs">
+            <div class="sig-item">
+              <div class="sig-line"></div>
+              <div class="sig-label">Store In-Charge Signature & Date</div>
+            </div>
+            <div class="sig-item">
+              <div class="sig-line"></div>
+              <div class="sig-label">Audited / Verified By</div>
+            </div>
+            <div class="sig-item">
+              <div class="sig-line"></div>
+              <div class="sig-label">Authorized Signatory</div>
+            </div>
+          </div>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  };
+
   const isSameDate = (recordDateStr, filterDateStr) => {
     if (!filterDateStr) return true;
     if (!recordDateStr) return false;
@@ -1346,6 +1612,22 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
               title="Toggle Filters"
             >
               <Filter size={16} />
+            </button>
+            <button
+              style={{
+                border: '1.5px solid #cbd5e1',
+                padding: '8px',
+                borderRadius: '8px',
+                background: '#ffffff',
+                cursor: 'pointer',
+                color: '#475569',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              onClick={handlePrintLogs}
+              title="Print Inward Logs (Black & White)"
+            >
+              <Printer size={16} />
             </button>
             <button
               style={{
