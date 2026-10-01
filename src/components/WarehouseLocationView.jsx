@@ -361,6 +361,8 @@ export default function WarehouseLocationView({
           id: m.id,
           name: matLabel,
           rawName: m.name,
+          category: m.category || '',
+          brand: m.brand || '',
           color: m.color,
           packets: effectivePkts,
           stock: m.stock,
@@ -2379,11 +2381,14 @@ export default function WarehouseLocationView({
                       required
                     >
                       {sourceMaterials.length > 0 ? (
-                        sourceMaterials.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — Lot #{m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({m.packets} Pkts Available)
-                          </option>
-                        ))
+                        sourceMaterials.map((m) => {
+                          const cat = m.category || m.fullMaterial?.category;
+                          return (
+                            <option key={m.id} value={m.id}>
+                              {cat ? `[${cat.toUpperCase()}] ` : ''}{m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — Lot #{m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({m.packets} Pkts Available)
+                            </option>
+                          );
+                        })
                       ) : (
                         <option value="">No materials found in {transferSourceLoc}</option>
                       )}
@@ -2710,17 +2715,44 @@ export default function WarehouseLocationView({
                             border: '1px solid var(--border-color)',
                             display: 'flex',
                             justifyContent: 'space-between',
-                            alignItems: 'center'
+                            alignItems: 'center',
+                            gap: '12px'
                           }}>
-                            <div>
-                              <div style={{ fontSize: '14px', fontWeight: '700', color: '#0f172a' }}>
-                                {item.name}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '14px', fontWeight: '700', color: '#0f172a' }}>
+                                  {item.name}
+                                </span>
+                                {(item.category || item.fullMaterial?.category) && (
+                                  <span style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: '700',
+                                    padding: '2px 7px',
+                                    borderRadius: '6px',
+                                    backgroundColor: '#e0e7ff',
+                                    color: '#4338ca',
+                                    border: '1px solid #c7d2fe',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.03em',
+                                    display: 'inline-flex',
+                                    alignItems: 'center'
+                                  }}>
+                                    {item.category || item.fullMaterial?.category}
+                                  </span>
+                                )}
                               </div>
-                              {item.poNumber && (
-                                <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                                  PO: <strong>{item.poNumber}</strong>
-                                </div>
-                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '3px', flexWrap: 'wrap' }}>
+                                {item.poNumber && (
+                                  <div style={{ fontSize: '11px', color: '#64748b' }}>
+                                    PO: <strong style={{ color: '#334155' }}>{item.poNumber}</strong>
+                                  </div>
+                                )}
+                                {(item.id || item.fullMaterial?.id) && (
+                                  <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                                    #{item.id || item.fullMaterial?.id}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                               <div style={{ textAlign: 'right' }}>

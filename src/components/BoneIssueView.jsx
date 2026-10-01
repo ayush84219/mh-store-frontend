@@ -24,8 +24,8 @@ export default function BoneIssueView({
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
 
-  // Step 2: Simple Issue Details (Internal Use - Normal Roll Quantity Only)
-  const [rollCount, setRollCount] = useState(1);
+  // Step 2: Simple Issue Details (Cutting Pcs & Editable Issue Pcs)
+  const [issuePcs, setIssuePcs] = useState(600);
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
@@ -39,6 +39,7 @@ export default function BoneIssueView({
 
   // Generation & Modal State
   const [generating, setGenerating] = useState(false);
+  const [savingSlip, setSavingSlip] = useState(false);
   const [generatedSlipData, setGeneratedSlipData] = useState(null);
   const [toast, setToast] = useState(null);
 
@@ -175,26 +176,28 @@ export default function BoneIssueView({
       localStorage.setItem('gpdms_bone_issue_history', JSON.stringify(updated.slice(0, 100)));
 
       // 1. Save directly into dedicated bone_issue MySQL table
-      await fetch(`${getBackendUrl()}/api/bone-issues`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          slipNo: record.slipNo,
-          lotNo: record.lotNo,
-          rolls: record.rolls,
-          issuerName: record.issuerName,
-          receiverName: record.receiverName,
-          issueDate: record.date,
-          style: record.style,
-          brand: record.brand,
-          garmentType: record.garmentType,
-          fabric: record.fabric,
-          quantity: record.quantity,
-          shade: record.shade,
-          size: record.size,
-          remarks: record.remarks
-        })
-      });
+      try {
+        await fetch(`${getBackendUrl()}/api/bone-issues`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            slipNo: record.slipNo,
+            lotNo: record.lotNo,
+            issuePcs: record.issuePcs || record.quantity || 600,
+            issuerName: record.issuerName,
+            receiverName: record.receiverName,
+            issueDate: record.date,
+            style: record.style,
+            brand: record.brand,
+            garmentType: record.garmentType,
+            fabric: record.fabric,
+            quantity: record.quantity,
+            shade: record.shade,
+            size: record.size,
+            remarks: record.remarks
+          })
+        });
+      } catch (_) {}
 
       // 2. Also sync to global issue_logs for general traceability
       try {
@@ -207,14 +210,15 @@ export default function BoneIssueView({
             isReissue: false,
             isReturn: false,
             category: 'BONE / POCKETING',
-            volume: record.rolls,
+            volume: record.issuePcs || 600,
             personName: record.issuerName,
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
             date: record.date,
             materials: [{
-              name: 'Bone Pocketing Roll',
-              rolls: record.rolls,
+              name: 'Bone Pocketing Fabric',
+              issuePcs: record.issuePcs,
+              cuttingQty: record.quantity,
               shade: record.shade
             }]
           })
@@ -241,7 +245,7 @@ export default function BoneIssueView({
       const res = await fetch(`${getBackendUrl()}/api/lot/${cleanLot}`);
       
       if (!res.ok) {
-        throw new Error(`Lot "${lotToQuery}" not found. You can still issue rolls manually.`);
+        throw new Error(`Lot "${lotToQuery}" not found. You can still enter details and issue pieces manually.`);
       }
 
       const data = await res.json();
@@ -257,7 +261,8 @@ export default function BoneIssueView({
       setSelectedShade(primaryShade);
 
       const cuttingQty = parseInt(data.quantity || 0, 10);
-      setRemarks(`Internal Bone pocketing roll issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty} Pcs.`);
+      setIssuePcs(cuttingQty > 0 ? cuttingQty : 600);
+      setRemarks(`Internal Bone pocketing issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty || 600} Pcs.`);
 
       setRecentLots(prev => {
         const updated = [lotToQuery, ...prev.filter(l => l !== lotToQuery)];
@@ -274,9 +279,10 @@ export default function BoneIssueView({
         brand: 'Mohit Hosiery',
         garmentType: 'Pants / Tracksuit',
         fabric: 'Cotton / Poly',
-        quantity: 0,
+        quantity: 600,
         shade: 'Default'
       });
+      setIssuePcs(600);
     } finally {
       setSearchingLot(false);
     }
@@ -289,7 +295,7 @@ export default function BoneIssueView({
     const {
       slipNo,
       lotNo,
-      rolls,
+      issuePcs = 600,
       issuerName,
       receiverName,
       date,
@@ -297,7 +303,7 @@ export default function BoneIssueView({
       brand = 'Mohit Hosiery',
       garmentType = 'Trouser / Tracksuit',
       fabric = 'Cotton Poly Blend',
-      quantity = 0,
+      quantity = 600,
       shade = 'Standard',
       size = 'M, L, XL, 2XL',
       remarks = ''
@@ -320,13 +326,13 @@ export default function BoneIssueView({
     // ── 1. Header (Company Branding & Voucher Info) ──────────────────────
     // Left: Company Branding & Title
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
+    doc.setFontSize(14);
     doc.setTextColor(0, 0, 0);
     doc.text('MOHIT HOSIERY', im, y + 14);
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text('INTERNAL MATERIAL ISSUE VOUCHER — BONE ROLLS', im, y + 27);
+    doc.text('INTERNAL MATERIAL ISSUE VOUCHER — BONE POCKETING', im, y + 27);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
@@ -391,7 +397,7 @@ export default function BoneIssueView({
 
     // Row 1
     drawSpec('Lot Number', `LOT #${lotNo}`, im, y);
-    drawSpec('Cutting Quantity', `${quantity || 0} Pcs`, im + halfW, y);
+    drawSpec('Cutting Quantity', `${quantity || issuePcs} Pcs`, im + halfW, y);
     y += 18;
 
     // Row 2
@@ -411,6 +417,7 @@ export default function BoneIssueView({
 
     // Row 5
     drawSpec('Department', 'CUTTING FLOOR', im, y);
+    drawSpec('Issue Pcs Quantity', `${issuePcs} Pcs`, im + halfW, y);
     y += 24;
 
     // Clean horizontal divider rule
@@ -423,7 +430,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('2. ISSUED MATERIAL (ROLL QUANTITY)', im, y);
+    doc.text('2. ISSUED MATERIAL SPECIFICATION', im, y);
     y += 12;
 
     // Table Header with subtle fill and clean top/bottom lines
@@ -440,8 +447,9 @@ export default function BoneIssueView({
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
     doc.text('#', im + 12, y + 15);
-    doc.text('MATERIAL / ITEM DESCRIPTION', im + 45, y + 15);
-    doc.text('QUANTITY ISSUED', pw - im - 14, y + 15, { align: 'right' });
+    doc.text('ITEM / MATERIAL DESCRIPTION', im + 40, y + 15);
+    doc.text('CUTTING PCS', im + 290, y + 15);
+    doc.text('ISSUE PCS', pw - im - 14, y + 15, { align: 'right' });
     y += thH;
 
     // Data Row
@@ -453,11 +461,14 @@ export default function BoneIssueView({
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
-    doc.text('Bone Pocketing / Piping Roll', im + 45, y + 17);
+    doc.text('Bone Pocketing / Piping Fabric', im + 40, y + 17);
+
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${quantity || issuePcs || 0} Pcs`, im + 290, y + 17);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.text(`${rolls} ROLL${rolls > 1 ? 'S' : ''}`, pw - im - 14, y + 17, { align: 'right' });
+    doc.setFontSize(10);
+    doc.text(`${issuePcs} Pcs`, pw - im - 14, y + 17, { align: 'right' });
     y += trH;
 
     // Row divider line
@@ -473,10 +484,10 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('TOTAL QUANTITY ISSUED:', im + 12, y + 16);
+    doc.text('TOTAL ISSUE QUANTITY:', im + 12, y + 16);
 
-    doc.setFontSize(10);
-    doc.text(`${rolls} ROLL${rolls > 1 ? 'S' : ''}`, pw - im - 14, y + 16, { align: 'right' });
+    doc.setFontSize(10.5);
+    doc.text(`${issuePcs} Pcs`, pw - im - 14, y + 16, { align: 'right' });
     y += totH;
 
     // Accounting double line at bottom of total
@@ -496,7 +507,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9.5);
     doc.setTextColor(50, 50, 50);
-    const remText = remarks || `Internal Bone pocketing roll issue for Lot ${lotNo} (${style}).`;
+    const remText = remarks || `Internal Bone pocketing issue for Lot ${lotNo} (${style}) - Issue Qty: ${issuePcs} Pcs.`;
     const splitRemarks = doc.splitTextToSize(remText, iw);
     doc.text(splitRemarks, im, y);
     y += Math.max(26, splitRemarks.length * 13 + 12);
@@ -593,11 +604,12 @@ export default function BoneIssueView({
     try {
       const currentSlipNo = issueSlipNo || await fetchNextIssueSlipNo();
       const currentLotNo = lotDetails?.lotNo || searchLotInput.trim();
+      const effectivePcs = parseInt(issuePcs, 10) || 600;
 
-      const doc = await createBoneIssuePDFDocument({
+      const payload = {
         slipNo: currentSlipNo,
         lotNo: currentLotNo,
-        rolls: rollCount,
+        issuePcs: effectivePcs,
         width: effectiveWidth,
         shade: selectedShade || lotDetails?.shade || 'Standard Shade',
         issuerName,
@@ -607,44 +619,45 @@ export default function BoneIssueView({
         brand: lotDetails?.brand || 'Mohit Hosiery',
         garmentType: lotDetails?.garmentType || 'Trouser / Tracksuit',
         fabric: lotDetails?.fabric || 'Cotton Poly Blend',
-        quantity: lotDetails?.quantity || 0,
-        size: lotDetails?.size || 'M, L, XL, 2XL',
-        remarks
-      });
-
-      const pdfBlob = doc.output('blob');
-      const pdfUrl = URL.createObjectURL(pdfBlob);
-
-      const generatedData = {
-        doc,
-        pdfUrl,
-        slipNo: currentSlipNo,
-        lotNo: currentLotNo,
-        rolls: rollCount,
-        width: effectiveWidth,
-        shade: selectedShade || lotDetails?.shade || 'Standard Shade',
-        issuerName,
-        receiverName,
-        date: issueDate,
-        style: lotDetails?.style || 'Garment Design',
-        brand: lotDetails?.brand || 'Mohit Hosiery',
-        garmentType: lotDetails?.garmentType || 'Trouser / Tracksuit',
-        fabric: lotDetails?.fabric || 'Cotton Poly Blend',
-        quantity: lotDetails?.quantity || 0,
+        quantity: lotDetails?.quantity || effectivePcs,
         size: lotDetails?.size || 'M, L, XL, 2XL',
         remarks
       };
 
-      setGeneratedSlipData(generatedData);
-      await saveToHistory(generatedData);
-      fetchNextIssueSlipNo();
+      const doc = await createBoneIssuePDFDocument(payload);
+      const pdfBlob = doc.output('blob');
+      const pdfUrl = URL.createObjectURL(pdfBlob);
 
-      showToast(`Bone Issue Voucher ${currentSlipNo} generated successfully!`);
+      const generatedData = {
+        ...payload,
+        doc,
+        pdfUrl,
+        isSaved: false
+      };
+
+      setGeneratedSlipData(generatedData);
+      showToast(`Voucher ${currentSlipNo} preview ready. Review and confirm to save.`);
     } catch (err) {
       console.error('Issue slip generation error:', err);
       showToast(err.message || 'Failed to generate Issue Bill.', 'error');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleConfirmAndSaveBill = async () => {
+    if (!generatedSlipData) return;
+    setSavingSlip(true);
+    try {
+      await saveToHistory(generatedSlipData);
+      await fetchNextIssueSlipNo();
+      setGeneratedSlipData(prev => prev ? { ...prev, isSaved: true } : null);
+      showToast(`Bone Issue Voucher ${generatedSlipData.slipNo} confirmed and saved successfully!`);
+    } catch (err) {
+      console.error('Save error:', err);
+      showToast('Failed to save voucher details.', 'error');
+    } finally {
+      setSavingSlip(false);
     }
   };
 
@@ -667,10 +680,11 @@ export default function BoneIssueView({
 
   const handleReprintFromHistory = async (item) => {
     try {
+      const effectivePcs = item.issuePcs || item.quantity || item.rolls || 600;
       const doc = await createBoneIssuePDFDocument({
         slipNo: item.slipNo,
         lotNo: item.lotNo,
-        rolls: item.rolls || 1,
+        issuePcs: effectivePcs,
         width: item.width || '1.5 Inch (Standard)',
         shade: item.shade || 'Standard',
         issuerName: item.issuerName || 'Store Staff',
@@ -680,7 +694,7 @@ export default function BoneIssueView({
         brand: item.brand || 'Mohit Hosiery',
         garmentType: item.garmentType || 'Trouser / Tracksuit',
         fabric: item.fabric || 'Cotton Poly Blend',
-        quantity: item.quantity || 0,
+        quantity: item.quantity || effectivePcs,
         size: item.size || 'M, L, XL, 2XL',
         remarks: item.remarks || ''
       });
@@ -693,14 +707,15 @@ export default function BoneIssueView({
         pdfUrl,
         slipNo: item.slipNo,
         lotNo: item.lotNo,
-        rolls: item.rolls || 1,
+        issuePcs: effectivePcs,
         width: item.width || '1.5 Inch (Standard)',
         shade: item.shade || 'Standard',
         issuerName: item.issuerName || 'Store Staff',
         receiverName: item.receiverName || 'Cutting Master',
         date: item.date || new Date().toISOString().split('T')[0],
         style: item.style || 'Garment Design',
-        brand: item.brand || 'Mohit Hosiery'
+        brand: item.brand || 'Mohit Hosiery',
+        isSaved: true
       });
     } catch (err) {
       console.error('Reprint error:', err);
@@ -1095,7 +1110,7 @@ export default function BoneIssueView({
 
               </div>
 
-              {/* RIGHT COLUMN: QUANTITY TO ISSUE (ROLLS) */}
+              {/* RIGHT COLUMN: QUANTITY DETAILS (CUTTING PCS & EDITABLE ISSUE PCS) */}
               <div style={{
                 padding: '18px 20px',
                 borderRadius: '12px',
@@ -1105,91 +1120,115 @@ export default function BoneIssueView({
                 flexDirection: 'column',
                 gap: '14px'
               }}>
-                <label style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
                   <Layers size={16} color="#0284c7" />
-                  <span>Quantity to Issue (Rolls):</span>
-                </label>
-
-                {/* Big Stepper */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setRollCount(prev => Math.max(1, (parseInt(prev, 10) || 1) - 1))}
-                    style={{
-                      width: '44px', height: '44px', borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '18px', fontWeight: '800', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#334155', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}
-                  >
-                    <Minus size={18} />
-                  </button>
-
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={rollCount}
-                    onChange={(e) => setRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    style={{
-                      width: '110px',
-                      height: '44px',
-                      textAlign: 'center',
-                      fontSize: '22px',
-                      fontWeight: '800',
-                      borderRadius: '10px',
-                      border: '2px solid #0284c7',
-                      background: '#ffffff',
-                      color: '#0284c7',
-                      boxShadow: '0 2px 6px rgba(2, 132, 199, 0.15)'
-                    }}
-                  />
-
-                  <button
-                    type="button"
-                    onClick={() => setRollCount(prev => (parseInt(prev, 10) || 1) + 1)}
-                    style={{
-                      width: '44px', height: '44px', borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '18px', fontWeight: '800', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#334155', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}
-                  >
-                    <Plus size={18} />
-                  </button>
-
-                  <span style={{ fontSize: '15px', fontWeight: '800', color: '#334155' }}>
-                    Rolls
-                  </span>
+                  <span>Quantity & Issue Pcs Details:</span>
                 </div>
 
-                {/* Quick Presets */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {[1, 2, 3, 4, 5, 6, 10, 20].map(cnt => (
-                    <button
-                      key={cnt}
-                      type="button"
-                      onClick={() => setRollCount(cnt)}
+                {/* Cutting Pcs Matrix Reference Badge */}
+                <div style={{
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  background: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                      Cutting Pcs (Lot Matrix)
+                    </span>
+                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                      Lot #{lotDetails?.lotNo || searchLotInput || '—'}
+                    </span>
+                  </div>
+                  <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
+                    {lotDetails?.quantity || 600} Pcs
+                  </strong>
+                </div>
+
+                {/* Editable Issue Pcs Input */}
+                <div>
+                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Scissors size={15} color="#0284c7" />
+                      <span>Issue Pcs (Editable):</span>
+                    </span>
+                    <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                      Direct Pcs Entry
+                    </span>
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="number"
+                      min="1"
+                      value={issuePcs}
+                      onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      placeholder="e.g. 600"
                       style={{
-                        padding: '5px 12px',
+                        flex: 1,
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '2px solid #0284c7',
+                        background: '#ffffff',
+                        fontSize: '18px',
+                        fontWeight: '800',
+                        color: '#0f172a',
+                        outline: 'none',
+                        boxShadow: '0 2px 6px rgba(2, 132, 199, 0.12)'
+                      }}
+                    />
+                    <span style={{ fontSize: '14px', fontWeight: '800', color: '#475569' }}>
+                      Pcs
+                    </span>
+                  </div>
+                </div>
+
+                {/* Quick Presets for Issue Pcs */}
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {lotDetails?.quantity && (
+                    <button
+                      key="same-cut"
+                      type="button"
+                      onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
+                      style={{
+                        padding: '5px 10px',
                         borderRadius: '6px',
-                        border: rollCount === cnt ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                        background: rollCount === cnt ? '#e0f2fe' : '#ffffff',
-                        color: rollCount === cnt ? '#0284c7' : '#334155',
-                        fontSize: '12px',
+                        border: issuePcs === parseInt(lotDetails.quantity, 10) ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                        background: issuePcs === parseInt(lotDetails.quantity, 10) ? '#e0f2fe' : '#ffffff',
+                        color: issuePcs === parseInt(lotDetails.quantity, 10) ? '#0284c7' : '#334155',
+                        fontSize: '11.5px',
                         fontWeight: '700',
                         cursor: 'pointer'
                       }}
                     >
-                      {cnt} Roll{cnt > 1 ? 's' : ''}
+                      Same as Cutting ({lotDetails.quantity} Pcs)
+                    </button>
+                  )}
+                  {[500, 600, 800, 1000, 1200].filter(v => v !== parseInt(lotDetails?.quantity, 10)).map(cnt => (
+                    <button
+                      key={cnt}
+                      type="button"
+                      onClick={() => setIssuePcs(cnt)}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: '6px',
+                        border: issuePcs === cnt ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                        background: issuePcs === cnt ? '#e0f2fe' : '#ffffff',
+                        color: issuePcs === cnt ? '#0284c7' : '#334155',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {cnt} Pcs
                     </button>
                   ))}
                 </div>
 
-                <div style={{ fontSize: '13px', fontWeight: '700', color: '#0284c7', background: '#e0f2fe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginTop: '6px' }}>
-                  Issue Summary: <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Bone Pocketing
+                <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#0369a1', background: '#e0f2fe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginTop: '4px' }}>
+                  Issue Summary: <strong>{issuePcs} Pcs</strong> of Bone Pocketing for LOT #{lotDetails?.lotNo || searchLotInput || '—'}
                 </div>
               </div>
 
@@ -1198,7 +1237,7 @@ export default function BoneIssueView({
             {/* ACTION: GENERATE BILL BUTTON */}
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
               <div style={{ fontSize: '13px', color: '#64748b' }}>
-                Issuing <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Bone to <strong>{receiverName || 'Cutting Master'}</strong>
+                Issuing <strong>{issuePcs} Pcs</strong> of Bone Pocketing to <strong>{receiverName || 'Cutting Master'}</strong>
               </div>
 
               <button
@@ -1220,7 +1259,7 @@ export default function BoneIssueView({
                   gap: '10px'
                 }}
               >
-                {generating ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
+                {generating ? <RefreshCw size={18} className="spin" /> : <Printer size={18} />}
                 <span>{generating ? 'Generating Issue Slip...' : 'Generate Bone Issue Bill'}</span>
               </button>
             </div>
@@ -1288,7 +1327,7 @@ export default function BoneIssueView({
                     <th style={{ padding: '10px 12px' }}>SLIP NO</th>
                     <th style={{ padding: '10px 12px' }}>DATE</th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
-                    <th style={{ padding: '10px 12px' }}>ROLLS</th>
+                    <th style={{ padding: '10px 12px' }}>ISSUE PCS</th>
                     <th style={{ padding: '10px 12px' }}>ISSUED BY</th>
                     <th style={{ padding: '10px 12px' }}>RECEIVED BY</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>ACTIONS</th>
@@ -1316,7 +1355,7 @@ export default function BoneIssueView({
                           LOT #{item.lotNo}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800', color: '#059669' }}>
-                          {item.rolls} Roll{item.rolls > 1 ? 's' : ''}
+                          {item.issuePcs || item.quantity || item.rolls || 600} Pcs
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.issuerName || 'ADMIN'}
@@ -1376,7 +1415,7 @@ export default function BoneIssueView({
         </div>
       )}
 
-      {/* GENERATED BILL SUCCESS MODAL */}
+      {/* GENERATED BILL / CONFIRMATION MODAL */}
       {generatedSlipData && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -1388,14 +1427,16 @@ export default function BoneIssueView({
             background: '#ffffff',
             borderRadius: '18px',
             width: '100%',
-            maxWidth: '520px',
+            maxWidth: '560px',
             boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
             overflow: 'hidden',
             animation: 'scaleIn 0.25s ease-out'
           }}>
             {/* Modal Header */}
             <div style={{
-              background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+              background: generatedSlipData.isSaved
+                ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
               padding: '18px 24px',
               color: '#ffffff',
               display: 'flex',
@@ -1403,15 +1444,24 @@ export default function BoneIssueView({
               justifyContent: 'space-between'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: generatedSlipData.isSaved ? 'rgba(255,255,255,0.2)' : 'rgba(2, 132, 199, 0.25)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
                   <CheckCircle size={22} />
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
-                    Bone Issue Voucher Generated!
+                    {generatedSlipData.isSaved ? 'Bone Issue Voucher Saved & Ready!' : 'Review & Confirm Voucher Details'}
                   </h3>
                   <span style={{ fontSize: '12px', opacity: 0.9 }}>
-                    Voucher No: <strong>{generatedSlipData.slipNo}</strong>
+                    Voucher No: <strong>{generatedSlipData.slipNo}</strong> {!generatedSlipData.isSaved && '• (Pending Save Confirmation)'}
                   </span>
                 </div>
               </div>
@@ -1426,6 +1476,44 @@ export default function BoneIssueView({
 
             {/* Modal Body */}
             <div style={{ padding: '22px 24px' }}>
+              {/* Notice banner */}
+              {!generatedSlipData.isSaved ? (
+                <div style={{
+                  background: '#fefce8',
+                  border: '1.5px solid #fde047',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  fontSize: '12.5px',
+                  color: '#854d0e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: '600'
+                }}>
+                  <AlertTriangle size={18} style={{ color: '#ca8a04', flexShrink: 0 }} />
+                  <span>Please verify all details below. Click <strong>"Confirm & Save Voucher"</strong> to record in system.</span>
+                </div>
+              ) : (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1.5px solid #86efac',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  fontSize: '12.5px',
+                  color: '#166534',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: '700'
+                }}>
+                  <CheckCircle size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+                  <span>✓ Successfully saved to database & history! You can now print or download the voucher.</span>
+                </div>
+              )}
+
+              {/* Details Grid */}
               <div style={{
                 background: '#f8fafc',
                 border: '1.5px solid #e2e8f0',
@@ -1439,8 +1527,16 @@ export default function BoneIssueView({
                     <strong style={{ color: '#0f172a' }}>LOT #{generatedSlipData.lotNo}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>QUANTITY ISSUED</span>
-                    <strong style={{ color: '#0284c7', fontSize: '16px' }}>{generatedSlipData.rolls} Rolls</strong>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE QUANTITY (PCS)</span>
+                    <strong style={{ color: '#0284c7', fontSize: '16px' }}>{generatedSlipData.issuePcs} Pcs</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>CUTTING MATRIX PCS</span>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.quantity || 600} Pcs</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE DATE</span>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.date}</strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUED BY (STORE)</span>
@@ -1450,80 +1546,166 @@ export default function BoneIssueView({
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>RECEIVED BY (CUTTING)</span>
                     <strong style={{ color: '#0f172a' }}>{generatedSlipData.receiverName}</strong>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE DATE</span>
-                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.date}</strong>
-                  </div>
+                  {generatedSlipData.remarks && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>REMARKS</span>
+                      <span style={{ color: '#334155', fontStyle: 'italic' }}>{generatedSlipData.remarks}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={handleDownloadPDF}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: '1.5px solid #0284c7',
-                    background: '#ffffff',
-                    color: '#0284c7',
-                    fontSize: '13.5px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <Download size={16} />
-                  <span>Download Voucher (PDF)</span>
-                </button>
+              {/* Action Buttons: Pending Confirm vs Saved */}
+              {!generatedSlipData.isSaved ? (
+                <div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={handleConfirmAndSaveBill}
+                      disabled={savingSlip}
+                      style={{
+                        flex: 1.3,
+                        padding: '14px 18px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        color: '#ffffff',
+                        fontSize: '14px',
+                        fontWeight: '800',
+                        cursor: savingSlip ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.4)',
+                        opacity: savingSlip ? 0.8 : 1
+                      }}
+                    >
+                      {savingSlip ? (
+                        <>
+                          <RefreshCw size={16} className="spin" />
+                          <span>Saving Voucher...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle size={17} />
+                          <span>Confirm & Save Voucher</span>
+                        </>
+                      )}
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={handlePrintBill}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: '#0f172a',
-                    color: '#ffffff',
-                    fontSize: '13.5px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.35)'
-                  }}
-                >
-                  <Printer size={16} />
-                  <span>Print Slip (B&W)</span>
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      onClick={handlePrintBill}
+                      style={{
+                        flex: 1,
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        border: '1.5px solid #0f172a',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <Printer size={16} />
+                      <span>Preview / Print (B&W)</span>
+                    </button>
+                  </div>
 
-              <div style={{ marginTop: '14px', textAlign: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => setGeneratedSlipData(null)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#64748b',
-                    fontSize: '12.5px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    textDecoration: 'underline'
-                  }}
-                >
-                  Done / Issue Next Lot
-                </button>
-              </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedSlipData(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#64748b',
+                        fontSize: '12.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Cancel & Edit Details
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={handlePrintBill}
+                      style={{
+                        flex: 1.2,
+                        padding: '13px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        fontSize: '13.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 12px rgba(15, 23, 42, 0.35)'
+                      }}
+                    >
+                      <Printer size={16} />
+                      <span>Print Voucher (B&W)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadPDF}
+                      style={{
+                        flex: 1,
+                        padding: '13px',
+                        borderRadius: '10px',
+                        border: '1.5px solid #0284c7',
+                        background: '#ffffff',
+                        color: '#0284c7',
+                        fontSize: '13.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <Download size={16} />
+                      <span>Download PDF</span>
+                    </button>
+                  </div>
+
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedSlipData(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#0284c7',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Done / Issue Next Lot →
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

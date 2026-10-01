@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode
 } from 'lucide-react';
 import './App.css';
 
@@ -19,6 +19,7 @@ const DashboardView = lazy(() => import('./components/DashboardView'));
 const DesignView = lazy(() => import('./components/DesignView'));
 const MaterialVerificationView = lazy(() => import('./components/MaterialVerificationView'));
 const MaterialIssueView = lazy(() => import('./components/MaterialIssueView'));
+const BarcodeMaterialIssueView = lazy(() => import('./components/BarcodeMaterialIssueView'));
 const ExtraMaterialIssueView = lazy(() => import('./components/ExtraMaterialIssueView'));
 const GeneratePOView = lazy(() => import('./components/GeneratePOView'));
 const MaterialDetailsView = lazy(() => import('./components/MaterialDetailsView'));
@@ -78,6 +79,7 @@ const hasTabAccess = (tabName, role) => {
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
+      'barcode_material_issue',
       'extra_material_issue',
       'return_material',
       'material_details',
@@ -121,6 +123,7 @@ const hasTabAccess = (tabName, role) => {
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
+      'barcode_material_issue',
       'extra_material_issue',
       'return_material',
       'material_details',
@@ -148,6 +151,7 @@ const TAB_ROUTES = {
   material_verification: '/material-verification',
   material_update: '/material-update',
   material_issue: '/material-issue',
+  barcode_material_issue: '/barcode-material-issue',
   extra_material_issue: '/extra-material-issue',
   return_material: '/return-material',
   generate_po: '/generate-po',
@@ -515,6 +519,7 @@ export default function App() {
       scanner_logs: 'Scanner Log',
       weight_capture: 'Material Add',
       material_issue: 'Material Issue',
+      barcode_material_issue: 'Barcode Material Issue',
       extra_material_issue: 'Extra Material Issue',
       return_material: 'Return Material',
       material_details: 'Material Detail',
@@ -2085,6 +2090,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                       <span className="sidebar-text">Material Issue</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'barcode_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('barcode_material_issue')} title="Barcode Material Issue">
+                      <span className="sidebar-text">⚡ Barcode Material Issue</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                       <span className="sidebar-text">Extra Material Issue</span>
                     </li>
@@ -2217,6 +2225,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                   <ClipboardList size={18} />
                   <span className="sidebar-text">Material Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'barcode_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('barcode_material_issue')} title="Barcode Material Issue">
+                  <Scan size={18} />
+                  <span className="sidebar-text">Barcode Material Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => handleTabClick('bone_issue')} title="Bone Issue">
                   <Layers size={18} />
@@ -2710,6 +2722,20 @@ export default function App() {
                 currentUser={currentUser}
                 onSubmitApproval={handleSubmitApprovalRequest}
                 onRedirectToZipPO={handleRedirectToZipPO}
+                onRedirectToTab={(tab) => handleTabClick(tab)}
+              />
+            )}
+
+            {activeTab === 'barcode_material_issue' && (
+              <BarcodeMaterialIssueView
+                materials={materials}
+                designs={designs}
+                onIssueMaterials={handleIssueMaterials}
+                onReturnMaterials={handleReturnMaterials}
+                issueLogs={issueLogs}
+                currencySymbol={currencySymbol}
+                currentUser={currentUser}
+                onRedirectToTab={(tab) => handleTabClick(tab)}
               />
             )}
 

@@ -1,9 +1,55 @@
 import { getBackendUrl } from '../utils/api';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3 } from 'lucide-react';
+import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import BarcodeMaterialIssueView from './BarcodeMaterialIssueView';
+
+// Sound feedback helper using Web Audio API
+const playFeedbackSound = (type = 'success') => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    if (type === 'scan') {
+      // Crisp high-pitch double chirp on barcode scan
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.09);
+    } else if (type === 'success') {
+      // Pleasant victory chime on successful issue
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+      osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1);
+      osc.frequency.setValueAtTime(783.99, ctx.currentTime + 0.2);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.35);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.36);
+    } else if (type === 'error') {
+      // Low buzz on shortage/error
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.setValueAtTime(180, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.26);
+    }
+  } catch (e) {
+    // Audio context may be restricted before user interaction
+  }
+};
 
 function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '' }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -492,6 +538,7 @@ export default function MaterialIssueView({
   const approvedDesigns = designs.filter(d => d.status === 'Approved');
 
   // Form states
+  const [issueWorkflowMode, setIssueWorkflowMode] = useState('lot_bom'); // 'lot_bom' or 'barcode_scan'
   const [selectedDesignId, setSelectedDesignId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showLogs, setShowLogs] = useState(false);
@@ -507,6 +554,12 @@ export default function MaterialIssueView({
   const [pieces, setPieces] = useState(100);
   const [isLoadingPieces, setIsLoadingPieces] = useState(false);
   const [bomMappings, setBomMappings] = useState([]);
+
+  // Barcode Scanning & Live Cart State for BOM Mapping
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [scanTargetIdx, setScanTargetIdx] = useState(null); // null = auto-match / next unmapped
+  const [scanNotice, setScanNotice] = useState(null); // { type: 'success' | 'error', text: '' }
+  const barcodeInputRef = useRef(null);
 
   // Lock refs to prevent re-fetching or resetting form when background polling occurs
   const fetchedLotIdRef = useRef('');
@@ -888,6 +941,114 @@ export default function MaterialIssueView({
     }
     setBomMappings(updated);
     setFormError('');
+  };
+
+  // Handle Barcode Scan for Material Mapping & Cart
+  const handleBarcodeScan = (e) => {
+    if (e) e.preventDefault();
+    if (!barcodeInput.trim()) return;
+    const raw = barcodeInput.trim();
+    const upper = raw.toUpperCase();
+
+    // 1. Resolve material from inventory (id, packet code, materialCode, barcodeId, name)
+    let matchedMaterial = materials.find(m => String(m.id).toUpperCase() === upper);
+
+    if (!matchedMaterial && upper.includes('-A')) {
+      const parts = upper.split('-A');
+      const base = parts[0];
+      matchedMaterial = materials.find(m =>
+        String(m.id).toUpperCase() === base ||
+        String(m.materialCode || '').toUpperCase() === base
+      );
+    }
+
+    if (!matchedMaterial) {
+      matchedMaterial = materials.find(m =>
+        String(m.barcodeId || '').toUpperCase() === upper ||
+        String(m.materialCode || '').toUpperCase() === upper
+      );
+    }
+
+    if (!matchedMaterial) {
+      matchedMaterial = materials.find(m =>
+        String(m.id).toUpperCase().includes(upper) ||
+        String(m.name || '').toUpperCase().includes(upper)
+      );
+    }
+
+    if (!matchedMaterial) {
+      playFeedbackSound('error');
+      setScanNotice({
+        type: 'error',
+        text: `No inventory material found matching code: "${raw}". Check stock catalog.`
+      });
+      setBarcodeInput('');
+      return;
+    }
+
+    if (!bomMappings || bomMappings.length === 0) {
+      playFeedbackSound('error');
+      setScanNotice({
+        type: 'error',
+        text: `Please select an approved production lot before scanning materials.`
+      });
+      setBarcodeInput('');
+      return;
+    }
+
+    // 2. Determine target BOM row to map
+    let targetIndex = scanTargetIdx;
+
+    if (targetIndex === null || targetIndex === undefined || targetIndex < 0 || targetIndex >= bomMappings.length) {
+      // Find matching row by keyword / category or first unmapped row
+      const matNameNorm = (matchedMaterial.name || '').toLowerCase();
+      const matCatNorm = (matchedMaterial.category || '').toLowerCase();
+
+      // Look for unmapped row matching category or name
+      const smartIdx = bomMappings.findIndex(m => {
+        if (m.alreadyIssued || m.materialId) return false;
+        const bName = (m.bomItemName || '').toLowerCase();
+        const bDetail = (m.bomItemDetail || '').toLowerCase();
+        return matNameNorm.includes(bName) || bName.includes(matCatNorm) ||
+               bDetail.includes(matCatNorm) || matCatNorm.includes(bName);
+      });
+
+      if (smartIdx !== -1) {
+        targetIndex = smartIdx;
+      } else {
+        // Fallback to first unmapped active row
+        const firstUnmapped = bomMappings.findIndex(m => !m.alreadyIssued && !m.materialId);
+        if (firstUnmapped !== -1) {
+          targetIndex = firstUnmapped;
+        } else {
+          // If all mapped, target first row
+          targetIndex = 0;
+        }
+      }
+    }
+
+    // 3. Update bomMappings
+    const updated = [...bomMappings];
+    const targetRow = updated[targetIndex];
+    if (targetRow) {
+      targetRow.materialId = matchedMaterial.id;
+      targetRow.issued = true; // Auto-select row
+      setBomMappings(updated);
+      setFormError('');
+
+      playFeedbackSound('scan');
+      setScanNotice({
+        type: 'success',
+        text: `✓ Scanned "${matchedMaterial.name}" (${matchedMaterial.id}) → Mapped to BOM Component: "${targetRow.bomItemName}"`
+      });
+    }
+
+    // Reset scan input and target
+    setBarcodeInput('');
+    setScanTargetIdx(null);
+    if (barcodeInputRef.current) {
+      barcodeInputRef.current.focus();
+    }
   };
 
   // Perform stock validation check
@@ -1427,24 +1588,98 @@ export default function MaterialIssueView({
     <div className="animate-fade" style={{ paddingBottom: '60px' }}>
       <div style={{ height: '8px' }} />
 
+      {/* Top Workflow Mode Switcher */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: 'var(--bg-secondary, #ffffff)',
+        border: '1px solid var(--border-color, #dbeafe)',
+        borderRadius: '12px',
+        padding: '6px',
+        marginBottom: '20px',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            type="button"
+            onClick={() => setIssueWorkflowMode('lot_bom')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: 'none',
+              background: issueWorkflowMode === 'lot_bom' ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'transparent',
+              color: issueWorkflowMode === 'lot_bom' ? '#ffffff' : 'var(--text-muted, #64748b)',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Layers size={16} />
+            <span>📦 Standard Lot BOM Issue</span>
+          </button>
 
-      {formSuccess && (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          padding: '16px',
-          backgroundColor: 'var(--success-light)',
-          color: 'var(--success)',
-          borderRadius: 'var(--border-radius-md)',
-          border: '1px solid rgba(16, 185, 129, 0.2)',
-          marginBottom: '24px',
-          fontWeight: '600'
-        }}>
-          <CheckCircle size={20} />
-          <span>{formSuccess}</span>
+          <button
+            type="button"
+            onClick={() => setIssueWorkflowMode('barcode_scan')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: 'none',
+              background: issueWorkflowMode === 'barcode_scan' ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'transparent',
+              color: issueWorkflowMode === 'barcode_scan' ? '#ffffff' : 'var(--text-muted, #64748b)',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Scan size={16} />
+            <span>⚡ Barcode Scanner Issue Mode</span>
+          </button>
         </div>
-      )}
+      </div>
+
+      {issueWorkflowMode === 'barcode_scan' ? (
+        <BarcodeMaterialIssueView
+          materials={materials}
+          designs={designs}
+          onIssueMaterials={onIssueMaterials}
+          onReturnMaterials={onReturnMaterials}
+          issueLogs={issueLogs}
+          currencySymbol={currencySymbol}
+          currentUser={currentUser}
+          onRedirectToTab={(tab) => {
+            if (tab === 'material_issue') setIssueWorkflowMode('lot_bom');
+            else if (onRedirectToTab) onRedirectToTab(tab);
+          }}
+        />
+      ) : (
+        <>
+          {formSuccess && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              padding: '16px',
+              backgroundColor: 'var(--success-light)',
+              color: 'var(--success)',
+              borderRadius: 'var(--border-radius-md)',
+              border: '1px solid rgba(16, 185, 129, 0.2)',
+              marginBottom: '24px',
+              fontWeight: '600'
+            }}>
+              <CheckCircle size={20} />
+              <span>{formSuccess}</span>
+            </div>
+          )}
 
       <div className="split-view split-view-asymmetric">
         {/* Left Side: Manufacturing Batch Selector */}
@@ -1786,7 +2021,7 @@ export default function MaterialIssueView({
 
               {/* Informative Tip Box explaining calculations */}
               <div style={{
-                marginBottom: '16px',
+                marginBottom: '14px',
                 padding: '12px 16px',
                 backgroundColor: 'var(--accent-light)',
                 borderRadius: '8px',
@@ -1808,7 +2043,185 @@ export default function MaterialIssueView({
                 </div>
               </div>
 
-              <div className="custom-table-container" style={{ overflowX: 'auto', minHeight: '320px', width: '100%', WebkitOverflowScrolling: 'touch', paddingBottom: '8px' }}>
+              {/* Barcode Quick-Scan & Mapping Box */}
+              <div style={{
+                marginBottom: '16px',
+                padding: '14px 16px',
+                background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
+                borderRadius: '10px',
+                border: '1.5px solid #93c5fd',
+                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.08)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      backgroundColor: '#2563eb',
+                      color: '#ffffff',
+                      padding: '7px',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.3)'
+                    }}>
+                      <Scan size={18} />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800', color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>⚡ Barcode Material Scanner &amp; Auto-Mapping</span>
+                        <span style={{ fontSize: '10px', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', fontWeight: '700' }}>
+                          Physical Gun / Keyboard
+                        </span>
+                      </h4>
+                      <p style={{ margin: '2px 0 0 0', fontSize: '11.5px', color: '#475569' }}>
+                        {scanTargetIdx !== null && bomMappings[scanTargetIdx] ? (
+                          <span style={{ color: '#2563eb', fontWeight: '800' }}>
+                            🎯 Target Focused: Scanning will map directly to &quot;{bomMappings[scanTargetIdx].bomItemName}&quot;
+                          </span>
+                        ) : (
+                          <span>Scan any material barcode (e.g. <code>MT1001</code>, <code>1001-A01</code>) to auto-map into BOM component rows.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Cart / Ready Status Badge */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '5px 10px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '8px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                    }}>
+                      <ShoppingCart size={15} style={{ color: '#2563eb' }} />
+                      <span>Issue Cart:</span>
+                      <span style={{
+                        backgroundColor: computedItems.filter(i => i.issued && i.materialId).length === computedItems.filter(i => i.issued).length && computedItems.length > 0 ? '#10b981' : '#f59e0b',
+                        color: '#ffffff',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        fontSize: '11px',
+                        fontWeight: '800'
+                      }}>
+                        {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Mapped
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <form onSubmit={handleBarcodeScan} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <Barcode size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                    <input
+                      ref={barcodeInputRef}
+                      type="text"
+                      className="form-input"
+                      placeholder={
+                        scanTargetIdx !== null && bomMappings[scanTargetIdx]
+                          ? `Scan barcode for: ${bomMappings[scanTargetIdx].bomItemName}...`
+                          : "Scan material barcode / type ID (e.g. MT1001, 1002, 1001-A01) and press Enter..."
+                      }
+                      value={barcodeInput}
+                      onChange={(e) => setBarcodeInput(e.target.value)}
+                      style={{
+                        paddingLeft: '38px',
+                        height: '42px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        borderColor: scanTargetIdx !== null ? '#2563eb' : '#93c5fd',
+                        backgroundColor: '#ffffff',
+                        boxShadow: scanTargetIdx !== null ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : 'none'
+                      }}
+                      disabled={!selectedDesign}
+                    />
+                    {barcodeInput && (
+                      <button
+                        type="button"
+                        onClick={() => setBarcodeInput('')}
+                        style={{
+                          position: 'absolute',
+                          right: '10px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#94a3b8'
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn btn-primary"
+                    style={{
+                      height: '42px',
+                      padding: '0 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      fontWeight: '700',
+                      fontSize: '13px',
+                      whiteSpace: 'nowrap'
+                    }}
+                    disabled={!selectedDesign || !barcodeInput.trim()}
+                  >
+                    <Scan size={16} />
+                    <span>Map Material</span>
+                  </button>
+
+                  {scanTargetIdx !== null && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setScanTargetIdx(null)}
+                      style={{ height: '42px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                    >
+                      Clear Target
+                    </button>
+                  )}
+                </form>
+
+                {/* Scan Feedback Alert */}
+                {scanNotice && (
+                  <div style={{
+                    marginTop: '10px',
+                    padding: '8px 12px',
+                    borderRadius: '6px',
+                    fontSize: '12.5px',
+                    fontWeight: '600',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: scanNotice.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                    color: scanNotice.type === 'success' ? '#065f46' : '#991b1b',
+                    border: `1px solid ${scanNotice.type === 'success' ? '#a7f3d0' : '#fecaca'}`
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {scanNotice.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                      <span>{scanNotice.text}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setScanNotice(null)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="custom-table-container" style={{ overflowX: 'auto', minHeight: '280px', width: '100%', WebkitOverflowScrolling: 'touch', paddingBottom: '8px' }}>
                 <table className="custom-table" style={{ fontSize: '13px', width: '100%', minWidth: '780px' }}>
                   <thead>
                     <tr>
@@ -1829,7 +2242,7 @@ export default function MaterialIssueView({
                         />
                       </th>
                       <th style={{ width: '140px', padding: '10px 8px' }}>BOM Component</th>
-                      <th style={{ minWidth: '220px', maxWidth: '280px', padding: '10px 8px' }}>Inventory Item Map</th>
+                      <th style={{ minWidth: '240px', maxWidth: '300px', padding: '10px 8px' }}>Inventory Item Map</th>
 
                       <th style={{ minWidth: '100px', padding: '10px 8px' }}>Description</th>
                       <th style={{ textAlign: 'center', width: '110px', padding: '10px 8px' }}>Total Needed</th>
@@ -1843,11 +2256,17 @@ export default function MaterialIssueView({
                         ? Math.round((item.currentStock - item.totalRequired) * 100) / 100
                         : item.currentStock;
                       const isShortage = item.issued && afterIssue < 0;
+                      const isTargeted = scanTargetIdx === idx;
 
                       return (
                         <tr key={idx} style={{
                           opacity: item.issued && !item.alreadyIssued ? 1 : 0.6,
-                          backgroundColor: (item.issued && !item.alreadyIssued) ? 'transparent' : 'var(--bg-primary)',
+                          backgroundColor: isTargeted
+                            ? 'rgba(37, 99, 235, 0.08)'
+                            : (item.issued && !item.alreadyIssued)
+                            ? 'transparent'
+                            : 'var(--bg-primary)',
+                          outline: isTargeted ? '2px solid #2563eb' : 'none',
                           transition: 'opacity 0.2s, background-color 0.2s',
                           color: item.alreadyIssued ? 'var(--text-muted)' : 'inherit'
                         }}>
@@ -1875,17 +2294,58 @@ export default function MaterialIssueView({
                                   </span>
                                 </div>
                               )}
+                              {isTargeted && (
+                                <div style={{ marginTop: '2px' }}>
+                                  <span style={{ fontSize: '10px', padding: '1px 5px', backgroundColor: '#dbeafe', color: '#1d4ed8', borderRadius: '4px', fontWeight: '700' }}>
+                                    🎯 Scanning Target
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           </td>
                           <td style={{ padding: '10px 8px' }}>
-                            <SearchableMaterialSelect
-                              materials={materials}
-                              value={item.materialId}
-                              onChange={(val) => handleMappingChange(idx, 'materialId', val)}
-                              disabled={!item.issued || item.alreadyIssued}
-                              hasError={!item.materialId && item.issued && !item.alreadyIssued}
-                              brandHint={selectedDesign?.brand || ''}
-                            />
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <div style={{ flex: 1 }}>
+                                <SearchableMaterialSelect
+                                  materials={materials}
+                                  value={item.materialId}
+                                  onChange={(val) => handleMappingChange(idx, 'materialId', val)}
+                                  disabled={!item.issued || item.alreadyIssued}
+                                  hasError={!item.materialId && item.issued && !item.alreadyIssued}
+                                  brandHint={selectedDesign?.brand || ''}
+                                />
+                              </div>
+                              {!item.alreadyIssued && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setScanTargetIdx(isTargeted ? null : idx);
+                                    if (!isTargeted && barcodeInputRef.current) {
+                                      barcodeInputRef.current.focus();
+                                    }
+                                  }}
+                                  className="btn"
+                                  style={{
+                                    padding: '5px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    backgroundColor: isTargeted ? '#2563eb' : '#f1f5f9',
+                                    color: isTargeted ? '#ffffff' : '#334155',
+                                    border: isTargeted ? '1px solid #1d4ed8' : '1px solid #cbd5e1',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    flexShrink: 0
+                                  }}
+                                  title="Scan material barcode specifically for this BOM component"
+                                >
+                                  <Scan size={12} />
+                                  <span>{isTargeted ? 'Active' : 'Scan'}</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
 
                           <td style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '10px 8px' }}>
@@ -1944,6 +2404,55 @@ export default function MaterialIssueView({
                 </table>
               </div>
 
+              {/* Bottom Quick Issue Cart Action Bar */}
+              <div style={{
+                marginTop: '16px',
+                padding: '14px 18px',
+                backgroundColor: 'var(--bg-primary)',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <ShoppingCart size={18} style={{ color: '#2563eb' }} />
+                    <strong style={{ fontSize: '14px' }}>
+                      Ready to Issue: {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Materials Mapped
+                    </strong>
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Production batch of <strong>{pieces} garment pieces</strong> &bull; Issuer: <strong>{personName || 'Store'}</strong> &bull; Receiver: <strong>{receiverName || 'Not Assigned'}</strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => handleSubmit(e)}
+                  className="btn"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '11px 22px',
+                    fontWeight: '800',
+                    fontSize: '14px',
+                    borderRadius: '8px',
+                    cursor: (hasShortage || isSelectedDesignAlreadyIssued) ? 'not-allowed' : 'pointer',
+                    border: 'none',
+                    backgroundColor: (hasShortage || isSelectedDesignAlreadyIssued) ? '#94a3b8' : '#2563eb',
+                    color: '#ffffff',
+                    boxShadow: (hasShortage || isSelectedDesignAlreadyIssued) ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.3)'
+                  }}
+                  disabled={hasShortage || isSelectedDesignAlreadyIssued}
+                >
+                  <Send size={16} />
+                  <span>Issue Materials for Batch ({pieces} Pcs)</span>
+                </button>
+              </div>
 
             </div>
           )}
@@ -4361,6 +4870,8 @@ export default function MaterialIssueView({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

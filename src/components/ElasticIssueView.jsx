@@ -25,6 +25,7 @@ export default function ElasticIssueView({
   const [recentLots, setRecentLots] = useState([]);
 
   // Step 1.5: Automatic Size to Meter Backend Calculation State & Switch Mode
+  const [issuePcs, setIssuePcs] = useState(600);
   const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'both'
   const [elasticSizeInput, setElasticSizeInput] = useState('50');
   const [elasticUnit, setElasticUnit] = useState('inch'); // 'inch' or 'cm'
@@ -51,9 +52,10 @@ export default function ElasticIssueView({
   const [customTapeWidth, setCustomTapeWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
 
-  // Issuer & Receiver
+  // Issuer, Receiver & Supervisor
   const [issuerName, setIssuerName] = useState(currentUser?.name || '');
   const [receiverName, setReceiverName] = useState('');
+  const [supervisorName, setSupervisorName] = useState('ROHIT / MONU');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [issueSlipNo, setIssueSlipNo] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -192,11 +194,12 @@ export default function ElasticIssueView({
     eUnit = elasticUnit,
     tSize = tapeSizeInput,
     tUnit = tapeUnit,
-    targetLot = lotDetails
+    targetLot = lotDetails,
+    customPcs = issuePcs
   ) => {
     try {
       setCalculating(true);
-      const pcs = parseInt(targetLot?.quantity || 600, 10);
+      const pcs = parseInt(customPcs || targetLot?.quantity || 600, 10);
       const res = await fetch(`${getBackendUrl()}/api/elastic/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -224,10 +227,10 @@ export default function ElasticIssueView({
     }
   };
 
-  // Re-calculate automatically when size, unit, tape, or lot changes
+  // Re-calculate automatically when size, unit, tape, lot, or issue pcs changes
   useEffect(() => {
-    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails);
-  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails]);
+    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs);
+  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs]);
 
   // Save new issue to history & database table
   const saveToHistory = async (record) => {
@@ -315,12 +318,14 @@ export default function ElasticIssueView({
       const res = await fetch(`${getBackendUrl()}/api/lot/${cleanLot}`);
 
       if (!res.ok) {
-        throw new Error(`Lot "${lotToQuery}" not found. You can still issue rolls manually.`);
+        throw new Error(`Lot "${lotToQuery}" not found. You can still enter details and issue pieces manually.`);
       }
 
       const data = await res.json();
       setLotDetails(data);
-      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, data);
+      const cuttingQty = parseInt(data.quantity || 0, 10);
+      setIssuePcs(cuttingQty > 0 ? cuttingQty : 600);
+      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, data, cuttingQty > 0 ? cuttingQty : 600);
 
       // Extract primary shade if available
       let primaryShade = '';
@@ -331,8 +336,7 @@ export default function ElasticIssueView({
       }
       setSelectedShade(primaryShade);
 
-      const cuttingQty = parseInt(data.quantity || 0, 10);
-      setRemarks(`Internal Elastic waistband roll issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty} Pcs.`);
+      setRemarks(`Internal Elastic waistband issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty || 600} Pcs.`);
 
       setRecentLots(prev => {
         const updated = [lotToQuery, ...prev.filter(l => l !== lotToQuery)];
@@ -349,33 +353,46 @@ export default function ElasticIssueView({
         brand: 'Mohit Hosiery',
         garmentType: 'Pants / Tracksuit',
         fabric: 'Cotton / Poly',
-        quantity: 0,
+        quantity: 600,
         shade: 'Default'
       });
+      setIssuePcs(600);
     } finally {
       setSearchingLot(false);
     }
   };
 
   const effectiveWidth = elasticWidth === 'Custom' ? (customWidth || '1 Inch') : elasticWidth;
+  const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
 
-  // ── Build Issue Voucher PDF ──────
+  // ── Build Original Issue Bill / PO PDF Document (Clean B&W Layout) ──────
   const createElasticIssuePDFDocument = async (data) => {
     const {
       slipNo,
       lotNo,
-      rolls,
-      issuerName,
-      receiverName,
-      date,
-      style = 'Garment Design',
+      issuerName = '',
+      receiverName = '',
+      supervisorName = 'ROHIT / MONU',
+      date = new Date().toISOString().split('T')[0],
+      style = 'LOWER',
       brand = 'Mohit Hosiery',
-      garmentType = 'Trouser / Tracksuit',
+      garmentType = 'LOWER',
       fabric = 'Cotton Poly Blend',
-      quantity = 0,
+      quantity = 600,
       shade = 'Standard',
       size = 'M, L, XL, 2XL',
       width = '1 Inch (Standard)',
+      tapeWidth = '0.5 Inch (Standard)',
+      elasticPerPcMtr = 1.27,
+      totalElasticMtr = 762,
+      tapePerPcMtr = 0.62,
+      totalTapeMtr = 372,
+      elasticSizeInput = '50',
+      elasticUnit = 'inch',
+      tapeSizeInput = '62',
+      tapeUnit = 'cm',
+      materialMode = 'elastic',
+      formulaExplanation = '',
       remarks = ''
     } = data;
 
@@ -383,261 +400,363 @@ export default function ElasticIssueView({
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
 
-    // Border
+    // Outer & Inner Borders (Crisp Black & White)
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(1.2);
-    doc.rect(26, 26, pw - 52, ph - 52);
+    doc.rect(20, 20, pw - 40, ph - 40);
 
-    const im = 44;
+    doc.setDrawColor(160, 160, 160);
+    doc.setLineWidth(0.6);
+    doc.rect(23, 23, pw - 46, ph - 46);
+
+    const im = 36;
     const iw = pw - im * 2;
-    let y = 48;
+    let y = 36;
 
-    // Header
+    // Header Box
+    doc.setFillColor(248, 248, 248);
+    doc.rect(im, y, iw, 58, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(1);
+    doc.rect(im, y, iw, 58, 'S');
+
+    // Company & Document Title (Pure Black)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
+    doc.setFontSize(15);
     doc.setTextColor(0, 0, 0);
-    doc.text('MOHIT HOSIERY', im, y + 14);
+    doc.text('MOHIT HOSIERY', im + 12, y + 19);
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text('INTERNAL MATERIAL ISSUE VOUCHER — ELASTIC ROLLS', im, y + 27);
+    doc.setTextColor(0, 0, 0);
+    doc.text('MATERIAL ISSUE BILL / PURCHASE ORDER (ORIGINAL)', im + 12, y + 35);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(80, 80, 80);
-    doc.text('Store Department  •  Cutting Floor Material Movement', im, y + 39);
+    doc.text('Store & Accessories Department • Production Floor Issue', im + 12, y + 48);
 
+    // Right Header Information Box (Pure Black & White)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(`VOUCHER NO:  ${slipNo}`, pw - im, y + 14, { align: 'right' });
+    doc.text(`BILL / PO NO: ${slipNo}`, pw - im - 12, y + 19, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(60, 60, 60);
-    doc.text(`Date:  ${date}`, pw - im, y + 27, { align: 'right' });
-
-    doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
-    doc.setTextColor(0, 0, 0);
-    doc.text('[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
+    doc.setTextColor(60, 60, 60);
+    doc.text(`DATE: ${date}`, pw - im - 12, y + 33, { align: 'right' });
 
-    y += 50;
-
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(1);
-    doc.line(im, y, pw - im, y);
-    y += 18;
-
-    // Specifications
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('1. LOT & PRODUCTION SPECIFICATIONS', im, y);
-    y += 15;
+    doc.text('[ ORIGINAL ISSUE BILL ]', pw - im - 12, y + 48, { align: 'right' });
 
-    const halfW = iw / 2;
+    y += 68;
 
-    const drawSpec = (label, val, xPos, yPos, maxW = halfW - 10) => {
+    // ── 1. PRODUCTION & LOT SPECIFICATIONS ──
+    doc.setFillColor(242, 242, 242);
+    doc.rect(im, y, iw, 17, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.rect(im, y, iw, 17, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text('1. PRODUCTION & LOT SPECIFICATIONS', im + 8, y + 12);
+    
+    // Spacing so text does not overwrite the section header
+    y += 30;
+
+    const colW = iw / 2;
+    const drawField = (label, val, xPos, yPos) => {
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9.5);
-      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(9);
+      doc.setTextColor(75, 75, 75);
       doc.text(`${label}:`, xPos, yPos);
 
       const labelW = doc.getTextWidth(`${label}: `);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
+      doc.setFontSize(9);
       doc.setTextColor(0, 0, 0);
-
-      const strVal = String(val || 'N/A');
-      const valW = maxW - labelW - 4;
-      let displayVal = strVal;
-      if (doc.getTextWidth(strVal) > valW) {
-        while (doc.getTextWidth(displayVal + '...') > valW && displayVal.length > 0) {
-          displayVal = displayVal.slice(0, -1);
-        }
-        displayVal += '...';
-      }
-      doc.text(displayVal, xPos + labelW + 4, yPos);
+      doc.text(String(val || '—'), xPos + labelW + 3, yPos);
     };
 
-    drawSpec('Lot Number', `LOT #${lotNo}`, im, y);
-    drawSpec('Cutting Quantity', `${quantity || 0} Pcs`, im + halfW, y);
+    drawField('Lot Number', `LOT #${lotNo}`, im + 6, y);
+    drawField('Total Cutting Quantity', `${quantity || 600} Pcs`, im + colW + 6, y);
     y += 18;
 
-    drawSpec('Style Name', style, im, y);
-    drawSpec('Brand / Buyer', brand, im + halfW, y);
+    drawField('Item / Style Name', style || garmentType || 'LOWER', im + 6, y);
+    drawField('Buyer / Brand', brand || 'Mohit Hosiery', im + colW + 6, y);
     y += 18;
 
-    drawSpec('Garment Type', garmentType, im, y);
-    drawSpec('Fabric Type', fabric, im + halfW, y);
+    drawField('Garment Type', garmentType || 'LOWER / Pants', im + 6, y);
+    drawField('Supervisor Name', supervisorName || 'ROHIT / MONU', im + colW + 6, y);
     y += 18;
 
-    drawSpec('Lot Shade / Color', shade || 'Standard', im, y);
-    drawSpec('Target Sizes', size || 'M, L, XL, 2XL', im + halfW, y);
-    y += 18;
-
-    drawSpec('Elastic Width', width || '1 Inch (Standard)', im, y);
-    drawSpec('Department', 'CUTTING FLOOR', im + halfW, y);
+    drawField('Lot Shade / Color', shade || 'Standard', im + 6, y);
+    drawField('Target Sizes', size || 'M, L, XL, 2XL', im + colW + 6, y);
     y += 24;
 
-    doc.setDrawColor(210, 210, 210);
-    doc.setLineWidth(0.6);
-    doc.line(im, y, pw - im, y);
-    y += 18;
+    // ── 2. MATERIAL ALLOCATION & TOTAL REQUIREMENT ──
+    doc.setFillColor(242, 242, 242);
+    doc.rect(im, y, iw, 17, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.rect(im, y, iw, 17, 'S');
 
-    // Material table
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('2. ISSUED MATERIAL (ROLL QUANTITY)', im, y);
-    y += 12;
+    doc.text('2. MATERIAL ALLOCATION & TOTAL REQUIREMENT (ORIGINAL BILL SPEC)', im + 8, y + 12);
+    
+    // Spacing before table header
+    y += 26;
 
-    const thH = 22;
-    doc.setFillColor(248, 248, 248);
+    // Table Header (Crisp Solid Black Bar with White Text)
+    const thH = 20;
+    doc.setFillColor(0, 0, 0);
     doc.rect(im, y, iw, thH, 'F');
 
-    doc.setDrawColor(0, 0, 0);
-    doc.setLineWidth(1);
-    doc.line(im, y, pw - im, y);
-    doc.line(im, y + thH, pw - im, y + thH);
-
+    // Clean column coordinate layout (No Overlap):
+    // Col 1: '#' (x: im + 6)
+    // Col 2: 'ITEM / MATERIAL DESCRIPTION' (x: im + 24)
+    // Col 3: 'SPECIFICATION' (x: im + 180)
+    // Col 4: 'PER PC REQ.' (x: im + 290)
+    // Col 5: 'CUTTING PCS' (x: im + 375)
+    // Col 6: 'TOTAL REQ. (MTR)' (x: pw - im - 10, align: right)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('#', im + 12, y + 15);
-    doc.text('MATERIAL / ITEM DESCRIPTION', im + 45, y + 15);
-    doc.text('QUANTITY ISSUED', pw - im - 14, y + 15, { align: 'right' });
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text('#', im + 6, y + 13);
+    doc.text('ITEM / MATERIAL DESCRIPTION', im + 24, y + 13);
+    doc.text('SPECIFICATION', im + 180, y + 13);
+    doc.text('PER PC REQ.', im + 290, y + 13);
+    doc.text('CUTTING PCS', im + 375, y + 13);
+    doc.text('TOTAL REQ. (MTR)', pw - im - 10, y + 13, { align: 'right' });
     y += thH;
 
-    const trH = 26;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('1', im + 12, y + 17);
+    let itemIdx = 1;
+    let grandTotalMtr = 0;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.text(`Elastic Waistband Roll  (${width || '1 Inch'})`, im + 45, y + 17);
+    // Row: Elastic
+    if (materialMode === 'elastic' || materialMode === 'both') {
+      const rowH = 24;
+      doc.setFillColor(255, 255, 255);
+      doc.rect(im, y, iw, rowH, 'F');
+      doc.setDrawColor(210, 210, 210);
+      doc.setLineWidth(0.6);
+      doc.line(im, y + rowH, pw - im, y + rowH);
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.text(`${rolls} ROLL${rolls > 1 ? 'S' : ''}`, pw - im - 14, y + 17, { align: 'right' });
-    y += trH;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(String(itemIdx++), im + 6, y + 15);
 
-    doc.setDrawColor(200, 200, 200);
-    doc.setLineWidth(0.6);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Elastic Waistband Roll', im + 24, y + 15);
+
+      doc.setFont('helvetica', 'normal');
+      doc.text(width || '1 Inch (Standard)', im + 180, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${elasticPerPcMtr} Mtr (${elasticSizeInput} ${elasticUnit})`, im + 290, y + 15);
+
+      doc.text(`${quantity || 600} Pcs`, im + 375, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(`${totalElasticMtr} Mtr`, pw - im - 10, y + 15, { align: 'right' });
+
+      grandTotalMtr += parseFloat(totalElasticMtr) || 0;
+      y += rowH;
+    }
+
+    // Row: Tape (if enabled)
+    if (materialMode === 'tape' || materialMode === 'both') {
+      const rowH = 24;
+      doc.setFillColor(255, 255, 255);
+      doc.rect(im, y, iw, rowH, 'F');
+      doc.setDrawColor(210, 210, 210);
+      doc.setLineWidth(0.6);
+      doc.line(im, y + rowH, pw - im, y + rowH);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(String(itemIdx++), im + 6, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Drawcord / Elastic Tape', im + 24, y + 15);
+
+      doc.setFont('helvetica', 'normal');
+      doc.text(tapeWidth || '0.5 Inch (Standard)', im + 180, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${tapePerPcMtr} Mtr (${tapeSizeInput} ${tapeUnit})`, im + 290, y + 15);
+
+      doc.text(`${quantity || 600} Pcs`, im + 375, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(`${totalTapeMtr} Mtr`, pw - im - 10, y + 15, { align: 'right' });
+
+      grandTotalMtr += parseFloat(totalTapeMtr) || 0;
+      y += rowH;
+    }
+
+    // Table Outer Border
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
     doc.line(im, y, pw - im, y);
 
+    // ── Total Material Requirement Summary Bar (Shows Only Mtr, Clean B&W) ──
     const totH = 24;
-    doc.setFillColor(248, 248, 248);
+    doc.setFillColor(242, 242, 242);
     doc.rect(im, y, iw, totH, 'F');
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('TOTAL QUANTITY ISSUED:', im + 12, y + 16);
-
-    doc.setFontSize(10);
-    doc.text(`${rolls} ROLL${rolls > 1 ? 'S' : ''}`, pw - im - 14, y + 16, { align: 'right' });
-    y += totH;
-
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(1);
-    doc.line(im, y, pw - im, y);
-    doc.line(im, y + 2.5, pw - im, y + 2.5);
+    doc.rect(im, y, iw, totH, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.text('TOTAL MATERIAL REQUIREMENT ON BILL:', im + 8, y + 15);
+
+    doc.setFontSize(10);
+    doc.text(`${grandTotalMtr.toFixed(2).replace(/\\.00$/, '')} Mtr`, pw - im - 10, y + 15, { align: 'right' });
+    y += totH + 18;
+
+    // ── 3. FORMULA BREAKDOWN & INSTRUCTIONS ──
+    doc.setFillColor(242, 242, 242);
+    doc.rect(im, y, iw, 17, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.rect(im, y, iw, 17, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text('3. FORMULA BREAKDOWN & INSTRUCTIONS', im + 8, y + 12);
     y += 24;
 
-    // Remarks
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('3. INTERNAL REMARKS & FLOOR INSTRUCTIONS', im, y);
-    y += 14;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(im, y, iw, 42, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.rect(im, y, iw, 42, 'S');
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
+    doc.setFontSize(8);
     doc.setTextColor(50, 50, 50);
-    const remText = remarks || `Internal Elastic waistband roll issue for Lot ${lotNo} (${style}).`;
-    const splitRemarks = doc.splitTextToSize(remText, iw);
-    doc.text(splitRemarks, im, y);
-    y += Math.max(26, splitRemarks.length * 13 + 12);
+    const formText = formulaExplanation || `${elasticSizeInput} Inch × 0.0254 = ${elasticPerPcMtr} m × ${quantity || 600} pcs = ${totalElasticMtr} m`;
+    doc.text(`Conversion: ${formText}`, im + 8, y + 15);
 
-    doc.setDrawColor(210, 210, 210);
-    doc.setLineWidth(0.6);
-    doc.line(im, y, pw - im, y);
-    y += 22;
+    const remText = remarks || `Standard internal material issue bill for Lot #${lotNo} (${style || 'Garment'}).`;
+    doc.text(`Remarks: ${remText}`, im + 8, y + 30);
+    y += 54;
 
-    // Dual Signatures
+    // ── 4. VERIFICATION & SIGNATURES ──
+    doc.setFillColor(242, 242, 242);
+    doc.rect(im, y, iw, 17, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.rect(im, y, iw, 17, 'S');
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('4. VERIFICATION & DUAL SIGNATURES', im, y);
-    y += 18;
-
-    const sigW = (iw - 50) / 2;
-    const xSig2 = im + sigW + 50;
-
-    // Left: Issuer
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('ISSUED BY (STORE STAFF)', im, y);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(70, 70, 70);
-    doc.text('Name:', im, y + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(issuerName || 'N/A', im + 44, y + 18);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(70, 70, 70);
-    doc.text('Date:', im, y + 34);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(date, im + 44, y + 34);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text('Signature: __________________________', im, y + 60);
-
-    // Right: Receiver
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('RECEIVED BY (CUTTING MASTER)', xSig2, y);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(70, 70, 70);
-    doc.text('Name:', xSig2, y + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(receiverName || 'N/A', xSig2 + 44, y + 18);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(70, 70, 70);
-    doc.text('Date:', xSig2, y + 34);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(date, xSig2 + 44, y + 34);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text('Signature: __________________________', xSig2, y + 60);
-
-    // Footer
-    doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text('4. VERIFICATION & SIGNATURES', im + 8, y + 12);
+    y += 26;
+
+    const sigColW = (iw - 20) / 3;
+
+    // Box 1: Store Staff (Issuer)
+    const x1 = im;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x1, y, sigColW, 64, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.rect(x1, y, sigColW, 64, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text('ISSUED BY (STORE STAFF)', x1 + 6, y + 13);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+    doc.text('Name: ', x1 + 6, y + 26);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(issuerName || 'STORE STAFF', x1 + 38, y + 26);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Date: ${date}`, x1 + 6, y + 39);
+    doc.text('Sign: ____________________', x1 + 6, y + 54);
+
+    // Box 2: Cutting Master (Receiver)
+    const x2 = x1 + sigColW + 10;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x2, y, sigColW, 64, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.rect(x2, y, sigColW, 64, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text('RECEIVED BY (CUTTING MASTER)', x2 + 6, y + 13);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+    doc.text('Name: ', x2 + 6, y + 26);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(receiverName || 'CUTTING MASTER', x2 + 38, y + 26);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Date: ${date}`, x2 + 6, y + 39);
+    doc.text('Sign: ____________________', x2 + 6, y + 54);
+
+    // Box 3: Supervisor Approval
+    const x3 = x2 + sigColW + 10;
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x3, y, sigColW, 64, 'F');
+    doc.setDrawColor(0, 0, 0);
+    doc.rect(x3, y, sigColW, 64, 'S');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(0, 0, 0);
+    doc.text('SUPERVISOR / AUTHORIZED', x3 + 6, y + 13);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 80);
+    doc.text('Name: ', x3 + 6, y + 26);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(supervisorName || 'SUPERVISOR', x3 + 38, y + 26);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Date: ${date}`, x3 + 6, y + 39);
+    doc.text('Sign: ____________________', x3 + 6, y + 54);
+
+    // Official Footer (Subtle B&W)
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
     doc.setTextColor(110, 110, 110);
-    doc.text('Official Internal Material Issue Voucher  •  Mohit Hosiery Quality Management System', pw / 2, ph - 38, { align: 'center' });
+    doc.text('Official Material Issue Bill / Purchase Order (Original) • Mohit Hosiery Quality & Production Management', pw / 2, ph - 30, { align: 'center' });
 
     return doc;
   };
 
-  // ── Generate Professional Elastic Issue Voucher ─────────────────────────────
+  // ── Generate Professional Original Issue Bill / PO ─────────────────────────────
   const generateElasticIssueBill = async () => {
     if (!lotDetails && !searchLotInput) {
       showToast('Please enter or search a Lot Number first.', 'error');
@@ -653,64 +772,83 @@ export default function ElasticIssueView({
     try {
       const currentSlipNo = issueSlipNo || await fetchNextIssueSlipNo();
       const currentLotNo = lotDetails?.lotNo || searchLotInput.trim();
+      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 600, 10);
+      const calculatedRolls = calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 762) / 25) || rollCount;
 
-      const doc = await createElasticIssuePDFDocument({
+      const payload = {
         slipNo: currentSlipNo,
         lotNo: currentLotNo,
-        rolls: rollCount,
+        rolls: calculatedRolls,
         width: effectiveWidth,
+        tapeWidth: effectiveTapeWidth,
         shade: selectedShade || lotDetails?.shade || 'Standard Shade',
         issuerName,
         receiverName,
+        supervisorName: supervisorName || lotDetails?.supervisor || 'ROHIT / MONU',
         date: issueDate,
-        style: lotDetails?.style || 'Garment Design',
+        style: lotDetails?.style || 'LOWER',
         brand: lotDetails?.brand || 'Mohit Hosiery',
-        garmentType: lotDetails?.garmentType || 'Trouser / Tracksuit',
+        garmentType: lotDetails?.garmentType || 'LOWER',
         fabric: lotDetails?.fabric || 'Cotton Poly Blend',
-        quantity: lotDetails?.quantity || 0,
+        quantity: currentQuantity,
+        cuttingQty: parseInt(lotDetails?.quantity || currentQuantity, 10),
+        issuePcs: currentQuantity,
         size: lotDetails?.size || 'M, L, XL, 2XL',
+        elasticPerPcMtr: calcResult.elasticPerPcMtr,
+        totalElasticMtr: calcResult.totalElasticMtr,
+        tapePerPcMtr: calcResult.tapePerPcMtr,
+        totalTapeMtr: calcResult.totalTapeMtr,
+        elasticSizeInput,
+        elasticUnit,
+        tapeSizeInput,
+        tapeUnit,
+        materialMode,
+        formulaExplanation: calcResult.formulaExplanation,
         remarks
-      });
+      };
 
+      const doc = await createElasticIssuePDFDocument(payload);
       const pdfBlob = doc.output('blob');
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
       const generatedData = {
+        ...payload,
         doc,
         pdfUrl,
-        slipNo: currentSlipNo,
-        lotNo: currentLotNo,
-        rolls: rollCount,
-        width: effectiveWidth,
-        shade: selectedShade || lotDetails?.shade || 'Standard Shade',
-        issuerName,
-        receiverName,
-        date: issueDate,
-        style: lotDetails?.style || 'Garment Design',
-        brand: lotDetails?.brand || 'Mohit Hosiery',
-        garmentType: lotDetails?.garmentType || 'Trouser / Tracksuit',
-        fabric: lotDetails?.fabric || 'Cotton Poly Blend',
-        quantity: lotDetails?.quantity || 0,
-        size: lotDetails?.size || 'M, L, XL, 2XL',
-        remarks
+        isSaved: false
       };
 
       setGeneratedSlipData(generatedData);
-      await saveToHistory(generatedData);
-      fetchNextIssueSlipNo();
-
-      showToast(`Elastic Issue Voucher ${currentSlipNo} generated successfully!`);
+      showToast(`Bill ${currentSlipNo} preview ready. Review and confirm to save.`);
     } catch (err) {
-      console.error('Issue slip generation error:', err);
-      showToast(err.message || 'Failed to generate Issue Bill.', 'error');
+      console.error('Issue bill generation error:', err);
+      showToast(err.message || 'Failed to generate Original Bill.', 'error');
     } finally {
       setGenerating(false);
     }
   };
 
+  const [savingSlip, setSavingSlip] = useState(false);
+
+  const handleConfirmAndSaveBill = async () => {
+    if (!generatedSlipData) return;
+    setSavingSlip(true);
+    try {
+      await saveToHistory(generatedSlipData);
+      await fetchNextIssueSlipNo();
+      setGeneratedSlipData(prev => prev ? { ...prev, isSaved: true } : null);
+      showToast(`Original Material Issue Bill ${generatedSlipData.slipNo} confirmed and saved successfully!`);
+    } catch (err) {
+      console.error('Save error:', err);
+      showToast('Failed to save bill details.', 'error');
+    } finally {
+      setSavingSlip(false);
+    }
+  };
+
   const handleDownloadPDF = () => {
     if (generatedSlipData?.doc) {
-      generatedSlipData.doc.save(`${generatedSlipData.slipNo}_Elastic_Issue_Voucher.pdf`);
+      generatedSlipData.doc.save(`${generatedSlipData.slipNo}_Original_Material_Issue_Bill.pdf`);
     }
   };
 
@@ -730,18 +868,29 @@ export default function ElasticIssueView({
       const doc = await createElasticIssuePDFDocument({
         slipNo: item.slipNo,
         lotNo: item.lotNo,
-        rolls: item.rolls || 1,
         width: item.width || item.elasticWidth || '1 Inch (Standard)',
+        tapeWidth: item.tapeWidth || '0.5 Inch (Standard)',
         shade: item.shade || 'Standard',
         issuerName: item.issuerName || 'Store Staff',
         receiverName: item.receiverName || 'Cutting Master',
+        supervisorName: item.supervisorName || 'ROHIT / MONU',
         date: item.date || new Date().toISOString().split('T')[0],
-        style: item.style || 'Garment Design',
+        style: item.style || 'LOWER',
         brand: item.brand || 'Mohit Hosiery',
-        garmentType: item.garmentType || 'Trouser / Tracksuit',
+        garmentType: item.garmentType || 'LOWER',
         fabric: item.fabric || 'Cotton Poly Blend',
-        quantity: item.quantity || 0,
+        quantity: item.quantity || 600,
         size: item.size || 'M, L, XL, 2XL',
+        elasticPerPcMtr: item.elasticPerPcMtr || calcResult.elasticPerPcMtr,
+        totalElasticMtr: item.totalElasticMtr || calcResult.totalElasticMtr,
+        tapePerPcMtr: item.tapePerPcMtr || calcResult.tapePerPcMtr,
+        totalTapeMtr: item.totalTapeMtr || calcResult.totalTapeMtr,
+        elasticSizeInput,
+        elasticUnit,
+        tapeSizeInput,
+        tapeUnit,
+        materialMode,
+        formulaExplanation: item.formulaExplanation || calcResult.formulaExplanation,
         remarks: item.remarks || ''
       });
 
@@ -749,22 +898,14 @@ export default function ElasticIssueView({
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
       setGeneratedSlipData({
+        ...item,
         doc,
         pdfUrl,
-        slipNo: item.slipNo,
-        lotNo: item.lotNo,
-        rolls: item.rolls || 1,
-        width: item.width || item.elasticWidth || '1 Inch (Standard)',
-        shade: item.shade || 'Standard',
-        issuerName: item.issuerName || 'Store Staff',
-        receiverName: item.receiverName || 'Cutting Master',
-        date: item.date || new Date().toISOString().split('T')[0],
-        style: item.style || 'Garment Design',
-        brand: item.brand || 'Mohit Hosiery'
+        isSaved: true
       });
     } catch (err) {
       console.error('Reprint error:', err);
-      showToast('Failed to open voucher for printing.', 'error');
+      showToast('Failed to open bill for printing.', 'error');
     }
   };
 
@@ -1331,7 +1472,7 @@ export default function ElasticIssueView({
                   </thead>
                   <tbody>
                     {(() => {
-                      const effPcs = parseInt(lotDetails?.quantity || 600, 10);
+                      const effPcs = parseInt(issuePcs || lotDetails?.quantity || 600, 10);
                       const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
                       const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
 
@@ -1409,7 +1550,7 @@ export default function ElasticIssueView({
                   </span>
                   {materialMode !== 'tape' && (
                     <span style={{ fontSize: '11px', color: '#64748b' }}>
-                      Suggested Elastic Rolls: <strong>{calcResult.recommendedRolls || 1} Rolls (25m/roll)</strong>
+                      Total Requirement: <strong>{calcResult.totalElasticMtr} Mtr</strong>
                     </span>
                   )}
                 </div>
@@ -1421,7 +1562,7 @@ export default function ElasticIssueView({
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>DATE</th>
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Lot No.</th>
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs</th>
+                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs (Issued)</th>
                         <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
                         {(materialMode === 'tape' || materialMode === 'both') && (
                           <th style={{ padding: '8px 10px', borderRight: materialMode === 'both' ? '1px solid #e2e8f0' : 'none' }}>Tape Per Pc (In mtr.)</th>
@@ -1441,7 +1582,7 @@ export default function ElasticIssueView({
                           {lotDetails?.garmentType || lotDetails?.style || 'LOWER'}
                         </td>
                         <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
-                          {lotDetails?.quantity || 600}
+                          {issuePcs}
                         </td>
                         <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
                           {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
@@ -1464,7 +1605,7 @@ export default function ElasticIssueView({
 
             </div>
 
-            {/* STEP 2: ELASTIC ISSUE DETAILS (INTEGRATED IN UNIFIED CARD) */}
+            {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
             <div style={{
               marginTop: '28px',
               paddingTop: '22px',
@@ -1486,18 +1627,18 @@ export default function ElasticIssueView({
                 }}>2</span>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                    Issue Details (Quantity of Rolls, Width & Issuer / Receiver)
+                    Issue Details (Date, Issuer, Receiver & Supervisor)
                   </h3>
                   <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                    Specify roll allocation, master issuer & receiver details
+                    Fill date, issuer, receiver and review total requirement before generating original bill / PO
                   </span>
                 </div>
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
 
-              {/* LEFT COLUMN: ISSUER & RECEIVER NAMES */}
+              {/* LEFT COLUMN: ISSUER, RECEIVER, SUPERVISOR & DATE */}
               <div style={{
                 padding: '18px 20px',
                 borderRadius: '12px',
@@ -1507,17 +1648,21 @@ export default function ElasticIssueView({
                 flexDirection: 'column',
                 gap: '14px'
               }}>
+                <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                  <User size={16} color="#059669" />
+                  <span>Issue & Requisition Information:</span>
+                </div>
+
                 {/* ISSUER NAME */}
                 <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <User size={15} color="#059669" />
-                    <span>Issuer Name (Store Staff):</span>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <span>Issuer Name (Store Staff / Prepared By):</span>
                   </label>
                   <input
                     type="text"
                     value={issuerName}
                     onChange={(e) => setIssuerName(e.target.value)}
-                    placeholder="Enter issuer name..."
+                    placeholder="Enter store staff name..."
                     autoComplete="off"
                     style={{
                       width: '100%', padding: '9px 12px', borderRadius: '8px',
@@ -1529,15 +1674,34 @@ export default function ElasticIssueView({
 
                 {/* RECEIVER NAME */}
                 <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <Scissors size={15} color="#059669" />
-                    <span>Receiver Name (Cutting Master):</span>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <Scissors size={14} color="#059669" />
+                    <span>Receiver Name (Cutting Master / Received By):</span>
                   </label>
                   <input
                     type="text"
                     value={receiverName}
                     onChange={(e) => setReceiverName(e.target.value)}
-                    placeholder="Enter receiver name..."
+                    placeholder="Enter cutting master name..."
+                    autoComplete="off"
+                    style={{
+                      width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1.5px solid #cbd5e1', background: '#ffffff',
+                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
+
+                {/* SUPERVISOR NAME */}
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <span>Supervisor / Floor Incharge Name:</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={supervisorName}
+                    onChange={(e) => setSupervisorName(e.target.value)}
+                    placeholder="e.g. ROHIT / MONU..."
                     autoComplete="off"
                     style={{
                       width: '100%', padding: '9px 12px', borderRadius: '8px',
@@ -1548,7 +1712,7 @@ export default function ElasticIssueView({
                 </div>
 
                 {/* Issue Date & Remarks */}
-                <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
                   <div>
                     <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
                       ISSUE DATE
@@ -1558,9 +1722,9 @@ export default function ElasticIssueView({
                       value={issueDate}
                       onChange={(e) => setIssueDate(e.target.value)}
                       style={{
-                        width: '100%', padding: '7px 8px', borderRadius: '8px',
+                        width: '100%', padding: '8px', borderRadius: '8px',
                         border: '1px solid #cbd5e1', background: '#ffffff',
-                        fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        fontSize: '12.5px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
                       }}
                     />
                   </div>
@@ -1572,9 +1736,9 @@ export default function ElasticIssueView({
                       type="text"
                       value={remarks}
                       onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="e.g. Elastic rolls for waistband..."
+                      placeholder="e.g. Elastic for waistband..."
                       style={{
-                        width: '100%', padding: '7px 10px', borderRadius: '8px',
+                        width: '100%', padding: '8px 10px', borderRadius: '8px',
                         border: '1px solid #cbd5e1', background: '#ffffff',
                         fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
                       }}
@@ -1584,101 +1748,159 @@ export default function ElasticIssueView({
 
               </div>
 
-              {/* RIGHT COLUMN: QUANTITY TO ISSUE (ROLLS) */}
+              {/* RIGHT COLUMN: TOTAL REQUIREMENT LIVE SUMMARY */}
               <div style={{
                 padding: '18px 20px',
                 borderRadius: '12px',
-                background: '#f8fafc',
-                border: '1.5px solid #e2e8f0',
+                background: '#ffffff',
+                border: '1.5px solid #059669',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '14px'
+                justifyContent: 'space-between',
+                boxShadow: '0 4px 14px rgba(5, 150, 105, 0.08)'
               }}>
-                <label style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <Layers size={16} color="#059669" />
-                  <span>Quantity to Issue (Rolls):</span>
-                </label>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '14px' }}>
+                    <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Layers size={16} color="#059669" />
+                      <span>Total Requirement on Original Bill:</span>
+                    </div>
+                    <span style={{ fontSize: '11px', fontWeight: '800', color: '#059669', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>
+                      ORIGINAL BILL SPEC
+                    </span>
+                  </div>
 
-                {/* Big Stepper */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setRollCount(prev => Math.max(1, (parseInt(prev, 10) || 1) - 1))}
-                    style={{
-                      width: '44px', height: '44px', borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '18px', fontWeight: '800', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#334155', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}
-                  >
-                    <Minus size={18} />
-                  </button>
+                  {/* Production Quick Details & Editable Issue Pcs */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px', fontSize: '12.5px' }}>
+                    <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>LOT & ITEM</span>
+                      <strong style={{ color: '#0f172a' }}>LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.garmentType || lotDetails?.style || 'LOWER'})</strong>
+                    </div>
+                    <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>CUTTING MATRIX PCS</span>
+                      <strong style={{ color: '#059669', fontSize: '13.5px' }}>{lotDetails?.quantity || 600} Pcs</strong>
+                    </div>
+                  </div>
 
-                  <input
-                    type="number"
-                    min="1"
-                    max="1000"
-                    value={rollCount}
-                    onChange={(e) => setRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    style={{
-                      width: '110px',
-                      height: '44px',
-                      textAlign: 'center',
-                      fontSize: '22px',
-                      fontWeight: '800',
+                  {/* Editable Issue Pcs Box */}
+                  <div style={{
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    marginBottom: '14px'
+                  }}>
+                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Scissors size={14} color="#059669" />
+                        <span>Issue Pcs (Editable):</span>
+                      </span>
+                      <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#047857', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                        Live Auto-Calculation
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        value={issuePcs}
+                        onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        placeholder="e.g. 600"
+                        style={{
+                          flex: 1,
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          border: '1.5px solid #059669',
+                          background: '#ffffff',
+                          fontSize: '15px',
+                          fontWeight: '800',
+                          color: '#0f172a',
+                          outline: 'none'
+                        }}
+                      />
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>Pcs</span>
+                      {lotDetails?.quantity && (
+                        <button
+                          type="button"
+                          onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
+                          style={{
+                            padding: '6px 9px',
+                            borderRadius: '6px',
+                            border: '1px solid #86efac',
+                            background: '#ffffff',
+                            color: '#047857',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Match Cutting ({lotDetails.quantity})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Material Requirement Highlights */}
+                  {(materialMode === 'elastic' || materialMode === 'both') && (
+                    <div style={{
+                      padding: '12px 14px',
                       borderRadius: '10px',
-                      border: '2px solid #059669',
-                      background: '#ffffff',
-                      color: '#059669',
-                      boxShadow: '0 2px 6px rgba(5, 150, 105, 0.15)'
-                    }}
-                  />
+                      background: '#f0fdf4',
+                      border: '1.5px solid #86efac',
+                      marginBottom: materialMode === 'both' ? '10px' : '14px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#047857', fontWeight: '800', textTransform: 'uppercase' }}>
+                            Elastic Total Requirement
+                          </span>
+                          <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '2px' }}>
+                            Per Pc: <strong>{calcResult.elasticPerPcMtr} Mtr</strong> ({elasticSizeInput} {elasticUnit}) × {issuePcs} Pcs
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '22px', fontWeight: '900', color: '#059669', lineHeight: '1.1' }}>
+                            {calcResult.totalElasticMtr} Mtr
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  <button
-                    type="button"
-                    onClick={() => setRollCount(prev => (parseInt(prev, 10) || 1) + 1)}
-                    style={{
-                      width: '44px', height: '44px', borderRadius: '10px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '18px', fontWeight: '800', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: '#334155', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}
-                  >
-                    <Plus size={18} />
-                  </button>
+                  {(materialMode === 'tape' || materialMode === 'both') && (
+                    <div style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: '#eff6ff',
+                      border: '1.5px solid #93c5fd',
+                      marginBottom: '14px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div>
+                          <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase' }}>
+                            Tape Total Requirement
+                          </span>
+                          <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '2px' }}>
+                            Per Pc: <strong>{calcResult.tapePerPcMtr} Mtr</strong> ({tapeSizeInput} {tapeUnit}) × {issuePcs} Pcs
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '20px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
+                            {calcResult.totalTapeMtr} Mtr
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-                  <span style={{ fontSize: '15px', fontWeight: '800', color: '#334155' }}>
-                    Rolls
-                  </span>
+                  {/* Formula Note */}
+                  <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
+                    Conversion Formula: <strong style={{ color: '#0f172a' }}>{calcResult.formulaExplanation}</strong>
+                  </div>
                 </div>
 
-                {/* Quick Presets */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {[1, 2, 3, 4, 5, 6, 10, 20].map(cnt => (
-                    <button
-                      key={cnt}
-                      type="button"
-                      onClick={() => setRollCount(cnt)}
-                      style={{
-                        padding: '5px 12px',
-                        borderRadius: '6px',
-                        border: rollCount === cnt ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                        background: rollCount === cnt ? '#dcfce7' : '#ffffff',
-                        color: rollCount === cnt ? '#059669' : '#334155',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {cnt} Roll{cnt > 1 ? 's' : ''}
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ fontSize: '13px', fontWeight: '700', color: '#059669', background: '#dcfce7', padding: '10px 14px', borderRadius: '8px', border: '1px solid #86efac', marginTop: '6px' }}>
-                  Issue Summary: <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Elastic
+                <div style={{ fontSize: '12px', color: '#059669', fontWeight: '700', marginTop: '10px', textAlign: 'center' }}>
+                  ✓ All details verified & ready to print formal original bill / PO
                 </div>
               </div>
 
@@ -1687,7 +1909,7 @@ export default function ElasticIssueView({
             {/* ACTION: GENERATE BILL BUTTON */}
             <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
               <div style={{ fontSize: '13px', color: '#64748b' }}>
-                Issuing <strong>{rollCount} Roll{rollCount > 1 ? 's' : ''}</strong> of Elastic to <strong>{receiverName || 'Cutting Master'}</strong>
+                Total Requirement: <strong style={{ color: '#059669' }}>{calcResult.totalElasticMtr} Mtr</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong>
               </div>
 
               <button
@@ -1710,7 +1932,7 @@ export default function ElasticIssueView({
                 }}
               >
                 {generating ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
-                <span>{generating ? 'Generating Issue Slip...' : 'Generate Elastic Issue Bill'}</span>
+                <span>{generating ? 'Generating Original Bill...' : 'Generate Original Issue Bill / PO'}</span>
               </button>
             </div>
           </div>
@@ -1774,13 +1996,13 @@ export default function ElasticIssueView({
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '800' }}>
-                    <th style={{ padding: '10px 12px' }}>SLIP NO</th>
+                    <th style={{ padding: '10px 12px' }}>BILL / SLIP NO</th>
                     <th style={{ padding: '10px 12px' }}>DATE</th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
-                    <th style={{ padding: '10px 12px' }}>WIDTH</th>
-                    <th style={{ padding: '10px 12px' }}>PER PC (MTR)</th>
-                    <th style={{ padding: '10px 12px' }}>TOTAL (MTR)</th>
-                    <th style={{ padding: '10px 12px' }}>ROLLS</th>
+                    <th style={{ padding: '10px 12px' }}>ITEM / STYLE</th>
+                    <th style={{ padding: '10px 12px' }}>PCS</th>
+                    <th style={{ padding: '10px 12px' }}>PER PC REQ.</th>
+                    <th style={{ padding: '10px 12px' }}>TOTAL REQUIREMENT</th>
                     <th style={{ padding: '10px 12px' }}>ISSUED BY</th>
                     <th style={{ padding: '10px 12px' }}>RECEIVED BY</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>ACTIONS</th>
@@ -1808,19 +2030,19 @@ export default function ElasticIssueView({
                           LOT #{item.lotNo}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
-                          {item.width || item.elasticWidth || '—'}
+                          {item.style || item.garmentType || 'LOWER'}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontWeight: '800' }}>
+                          {item.quantity || 600} Pcs
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800', color: '#047857' }}>
-                          {item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—'}
+                          {item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '1.27 Mtr'}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#065f46' }}>
-                          {item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : '—'}
-                        </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#059669' }}>
-                          {item.rolls} Roll{item.rolls > 1 ? 's' : ''}
+                        <td style={{ padding: '10px 12px', fontWeight: '900', color: '#065f46', background: '#f0fdf4' }}>
+                          {item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : '762 Mtr'}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
-                          {item.issuerName || 'ADMIN'}
+                          {item.issuerName || 'STORE STAFF'}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '700' }}>
                           {item.receiverName || 'CUTTING MASTER'}
@@ -1829,7 +2051,7 @@ export default function ElasticIssueView({
                           <button
                             type="button"
                             onClick={() => handleReprintFromHistory(item)}
-                            title="Print Black & White Voucher"
+                            title="Print Original Bill (B&W)"
                             style={{
                               padding: '5px 10px',
                               borderRadius: '6px',
@@ -1845,7 +2067,7 @@ export default function ElasticIssueView({
                               gap: '4px'
                             }}
                           >
-                            <Printer size={11} /> Print (B&W)
+                            <Printer size={11} /> Print (Original)
                           </button>
                           <button
                             type="button"
@@ -1877,7 +2099,7 @@ export default function ElasticIssueView({
         </div>
       )}
 
-      {/* GENERATED BILL SUCCESS MODAL */}
+      {/* GENERATED BILL / CONFIRMATION MODAL */}
       {generatedSlipData && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -1889,14 +2111,16 @@ export default function ElasticIssueView({
             background: '#ffffff',
             borderRadius: '18px',
             width: '100%',
-            maxWidth: '520px',
+            maxWidth: '580px',
             boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
             overflow: 'hidden',
             animation: 'scaleIn 0.25s ease-out'
           }}>
             {/* Modal Header */}
             <div style={{
-              background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+              background: generatedSlipData.isSaved
+                ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
+                : 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
               padding: '18px 24px',
               color: '#ffffff',
               display: 'flex',
@@ -1904,15 +2128,24 @@ export default function ElasticIssueView({
               justifyContent: 'space-between'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: generatedSlipData.isSaved ? 'rgba(255,255,255,0.2)' : 'rgba(16, 185, 129, 0.2)',
+                  color: generatedSlipData.isSaved ? '#ffffff' : '#34d399',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
                   <CheckCircle size={22} />
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800' }}>
-                    Elastic Issue Voucher Generated!
+                    {generatedSlipData.isSaved ? 'Original Issue Bill Saved & Ready!' : 'Review & Confirm Bill Details'}
                   </h3>
                   <span style={{ fontSize: '12px', opacity: 0.9 }}>
-                    Voucher No: <strong>{generatedSlipData.slipNo}</strong>
+                    Bill / PO No: <strong>{generatedSlipData.slipNo}</strong> {!generatedSlipData.isSaved && '• (Pending Save Confirmation)'}
                   </span>
                 </div>
               </div>
@@ -1927,6 +2160,44 @@ export default function ElasticIssueView({
 
             {/* Modal Body */}
             <div style={{ padding: '22px 24px' }}>
+              {/* Notice banner depending on saved state */}
+              {!generatedSlipData.isSaved ? (
+                <div style={{
+                  background: '#fefce8',
+                  border: '1.5px solid #fde047',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  fontSize: '12.5px',
+                  color: '#854d0e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: '600'
+                }}>
+                  <AlertTriangle size={18} style={{ color: '#ca8a04', flexShrink: 0 }} />
+                  <span>Please verify all details below. Click <strong>"Confirm & Save Bill"</strong> to record in system.</span>
+                </div>
+              ) : (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1.5px solid #86efac',
+                  borderRadius: '10px',
+                  padding: '10px 14px',
+                  marginBottom: '16px',
+                  fontSize: '12.5px',
+                  color: '#166534',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  fontWeight: '700'
+                }}>
+                  <CheckCircle size={18} style={{ color: '#16a34a', flexShrink: 0 }} />
+                  <span>✓ Successfully saved to database & history! You can now print or download the original bill.</span>
+                </div>
+              )}
+
+              {/* Details Grid */}
               <div style={{
                 background: '#f8fafc',
                 border: '1.5px solid #e2e8f0',
@@ -1940,16 +2211,24 @@ export default function ElasticIssueView({
                     <strong style={{ color: '#0f172a' }}>LOT #{generatedSlipData.lotNo}</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>QUANTITY ISSUED</span>
-                    <strong style={{ color: '#059669', fontSize: '16px' }}>{generatedSlipData.rolls} Rolls</strong>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>TOTAL REQUIREMENT ON BILL</span>
+                    <strong style={{ color: '#059669', fontSize: '16px' }}>{generatedSlipData.totalElasticMtr || 762} Mtr</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ELASTIC WIDTH</span>
-                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.width}</strong>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ITEM / STYLE & PCS</span>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.style || 'LOWER'} • {generatedSlipData.quantity || 600} Pcs</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>PER PC REQUIREMENT</span>
+                    <strong style={{ color: '#047857' }}>{generatedSlipData.elasticPerPcMtr || 1.27} Mtr / Pc</strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE DATE</span>
                     <strong style={{ color: '#0f172a' }}>{generatedSlipData.date}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>SUPERVISOR</span>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.supervisorName || 'ROHIT / MONU'}</strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUED BY (STORE)</span>
@@ -1959,76 +2238,166 @@ export default function ElasticIssueView({
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>RECEIVED BY (CUTTING)</span>
                     <strong style={{ color: '#0f172a' }}>{generatedSlipData.receiverName}</strong>
                   </div>
+                  {generatedSlipData.remarks && (
+                    <div style={{ gridColumn: 'span 2' }}>
+                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>REMARKS / NOTES</span>
+                      <span style={{ color: '#334155', fontStyle: 'italic' }}>{generatedSlipData.remarks}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Action Buttons */}
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={handleDownloadPDF}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: '1.5px solid #059669',
-                    background: '#ffffff',
-                    color: '#059669',
-                    fontSize: '13.5px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px'
-                  }}
-                >
-                  <Download size={16} />
-                  <span>Download Voucher (PDF)</span>
-                </button>
+              {/* Action Buttons: Pending Confirm vs Saved */}
+              {!generatedSlipData.isSaved ? (
+                <div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={handleConfirmAndSaveBill}
+                      disabled={savingSlip}
+                      style={{
+                        flex: 1.3,
+                        padding: '14px 18px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                        color: '#ffffff',
+                        fontSize: '14px',
+                        fontWeight: '800',
+                        cursor: savingSlip ? 'not-allowed' : 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 14px rgba(5, 150, 105, 0.4)',
+                        opacity: savingSlip ? 0.8 : 1
+                      }}
+                    >
+                      {savingSlip ? (
+                        <>
+                          <RefreshCw size={16} className="spin" />
+                          <span>Saving Details...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle size={17} />
+                          <span>Confirm & Save Bill Details</span>
+                        </>
+                      )}
+                    </button>
 
-                <button
-                  type="button"
-                  onClick={handlePrintBill}
-                  style={{
-                    flex: 1,
-                    padding: '12px',
-                    borderRadius: '10px',
-                    border: 'none',
-                    background: '#0f172a',
-                    color: '#ffffff',
-                    fontSize: '13.5px',
-                    fontWeight: '800',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.35)'
-                  }}
-                >
-                  <Printer size={16} />
-                  <span>Print Slip (B&W)</span>
-                </button>
-              </div>
+                    <button
+                      type="button"
+                      onClick={handlePrintBill}
+                      style={{
+                        flex: 1,
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        border: '1.5px solid #0f172a',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <Printer size={16} />
+                      <span>Preview / Print (B&W)</span>
+                    </button>
+                  </div>
 
-              <div style={{ marginTop: '14px', textAlign: 'center' }}>
-                <button
-                  type="button"
-                  onClick={() => setGeneratedSlipData(null)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#64748b',
-                    fontSize: '12.5px',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                    textDecoration: 'underline'
-                  }}
-                >
-                  Done / Issue Next Lot
-                </button>
-              </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedSlipData(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#64748b',
+                        fontSize: '12.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Cancel & Edit Details
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', gap: '10px', marginBottom: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={handlePrintBill}
+                      style={{
+                        flex: 1.2,
+                        padding: '13px',
+                        borderRadius: '10px',
+                        border: 'none',
+                        background: '#0f172a',
+                        color: '#ffffff',
+                        fontSize: '13.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: '0 4px 12px rgba(15, 23, 42, 0.35)'
+                      }}
+                    >
+                      <Printer size={16} />
+                      <span>Print Original Bill (B&W)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleDownloadPDF}
+                      style={{
+                        flex: 1,
+                        padding: '13px',
+                        borderRadius: '10px',
+                        border: '1.5px solid #059669',
+                        background: '#ffffff',
+                        color: '#059669',
+                        fontSize: '13.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <Download size={16} />
+                      <span>Download Bill (PDF)</span>
+                    </button>
+                  </div>
+
+                  <div style={{ textAlign: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedSlipData(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#059669',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Done / Issue Next Lot →
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
