@@ -688,7 +688,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       const tareKg = useTareWeight ? (parseFloat(tareWeight) || 0) : 0;
       const netKg = parseFloat((grossKg - tareKg).toFixed(3));
       const wppG = parseFloat(weightPerPiece) || 0;
-      const barcodeId = `${form.materialCode}-A${String(totalPackets).padStart(2, '0')}`;
+      const barcodeId = form.materialCode;
       const finalLocation = getCombinedLocationSummary();
 
       const newEntry = {
@@ -805,7 +805,7 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
         const sendNext = () => {
           if (nextPkt > totalPkts) { pws.close(); return; }
           const pktLoc = getPacketLocationForIndex(nextPkt);
-          const pktBarcodeId = `${form.materialCode}-A${String(nextPkt).padStart(2, '0')}`;
+          const pktBarcodeId = form.materialCode;
           pws.send(JSON.stringify({
             type: 'print_accessory',
             data: {

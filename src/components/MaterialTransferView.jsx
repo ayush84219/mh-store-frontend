@@ -737,7 +737,7 @@ export default function MaterialTransferView({
 
     const stickers = [];
     for (let pkt = 1; pkt <= totalToPrint; pkt++) {
-      const pktBarcodeId = `${item.materialCode}-A${String(pkt).padStart(2, '0')}`;
+      const pktBarcodeId = item.materialCode;
       const capture = matchingCaptures.find(c => c.barcodeId === pktBarcodeId)
         || matchingCaptures[pkt - 1]
         || matchingCaptures[0];
@@ -811,7 +811,7 @@ export default function MaterialTransferView({
     const result = [...originalStickers];
     const template = originalStickers[0];
     for (let pkt = originalStickers.length + 1; result.length < count; pkt++) {
-      const newBarcodeId = `${template.materialCode}-A${String(pkt).padStart(2, '0')}`;
+      const newBarcodeId = template.materialCode;
       result.push({
         ...template,
         barcodeId: newBarcodeId,

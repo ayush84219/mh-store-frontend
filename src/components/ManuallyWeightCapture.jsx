@@ -345,7 +345,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     setTimeout(() => {
       const totalPackets = parseInt(form.packets, 10) || 1;
       const totalPieces = parseInt(form.pieces, 10) || 0;
-      const barcodeId = `${form.materialCode}-A${String(totalPackets).padStart(2, '0')}`;
+      const barcodeId = form.materialCode;
       const finalLocation = getCombinedLocationSummary();
 
       const newEntry = {
@@ -484,7 +484,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
         }
 
         const pktLoc = getPacketLocationForIndex(currentPkt);
-        const pktBarcodeId = `${printTargetData.materialCode}-A${String(currentPkt).padStart(2, '0')}`;
+        const pktBarcodeId = printTargetData.materialCode;
 
         pws.send(JSON.stringify({
           type: 'print_accessory',
@@ -2271,12 +2271,10 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             }}>
               <div>
                 <span style={{ fontSize: '10px', fontWeight: '800', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Generated Barcode Series
+                  Barcode (Item ID)
                 </span>
                 <div style={{ fontSize: '14px', fontWeight: '900', color: '#4338ca', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
-                  {stickerCountToPrint > 1
-                    ? `${printTargetData.materialCode}-A01 ... ${printTargetData.materialCode}-A${String(stickerCountToPrint).padStart(2, '0')}`
-                    : `${printTargetData.materialCode}-A01`}
+                  {printTargetData.materialCode}
                 </div>
               </div>
               <span style={{

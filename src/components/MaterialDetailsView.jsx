@@ -439,11 +439,12 @@ export default function MaterialDetailsView({
   const handlePrintSinglePacket = (material, packet) => {
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
+    const barcodeText = material.id || packet.barcode || 'MT1000';
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Packet Label - ${packet.barcode}</title>
+        <title>Packet Label - ${barcodeText}</title>
         <style>
           @page { size: 100mm 65mm; margin: 3mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 4px; color: #000; }
@@ -459,7 +460,7 @@ export default function MaterialDetailsView({
           <div class="header">${material.name}</div>
           <div class="sub">Code: <strong>${material.id}</strong> • Rack: <strong>${packet.location}</strong></div>
           <div class="barcode-box">||||| | |||| ||||| ||| | |||</div>
-          <div style="font-family: monospace; font-size: 13px; font-weight: bold;">${packet.barcode}</div>
+          <div style="font-family: monospace; font-size: 13px; font-weight: bold;">${barcodeText}</div>
           <div class="details">
             <span><strong>Pkt:</strong> #${packet.packetNo} / ${packet.totalPackets}</span>
             <span><strong>Qty:</strong> ~${packet.pieces} ${material.unit}</span>
@@ -778,12 +779,11 @@ export default function MaterialDetailsView({
   };
 
   const getMaterialBarcodes = (m) => {
-    // Generate barcodes PACKET WISE matching Weight Capture format: MT1006-A01, MT1006-A02...
+    // Generate barcodes according to Item ID: all packets under this material have the exact same Item ID barcode (e.g. MT1000)
     const packetsCount = Math.max(1, parseInt(materialPackets[m.id] ?? m.packets ?? 1, 10));
     const generated = [];
     for (let i = 1; i <= packetsCount; i++) {
-      const paddedIndex = String(i).padStart(2, '0');
-      generated.push(`${m.id}-A${paddedIndex}`);
+      generated.push(m.id);
     }
     return generated;
   };
@@ -819,7 +819,7 @@ export default function MaterialDetailsView({
         }
 
         const pktLoc = getPacketLocationForMaterial(material, nextPkt);
-        const pktBarcodeId = `${material.id}-A${String(nextPkt).padStart(2, '0')}`;
+        const pktBarcodeId = material.id;
         const pktQty = Math.round((Number(material.stock || 0) / pkts) * 100) / 100;
 
         const payload = {
@@ -1110,7 +1110,7 @@ export default function MaterialDetailsView({
     const numPackets = Math.max(1, parseInt(packetsToPrint, 10) || 1);
     const generatedBarcodes = Array.from(
       { length: numPackets }, 
-      (_, i) => `${materialId}-A${String(i + 1).padStart(2, '0')}`
+      () => materialId
     );
 
     const newMaterial = {
@@ -2399,7 +2399,7 @@ export default function MaterialDetailsView({
                                 }}>
                                   {barcodes.map((code, idx) => (
                                     <div 
-                                      key={code} 
+                                      key={`${m.id}-pkt-${idx + 1}`} 
                                       style={{ 
                                         display: 'flex', 
                                         flexDirection: 'column', 
@@ -2411,14 +2411,17 @@ export default function MaterialDetailsView({
                                         boxShadow: 'var(--shadow-sm)'
                                       }}
                                     >
-                                      <BarcodeVisual code={code} />
+                                      <div style={{ fontSize: '10.5px', fontWeight: '800', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                                        Packet #{idx + 1} of {barcodes.length}
+                                      </div>
+                                      <BarcodeVisual code={m.id} />
                                       <span style={{ fontSize: '10px', fontWeight: '800', color: '#6366f1', marginTop: '4px' }}>
                                         📍 {getPacketLocationForMaterial(m, idx + 1)}
                                       </span>
                                       <button 
                                         className="btn btn-secondary btn-sm" 
                                         style={{ marginTop: '6px', width: '100%', fontSize: '10px', height: '24px', padding: '0 8px' }}
-                                        onClick={() => handlePrintBarcodes([code], m)}
+                                        onClick={() => handlePrintBarcodes([m.id], m)}
                                       >
                                         <Printer size={10} />
                                         <span>Print Label</span>
@@ -2462,12 +2465,12 @@ export default function MaterialDetailsView({
             {printQueue.barcodes.map((code, idx) => {
               const m = printQueue.material || {};
               const rollNum = idx + 1;
-              const barcodeId = `${m.id || 'MT1000'}-A${String(rollNum).padStart(2, '0')}`;
+              const barcodeId = m.id || 'MT1000';
               const pktLoc = getPacketLocationForMaterial(m, rollNum);
 
               return (
                 <div 
-                  key={code} 
+                  key={`${m.id || 'mat'}-print-${idx + 1}`} 
                   style={{ 
                     display: 'flex', 
                     flexDirection: 'column', 
