@@ -493,10 +493,12 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             materialName: printTargetData.materialName,
             materialCode: printTargetData.materialCode,
             category: printTargetData.category || 'ACCESSORY',
-            weight: 'N/A (Manual)',
+            weight: `${printTargetData.pieces} ${printTargetData.unit || 'Pcs'}`,
             pieces: String(printTargetData.pieces),
+            quantity: `${printTargetData.pieces} ${printTargetData.unit || 'Pcs'}`,
             unit: printTargetData.unit || 'Pcs',
             operator: printTargetData.storeIncharge || 'Operator',
+            receivedBy: printTargetData.storeIncharge || 'Operator',
             authorized: printTargetData.storeIncharge || 'Operator',
             poNumber: printTargetData.poNumber || 'N/A',
             billNo: printTargetData.invoiceNo || 'N/A',
@@ -505,7 +507,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             barcodeId: pktBarcodeId,
             location: pktLoc || printTargetData.location || 'Main Store',
             packetNo: currentPkt,
-            date: printTargetData.date || new Date().toLocaleDateString('en-GB')
+            date: printTargetData.date || new Date().toLocaleString('en-GB')
           }
         }));
 

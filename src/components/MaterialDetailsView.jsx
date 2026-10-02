@@ -83,6 +83,31 @@ const getBrandDisplay = (brand) => {
   return map[brand] || brand.toUpperCase();
 };
 
+// ─── Format Date & Time Helper ────────────────────────────────────────────────
+const formatDateTime = (rawDate) => {
+  if (!rawDate) {
+    const d = new Date();
+    const day = String(d.getDate()).padStart(2, '0');
+    const mon = String(d.getMonth() + 1).padStart(2, '0');
+    const year = d.getFullYear();
+    let hours = d.getHours();
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
+    return `${day}-${mon}-${year} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
+  }
+  const d = new Date(rawDate);
+  if (isNaN(d.getTime())) return String(rawDate);
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  let hours = d.getHours();
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12 || 12;
+  return `${day}-${mon}-${year} ${String(hours).padStart(2, '0')}:${mins} ${ampm}`;
+};
+
 // ─── Pagination Bar Component ──────────────────────────────────────────────────
 const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5, 10, 20, 50, 100] }) => {
   const totalPages = Math.max(1, Math.ceil(totalItems / rpp));
@@ -214,9 +239,10 @@ const BarcodeVisual = ({ code }) => {
       backgroundColor: '#ffffff',
       padding: '8px 12px',
       border: '1.5px solid #333333',
-      borderRadius: '4px',
+      borderRadius: '6px',
       width: '100%',
-      maxWidth: '220px',
+      maxWidth: '260px',
+      boxSizing: 'border-box',
       color: '#000000',
       textAlign: 'center',
       margin: '0 auto'
@@ -440,31 +466,44 @@ export default function MaterialDetailsView({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
     const barcodeText = material.id || packet.barcode || 'MT1000';
+    const locationText = packet.location || getPacketLocationForMaterial(material, packet.packetNo || 1) || material.location || 'Main Store';
+    const poNumberText = material.poNumber || material.po || material.poNo || material.billNo || material.invoiceNo || 'N/A';
+    const dateTimeText = formatDateTime(material.createdAt || material.inwardDate || material.date);
+    const receivedByText = material.receivedBy || material.storeIncharge || material.operator || currentUser?.name || currentUser?.username || 'Paras';
+    const totalPackets = Math.max(1, parseInt(material.packets || 1, 10));
+    const pktQty = Math.round((Number(material.stock || 0) / totalPackets) * 100) / 100;
+    const qtyText = `${pktQty} ${material.unit || 'Pcs'}`;
+
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Packet Label - ${barcodeText}</title>
+        <title>Barcode Label - ${barcodeText}</title>
         <style>
-          @page { size: 100mm 65mm; margin: 3mm; }
-          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 4px; color: #000; }
-          .label-card { border: 2px solid #000; padding: 8px; border-radius: 4px; text-align: center; }
-          .header { font-size: 13px; font-weight: bold; margin-bottom: 2px; text-transform: uppercase; }
-          .sub { font-size: 10.5px; color: #444; margin-bottom: 4px; }
-          .barcode-box { margin: 6px 0; font-family: monospace; font-size: 14px; font-weight: bold; letter-spacing: 2px; border: 1px solid #000; padding: 4px; background: #fafafa; }
-          .details { font-size: 10px; margin-top: 6px; display: flex; justify-content: space-between; border-top: 1px dashed #000; padding-top: 4px; }
+          @page { size: 100mm 70mm; margin: 3mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 6px; color: #000; }
+          .label-card { border: 2px solid #000; padding: 10px; border-radius: 4px; }
+          .grid-table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 8px; border: 1.5px solid #000; }
+          .grid-table td { border: 1px solid #333; padding: 4px 6px; }
+          .grid-table td.lbl { background: #f4f4f4; font-weight: bold; width: 38%; }
+          .grid-table td.val { font-weight: bold; }
+          .barcode-box { margin: 6px 0; font-family: monospace; font-size: 14px; font-weight: bold; letter-spacing: 2px; border: 1px solid #000; padding: 6px; background: #fafafa; text-align: center; }
         </style>
       </head>
       <body>
         <div class="label-card">
-          <div class="header">${material.name}</div>
-          <div class="sub">Code: <strong>${material.id}</strong> • Rack: <strong>${packet.location}</strong></div>
-          <div class="barcode-box">||||| | |||| ||||| ||| | |||</div>
-          <div style="font-family: monospace; font-size: 13px; font-weight: bold;">${barcodeText}</div>
-          <div class="details">
-            <span><strong>Pkt:</strong> #${packet.packetNo} / ${packet.totalPackets}</span>
-            <span><strong>Qty:</strong> ~${packet.pieces} ${material.unit}</span>
-            <span><strong>Status:</strong> ${packet.status}</span>
+          <table class="grid-table">
+            <tr><td class="lbl">BARCODE ID</td><td class="val" style="font-family: monospace;">${barcodeText}</td></tr>
+            <tr><td class="lbl">MAT NAME</td><td class="val">${material.name || material.materialName || 'MT'}</td></tr>
+            <tr><td class="lbl">PO NO</td><td class="val">${poNumberText}</td></tr>
+            <tr><td class="lbl">QUANTITY</td><td class="val">${qtyText}</td></tr>
+            <tr><td class="lbl">LOCATION</td><td class="val">📍 ${locationText}</td></tr>
+            <tr><td class="lbl">DATE & TIME</td><td class="val">${dateTimeText}</td></tr>
+            <tr><td class="lbl">RECEIVED BY</td><td class="val">${receivedByText}</td></tr>
+          </table>
+          <div class="barcode-box">
+            <div>||||| | |||| ||||| ||| | ||| |||||</div>
+            <div style="font-family: monospace; font-size: 13px; font-weight: bold; margin-top: 2px;">${barcodeText}</div>
           </div>
         </div>
         <script>window.onload = () => { window.print(); window.close(); };</script>
@@ -764,18 +803,24 @@ export default function MaterialDetailsView({
   const getPacketLocationForMaterial = (m, packetNo) => {
     const mode = materialLocationModes[m.id] || 'same';
     const groups = materialLocationGroups[m.id] || [];
+    const baseLoc = (m.location && m.location !== 'Default') 
+      ? m.location 
+      : ((m.storeLocation && m.storeLocation !== 'Default') 
+        ? m.storeLocation 
+        : ((m.color && m.color !== 'Default') ? m.color : 'Main Store'));
+
     if (mode === 'same' || groups.length === 0) {
-      return m.color || 'Main Store';
+      return baseLoc;
     }
     let offset = 0;
     for (const group of groups) {
       const cnt = parseInt(group.count, 10) || 0;
       if (packetNo > offset && packetNo <= offset + cnt) {
-        return group.location.trim() || m.color || 'Main Store';
+        return group.location?.trim() || baseLoc;
       }
       offset += cnt;
     }
-    return m.color || 'Main Store';
+    return baseLoc;
   };
 
   const getMaterialBarcodes = (m) => {
@@ -791,12 +836,15 @@ export default function MaterialDetailsView({
   const sendDirectMachinePrint = (material, totalPkts = 1, customFields = {}) => {
     const pkts = Math.max(1, totalPkts);
     const d = new Date();
+    let hours = d.getHours();
+    const mins = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12 || 12;
     const printDate =
       String(d.getDate()).padStart(2, '0') + '-' +
       String(d.getMonth() + 1).padStart(2, '0') + '-' +
       d.getFullYear() + ' ' +
-      String(d.getHours()).padStart(2, '0') + ':' +
-      String(d.getMinutes()).padStart(2, '0');
+      String(hours).padStart(2, '0') + ':' + mins + ' ' + ampm;
 
     setPrintStatus({
       type: 'info',
@@ -821,26 +869,32 @@ export default function MaterialDetailsView({
         const pktLoc = getPacketLocationForMaterial(material, nextPkt);
         const pktBarcodeId = material.id;
         const pktQty = Math.round((Number(material.stock || 0) / pkts) * 100) / 100;
+        const qtyFormatted = `${pktQty} ${material.unit || 'Pcs'}`;
+        const poNumberVal = customFields.poNumber || material.poNumber || material.po || material.poNo || material.billNo || material.invoiceNo || 'N/A';
+        const receivedByVal = customFields.receivedBy || material.receivedBy || material.storeIncharge || material.operator || currentUser?.name || currentUser?.username || 'Paras';
 
         const payload = {
           type: 'print_accessory',
           data: {
             cmp: customFields.supplier || material.supplier || 'MH STORE',
-            materialName: material.name,
+            materialName: material.name || material.materialName || 'MT',
             materialCode: material.id,
             category: material.category || 'Accessory',
             shade: material.color || 'Default',
-            weight: `${pktQty} ${material.unit || 'Pcs'}`,
+            weight: qtyFormatted,
             pieces: String(pktQty),
+            quantity: qtyFormatted,
             totalQty: `${material.stock || pktQty} ${material.unit || 'Pcs'}`,
             unit: material.unit || 'Pcs',
             location: pktLoc || material.location || 'Main Store',
             date: printDate,
-            poNumber: customFields.poNumber || material.poNumber || material.po || 'N/A',
+            printDate: printDate,
+            poNumber: poNumberVal,
             billNo: customFields.invoiceNo || material.invoiceNo || material.billNo || 'N/A',
             lotNo: material.id,
-            operator: currentUser?.name || 'Paras',
-            authorized: currentUser?.name || 'Paras',
+            operator: receivedByVal,
+            receivedBy: receivedByVal,
+            authorized: receivedByVal,
             packetNo: nextPkt,
             totalPackets: pkts,
             barcodeId: pktBarcodeId
@@ -2391,11 +2445,11 @@ export default function MaterialDetailsView({
                               ) : (
                                 <div style={{ 
                                   display: 'grid', 
-                                  gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', 
-                                  gap: '12px',
-                                  maxHeight: '280px',
+                                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+                                  gap: '14px',
+                                  maxHeight: '360px',
                                   overflowY: 'auto',
-                                  paddingRight: '6px'
+                                  padding: '4px 6px 4px 2px'
                                 }}>
                                   {barcodes.map((code, idx) => (
                                     <div 
@@ -2403,27 +2457,81 @@ export default function MaterialDetailsView({
                                       style={{ 
                                         display: 'flex', 
                                         flexDirection: 'column', 
-                                        alignItems: 'center',
                                         backgroundColor: 'var(--bg-primary)', 
-                                        padding: '10px', 
-                                        borderRadius: '6px', 
-                                        border: '1px solid var(--border-color)',
-                                        boxShadow: 'var(--shadow-sm)'
+                                        padding: '12px', 
+                                        borderRadius: '8px', 
+                                        border: '1.5px solid var(--border-color)',
+                                        boxShadow: 'var(--shadow-sm)',
+                                        gap: '8px',
+                                        boxSizing: 'border-box',
+                                        minWidth: 0
                                       }}
                                     >
-                                      <div style={{ fontSize: '10.5px', fontWeight: '800', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                                        Packet #{idx + 1} of {barcodes.length}
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)' }}>
+                                          Packet #{idx + 1} of {barcodes.length}
+                                        </span>
+                                        <span style={{ fontSize: '10.5px', fontWeight: '700', padding: '2px 7px', borderRadius: '4px', background: 'rgba(99, 102, 241, 0.1)', color: '#6366f1', whiteSpace: 'nowrap' }}>
+                                          {m.category || 'Accessory'}
+                                        </span>
                                       </div>
+
+                                      <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', wordBreak: 'break-word', lineHeight: '1.3' }}>
+                                        {m.name}
+                                      </div>
+
+                                      <div style={{
+                                        backgroundColor: 'var(--bg-secondary)',
+                                        borderRadius: '6px',
+                                        padding: '8px 10px',
+                                        border: '1px solid var(--border-color)',
+                                        fontSize: '11.5px',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '5px'
+                                      }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Barcode ID:</span>
+                                          <strong style={{ fontFamily: 'monospace', color: 'var(--text-main)', fontSize: '12px' }}>{m.id}</strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>MAT Name:</span>
+                                          <strong style={{ color: 'var(--text-main)', fontSize: '11.5px', textAlign: 'right', wordBreak: 'break-word' }}>{m.name || m.materialName || '-'}</strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>PO No:</span>
+                                          <strong style={{ color: 'var(--text-main)', fontSize: '11.5px' }}>{m.poNumber || m.po || m.poNo || m.billNo || m.invoiceNo || 'N/A'}</strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Quantity:</span>
+                                          <strong style={{ color: 'var(--text-main)', fontSize: '11.5px', fontWeight: '800' }}>
+                                            {Math.round((Number(m.stock || 0) / Math.max(1, barcodes.length)) * 100) / 100} {m.unit || 'Pcs'}
+                                          </strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px', flexShrink: 0 }}>Location:</span>
+                                          <strong style={{ color: '#059669', textAlign: 'right', fontSize: '11.5px', wordBreak: 'break-word' }}>
+                                            📍 {getPacketLocationForMaterial(m, idx + 1)}
+                                          </strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Date & Time:</span>
+                                          <strong style={{ color: 'var(--text-main)', fontSize: '11px' }}>{formatDateTime(m.createdAt || m.inwardDate || m.date)}</strong>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Received By:</span>
+                                          <strong style={{ color: 'var(--text-main)', fontSize: '11.5px' }}>{m.receivedBy || m.storeIncharge || m.operator || currentUser?.name || currentUser?.username || 'Paras'}</strong>
+                                        </div>
+                                      </div>
+
                                       <BarcodeVisual code={m.id} />
-                                      <span style={{ fontSize: '10px', fontWeight: '800', color: '#6366f1', marginTop: '4px' }}>
-                                        📍 {getPacketLocationForMaterial(m, idx + 1)}
-                                      </span>
+
                                       <button 
                                         className="btn btn-secondary btn-sm" 
-                                        style={{ marginTop: '6px', width: '100%', fontSize: '10px', height: '24px', padding: '0 8px' }}
+                                        style={{ marginTop: '2px', width: '100%', fontSize: '11px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
                                         onClick={() => handlePrintBarcodes([m.id], m)}
                                       >
-                                        <Printer size={10} />
+                                        <Printer size={12} />
                                         <span>Print Label</span>
                                       </button>
                                     </div>
@@ -2467,6 +2575,12 @@ export default function MaterialDetailsView({
               const rollNum = idx + 1;
               const barcodeId = m.id || 'MT1000';
               const pktLoc = getPacketLocationForMaterial(m, rollNum);
+              const poNo = m.poNumber || m.po || m.poNo || m.billNo || m.invoiceNo || 'N/A';
+              const receivedBy = m.receivedBy || m.storeIncharge || m.operator || currentUser?.name || currentUser?.username || 'Paras';
+              const entryDate = formatDateTime(m.createdAt || m.inwardDate || m.date);
+              const totalPackets = Math.max(1, printQueue.barcodes.length);
+              const pktQty = Math.round((Number(m.stock || 0) / totalPackets) * 100) / 100;
+              const pktQtyText = `${pktQty} ${m.unit || 'Pcs'}`;
 
               return (
                 <div 
@@ -2483,42 +2597,35 @@ export default function MaterialDetailsView({
                   }}
                 >
                   {/* Grid Table matching user's exact specification */}
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', margin: '0 0 8px 0', border: '1px solid #444' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '10.5px', margin: '0 0 8px 0', border: '1.5px solid #000' }}>
                     <tbody>
                       <tr>
                         <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold', width: '38%' }}>BARCODE ID</td>
-                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{barcodeId}</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold', fontFamily: 'monospace' }}>{barcodeId}</td>
                       </tr>
                       <tr>
-                        <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>MATERIAL</td>
-                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{m.name || 'KT-5060'}</td>
+                        <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>MAT NAME</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{m.name || m.materialName || 'KT-5060'}</td>
                       </tr>
                       <tr>
                         <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>PO NO</td>
-                        <td style={{ border: '1px solid #444', padding: '3px 5px' }}>{m.poNumber || m.po || m.poNo || m.po_number || m.billNo || 'N/A'}</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{poNo}</td>
                       </tr>
-                      {/* Split Row: WEIGHT & DATE */}
                       <tr>
-                        <td colSpan="2" style={{ padding: 0 }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                            <tbody>
-                              <tr>
-                                <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold', width: '22%' }}>WEIGHT</td>
-                                <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold', width: '28%' }}>{m.stock ? `${m.stock} ${m.unit || 'Pcs'}` : '15.75 KG'}</td>
-                                <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold', width: '22%' }}>DATE</td>
-                                <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold', width: '28%' }}>{new Date().toLocaleDateString('en-IN')}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </td>
+                        <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>QUANTITY</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{pktQtyText}</td>
                       </tr>
                       <tr>
                         <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>LOCATION</td>
-                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>{pktLoc}</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px', fontWeight: 'bold' }}>📍 {pktLoc}</td>
+                      </tr>
+                      <tr>
+                        <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>DATE & TIME</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px' }}>{entryDate}</td>
                       </tr>
                       <tr>
                         <td style={{ border: '1px solid #444', background: '#f4f4f4', padding: '3px 5px', fontWeight: 'bold' }}>RECEIVED BY</td>
-                        <td style={{ border: '1px solid #444', padding: '3px 5px' }}>Paras</td>
+                        <td style={{ border: '1px solid #444', padding: '3px 5px' }}>{receivedBy}</td>
                       </tr>
                     </tbody>
                   </table>
@@ -2953,7 +3060,7 @@ export default function MaterialDetailsView({
                   <div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px' }}>
                       {traceModalData.traceInfo.packets?.map((pkt) => (
-                        <div key={pkt.packetNo} style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+                        <div key={pkt.packetNo} style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '12px', textAlign: 'left' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                             <span style={{ fontSize: '11px', fontWeight: '800', backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)', padding: '2px 6px', borderRadius: '4px' }}>
                               Packet #{pkt.packetNo} of {pkt.totalPackets}
@@ -2962,11 +3069,46 @@ export default function MaterialDetailsView({
                               {pkt.status}
                             </span>
                           </div>
-                          <BarcodeVisual code={pkt.barcode} />
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                            <span>Qty: <strong>~{pkt.pieces} {traceModalData.material.unit}</strong></span>
-                            <span>📍 <strong>{pkt.location}</strong></span>
+                          
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', marginBottom: '6px' }}>
+                            {traceModalData.material.name}
                           </div>
+
+                          <div style={{ fontSize: '11.5px', display: 'flex', flexDirection: 'column', gap: '3px', marginBottom: '8px', color: 'var(--text-muted)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Barcode ID:</span>
+                              <strong style={{ fontFamily: 'monospace', color: 'var(--text-main)' }}>{pkt.barcode}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>MAT Name:</span>
+                              <strong style={{ color: 'var(--text-main)', textAlign: 'right', wordBreak: 'break-word' }}>{traceModalData.material.name || traceModalData.material.materialName || '-'}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>PO No:</span>
+                              <strong style={{ color: 'var(--text-main)' }}>{traceModalData.material.poNumber || traceModalData.material.po || traceModalData.material.poNo || traceModalData.material.billNo || traceModalData.material.invoiceNo || 'N/A'}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Quantity:</span>
+                              <strong style={{ color: 'var(--text-main)', fontWeight: '800' }}>
+                                {Math.round((Number(traceModalData.material.stock || 0) / Math.max(1, traceModalData.traceInfo?.packetsCount || 1)) * 100) / 100} {traceModalData.material.unit || 'Pcs'}
+                              </strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Location:</span>
+                              <strong style={{ color: '#059669' }}>📍 {pkt.location || getPacketLocationForMaterial(traceModalData.material, pkt.packetNo || 1)}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Date & Time:</span>
+                              <strong style={{ color: 'var(--text-main)', fontSize: '11px' }}>{formatDateTime(traceModalData.material.createdAt || traceModalData.material.inwardDate || traceModalData.material.date)}</strong>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>Received By:</span>
+                              <strong style={{ color: 'var(--text-main)' }}>{traceModalData.material.receivedBy || traceModalData.material.storeIncharge || traceModalData.material.operator || currentUser?.name || currentUser?.username || 'Paras'}</strong>
+                            </div>
+                          </div>
+
+                          <BarcodeVisual code={pkt.barcode} />
+                          
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handlePrintSinglePacket(traceModalData.material, pkt)}

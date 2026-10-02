@@ -2090,29 +2090,27 @@ export default function MaterialTransferView({
                         <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 'bold', fontFamily: 'monospace', fontSize: '12px' }}>{stk.barcodeId}</td>
                       </tr>
                       <tr>
-                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>MATERIAL</td>
+                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>MATERIAL NAME</td>
                         <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 'bold' }}>{stk.materialName}</td>
                       </tr>
                       <tr>
-                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>PO NO</td>
-                        <td style={{ border: '1px solid #000000', padding: '4px 6px' }}>{stk.poNumber || stk.billNo || 'N/A'}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>WEIGHT / PCS</td>
-                        <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 'bold' }}>{stk.weight || stk.totalQty}</td>
+                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>CATEGORY</td>
+                        <td style={{ border: '1px solid #000000', padding: '4px 6px' }}>{stk.category || 'Accessory'}</td>
                       </tr>
                       <tr>
                         <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>LOCATION</td>
                         <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 'bold', color: '#059669' }}>📍 {stk.location}</td>
                       </tr>
                       <tr>
-                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>DATE</td>
-                        <td style={{ border: '1px solid #000000', padding: '4px 6px' }}>{stk.date}</td>
+                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>TOTAL QUANTITY</td>
+                        <td style={{ border: '1px solid #000000', padding: '4px 6px', fontWeight: 'bold' }}>{stk.totalQty || stk.weight || stk.pieces || 'N/A'}</td>
                       </tr>
-                      <tr>
-                        <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>RECEIVED BY</td>
-                        <td style={{ border: '1px solid #000000', padding: '4px 6px' }}>{stk.operator}</td>
-                      </tr>
+                      {stk.poNumber || stk.billNo ? (
+                        <tr>
+                          <td style={{ border: '1px solid #000000', background: '#f4f4f4', padding: '4px 6px', fontWeight: 'bold' }}>PO NO</td>
+                          <td style={{ border: '1px solid #000000', padding: '4px 6px' }}>{stk.poNumber || stk.billNo}</td>
+                        </tr>
+                      ) : null}
                     </tbody>
                   </table>
 
@@ -2147,12 +2145,10 @@ export default function MaterialTransferView({
                       <div style="width: 2.4in; padding: 6px; border: 1.5px solid #000; box-sizing: border-box; page-break-after: always; font-family: Arial, sans-serif; background: #fff;">
                         <table style="width: 100%; border-collapse: collapse; font-size: 10px; border: 1px solid #000; margin-bottom: 6px;">
                           <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold; width: 38%;">BARCODE ID</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold; font-family: monospace;">${stk.barcodeId}</td></tr>
-                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">MATERIAL</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold;">${stk.materialName}</td></tr>
-                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">PO NO</td><td style="border: 1px solid #000; padding: 2px 4px;">${stk.poNumber || stk.billNo || 'N/A'}</td></tr>
-                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">WEIGHT</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold;">${stk.weight}</td></tr>
+                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">MATERIAL NAME</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold;">${stk.materialName}</td></tr>
+                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">CATEGORY</td><td style="border: 1px solid #000; padding: 2px 4px;">${stk.category || 'Accessory'}</td></tr>
                           <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">LOCATION</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold;">${stk.location}</td></tr>
-                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">DATE</td><td style="border: 1px solid #000; padding: 2px 4px;">${stk.date}</td></tr>
-                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">OPERATOR</td><td style="border: 1px solid #000; padding: 2px 4px;">${stk.operator}</td></tr>
+                          <tr><td style="border: 1px solid #000; background: #f0f0f0; padding: 2px 4px; font-weight: bold;">TOTAL QUANTITY</td><td style="border: 1px solid #000; padding: 2px 4px; font-weight: bold;">${stk.totalQty || stk.weight || stk.pieces || 'N/A'}</td></tr>
                         </table>
                         <div style="text-align: center; font-family: monospace; font-size: 11px; font-weight: bold; letter-spacing: 1px; border: 1px dashed #444; padding: 4px;">
                           |||||| |||| ||||| ||||| |||| ||||<br/>

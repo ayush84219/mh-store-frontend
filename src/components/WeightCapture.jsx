@@ -789,12 +789,15 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
         pieces: String(pieces),
         unit: form.unit,
         operator: form.storeIncharge || 'Paras',
+        receivedBy: form.storeIncharge || 'Paras',
         authorized: form.storeIncharge || 'Paras',
+        quantity: `${pieces} ${form.unit || 'Pcs'}`,
         poNumber: form.poNumber || 'N/A',
         billNo: form.invoiceNo || form.poNumber || 'N/A',
         lotNo: form.lotNo || form.materialCode || '4569',
         totalPackets: totalPkts,
-        date: printDate.split(' ')[0],
+        date: printDate,
+        printDate: printDate,
       };
 
       // Open one persistent WebSocket, send stickers one-by-one with packet-specific location
