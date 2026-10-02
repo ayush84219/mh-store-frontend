@@ -853,7 +853,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const [trackerRgpNo, setTrackerRgpNo] = useState("");
   const [trackerLoading, setTrackerLoading] = useState(false);
   const [trackerLogs, setTrackerLogs] = useState([]);
+  const [trackerRgpList, setTrackerRgpList] = useState([]);
+  const [trackerStatusFilter, setTrackerStatusFilter] = useState("all");
   const [trackerError, setTrackerError] = useState("");
+  const [expandedTrackerRgp, setExpandedTrackerRgp] = useState(null);
 
   // States for search and matrix workflow
   const [searchLotNo, setSearchLotNo] = useState("");
@@ -888,18 +891,21 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     setTrackerLogs([]);
     try {
       const backendUrl = getBackendUrl();
-      const [scansRes, zipRes, doriRes, posRes] = await Promise.all([
+      const [rgpRes, scansRes, zipRes, doriRes, posRes] = await Promise.all([
+        fetch(`${backendUrl}/api/rgp`),
         fetch(`${backendUrl}/api/scans`),
         fetch(`${backendUrl}/api/cutting-headers`),
         fetch(`${backendUrl}/api/doori-orders`),
         fetch(`${backendUrl}/api/pos`)
       ]);
       
+      const rgpData = rgpRes.ok ? await rgpRes.json() : [];
       const scansData = scansRes.ok ? await scansRes.json() : [];
       const zipsData = zipRes.ok ? await zipRes.json() : [];
       const dorisData = doriRes.ok ? await doriRes.json() : [];
       const posData = posRes.ok ? await posRes.json() : [];
       
+      setTrackerRgpList(Array.isArray(rgpData) ? rgpData : []);
       setZipHeaders(zipsData);
       setDoriOrders(dorisData);
       setTrimPOs(posData);
@@ -911,8 +917,8 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       filtered.sort((a, b) => new Date(b.scanned_at) - new Date(a.scanned_at));
       
       setTrackerLogs(filtered);
-      if (filtered.length === 0) {
-        setTrackerError("No scan records found in the database.");
+      if (filtered.length === 0 && (!rgpData || rgpData.length === 0)) {
+        setTrackerError("No RGP or scan records found in the database.");
       }
     } catch (err) {
       console.error("Tracker fetch all error:", err);
@@ -933,31 +939,40 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     setTrackerLogs([]);
     try {
       const backendUrl = getBackendUrl();
-      const [scansRes, zipRes, doriRes, posRes] = await Promise.all([
+      const [rgpRes, scansRes, zipRes, doriRes, posRes] = await Promise.all([
+        fetch(`${backendUrl}/api/rgp`),
         fetch(`${backendUrl}/api/scans`),
         fetch(`${backendUrl}/api/cutting-headers`),
         fetch(`${backendUrl}/api/doori-orders`),
         fetch(`${backendUrl}/api/pos`)
       ]);
       
+      const rgpData = rgpRes.ok ? await rgpRes.json() : [];
       const scansData = scansRes.ok ? await scansRes.json() : [];
       const zipsData = zipRes.ok ? await zipRes.json() : [];
       const dorisData = doriRes.ok ? await doriRes.json() : [];
       const posData = posRes.ok ? await posRes.json() : [];
       
+      const qLower = trimmed.toLowerCase();
+      const filteredRgps = (Array.isArray(rgpData) ? rgpData : []).filter(r => 
+        String(r.rgpNo || '').toLowerCase().includes(qLower) ||
+        String(r.vendor || '').toLowerCase().includes(qLower) ||
+        String(r.department || '').toLowerCase().includes(qLower)
+      );
+      setTrackerRgpList(filteredRgps);
       setZipHeaders(zipsData);
       setDoriOrders(dorisData);
       setTrimPOs(posData);
       
-      const filtered = scansData.filter(
-        (s) => (s.lot_number || "").trim().toLowerCase() === trimmed.toLowerCase()
+      const filteredScans = scansData.filter(
+        (s) => (s.lot_number || "").trim().toLowerCase().includes(qLower)
       );
       
-      filtered.sort((a, b) => new Date(a.scanned_at) - new Date(b.scanned_at));
+      filteredScans.sort((a, b) => new Date(a.scanned_at) - new Date(b.scanned_at));
+      setTrackerLogs(filteredScans);
       
-      setTrackerLogs(filtered);
-      if (filtered.length === 0) {
-        setTrackerError(`No scan records found for RGP: "${trimmed}". Please scan the printed QR code using mobile to record entries.`);
+      if (filteredScans.length === 0 && filteredRgps.length === 0) {
+        setTrackerError(`No records found matching: "${trimmed}".`);
       }
     } catch (err) {
       console.error("Tracker fetch error:", err);
@@ -969,14 +984,9 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
   useEffect(() => {
     if (showTrackerModal) {
-      if (form.rgpNo && form.rgpNo !== "(auto)") {
-        setTrackerRgpNo(form.rgpNo);
-        fetchRgpTracking(form.rgpNo);
-      } else {
-        setTrackerRgpNo("");
-        setTrackerLogs([]);
-        setTrackerError("");
-      }
+      setTrackerRgpNo("");
+      setTrackerError("");
+      fetchAllRgpHistory();
     }
   }, [showTrackerModal]);
 
@@ -2282,304 +2292,738 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   };
 
   const renderTrackerModal = () => {
-    // Group scans by RGP number
+    // 1. Compile real RGP records & associated live scanner checkpoints
     const rgpGroups = {};
-    trackerLogs.forEach((log) => {
-      const rgpNo = log.lot_number || "Unknown";
-      if (!rgpGroups[rgpNo]) {
-        rgpGroups[rgpNo] = {
-          rgpNo: rgpNo,
-          gateEntry: null,
-          materialIn: null,
-          rgpEntry: null,
-          rgpReturn: null,
-          materialName: log.material_name || "—",
-          quantity: log.quantity || "—",
-          supplierName: log.supplier_name || "—",
-          firstScanDate: log.scanned_at,
-          allScans: []
-        };
+
+    // First, seed with all actual RGPs from the database
+    trackerRgpList.forEach((rgp) => {
+      const rgpNo = String(rgp.rgpNo || '').trim();
+      if (!rgpNo) return;
+
+      let parsedEntries = [];
+      try {
+        if (Array.isArray(rgp.entries)) parsedEntries = rgp.entries;
+        else if (typeof rgp.entries === 'string') parsedEntries = JSON.parse(rgp.entries);
+      } catch (_) {
+        parsedEntries = [];
       }
 
-      rgpGroups[rgpNo].allScans.push(log);
+      const totalQty = parsedEntries.reduce((sum, e) => sum + (parseFloat(e.qty1) || 0), 0);
+      const matNames = parsedEntries.map(e => e.itemDesc).filter(Boolean);
+      const associatedLots = parsedEntries.map(e => e.lotNo).filter(Boolean);
+
+      rgpGroups[rgpNo] = {
+        rgpNo: rgpNo,
+        gateEntry: null,
+        materialIn: null,
+        rgpEntry: null,
+        rgpReturn: null,
+        materialName: matNames.length > 0 ? matNames.slice(0, 2).join(', ') + (matNames.length > 2 ? ` (+${matNames.length - 2})` : '') : (rgp.purpose || rgp.department || "Fabric/Trims"),
+        quantity: totalQty > 0 ? totalQty : (rgp.quantity || "—"),
+        supplierName: rgp.vendor || "—",
+        department: rgp.department || "Store",
+        purpose: rgp.purpose || "Processing",
+        firstScanDate: rgp.date || rgp.created_at || new Date().toISOString(),
+        expectedReturnDate: rgp.expectedReturnDate,
+        vehicleNo: rgp.vehicleNo,
+        preparedBy: rgp.preparedBy,
+        authorizedBy: rgp.authorizedBy,
+        remarks: rgp.remarks,
+        isRealRgp: true,
+        status: rgp.status || "Dispatched",
+        associatedLots: associatedLots,
+        rawRgp: rgp,
+        rawEntries: parsedEntries,
+        allScans: []
+      };
+    });
+
+    // Next, map all scan logs to corresponding RGPs or create standalone scan rows
+    trackerLogs.forEach((log) => {
+      const scanLot = String(log.lot_number || "Unknown").trim();
+      
+      // Check if log matches an existing RGP
+      let targetGroup = rgpGroups[scanLot];
+      if (!targetGroup && log.rgp_payload) {
+        try {
+          const payload = JSON.parse(log.rgp_payload);
+          if (payload && payload.rgpNo && rgpGroups[payload.rgpNo]) {
+            targetGroup = rgpGroups[payload.rgpNo];
+          }
+        } catch (_) {}
+      }
+
+      // If still not found, check if scan lot matches any associated lot number
+      if (!targetGroup) {
+        const foundKey = Object.keys(rgpGroups).find(k => 
+          rgpGroups[k].associatedLots && rgpGroups[k].associatedLots.some(lot => String(lot).toLowerCase() === scanLot.toLowerCase())
+        );
+        if (foundKey) targetGroup = rgpGroups[foundKey];
+      }
+
+      // If standalone scan without an RGP pass
+      if (!targetGroup) {
+        if (!rgpGroups[scanLot]) {
+          rgpGroups[scanLot] = {
+            rgpNo: scanLot,
+            gateEntry: null,
+            materialIn: null,
+            rgpEntry: null,
+            rgpReturn: null,
+            materialName: log.material_name || "—",
+            quantity: log.quantity || "—",
+            supplierName: log.supplier_name || "—",
+            department: "Gate / Store",
+            purpose: "Check-in",
+            firstScanDate: log.scanned_at,
+            expectedReturnDate: null,
+            vehicleNo: "",
+            preparedBy: "",
+            authorizedBy: "",
+            remarks: "",
+            isRealRgp: false,
+            status: "Logged",
+            associatedLots: [],
+            rawRgp: null,
+            rawEntries: [],
+            allScans: []
+          };
+        }
+        targetGroup = rgpGroups[scanLot];
+      }
+
+      targetGroup.allScans.push(log);
 
       if (log.scan_type === 'gate_entry') {
-        rgpGroups[rgpNo].gateEntry = log;
+        targetGroup.gateEntry = log;
+        if (!targetGroup.supplierName || targetGroup.supplierName === '—') targetGroup.supplierName = log.supplier_name;
       } else if (log.scan_type === 'material_in') {
-        rgpGroups[rgpNo].materialIn = log;
+        targetGroup.materialIn = log;
+        if (!targetGroup.materialName || targetGroup.materialName === '—') targetGroup.materialName = log.material_name;
+        if (!targetGroup.quantity || targetGroup.quantity === '—') targetGroup.quantity = log.quantity;
       } else if (log.scan_type === 'rgp_entry') {
-        rgpGroups[rgpNo].rgpEntry = log;
-        rgpGroups[rgpNo].materialName = log.material_name;
-        rgpGroups[rgpNo].quantity = log.quantity;
-        rgpGroups[rgpNo].supplierName = log.supplier_name;
+        targetGroup.rgpEntry = log;
+        if (log.material_name) targetGroup.materialName = log.material_name;
+        if (log.quantity) targetGroup.quantity = log.quantity;
+        if (log.supplier_name) targetGroup.supplierName = log.supplier_name;
       } else if (log.scan_type === 'rgp_return') {
-        rgpGroups[rgpNo].rgpReturn = log;
-        rgpGroups[rgpNo].materialName = log.material_name;
-        rgpGroups[rgpNo].quantity = log.quantity;
-        rgpGroups[rgpNo].supplierName = log.supplier_name;
+        targetGroup.rgpReturn = log;
+        if (log.material_name) targetGroup.materialName = log.material_name;
+        if (log.quantity) targetGroup.quantity = log.quantity;
+        if (log.supplier_name) targetGroup.supplierName = log.supplier_name;
       }
     });
 
-    const rgpRows = Object.values(rgpGroups);
+    let rgpRows = Object.values(rgpGroups);
+
+    // Compute status and aging for each row
+    rgpRows = rgpRows.map(row => {
+      const isReturned = Boolean(row.rgpReturn || row.status?.toLowerCase() === 'returned');
+      const isOverdue = !isReturned && row.expectedReturnDate && (new Date(row.expectedReturnDate) < new Date());
+      let computedStatus = 'in_transit';
+      if (isReturned) computedStatus = 'returned';
+      else if (isOverdue) computedStatus = 'overdue';
+
+      const agingDays = Math.max(0, Math.floor((new Date() - new Date(row.firstScanDate || Date.now())) / (1000 * 60 * 60 * 24)));
+
+      return {
+        ...row,
+        isReturned,
+        isOverdue,
+        computedStatus,
+        agingDays
+      };
+    });
+
+    // Summary KPI metrics
+    const totalCount = rgpRows.length;
+    const returnedCount = rgpRows.filter(r => r.computedStatus === 'returned').length;
+    const overdueCount = rgpRows.filter(r => r.computedStatus === 'overdue').length;
+    const inTransitCount = rgpRows.filter(r => r.computedStatus === 'in_transit').length;
+
+    // Filter by search text if entered
+    if (trackerRgpNo && trackerRgpNo.trim()) {
+      const q = trackerRgpNo.trim().toLowerCase();
+      rgpRows = rgpRows.filter(r => 
+        String(r.rgpNo || '').toLowerCase().includes(q) ||
+        String(r.supplierName || '').toLowerCase().includes(q) ||
+        String(r.materialName || '').toLowerCase().includes(q) ||
+        String(r.department || '').toLowerCase().includes(q) ||
+        String(r.purpose || '').toLowerCase().includes(q) ||
+        (r.associatedLots && r.associatedLots.some(lot => String(lot).toLowerCase().includes(q)))
+      );
+    }
+
+    // Filter by status pill if selected
+    if (trackerStatusFilter !== 'all') {
+      rgpRows = rgpRows.filter(r => r.computedStatus === trackerStatusFilter);
+    }
+
     rgpRows.sort((a, b) => new Date(b.firstScanDate) - new Date(a.firstScanDate));
 
     return (
       <div style={modalStyles.overlay}>
-        <div style={{ ...modalStyles.modal, maxWidth: '1200px', backgroundColor: '#0f172a', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}>
-          <div style={{ ...modalStyles.header, backgroundColor: 'rgba(15,23,42,0.8)', borderBottom: '1px solid rgba(255,255,255,0.1)', padding: '20px 28px' }}>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: '800', color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Emoji size={24} mr={0}>🔍</Emoji> RGP Live Tracking & Status
-            </h2>
+        <div style={{
+          ...modalStyles.modal,
+          maxWidth: '1300px',
+          backgroundColor: '#ffffff',
+          color: '#0f172a',
+          border: '1.5px solid #e2e8f0',
+          borderRadius: '20px',
+          boxShadow: '0 25px 60px -15px rgba(0, 41, 107, 0.18)',
+          overflow: 'hidden'
+        }}>
+          {/* Light Header */}
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderBottom: '1.5px solid #f1f5f9',
+            padding: '20px 28px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <div>
+              <h2 style={{ fontSize: '1.35rem', fontWeight: '800', color: '#0f2b3d', margin: 0, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <Emoji size={24} mr={0}>🔍</Emoji> RGP Live Tracking &amp; Status Register
+              </h2>
+              <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: '#64748b' }}>
+                Real-time security gate scans, outward issues, and inward return checkpoints.
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => setShowTrackerModal(false)}
               style={{
-                background: 'none', border: 'none', color: '#94a3b8', fontSize: '1.8rem', cursor: 'pointer', fontWeight: 'bold', lineHeight: 1
+                background: '#f1f5f9',
+                border: '1px solid #e2e8f0',
+                borderRadius: '10px',
+                color: '#64748b',
+                width: '36px',
+                height: '36px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '1.4rem',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                lineHeight: 1,
+                transition: 'all 0.15s'
               }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e2e8f0'; e.currentTarget.style.color = '#0f172a'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; e.currentTarget.style.color = '#64748b'; }}
             >
               ×
             </button>
           </div>
 
-          <div style={{ padding: '24px', overflowY: 'auto', maxHeight: 'calc(90vh - 120px)' }}>
-            {/* Search bar */}
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '24px' }}>
-              <input
-                type="text"
-                placeholder="Enter RGP number (e.g. RGP-75649)"
-                value={trackerRgpNo}
-                onChange={(e) => setTrackerRgpNo(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') fetchRgpTracking(trackerRgpNo); }}
-                style={{
-                  flex: 1,
-                  padding: '12px 16px',
-                  borderRadius: '8px',
-                  border: '1.5px solid rgba(255,255,255,0.1)',
-                  backgroundColor: 'rgba(15, 23, 42, 0.6)',
-                  color: '#f8fafc',
-                  fontSize: '14px'
-                }}
-              />
+          <div style={{ padding: '24px 28px', overflowY: 'auto', maxHeight: 'calc(88vh - 110px)', backgroundColor: '#ffffff' }}>
+            
+            {/* Top Metric Cards */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '12px',
+              marginBottom: '20px'
+            }}>
+              {[
+                { label: 'Total Tracked Passes', count: totalCount, color: '#1a4a6f', bg: '#f1f5f9', filterId: 'all' },
+                { label: 'In Transit', count: inTransitCount, color: '#d97706', bg: '#fef3c7', filterId: 'in_transit' },
+                { label: 'Fully Returned', count: returnedCount, color: '#059669', bg: '#d1fae5', filterId: 'returned' },
+                { label: 'Overdue Alert', count: overdueCount, color: '#dc2626', bg: '#fee2e2', filterId: 'overdue' }
+              ].map((stat, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => setTrackerStatusFilter(stat.filterId)}
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: '12px',
+                    backgroundColor: stat.bg,
+                    border: '1.5px solid',
+                    borderColor: trackerStatusFilter === stat.filterId ? stat.color : 'transparent',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s'
+                  }}
+                >
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: stat.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {stat.label}
+                  </div>
+                  <div style={{ fontSize: '22px', fontWeight: '800', color: stat.color, marginTop: '2px' }}>
+                    {stat.count}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Search & Action Bar */}
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', flex: 1, minWidth: '260px', display: 'flex', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  placeholder="Search by RGP number (e.g. RGP-000002), Vendor, Material, Lot #..."
+                  value={trackerRgpNo}
+                  onChange={(e) => {
+                    setTrackerRgpNo(e.target.value);
+                    if (trackerError) setTrackerError("");
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') fetchRgpTracking(trackerRgpNo); }}
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '11px 36px 11px 16px',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    backgroundColor: '#f8fafc',
+                    color: '#0f172a',
+                    fontSize: '13.5px',
+                    outline: 'none'
+                  }}
+                />
+                {trackerRgpNo && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTrackerRgpNo("");
+                      setTrackerError("");
+                      fetchAllRgpHistory();
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      background: 'none',
+                      border: 'none',
+                      color: '#94a3b8',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 'bold',
+                      padding: '4px'
+                    }}
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => fetchRgpTracking(trackerRgpNo)}
                 disabled={trackerLoading}
                 style={{
-                  backgroundColor: '#3b82f6',
+                  backgroundColor: '#1a4a6f',
                   color: '#ffffff',
                   border: 'none',
-                  borderRadius: '8px',
-                  padding: '0 20px',
-                  fontWeight: 'bold',
+                  borderRadius: '10px',
+                  padding: '0 22px',
+                  fontWeight: '700',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  fontSize: '14px'
+                  fontSize: '13.5px',
+                  boxShadow: '0 2px 6px rgba(26, 74, 111, 0.2)'
                 }}
               >
-                {trackerLoading ? "Loading..." : "Track"}
+                {trackerLoading ? "Loading..." : "Track / Search"}
               </button>
               <button
                 type="button"
-                onClick={fetchAllRgpHistory}
+                onClick={() => {
+                  setTrackerRgpNo("");
+                  setTrackerError("");
+                  fetchAllRgpHistory();
+                }}
                 disabled={trackerLoading}
                 style={{
-                  backgroundColor: '#475569',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '0 20px',
-                  fontWeight: 'bold',
+                  backgroundColor: '#f1f5f9',
+                  color: '#334155',
+                  border: '1.5px solid #cbd5e1',
+                  borderRadius: '10px',
+                  padding: '0 18px',
+                  fontWeight: '700',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  fontSize: '14px',
+                  gap: '6px',
+                  fontSize: '13.5px',
                   whiteSpace: 'nowrap'
                 }}
               >
-                📋 See All History
+                📋 Refresh All
               </button>
             </div>
 
             {/* Loading or Error */}
             {trackerLoading && (
-              <div style={{ textAlign: 'center', padding: '32px 0', color: '#94a3b8' }}>
-                <Emoji size={28}>⏳</Emoji> Searching scan records...
+              <div style={{ textAlign: 'center', padding: '36px 0', color: '#64748b' }}>
+                <Emoji size={28}>⏳</Emoji> Fetching live RGP and scanner checkpoints...
               </div>
             )}
 
             {trackerError && !trackerLoading && (
               <div style={{
-                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
                 border: '1px solid rgba(239, 68, 68, 0.2)',
-                borderRadius: '8px',
+                borderRadius: '10px',
                 padding: '12px 16px',
-                color: '#fca5a5',
+                color: '#dc2626',
                 fontSize: '13px',
                 lineHeight: 1.5,
-                marginBottom: '20px'
+                marginBottom: '16px'
               }}>
                 ⚠️ {trackerError}
               </div>
             )}
 
-            {/* Grouped Logs Table */}
+            {/* Clean White Live Tracking Table */}
             {!trackerLoading && rgpRows.length > 0 && (
-              <div style={{ overflowX: 'auto', marginTop: '16px' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', color: '#f8fafc', minWidth: '950px' }}>
+              <div style={{
+                overflowX: 'auto',
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '14px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
+                backgroundColor: '#ffffff'
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', color: '#0f172a', minWidth: '1100px' }}>
                   <thead>
-                    <tr style={{ backgroundColor: 'rgba(255, 255, 255, 0.05)', borderBottom: '2px solid rgba(255, 255, 255, 0.1)' }}>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>SR. NO.</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left' }}>RGP NO.</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left' }}>MATERIAL DETAIL</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>QTY</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'left' }}>SUPPLIER</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>GATE ENTRY</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>MATERIAL RECEIVED</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>RGP ISSUE</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>RGP RETURN</th>
-                      <th style={{ padding: '12px 8px', textAlign: 'center' }}>AGING</th>
+                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ padding: '12px 8px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase', width: '40px' }}>#</th>
+                      <th style={{ padding: '12px 12px', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>RGP NO. &amp; LOT</th>
+                      <th style={{ padding: '12px 12px', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>MATERIAL DETAIL</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>QTY</th>
+                      <th style={{ padding: '12px 12px', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>VENDOR / SUPPLIER</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>GATE ENTRY</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>MATERIAL RECEIVED</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>RGP ISSUE (OUT)</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>RGP RETURN (IN)</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>STATUS / AGING</th>
+                      <th style={{ padding: '12px 10px', textAlign: 'center', color: '#475569', fontSize: '11.5px', fontWeight: '700', textTransform: 'uppercase' }}>ACTION</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rgpRows.map((row, idx) => {
-                      const agingDays = Math.max(0, Math.floor((new Date() - new Date(row.firstScanDate)) / (1000 * 60 * 60 * 24)));
-                      const isRgp = String(row.rgpNo).toUpperCase().includes('RGP');
-                      
-                      let associatedLots = [];
-                      if (isRgp && row.rgpEntry && row.rgpEntry.rgp_payload) {
-                        try {
-                          const payload = JSON.parse(row.rgpEntry.rgp_payload);
-                          if (payload && Array.isArray(payload.entries)) {
-                            associatedLots = payload.entries.map(e => String(e.lotNo).toLowerCase().trim());
-                          }
-                        } catch(e){}
-                      }
+                      const isRgp = String(row.rgpNo).toUpperCase().includes('RGP') || row.isRealRgp;
+                      const isExpanded = expandedTrackerRgp === row.rgpNo;
 
                       const cleanRgpNo = String(row.rgpNo).toLowerCase().trim();
-                      const hasZipPo = zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || associatedLots.some(lot => zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === lot));
-                      const hasDoriPo = doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || associatedLots.some(lot => doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === lot));
+                      const hasZipPo = zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || (row.associatedLots && row.associatedLots.some(lot => zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === String(lot).toLowerCase())));
+                      const hasDoriPo = doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || (row.associatedLots && row.associatedLots.some(lot => doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === String(lot).toLowerCase())));
                       const hasTrimPo = trimPOs.some(po => 
                         (po.designName && String(po.designName).toLowerCase().trim() === cleanRgpNo) ||
                         (po.poNumber && String(po.poNumber).toLowerCase().trim() === cleanRgpNo)
-                      ) || associatedLots.some(lot => trimPOs.some(po => 
-                        (po.designName && String(po.designName).toLowerCase().trim() === lot) ||
-                        (po.poNumber && String(po.poNumber).toLowerCase().trim() === lot)
-                      ));
+                      ) || (row.associatedLots && row.associatedLots.some(lot => trimPOs.some(po => 
+                        (po.designName && String(po.designName).toLowerCase().trim() === String(lot).toLowerCase()) ||
+                        (po.poNumber && String(po.poNumber).toLowerCase().trim() === String(lot).toLowerCase())
+                      )));
 
                       return (
-                        <tr key={row.rgpNo} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)' }}>
-                          <td style={{ padding: '16px 8px', textAlign: 'center', fontWeight: '600', color: '#94a3b8' }}>{idx + 1}</td>
-                          <td style={{ padding: '16px 8px' }}>
-                            <div style={{ fontWeight: '700', color: '#38bdf8', fontSize: '13px' }}>{row.rgpNo}</div>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '6px' }}>
-                              {isRgp && (
-                                <span style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '700' }}>
-                                  Returnable Gate Pass
-                                </span>
-                              )}
-                              {hasZipPo && (
-                                <span style={{ backgroundColor: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', border: '1px solid rgba(236, 72, 153, 0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '700' }}>
-                                  Zip Purcharge Orders
-                                </span>
-                              )}
-                              {hasDoriPo && (
-                                <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '700' }}>
-                                  Dori Purcharge Orders
-                                </span>
-                              )}
-                              {hasTrimPo && (
-                                <span style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '2px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '700' }}>
-                                  TRIM PO
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ padding: '16px 8px', fontWeight: '600' }}>{row.materialName}</td>
-                          <td style={{ padding: '16px 8px', textAlign: 'center', fontWeight: '700' }}>{row.quantity}</td>
-                          <td style={{ padding: '16px 8px' }}>{row.supplierName || '—'}</td>
+                        <React.Fragment key={row.rgpNo}>
+                          <tr
+                            style={{
+                              borderBottom: isExpanded ? 'none' : '1px solid #f1f5f9',
+                              backgroundColor: isExpanded ? '#f8fafc' : '#ffffff',
+                              transition: 'background-color 0.15s'
+                            }}
+                            onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.backgroundColor = '#f8fafc'; }}
+                            onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.backgroundColor = '#ffffff'; }}
+                          >
+                            <td style={{ padding: '14px 8px', textAlign: 'center', fontWeight: '600', color: '#64748b' }}>
+                              {idx + 1}
+                            </td>
 
-                          {/* Gate Entry Status */}
-                          <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                            {row.gateEntry ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', display: 'inline-block' }}>
-                                  ✓ Done
-                                </span>
-                                <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#e2e8f0', marginTop: '4px' }}>{row.gateEntry.person_name}</span>
-                                <span style={{ fontSize: '9px', color: '#94a3b8' }}>{new Date(row.gateEntry.scanned_at).toLocaleDateString()}</span>
+                            {/* RGP NO & Linked Lots */}
+                            <td style={{ padding: '14px 12px' }}>
+                              <div style={{ fontWeight: '800', color: '#7c3aed', fontSize: '13.5px', fontFamily: 'monospace' }}>
+                                {row.rgpNo}
                               </div>
-                            ) : (
-                              <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700' }}>
-                                ● Pending
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Material Received Status */}
-                          <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                            {row.materialIn ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                <span style={{ backgroundColor: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', display: 'inline-block' }}>
-                                  ✓ Received
-                                </span>
-                                <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#e2e8f0', marginTop: '4px' }}>{row.materialIn.person_name}</span>
-                                <span style={{ fontSize: '9px', color: '#94a3b8' }}>{new Date(row.materialIn.scanned_at).toLocaleDateString()}</span>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+                                {isRgp && (
+                                  <span style={{ backgroundColor: 'rgba(124, 58, 237, 0.08)', color: '#7c3aed', border: '1px solid rgba(124, 58, 237, 0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700' }}>
+                                    Gate Pass
+                                  </span>
+                                )}
+                                {row.associatedLots && row.associatedLots.length > 0 && (
+                                  <span style={{ backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '600' }}>
+                                    Lot: {row.associatedLots.join(', ')}
+                                  </span>
+                                )}
+                                {hasZipPo && (
+                                  <span style={{ backgroundColor: 'rgba(236, 72, 153, 0.1)', color: '#db2777', border: '1px solid rgba(236, 72, 153, 0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700' }}>
+                                    Zip PO
+                                  </span>
+                                )}
+                                {hasDoriPo && (
+                                  <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.1)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700' }}>
+                                    Dori PO
+                                  </span>
+                                )}
+                                {hasTrimPo && (
+                                  <span style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#2563eb', border: '1px solid rgba(59, 130, 246, 0.25)', padding: '1px 6px', borderRadius: '4px', fontSize: '9.5px', fontWeight: '700' }}>
+                                    Trim PO
+                                  </span>
+                                )}
                               </div>
-                            ) : (
-                              <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700' }}>
-                                ● Pending
-                              </span>
-                            )}
-                          </td>
+                            </td>
 
-                          {/* RGP Issue Status */}
-                          <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                            {row.rgpEntry ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                <span style={{ backgroundColor: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', display: 'inline-block' }}>
-                                  ✓ Done
+                            {/* Material Detail */}
+                            <td style={{ padding: '14px 12px', fontWeight: '600', color: '#0f172a' }}>
+                              <div>{row.materialName}</div>
+                              {row.purpose && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Purpose: {row.purpose}</div>}
+                            </td>
+
+                            {/* Quantity */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center', fontWeight: '800', color: '#0f172a' }}>
+                              {row.quantity}
+                            </td>
+
+                            {/* Supplier / Vendor */}
+                            <td style={{ padding: '14px 12px', color: '#334155', fontWeight: '600' }}>
+                              <div>{row.supplierName || '—'}</div>
+                              {row.department && <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>Dept: {row.department}</div>}
+                            </td>
+
+                            {/* Gate Entry Checkpoint */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              {row.gateEntry ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                  <span style={{ backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                    ✓ Done
+                                  </span>
+                                  <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#0f172a', marginTop: '2px' }}>{row.gateEntry.person_name}</span>
+                                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>{new Date(row.gateEntry.scanned_at).toLocaleDateString('en-GB')}</span>
+                                </div>
+                              ) : (
+                                <span style={{ backgroundColor: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                  ● Pending
                                 </span>
-                                <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#e2e8f0', marginTop: '4px' }}>{row.rgpEntry.person_name}</span>
-                                <span style={{ fontSize: '9px', color: '#94a3b8' }}>{new Date(row.rgpEntry.scanned_at).toLocaleDateString()}</span>
-                              </div>
-                            ) : (
-                              <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700' }}>
-                                ● Pending
-                              </span>
-                            )}
-                          </td>
+                              )}
+                            </td>
 
-                          {/* RGP Return Status */}
-                          <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                            {row.rgpReturn ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                <span style={{ backgroundColor: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', border: '1px solid rgba(236, 72, 153, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700', display: 'inline-block' }}>
+                            {/* Material Received Checkpoint */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              {row.materialIn ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                  <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                    ✓ Received
+                                  </span>
+                                  <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#0f172a', marginTop: '2px' }}>{row.materialIn.person_name}</span>
+                                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>{new Date(row.materialIn.scanned_at).toLocaleDateString('en-GB')}</span>
+                                </div>
+                              ) : (
+                                <span style={{ backgroundColor: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                  ● Pending
+                                </span>
+                              )}
+                            </td>
+
+                            {/* RGP Issue (Gate Out) Checkpoint */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              {row.rgpEntry ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                  <span style={{ backgroundColor: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                    ✓ Done
+                                  </span>
+                                  <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#0f172a', marginTop: '2px' }}>{row.rgpEntry.person_name}</span>
+                                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>{new Date(row.rgpEntry.scanned_at).toLocaleDateString('en-GB')}</span>
+                                </div>
+                              ) : (
+                                <span style={{ backgroundColor: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                  ● Pending
+                                </span>
+                              )}
+                            </td>
+
+                            {/* RGP Return (Gate In) Checkpoint */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              {row.rgpReturn ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                  <span style={{ backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                    ✓ Returned
+                                  </span>
+                                  <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#0f172a', marginTop: '2px' }}>{row.rgpReturn.person_name}</span>
+                                  <span style={{ fontSize: '9.5px', color: '#64748b' }}>{new Date(row.rgpReturn.scanned_at).toLocaleDateString('en-GB')}</span>
+                                </div>
+                              ) : (
+                                <span style={{ backgroundColor: '#fffbeb', color: '#d97706', border: '1px solid #fde68a', padding: '3px 8px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '700' }}>
+                                  ● Pending
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Status & Aging */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              {row.isReturned ? (
+                                <span style={{ backgroundColor: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', display: 'inline-block' }}>
                                   ✓ Returned
                                 </span>
-                                <span style={{ fontWeight: '600', fontSize: '10.5px', color: '#e2e8f0', marginTop: '4px' }}>{row.rgpReturn.person_name}</span>
-                                <span style={{ fontSize: '9px', color: '#94a3b8' }}>{new Date(row.rgpReturn.scanned_at).toLocaleDateString()}</span>
-                              </div>
-                            ) : (
-                              <span style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '3px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: '700' }}>
-                                ● Pending
-                              </span>
-                            )}
-                          </td>
+                              ) : row.isOverdue ? (
+                                <span style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '800', display: 'inline-block' }}>
+                                  ⚠️ Overdue ({row.agingDays}d)
+                                </span>
+                              ) : (
+                                <span style={{ backgroundColor: '#fef3c7', color: '#d97706', border: '1px solid #fde68a', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', display: 'inline-block' }}>
+                                  ⏳ {row.agingDays} days
+                                </span>
+                              )}
+                            </td>
 
-                          {/* Aging Days */}
-                          <td style={{ padding: '16px 8px', textAlign: 'center' }}>
-                            <span style={{ backgroundColor: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 'bold', display: 'inline-block' }}>
-                              {agingDays} days
-                            </span>
-                          </td>
-                        </tr>
+                            {/* Actions */}
+                            <td style={{ padding: '14px 10px', textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedTrackerRgp(isExpanded ? null : row.rgpNo)}
+                                  style={{
+                                    backgroundColor: isExpanded ? '#1a4a6f' : '#f1f5f9',
+                                    color: isExpanded ? '#ffffff' : '#334155',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '6px',
+                                    padding: '4px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  {isExpanded ? "▲ Hide" : "▼ Details"}
+                                </button>
+                                {row.rawRgp && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      try {
+                                        const doc = generateRgpPDF({ payload: row.rawRgp, options: { qrEntryImage: null, qrReturnImage: null, qrGateImage: null } });
+                                        doc.save(`${row.rgpNo}.pdf`);
+                                      } catch (err) {
+                                        console.error('PDF error:', err);
+                                      }
+                                    }}
+                                    title="Download PDF Document"
+                                    style={{
+                                      backgroundColor: '#ffffff',
+                                      color: '#1a4a6f',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '6px',
+                                      padding: '4px 8px',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    📄 PDF
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Detail View */}
+                          {isExpanded && (
+                            <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                              <td colSpan={11} style={{ padding: '16px 20px' }}>
+                                <div style={{
+                                  backgroundColor: '#ffffff',
+                                  borderRadius: '12px',
+                                  border: '1.5px solid #e2e8f0',
+                                  padding: '16px 20px',
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
+                                }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                                    <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800', color: '#0f2b3d' }}>
+                                      📦 Full RGP Pass Breakdown ({row.rgpNo})
+                                    </h4>
+                                    <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: '#64748b' }}>
+                                      {row.preparedBy && <span><strong>Prepared By:</strong> {row.preparedBy}</span>}
+                                      {row.authorizedBy && <span><strong>Authorized:</strong> {row.authorizedBy}</span>}
+                                      {row.expectedReturnDate && <span><strong>Exp. Return:</strong> {new Date(row.expectedReturnDate).toLocaleDateString('en-GB')}</span>}
+                                      {row.vehicleNo && <span><strong>Vehicle:</strong> {row.vehicleNo}</span>}
+                                    </div>
+                                  </div>
+
+                                  {/* Item Matrix Rows */}
+                                  {row.rawEntries && row.rawEntries.length > 0 ? (
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', backgroundColor: '#f8fafc', borderRadius: '8px', overflow: 'hidden', marginBottom: '14px' }}>
+                                      <thead>
+                                        <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1px solid #e2e8f0', color: '#475569' }}>
+                                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700' }}>LOT NO.</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700' }}>ITEM / MATERIAL DESCRIPTION</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '700' }}>ISSUE QTY</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '700' }}>UOM</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700' }}>DEPARTMENT</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700' }}>PURPOSE</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {row.rawEntries.map((ent, eIdx) => (
+                                          <tr key={eIdx} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                                            <td style={{ padding: '8px 10px', fontWeight: '700', color: '#7c3aed', fontFamily: 'monospace' }}>{ent.lotNo || '—'}</td>
+                                            <td style={{ padding: '8px 10px', fontWeight: '600', color: '#0f172a' }}>{ent.itemDesc || '—'}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#059669' }}>{ent.qty1 || 0}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center', color: '#64748b' }}>{ent.uom || 'PCS'}</td>
+                                            <td style={{ padding: '8px 10px', color: '#334155' }}>{ent.department || 'Store'}</td>
+                                            <td style={{ padding: '8px 10px', color: '#334155' }}>{ent.purpose || 'Processing'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  ) : (
+                                    <div style={{ padding: '10px 0', fontSize: '12px', color: '#64748b' }}>
+                                      No itemized sub-entries logged for this pass.
+                                    </div>
+                                  )}
+
+                                  {/* Live Scanner Checkpoint Timeline */}
+                                  <div style={{ marginTop: '10px' }}>
+                                    <div style={{ fontSize: '11.5px', fontWeight: '700', color: '#475569', textTransform: 'uppercase', marginBottom: '8px' }}>
+                                      🛡️ Security &amp; Gate Checkpoint Audit Trail ({row.allScans.length} events logged)
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+                                      {[
+                                        { label: 'Gate Inward Entry', data: row.gateEntry, color: '#059669', bg: '#ecfdf5' },
+                                        { label: 'Material Inward Store', data: row.materialIn, color: '#2563eb', bg: '#eff6ff' },
+                                        { label: 'RGP Outward Issue', data: row.rgpEntry, color: '#7c3aed', bg: '#f5f3ff' },
+                                        { label: 'RGP Inward Return', data: row.rgpReturn, color: '#059669', bg: '#ecfdf5' }
+                                      ].map((cp, cpIdx) => (
+                                        <div key={cpIdx} style={{
+                                          padding: '10px 12px',
+                                          borderRadius: '8px',
+                                          backgroundColor: cp.data ? cp.bg : '#f8fafc',
+                                          border: `1px solid ${cp.data ? cp.color + '40' : '#e2e8f0'}`
+                                        }}>
+                                          <div style={{ fontSize: '11px', fontWeight: '700', color: cp.data ? cp.color : '#64748b' }}>
+                                            {cp.data ? '✓ ' : '● '}{cp.label}
+                                          </div>
+                                          {cp.data ? (
+                                            <div style={{ marginTop: '4px', fontSize: '11.5px', color: '#0f172a' }}>
+                                              <div><strong>By:</strong> {cp.data.person_name}</div>
+                                              <div style={{ fontSize: '10.5px', color: '#64748b' }}>{new Date(cp.data.scanned_at).toLocaleString('en-GB')}</div>
+                                            </div>
+                                          ) : (
+                                            <div style={{ marginTop: '4px', fontSize: '11px', color: '#94a3b8' }}>
+                                              Awaiting checkpoint scan
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {!trackerLoading && rgpRows.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '48px 20px', color: '#64748b' }}>
+                <Emoji size={36}>🔍</Emoji>
+                <h4 style={{ margin: '12px 0 4px 0', fontSize: '15px', color: '#0f2b3d' }}>No tracking records match</h4>
+                <p style={{ margin: 0, fontSize: '13px' }}>Try searching by another RGP number or click "Refresh All".</p>
               </div>
             )}
           </div>
@@ -2610,7 +3054,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
             </h1>
             <p style={styles.headerSubtitle}>
               <Emoji size={14} mr={6}>🏭</Emoji>
-              Material Issue & Return Tracking System
+              Material Issue &amp; Return Tracking System
             </p>
           </div>
           <div style={styles.rgpBadge}>
@@ -2634,7 +3078,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
             }}
           >
             <Emoji size={16} mr={8}>⚡</Emoji>
-            Automatic RGP (Lot & Cutting Matrix)
+            Automatic RGP (Lot &amp; Cutting Matrix)
           </button>
           <button
             type="button"
@@ -2653,10 +3097,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
         <button
           type="button"
-          onClick={() => setShowTrackerModal(true)}
+          onClick={() => { setShowTrackerModal(true); fetchAllRgpHistory(); }}
           style={{
             ...styles.modeTab,
-            backgroundColor: '#0f2b3d',
+            backgroundColor: '#1a4a6f',
             color: '#ffffff',
             fontWeight: '700',
             border: 'none',
@@ -2666,7 +3110,8 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
             alignItems: 'center',
             gap: '8px',
             cursor: 'pointer',
-            marginRight: '6px'
+            marginRight: '6px',
+            boxShadow: '0 2px 8px rgba(26, 74, 111, 0.25)'
           }}
         >
           <Emoji size={16} mr={0}>🔍</Emoji>

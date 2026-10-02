@@ -3,9 +3,12 @@ import { getBackendUrl } from '../utils/api';
 import { 
   TrendingUp, FileText, Calendar, DollarSign, Download, Printer, ClipboardList, 
   Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
-  Scissors, AlertCircle, ExternalLink, RefreshCw, BarChart3, Activity, 
-  PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package
+  Scissors, AlertCircle, AlertTriangle, ExternalLink, RefreshCw, BarChart3, Activity, 
+  PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package,
+  QrCode, ShieldCheck, CheckCircle, Check, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
 import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
@@ -224,6 +227,19 @@ export default function ReportsHistoryView({
   const [undesignedFabricFilter, setUndesignedFabricFilter] = useState('all');
   const [undesignedSort, setUndesignedSort] = useState('latest');
 
+  // RGP Pass Register states
+  const [rgpList, setRgpList] = useState([]);
+  const [rgpLoading, setRgpLoading] = useState(false);
+  const [rgpSearch, setRgpSearch] = useState('');
+  const [rgpStatusFilter, setRgpStatusFilter] = useState('all');
+  const [rgpTypeFilter, setRgpTypeFilter] = useState('all');
+  const [rgpScanFilter, setRgpScanFilter] = useState('all');
+  const [rgpDateFilter, setRgpDateFilter] = useState('all');
+  const [rgpSort, setRgpSort] = useState('latest');
+  const [selectedRgpForModal, setSelectedRgpForModal] = useState(null);
+  const [expandedRgpIds, setExpandedRgpIds] = useState(new Set());
+  const [rgpViewMode, setRgpViewMode] = useState('table');
+
   // Auto-select first design lot if available
   useEffect(() => {
     if (!selectedLotId && designs.length > 0) {
@@ -288,6 +304,12 @@ export default function ReportsHistoryView({
         }
       })
       .catch(err => console.error('Error fetching weight captures:', err));
+
+    // Fetch RGPs
+    fetch(`${backendUrl}/api/rgp`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setRgpList(Array.isArray(data) ? data : []))
+      .catch(err => console.error('Error fetching RGPs:', err));
 
     // Fetch undesigned lots
     if (activeReportTab === 'undesigned_lots') {
@@ -761,6 +783,410 @@ export default function ReportsHistoryView({
     ptSort
   );
 
+  // Refresh RGP data
+  const fetchRgpData = async () => {
+    setRgpLoading(true);
+    const backendUrl = getBackendUrl();
+    try {
+      const [rRes, sRes] = await Promise.all([
+        fetch(`${backendUrl}/api/rgp`),
+        fetch(`${backendUrl}/api/scans`)
+      ]);
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        setRgpList(Array.isArray(rData) ? rData : []);
+      }
+      if (sRes.ok) {
+        const sData = await sRes.json();
+        setScans(Array.isArray(sData) ? sData : []);
+      }
+    } catch (e) {
+      console.error('Error refreshing RGP data:', e);
+    } finally {
+      setRgpLoading(false);
+    }
+  };
+
+  // Toggle RGP row expansion
+  const toggleRgpExpand = (id) => {
+    setExpandedRgpIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Processed RGP list with full calculations
+  const processedRgpList = useMemo(() => {
+    return (rgpList || []).map(rgp => {
+      const rgpNoClean = String(rgp.rgpNo || '').trim();
+      const rgpNoLower = rgpNoClean.toLowerCase();
+      
+      const entries = Array.isArray(rgp.entries) ? rgp.entries : [];
+      const totalQty1 = entries.reduce((sum, e) => sum + (Number(e.qty1) || 0), 0) || Number(rgp.qty) || 0;
+      const totalQty2 = entries.reduce((sum, e) => sum + (Number(e.qty2) || 0), 0);
+      const uniqueLots = Array.from(new Set(entries.map(e => e.lotNo).filter(Boolean)));
+      
+      // Match scans from scans table
+      const matchingScans = (scans || []).filter(s => {
+        const sLot = String(s.lot_number || '').trim().toLowerCase();
+        if (sLot === rgpNoLower) return true;
+        if (s.rgp_payload) {
+          try {
+            const p = typeof s.rgp_payload === 'string' ? JSON.parse(s.rgp_payload) : s.rgp_payload;
+            if (p && String(p.rgpNo || '').toLowerCase() === rgpNoLower) return true;
+          } catch (_) {}
+        }
+        return false;
+      });
+
+      // Find Gate Out / Issue scan
+      const gateOutScan = matchingScans.find(s => s.scan_type === 'rgp_entry' || s.scan_type === 'gate_entry');
+      // Find Gate In / Return scan
+      const gateInScan = matchingScans.find(s => s.scan_type === 'rgp_return');
+
+      // Check dates and status
+      const issueDateObj = parseToDateObject(rgp.date);
+      const expDateObj = parseToDateObject(rgp.expectedReturnDate);
+      const isReturned = !!gateInScan || rgp.status === 'Returned';
+      
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const isExpPast = expDateObj.getTime() > 0 && expDateObj < now;
+      const isOverdue = !isReturned && isExpPast;
+      
+      let daysOverdue = 0;
+      if (isOverdue && expDateObj.getTime() > 0) {
+        daysOverdue = Math.ceil((now - expDateObj) / (1000 * 60 * 60 * 24));
+      }
+
+      let status = 'In Transit';
+      if (isReturned) status = 'Returned';
+      else if (isOverdue) status = 'Overdue';
+
+      return {
+        ...rgp,
+        entries,
+        totalQty1,
+        totalQty2,
+        uniqueLots,
+        matchingScans,
+        gateOutScan,
+        gateInScan,
+        isReturned,
+        isOverdue,
+        daysOverdue,
+        status,
+        issueDateObj,
+        expDateObj
+      };
+    });
+  }, [rgpList, scans]);
+
+  // Filtered RGP list
+  const filteredRgpList = useMemo(() => {
+    let list = processedRgpList.filter(item => {
+      // 1. Text Search
+      const q = rgpSearch.toLowerCase().trim();
+      if (q) {
+        const matchNo = String(item.rgpNo || '').toLowerCase().includes(q);
+        const matchVendor = String(item.vendor || '').toLowerCase().includes(q);
+        const matchDept = String(item.department || '').toLowerCase().includes(q);
+        const matchPurpose = String(item.purpose || '').toLowerCase().includes(q);
+        const matchVehicle = String(item.vehicleNo || '').toLowerCase().includes(q);
+        const matchPrepared = String(item.preparedBy || '').toLowerCase().includes(q);
+        const matchAuth = String(item.authorizedBy || '').toLowerCase().includes(q);
+        const matchType = String(item.rgpType || '').toLowerCase().includes(q);
+        const matchItem = item.entries.some(e => 
+          String(e.itemDesc || '').toLowerCase().includes(q) || 
+          String(e.lotNo || '').toLowerCase().includes(q) ||
+          String(e.purpose || '').toLowerCase().includes(q)
+        );
+        if (!matchNo && !matchVendor && !matchDept && !matchPurpose && !matchVehicle && !matchPrepared && !matchAuth && !matchType && !matchItem) {
+          return false;
+        }
+      }
+
+      // 2. Status Filter
+      if (rgpStatusFilter === 'open' && (item.isReturned || item.isOverdue)) return false;
+      if (rgpStatusFilter === 'returned' && !item.isReturned) return false;
+      if (rgpStatusFilter === 'overdue' && !item.isOverdue) return false;
+
+      // 3. Type Filter
+      if (rgpTypeFilter !== 'all' && String(item.rgpType || '').toLowerCase() !== rgpTypeFilter.toLowerCase()) {
+        return false;
+      }
+
+      // 4. Scanner Filter
+      if (rgpScanFilter === 'scanned_out' && !item.gateOutScan) return false;
+      if (rgpScanFilter === 'scanned_in' && !item.gateInScan) return false;
+      if (rgpScanFilter === 'not_scanned' && (item.gateOutScan || item.gateInScan)) return false;
+
+      // 5. Date Filter
+      if (!applyDateFilter(item.date, rgpDateFilter)) return false;
+
+      return true;
+    });
+
+    // Sort
+    list.sort((a, b) => {
+      if (rgpSort === 'latest') {
+        return b.issueDateObj.getTime() - a.issueDateObj.getTime();
+      } else if (rgpSort === 'oldest') {
+        return a.issueDateObj.getTime() - b.issueDateObj.getTime();
+      } else if (rgpSort === 'exp_return') {
+        return a.expDateObj.getTime() - b.expDateObj.getTime();
+      } else if (rgpSort === 'rgp_no') {
+        return String(b.rgpNo || '').localeCompare(String(a.rgpNo || ''));
+      }
+      return 0;
+    });
+
+    return list;
+  }, [processedRgpList, rgpSearch, rgpStatusFilter, rgpTypeFilter, rgpScanFilter, rgpDateFilter, rgpSort]);
+
+  // Summary Metrics KPI for RGPs
+  const rgpStats = useMemo(() => {
+    const total = processedRgpList.length;
+    const returned = processedRgpList.filter(r => r.isReturned).length;
+    const overdue = processedRgpList.filter(r => r.isOverdue).length;
+    const inTransit = processedRgpList.filter(r => !r.isReturned && !r.isOverdue).length;
+    const totalDispatchedQty = processedRgpList.reduce((sum, r) => sum + r.totalQty1, 0);
+    const scannedAtGate = processedRgpList.filter(r => r.gateOutScan || r.gateInScan).length;
+    const scanRate = total > 0 ? Math.round((scannedAtGate / total) * 100) : 0;
+    
+    // Type counts
+    const typeCounts = {};
+    processedRgpList.forEach(r => {
+      const t = r.rgpType || 'Other';
+      typeCounts[t] = (typeCounts[t] || 0) + 1;
+    });
+
+    return { total, returned, overdue, inTransit, totalDispatchedQty, scannedAtGate, scanRate, typeCounts };
+  }, [processedRgpList]);
+
+  // CSV Export for RGPs
+  const handleExportRgpCSV = () => {
+    if (!filteredRgpList.length) {
+      alert('No RGP records to export.');
+      return;
+    }
+    const headers = [
+      'RGP Number',
+      'Issue Date',
+      'Expected Return Date',
+      'Status',
+      'Vendor/Party',
+      'RGP Type',
+      'Department',
+      'Purpose',
+      'Vehicle No',
+      'Total Items',
+      'Total Qty (Pcs)',
+      'Total Bags/Rolls',
+      'Prepared By',
+      'Authorized By',
+      'Gate Out Scan Date',
+      'Gate Out Guard',
+      'Gate In Return Scan Date',
+      'Gate In Guard',
+      'Item Descriptions & Lots'
+    ];
+
+    const rows = filteredRgpList.map(r => {
+      const itemSummaries = r.entries.map(e => `[Lot #${e.lotNo || 'N/A'}: ${e.itemDesc || ''} (${e.qty1 || 0} ${e.uom || ''})]`).join('; ');
+      return [
+        `"${r.rgpNo || ''}"`,
+        `"${r.date || ''}"`,
+        `"${r.expectedReturnDate || ''}"`,
+        `"${r.status || ''}"`,
+        `"${r.vendor || ''}"`,
+        `"${r.rgpType || ''}"`,
+        `"${r.department || ''}"`,
+        `"${r.purpose || ''}"`,
+        `"${r.vehicleNo || ''}"`,
+        r.entries.length,
+        r.totalQty1,
+        r.totalQty2,
+        `"${r.preparedBy || ''}"`,
+        `"${r.authorizedBy || ''}"`,
+        `"${r.gateOutScan ? formatDateTime(r.gateOutScan.scanned_at) : 'Not Scanned'}"`,
+        `"${r.gateOutScan ? (r.gateOutScan.person_name || '—') : '—'}"`,
+        `"${r.gateInScan ? formatDateTime(r.gateInScan.scanned_at) : 'Not Scanned'}"`,
+        `"${r.gateInScan ? (r.gateInScan.person_name || '—') : '—'}"`,
+        `"${itemSummaries.replace(/"/g, '""')}"`
+      ].join(',');
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `RGP_Pass_Full_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // PDF Download for single RGP
+  const handleDownloadRgpPdf = (rgp) => {
+    if (!rgp) return;
+    try {
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      // Header banner
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(30, 41, 59);
+      doc.text('RETURNABLE GATE PASS (RGP)', 40, 45);
+
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Official Document — Generated: ${new Date().toLocaleString('en-GB')}`, 40, 60);
+
+      // Status Stamp
+      const isRet = rgp.isReturned;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      if (isRet) {
+        doc.setTextColor(16, 185, 129);
+        doc.text('STATUS: FULLY RETURNED', 390, 45);
+      } else if (rgp.isOverdue) {
+        doc.setTextColor(239, 68, 68);
+        doc.text(`STATUS: OVERDUE (${rgp.daysOverdue} Days)`, 390, 45);
+      } else {
+        doc.setTextColor(124, 58, 237);
+        doc.text('STATUS: IN-TRANSIT / OPEN', 390, 45);
+      }
+
+      // Border Box for Header Info
+      doc.setDrawColor(226, 232, 240);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(40, 75, 515, 95, 6, 6, 'FD');
+
+      doc.setFontSize(9.5);
+      doc.setTextColor(15, 23, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`RGP Number:`, 55, 95);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.rgpNo || 'N/A'}`, 130, 95);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Issue Date:`, 55, 112);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.date || 'N/A'}`, 130, 112);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Exp. Return:`, 55, 129);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.expectedReturnDate || 'N/A'}`, 130, 129);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Vehicle No:`, 55, 146);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.vehicleNo || 'N/A'}`, 130, 146);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Vendor / Party:`, 270, 95);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.vendor || 'N/A'}`, 360, 95);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`RGP Type:`, 270, 112);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.rgpType || 'N/A'}`, 360, 112);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Department:`, 270, 129);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.department || 'N/A'}`, 360, 129);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Purpose:`, 270, 146);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${rgp.purpose || 'N/A'}`, 360, 146);
+
+      // Items Table
+      const itemRows = (rgp.entries || []).map((e, idx) => [
+        idx + 1,
+        e.lotNo || '—',
+        e.itemDesc || 'Item',
+        e.qty1 || 0,
+        e.qty2 || 0,
+        e.uom || 'PCS',
+        e.purpose || rgp.purpose || '—'
+      ]);
+
+      autoTable(doc, {
+        startY: 185,
+        head: [['#', 'Lot No', 'Item Description', 'Qty 1', 'Qty 2 (Rolls)', 'UOM', 'Purpose']],
+        body: itemRows.length ? itemRows : [['1', '—', rgp.itemDesc || 'Materials', rgp.qty || 1, '—', rgp.uom || 'PCS', rgp.purpose || '—']],
+        theme: 'striped',
+        headStyles: { fillColor: [124, 58, 237], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        styles: { fontSize: 8.5, cellPadding: 5 },
+        margin: { left: 40, right: 40 }
+      });
+
+      let nextY = doc.lastAutoTable.finalY + 20;
+
+      // Gate Scanner Audit Box
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59);
+      doc.text('Security Gate Scanner Verification Trail', 40, nextY);
+      nextY += 10;
+
+      const scanRows = (rgp.matchingScans || []).map((s, idx) => [
+        idx + 1,
+        s.scan_type === 'rgp_return' ? 'Gate In (Return Scan)' : (s.scan_type === 'rgp_entry' ? 'Gate Out (Dispatch Scan)' : s.scan_type),
+        formatDateTime(s.scanned_at),
+        s.person_name || 'Gatekeeper',
+        s.supplier_name || rgp.vendor || '—',
+        `${s.quantity || 0} ${s.material_name || ''}`
+      ]);
+
+      if (scanRows.length > 0) {
+        autoTable(doc, {
+          startY: nextY,
+          head: [['#', 'Event Type', 'Scan Date & Time', 'Security / Guard', 'Party Verified', 'Scanned Material & Qty']],
+          body: scanRows,
+          theme: 'grid',
+          headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold', fontSize: 8.5 },
+          styles: { fontSize: 8, cellPadding: 4 },
+          margin: { left: 40, right: 40 }
+        });
+        nextY = doc.lastAutoTable.finalY + 30;
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text('No live QR scanner gate logs recorded for this pass yet.', 40, nextY + 12);
+        nextY += 40;
+      }
+
+      // Authorization Signatures
+      if (nextY > 720) {
+        doc.addPage();
+        nextY = 60;
+      }
+      doc.setDrawColor(203, 213, 225);
+      doc.line(50, nextY + 35, 180, nextY + 35);
+      doc.line(370, nextY + 35, 500, nextY + 35);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Prepared By: ${rgp.preparedBy || 'Store Incharge'}`, 50, nextY + 48);
+      doc.text(`Authorized By: ${rgp.authorizedBy || 'Management'}`, 370, nextY + 48);
+
+      doc.save(`RGP_${rgp.rgpNo || 'Pass'}_Document.pdf`);
+    } catch (err) {
+      console.error('Error generating RGP PDF:', err);
+      alert('Could not generate PDF: ' + err.message);
+    }
+  };
+
   // Render a responsive bar/line chart using SVG
   const monthData = [
     { label: 'March', amount: 45000 },
@@ -775,7 +1201,7 @@ export default function ReportsHistoryView({
     <div className="animate-fade">
       <div style={{ marginBottom: '20px', paddingTop: '4px' }}>
         <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 6px 0' }}>Reports & Transaction Ledger</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>Analyze manufacturing cost expenditures, check PO archives, and inspect material consumption by Lot.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>Analyze manufacturing cost expenditures, check PO archives, inspect material consumption by Lot, and audit Returnable Gate Passes (RGPs).</p>
       </div>
 
       {/* Sub-tab navigation */}
@@ -812,6 +1238,27 @@ export default function ReportsHistoryView({
         >
           <Calendar size={14} />
           <span>Daily &amp; Weekly Calendar</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('rgp_reports')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '600',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'rgp_reports' ? 'var(--accent-color)' : 'transparent',
+            color: activeReportTab === 'rgp_reports' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <Truck size={14} />
+          <span>RGP Pass Register ({processedRgpList.length || 0})</span>
         </button>
         <button
           type="button"
@@ -894,7 +1341,7 @@ export default function ReportsHistoryView({
             gap: '6px'
           }}
         >
-          <Truck size={14} />
+          <PackageCheck size={14} />
           <span>PO Sourcing Tracking</span>
         </button>
         <button
@@ -2926,6 +3373,1130 @@ export default function ReportsHistoryView({
           </div>
         );
       })()}
+
+      {activeReportTab === 'rgp_reports' && (
+        <div className="animate-scale" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Header Action Bar */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            backgroundColor: 'var(--bg-secondary)',
+            padding: '16px 20px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Truck size={20} color="var(--accent-color)" />
+                <span>Returnable Gate Pass (RGP) Audit Register &amp; Scanner Logs</span>
+              </h3>
+              <p style={{ margin: '3px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                Complete operational audit of external processor transfers, gate dispatch/inward QR scans, vendor returns, and overdue tracking.
+              </p>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={fetchRgpData}
+                disabled={rgpLoading}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', height: '34px' }}
+                title="Refresh RGP &amp; Gate Scanner records"
+              >
+                <RefreshCw size={13} className={rgpLoading ? 'animate-spin' : ''} />
+                <span>{rgpLoading ? 'Refreshing...' : 'Refresh Logs'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportRgpCSV}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', height: '34px', color: '#059669', borderColor: 'rgba(5, 150, 105, 0.3)' }}
+                title="Export all filtered RGPs to Excel / CSV spreadsheet"
+              >
+                <FileSpreadsheet size={14} />
+                <span>Export CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', height: '34px' }}
+                title="Print RGP Audit Summary"
+              >
+                <Printer size={13} />
+                <span>Print Register</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 6 Executive KPI Metric Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: '14px'
+          }}>
+            {/* 1. Total RGPs */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderLeft: '4px solid #6366f1',
+              boxShadow: 'var(--shadow-sm)',
+              position: 'relative'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>Total RGP Passes</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366f1' }}>
+                  <FileText size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>
+                {rgpStats.total}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {Object.entries(rgpStats.typeCounts).slice(0, 3).map(([type, cnt]) => (
+                  <span key={type} style={{ background: 'var(--bg-primary)', padding: '1px 5px', borderRadius: '4px', fontSize: '10px' }}>
+                    {type}: {cnt}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* 2. Dispatched / In Transit */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderLeft: '4px solid #f59e0b',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>In-Transit / Open</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(245, 158, 11, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f59e0b' }}>
+                  <Truck size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: '#f59e0b' }}>
+                {rgpStats.inTransit}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {rgpStats.total > 0 ? `${Math.round((rgpStats.inTransit / rgpStats.total) * 100)}% of total passes` : 'Awaiting return'}
+              </div>
+            </div>
+
+            {/* 3. Fully Returned */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderLeft: '4px solid #10b981',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>Returned &amp; Closed</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981' }}>
+                  <CheckCircle size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: '#10b981' }}>
+                {rgpStats.returned}
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Verified by gate return scan
+              </div>
+            </div>
+
+            {/* 4. Overdue Passes */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: rgpStats.overdue > 0 ? 'rgba(239, 68, 68, 0.04)' : 'var(--bg-secondary)',
+              border: '1px solid',
+              borderColor: rgpStats.overdue > 0 ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)',
+              borderLeft: '4px solid #ef4444',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: rgpStats.overdue > 0 ? '#ef4444' : 'var(--text-muted)' }}>Overdue Passes</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ef4444' }}>
+                  <AlertTriangle size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: '#ef4444' }}>
+                {rgpStats.overdue}
+              </div>
+              <div style={{ fontSize: '11px', color: rgpStats.overdue > 0 ? '#ef4444' : 'var(--text-muted)', marginTop: '4px', fontWeight: rgpStats.overdue > 0 ? '700' : '400' }}>
+                {rgpStats.overdue > 0 ? 'Requires vendor follow-up' : 'All returns within schedule'}
+              </div>
+            </div>
+
+            {/* 5. Total Units Dispatched */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderLeft: '4px solid #8b5cf6',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>Total Dispatched Units</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(139, 92, 246, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b5cf6' }}>
+                  <Boxes size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: 'var(--text-main)' }}>
+                {rgpStats.totalDispatchedQty.toLocaleString()} <span style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-muted)' }}>pcs</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                Cumulative goods out
+              </div>
+            </div>
+
+            {/* 6. Gate Scanner Compliance */}
+            <div style={{
+              padding: '16px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--bg-secondary)',
+              border: '1px solid var(--border-color)',
+              borderLeft: '4px solid #06b6d4',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>Gate Scan Verification</span>
+                <div style={{ width: '28px', height: '28px', borderRadius: '6px', background: 'rgba(6, 182, 212, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#06b6d4' }}>
+                  <QrCode size={15} />
+                </div>
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: '800', color: '#06b6d4' }}>
+                {rgpStats.scanRate}%
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {rgpStats.scannedAtGate} of {rgpStats.total} scanned at gate
+              </div>
+            </div>
+          </div>
+
+          {/* Filter & Search Bar */}
+          <div style={{
+            display: 'flex',
+            gap: '10px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '14px 16px',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '10px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            {/* Search */}
+            <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '180px' }}>
+              <Search size={15} style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-muted)'
+              }} />
+              <input
+                type="text"
+                placeholder="Search RGP #, Vendor, Lot #, Department, Purpose, Item, Vehicle..."
+                value={rgpSearch}
+                onChange={(e) => setRgpSearch(e.target.value)}
+                style={{
+                  paddingLeft: '36px',
+                  paddingRight: rgpSearch ? '30px' : '12px',
+                  height: '36px',
+                  fontSize: '13px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary, #f8fafc)',
+                  color: 'var(--text-main)',
+                  width: '100%',
+                  outline: 'none',
+                  transition: 'border-color 0.2s'
+                }}
+              />
+              {rgpSearch && (
+                <button
+                  type="button"
+                  onClick={() => setRgpSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '2px'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Status Filter */}
+            <select
+              value={rgpStatusFilter}
+              onChange={(e) => setRgpStatusFilter(e.target.value)}
+              style={styles.select}
+            >
+              <option value="all">All Statuses</option>
+              <option value="open">In-Transit / Open</option>
+              <option value="returned">Fully Returned</option>
+              <option value="overdue">Overdue Passes</option>
+            </select>
+
+            {/* Type Filter */}
+            <select
+              value={rgpTypeFilter}
+              onChange={(e) => setRgpTypeFilter(e.target.value)}
+              style={styles.select}
+            >
+              <option value="all">All RGP Types</option>
+              <option value="Fabric">Fabric</option>
+              <option value="Tools">Tools</option>
+              <option value="Machine">Machine</option>
+              <option value="Sample">Sample</option>
+              <option value="Other">Other</option>
+            </select>
+
+            {/* Gate Scanner Status Filter */}
+            <select
+              value={rgpScanFilter}
+              onChange={(e) => setRgpScanFilter(e.target.value)}
+              style={styles.select}
+            >
+              <option value="all">All Gate Scans</option>
+              <option value="scanned_out">Scanned at Gate Out (Issue)</option>
+              <option value="scanned_in">Scanned at Gate In (Return)</option>
+              <option value="not_scanned">Pending Gate Scan</option>
+            </select>
+
+            {/* Date Preset Filter */}
+            <select
+              value={rgpDateFilter}
+              onChange={(e) => setRgpDateFilter(e.target.value)}
+              style={styles.select}
+            >
+              <option value="all">All Time</option>
+              <option value="today">Issued Today</option>
+              <option value="week">Issued This Week</option>
+              <option value="month">Issued This Month</option>
+            </select>
+
+            {/* Sort */}
+            <select
+              value={rgpSort}
+              onChange={(e) => setRgpSort(e.target.value)}
+              style={styles.select}
+            >
+              <option value="latest">Latest Created</option>
+              <option value="oldest">Oldest First</option>
+              <option value="exp_return">Return Date (Earliest)</option>
+              <option value="rgp_no">RGP Number</option>
+            </select>
+
+            {/* View Mode Toggle */}
+            <div style={{
+              display: 'flex',
+              backgroundColor: 'var(--bg-primary)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              padding: '2px',
+              marginLeft: 'auto'
+            }}>
+              <button
+                type="button"
+                onClick={() => setRgpViewMode('table')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  backgroundColor: rgpViewMode === 'table' ? 'var(--accent-color)' : 'transparent',
+                  color: rgpViewMode === 'table' ? '#ffffff' : 'var(--text-muted)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Table View
+              </button>
+              <button
+                type="button"
+                onClick={() => setRgpViewMode('cards')}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  backgroundColor: rgpViewMode === 'cards' ? 'var(--accent-color)' : 'transparent',
+                  color: rgpViewMode === 'cards' ? '#ffffff' : 'var(--text-muted)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Cards View
+              </button>
+            </div>
+          </div>
+
+          {/* Results Counter */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', color: 'var(--text-muted)' }}>
+            <span>Showing <strong>{filteredRgpList.length}</strong> of <strong>{processedRgpList.length}</strong> RGP records</span>
+            {filteredRgpList.length < processedRgpList.length && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRgpSearch('');
+                  setRgpStatusFilter('all');
+                  setRgpTypeFilter('all');
+                  setRgpScanFilter('all');
+                  setRgpDateFilter('all');
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--accent-color)', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}
+              >
+                Clear all filters
+              </button>
+            )}
+          </div>
+
+          {/* Main Content: Table or Cards View */}
+          {filteredRgpList.length === 0 ? (
+            <div className="panel" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
+              <Truck size={48} strokeWidth={1} style={{ marginBottom: '12px', color: 'var(--text-light)', display: 'inline-block', opacity: 0.5 }} />
+              <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-main)', margin: '0 0 6px 0' }}>No RGP Records Found</h3>
+              <p style={{ fontSize: '13px', margin: 0, maxWidth: '400px', display: 'inline-block' }}>
+                No Returnable Gate Passes matched your current filter criteria. Try resetting search parameters or create a new RGP pass.
+              </p>
+            </div>
+          ) : rgpViewMode === 'table' ? (
+            /* Table View */
+            <div className="panel" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      <th style={{ padding: '12px 16px', width: '30px' }}></th>
+                      <th style={{ padding: '12px 16px' }}>RGP Pass &amp; Type</th>
+                      <th style={{ padding: '12px 16px' }}>Dates &amp; Status</th>
+                      <th style={{ padding: '12px 16px' }}>Vendor &amp; Purpose</th>
+                      <th style={{ padding: '12px 16px' }}>Dispatched Goods</th>
+                      <th style={{ padding: '12px 16px' }}>Vehicle / Auth</th>
+                      <th style={{ padding: '12px 16px' }}>Gate QR Scans</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRgpList.map((rgp) => {
+                      const isExpanded = expandedRgpIds.has(rgp.id || rgp.rgpNo);
+                      return (
+                        <React.Fragment key={rgp.id || rgp.rgpNo}>
+                          <tr
+                            style={{
+                              borderBottom: isExpanded ? 'none' : '1px solid var(--border-color)',
+                              backgroundColor: isExpanded ? 'rgba(99, 102, 241, 0.02)' : 'transparent',
+                              transition: 'background-color 0.15s'
+                            }}
+                          >
+                            {/* Expand Toggle */}
+                            <td style={{ padding: '12px 8px 12px 16px' }}>
+                              <button
+                                type="button"
+                                onClick={() => toggleRgpExpand(rgp.id || rgp.rgpNo)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted)',
+                                  cursor: 'pointer',
+                                  padding: '4px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '4px'
+                                }}
+                                title={isExpanded ? 'Collapse row' : 'Expand details'}
+                              >
+                                {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              </button>
+                            </td>
+
+                            {/* RGP Pass & Type */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span style={{ fontWeight: '800', color: '#7c3aed', fontFamily: 'monospace', fontSize: '14px' }}>
+                                  {rgp.rgpNo || 'RGP-PASS'}
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'rgba(124, 58, 237, 0.1)',
+                                  color: '#7c3aed',
+                                  border: '1px solid rgba(124, 58, 237, 0.2)'
+                                }}>
+                                  {rgp.rgpType || 'Fabric'}
+                                </span>
+                                {rgp.uniqueLots.length > 0 && (
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                    Lots: {rgp.uniqueLots.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Dates & Status */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontSize: '12.5px', fontWeight: '600', color: 'var(--text-main)' }}>
+                                Issued: {formatDateTime(rgp.date)}
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                Exp Return: {rgp.expectedReturnDate ? formatDateTime(rgp.expectedReturnDate) : 'Not specified'}
+                              </div>
+                              <div style={{ marginTop: '5px' }}>
+                                {rgp.isReturned ? (
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                    color: '#10b981',
+                                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}>
+                                    <Check size={11} /> Fully Returned
+                                  </span>
+                                ) : rgp.isOverdue ? (
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                                    color: '#ef4444',
+                                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}>
+                                    <AlertTriangle size={11} /> Overdue by {rgp.daysOverdue}d
+                                  </span>
+                                ) : (
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    padding: '2px 8px',
+                                    borderRadius: '12px',
+                                    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                                    color: '#f59e0b',
+                                    border: '1px solid rgba(245, 158, 11, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}>
+                                    <Clock size={11} /> In Transit
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Vendor & Purpose */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '13.5px' }}>
+                                {rgp.vendor || '—'}
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                Dept: <strong>{rgp.department || 'Store'}</strong>
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                                Purpose: {rgp.purpose || 'Processing'}
+                              </div>
+                            </td>
+
+                            {/* Dispatched Goods */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontWeight: '800', color: 'var(--text-main)', fontSize: '13.5px' }}>
+                                {rgp.totalQty1.toLocaleString()} <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)' }}>{rgp.entries[0]?.uom || rgp.uom || 'PCS'}</span>
+                              </div>
+                              <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                {rgp.entries.length} line item{rgp.entries.length === 1 ? '' : 's'}
+                                {rgp.totalQty2 > 0 && ` (${rgp.totalQty2} rolls/bags)`}
+                              </div>
+                            </td>
+
+                            {/* Vehicle & Auth */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ fontSize: '12px', color: 'var(--text-main)', fontWeight: '600' }}>
+                                Veh: {rgp.vehicleNo || 'Self / Courier'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                By: {rgp.preparedBy || 'Store Staff'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                                Auth: {rgp.authorizedBy || 'Admin'}
+                              </div>
+                            </td>
+
+                            {/* Gate QR Scans */}
+                            <td style={{ padding: '12px 16px' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                {/* Gate Out Scan */}
+                                <div style={{
+                                  fontSize: '11px',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: rgp.gateOutScan ? 'rgba(16, 185, 129, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                                  color: rgp.gateOutScan ? '#10b981' : 'var(--text-muted)',
+                                  border: `1px solid ${rgp.gateOutScan ? 'rgba(16, 185, 129, 0.25)' : 'rgba(148, 163, 184, 0.2)'}`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px'
+                                }}>
+                                  <span>📤 Gate Out:</span>
+                                  <strong>{rgp.gateOutScan ? (rgp.gateOutScan.person_name || 'Scanned') : 'Pending'}</strong>
+                                </div>
+
+                                {/* Gate In Scan */}
+                                <div style={{
+                                  fontSize: '11px',
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: rgp.gateInScan ? 'rgba(236, 72, 153, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                                  color: rgp.gateInScan ? '#ec4899' : 'var(--text-muted)',
+                                  border: `1px solid ${rgp.gateInScan ? 'rgba(236, 72, 153, 0.25)' : 'rgba(148, 163, 184, 0.2)'}`,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px'
+                                }}>
+                                  <span>📥 Gate In:</span>
+                                  <strong>{rgp.gateInScan ? (rgp.gateInScan.person_name || 'Returned') : 'Pending'}</strong>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Actions */}
+                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedRgpForModal(rgp)}
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '5px 8px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  title="View Full RGP Specification &amp; QR Modal"
+                                >
+                                  <Eye size={13} />
+                                  <span>View</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadRgpPdf(rgp)}
+                                  className="btn btn-secondary btn-sm"
+                                  style={{ padding: '5px 8px', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px', color: '#7c3aed', borderColor: 'rgba(124, 58, 237, 0.3)' }}
+                                  title="Download / Print Official RGP PDF"
+                                >
+                                  <Download size={13} />
+                                  <span>PDF</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Row Accordion */}
+                          {isExpanded && (
+                            <tr style={{ backgroundColor: 'rgba(99, 102, 241, 0.02)', borderBottom: '1px solid var(--border-color)' }}>
+                              <td colSpan={8} style={{ padding: '0 20px 20px 48px' }}>
+                                <div style={{
+                                  backgroundColor: 'var(--bg-secondary)',
+                                  padding: '16px 20px',
+                                  borderRadius: '10px',
+                                  border: '1px solid var(--border-color)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '16px'
+                                }}>
+                                  {/* Line Items Table */}
+                                  <div>
+                                    <h4 style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <Boxes size={14} color="var(--accent-color)" />
+                                      Itemized Dispatched Items ({rgp.entries.length})
+                                    </h4>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                                      <thead>
+                                        <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left' }}>
+                                          <th style={{ padding: '6px 8px' }}>#</th>
+                                          <th style={{ padding: '6px 8px' }}>Lot Number</th>
+                                          <th style={{ padding: '6px 8px' }}>Item Description</th>
+                                          <th style={{ padding: '6px 8px', textAlign: 'right' }}>Qty 1</th>
+                                          <th style={{ padding: '6px 8px', textAlign: 'right' }}>Qty 2 (Bags/Rolls)</th>
+                                          <th style={{ padding: '6px 8px' }}>UOM</th>
+                                          <th style={{ padding: '6px 8px' }}>Department</th>
+                                          <th style={{ padding: '6px 8px' }}>Purpose</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {rgp.entries.map((entry, idx) => (
+                                          <tr key={idx} style={{ borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                                            <td style={{ padding: '6px 8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                            <td style={{ padding: '6px 8px', fontWeight: '700', color: '#7c3aed' }}>
+                                              {entry.lotNo ? `#${entry.lotNo}` : '—'}
+                                            </td>
+                                            <td style={{ padding: '6px 8px', fontWeight: '600' }}>{entry.itemDesc || 'Item'}</td>
+                                            <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: '700', color: 'var(--text-main)' }}>
+                                              {Number(entry.qty1 || 0).toLocaleString()}
+                                            </td>
+                                            <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text-muted)' }}>
+                                              {entry.qty2 || 0}
+                                            </td>
+                                            <td style={{ padding: '6px 8px' }}>{entry.uom || 'PCS'}</td>
+                                            <td style={{ padding: '6px 8px' }}>{entry.department || rgp.department || 'Store'}</td>
+                                            <td style={{ padding: '6px 8px' }}>{entry.purpose || rgp.purpose || 'Processing'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  {/* Security Gate Scanner Trail */}
+                                  <div>
+                                    <h4 style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 8px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <QrCode size={14} color="#10b981" />
+                                      Security Gate Scanner Event Logs ({rgp.matchingScans.length})
+                                    </h4>
+                                    {rgp.matchingScans.length === 0 ? (
+                                      <div style={{ padding: '12px', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                        No live security gate scans have been captured yet for this pass. Security personnel can scan the RGP QR code on mobile to record Gate Entry and Return.
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                        {rgp.matchingScans.map((s, idx) => (
+                                          <div
+                                            key={idx}
+                                            style={{
+                                              padding: '8px 12px',
+                                              borderRadius: '6px',
+                                              backgroundColor: 'var(--bg-primary)',
+                                              border: '1px solid var(--border-color)',
+                                              display: 'flex',
+                                              justifyContent: 'space-between',
+                                              alignItems: 'center',
+                                              fontSize: '12px'
+                                            }}
+                                          >
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                              <span style={{
+                                                fontSize: '10px',
+                                                fontWeight: '800',
+                                                textTransform: 'uppercase',
+                                                padding: '2px 6px',
+                                                borderRadius: '4px',
+                                                backgroundColor: s.scan_type === 'rgp_return' ? 'rgba(236, 72, 153, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                                color: s.scan_type === 'rgp_return' ? '#ec4899' : '#10b981'
+                                              }}>
+                                                {s.scan_type === 'rgp_return' ? 'Gate In (Return)' : (s.scan_type === 'rgp_entry' ? 'Gate Out (Dispatch)' : s.scan_type)}
+                                              </span>
+                                              <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>
+                                                Security / Operator: {s.person_name || 'Guard'}
+                                              </span>
+                                              <span style={{ color: 'var(--text-muted)' }}>
+                                                Item: {s.material_name} ({s.quantity} pcs)
+                                              </span>
+                                            </div>
+                                            <div style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                              <Clock size={11} />
+                                              <span>{formatDateTime(s.scanned_at)}</span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Remarks & Authorization Metadata */}
+                                  {rgp.remarks && (
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-color)', paddingTop: '8px' }}>
+                                      <strong>Remarks:</strong> {rgp.remarks}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Cards View */
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+              gap: '16px'
+            }}>
+              {filteredRgpList.map((rgp) => (
+                <div
+                  key={rgp.id || rgp.rgpNo}
+                  className="panel animate-scale"
+                  style={{
+                    padding: '18px',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '14px',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                >
+                  <div>
+                    {/* Top Row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                      <div>
+                        <span style={{ fontWeight: '800', color: '#7c3aed', fontFamily: 'monospace', fontSize: '15px' }}>
+                          {rgp.rgpNo}
+                        </span>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {rgp.rgpType} • {rgp.department || 'Store'}
+                        </div>
+                      </div>
+                      <div>
+                        {rgp.isReturned ? (
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            color: '#10b981',
+                            border: '1px solid rgba(16, 185, 129, 0.25)'
+                          }}>
+                            Returned
+                          </span>
+                        ) : rgp.isOverdue ? (
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            color: '#ef4444',
+                            border: '1px solid rgba(239, 68, 68, 0.25)'
+                          }}>
+                            Overdue ({rgp.daysOverdue}d)
+                          </span>
+                        ) : (
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            padding: '2px 8px',
+                            borderRadius: '12px',
+                            backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                            color: '#f59e0b',
+                            border: '1px solid rgba(245, 158, 11, 0.25)'
+                          }}>
+                            In Transit
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Vendor & Goods info */}
+                    <div style={{ fontSize: '13px', marginBottom: '10px' }}>
+                      <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                        {rgp.vendor}
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '2px' }}>
+                        Purpose: {rgp.purpose || 'Processing'}
+                      </div>
+                    </div>
+
+                    {/* Dispatched Goods */}
+                    <div style={{
+                      padding: '10px 12px',
+                      backgroundColor: 'var(--bg-primary)',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      marginBottom: '10px'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '700', color: 'var(--text-main)', marginBottom: '4px' }}>
+                        <span>Total Quantity:</span>
+                        <span>{rgp.totalQty1.toLocaleString()} {rgp.entries[0]?.uom || rgp.uom || 'PCS'}</span>
+                      </div>
+                      <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                        {rgp.entries.length} items • {rgp.entries.map(e => e.itemDesc).filter(Boolean).slice(0, 2).join(', ')}
+                      </div>
+                    </div>
+
+                    {/* Scanner Badges */}
+                    <div style={{ display: 'flex', gap: '6px', fontSize: '11px' }}>
+                      <span style={{
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: rgp.gateOutScan ? 'rgba(16, 185, 129, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                        color: rgp.gateOutScan ? '#10b981' : 'var(--text-muted)'
+                      }}>
+                        Out: {rgp.gateOutScan ? 'Scanned' : 'Pending'}
+                      </span>
+                      <span style={{
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        backgroundColor: rgp.gateInScan ? 'rgba(236, 72, 153, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                        color: rgp.gateInScan ? '#ec4899' : 'var(--text-muted)'
+                      }}>
+                        In: {rgp.gateInScan ? 'Returned' : 'Pending'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {formatDateTime(rgp.date)}
+                    </span>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedRgpForModal(rgp)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '4px 10px', fontSize: '11.5px' }}
+                      >
+                        Inspect
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadRgpPdf(rgp)}
+                        className="btn btn-secondary btn-sm"
+                        style={{ padding: '4px 10px', fontSize: '11.5px', color: '#7c3aed', borderColor: 'rgba(124, 58, 237, 0.3)' }}
+                      >
+                        PDF
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Quick Details Modal Dialog */}
+          {selectedRgpForModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.55)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '20px'
+            }}>
+              <div style={{
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '16px',
+                border: '1px solid var(--border-color)',
+                width: '100%',
+                maxWidth: '720px',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                padding: '24px',
+                boxShadow: 'var(--shadow-lg)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '20px'
+              }}>
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '18px', fontWeight: '800', color: '#7c3aed', fontFamily: 'monospace' }}>
+                        {selectedRgpForModal.rgpNo}
+                      </span>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(124, 58, 237, 0.1)',
+                        color: '#7c3aed'
+                      }}>
+                        {selectedRgpForModal.rgpType}
+                      </span>
+                    </div>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: 'var(--text-muted)' }}>
+                      Vendor: <strong>{selectedRgpForModal.vendor}</strong> | Department: {selectedRgpForModal.department || 'Store'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRgpForModal(null)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Status & Timing Banner */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '12px 16px',
+                  borderRadius: '8px',
+                  backgroundColor: selectedRgpForModal.isReturned ? 'rgba(16, 185, 129, 0.08)' : (selectedRgpForModal.isOverdue ? 'rgba(239, 68, 68, 0.08)' : 'rgba(245, 158, 11, 0.08)'),
+                  border: `1px solid ${selectedRgpForModal.isReturned ? 'rgba(16, 185, 129, 0.25)' : (selectedRgpForModal.isOverdue ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)')}`
+                }}>
+                  <div>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Issue Date: </span>
+                    <strong style={{ fontSize: '13px' }}>{formatDateTime(selectedRgpForModal.date)}</strong>
+                    <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>•</span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Expected Return: </span>
+                    <strong style={{ fontSize: '13px' }}>{selectedRgpForModal.expectedReturnDate ? formatDateTime(selectedRgpForModal.expectedReturnDate) : 'Not specified'}</strong>
+                  </div>
+                  <div>
+                    <span style={{
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      color: selectedRgpForModal.isReturned ? '#10b981' : (selectedRgpForModal.isOverdue ? '#ef4444' : '#f59e0b')
+                    }}>
+                      {selectedRgpForModal.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Items Breakdown */}
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 10px 0' }}>
+                    Itemized Items Dispatched ({selectedRgpForModal.entries.length})
+                  </h4>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left', backgroundColor: 'var(--bg-primary)' }}>
+                        <th style={{ padding: '8px' }}>#</th>
+                        <th style={{ padding: '8px' }}>Lot #</th>
+                        <th style={{ padding: '8px' }}>Item Description</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>Qty 1</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>Qty 2</th>
+                        <th style={{ padding: '8px' }}>UOM</th>
+                        <th style={{ padding: '8px' }}>Purpose</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRgpForModal.entries.map((e, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '8px', fontWeight: '700', color: '#7c3aed' }}>{e.lotNo ? `#${e.lotNo}` : '—'}</td>
+                          <td style={{ padding: '8px', fontWeight: '600' }}>{e.itemDesc}</td>
+                          <td style={{ padding: '8px', textAlign: 'right', fontWeight: '700' }}>{Number(e.qty1 || 0).toLocaleString()}</td>
+                          <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text-muted)' }}>{e.qty2 || 0}</td>
+                          <td style={{ padding: '8px' }}>{e.uom || 'PCS'}</td>
+                          <td style={{ padding: '8px' }}>{e.purpose || selectedRgpForModal.purpose || 'Processing'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Security Gate Logs */}
+                <div>
+                  <h4 style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', margin: '0 0 10px 0', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <QrCode size={15} color="#10b981" />
+                    Security Gate Scanner Logs
+                  </h4>
+                  {selectedRgpForModal.matchingScans.length === 0 ? (
+                    <div style={{ padding: '14px', backgroundColor: 'var(--bg-primary)', borderRadius: '8px', fontSize: '12.5px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                      No QR scanner records recorded for this RGP yet.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {selectedRgpForModal.matchingScans.map((s, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-color)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '12.5px'
+                          }}
+                        >
+                          <div>
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '800',
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              backgroundColor: s.scan_type === 'rgp_return' ? 'rgba(236, 72, 153, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                              color: s.scan_type === 'rgp_return' ? '#ec4899' : '#10b981',
+                              marginRight: '8px'
+                            }}>
+                              {s.scan_type === 'rgp_return' ? 'Gate In (Return)' : 'Gate Out (Dispatch)'}
+                            </span>
+                            <strong>Guard: {s.person_name || 'Security'}</strong> — {s.material_name} ({s.quantity} pcs)
+                          </div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '11.5px' }}>
+                            {formatDateTime(s.scanned_at)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Modal Footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Prepared By: <strong>{selectedRgpForModal.preparedBy || 'Store'}</strong> | Authorized: <strong>{selectedRgpForModal.authorizedBy || 'Admin'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadRgpPdf(selectedRgpForModal)}
+                      className="btn btn-primary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Download size={14} />
+                      <span>Download Official PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRgpForModal(null)}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

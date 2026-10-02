@@ -273,12 +273,14 @@ export default function SearchableLocationSelect({
                     e.preventDefault();
                     if (filteredLocations.length > 0) {
                       handleSelect(filteredLocations[0].code);
+                    } else if (searchQuery.trim()) {
+                      handleSelect(searchQuery.trim());
                     }
                   } else if (e.key === 'Escape') {
                     setIsOpen(false);
                   }
                 }}
-                placeholder="Search rack / slot (e.g. RACK 12, Hall 1)..."
+                placeholder="Search or type rack (e.g. Main Store - Rack 1, Rack 12)..."
                 className="seamless-search-input"
                 style={{
                   border: 'none',
@@ -323,6 +325,29 @@ export default function SearchableLocationSelect({
                 </button>
               )}
             </div>
+
+            {/* Quick Custom Location Action if typed */}
+            {searchQuery.trim() && !filteredLocations.some(l => l.code.toLowerCase() === searchQuery.trim().toLowerCase()) && (
+              <div
+                onClick={() => handleSelect(searchQuery.trim())}
+                style={{
+                  marginTop: '6px',
+                  padding: '6px 10px',
+                  borderRadius: '6px',
+                  background: 'rgba(59, 130, 246, 0.1)',
+                  border: '1px dashed #3b82f6',
+                  color: '#1d4ed8',
+                  fontSize: '12px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span>➕ Use "<strong>{searchQuery.trim()}</strong>" as Location / Rack</span>
+              </div>
+            )}
 
             {/* Warehouse Filter Chips */}
             {warehouseList.length > 1 && (
@@ -371,13 +396,33 @@ export default function SearchableLocationSelect({
             }}
           >
             {filteredLocations.length === 0 ? (
-              <div style={{ padding: '24px 14px', textAlign: 'center' }}>
+              <div style={{ padding: '16px 14px', textAlign: 'center' }}>
                 <span style={{ fontSize: '13px', color: 'var(--text-muted, #64748b)', display: 'block', fontWeight: '600' }}>
                   No configured location matched "{searchQuery}"
                 </span>
-                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginTop: '6px' }}>
-                  Please select an existing configured rack or location
-                </span>
+                {searchQuery.trim() ? (
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(searchQuery.trim())}
+                    style={{
+                      marginTop: '8px',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      background: '#3b82f6',
+                      color: '#ffffff',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Use "{searchQuery.trim()}" as Rack Location
+                  </button>
+                ) : (
+                  <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block', marginTop: '6px' }}>
+                    Please select an existing configured rack or location
+                  </span>
+                )}
               </div>
             ) : (
               filteredLocations.map(loc => {

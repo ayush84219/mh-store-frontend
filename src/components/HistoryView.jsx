@@ -3,7 +3,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search, Clock, User, ClipboardList, CheckCircle, XCircle,
   Scissors, Shuffle, Truck, QrCode, ShieldCheck, AlertCircle, FileText, Check, Download,
-  BarChart3, TrendingUp, Activity
+  BarChart3, TrendingUp, Activity, Boxes, Eye, Tag, Calendar, MapPin, Building,
+  ArrowRight, ShieldAlert, FileSpreadsheet, ArrowUpRight, ArrowDownLeft
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -59,12 +60,6 @@ const formatDateTime = (dateVal) => {
 const parseToDateObject = (dateVal) => {
   if (!dateVal) return new Date(0);
 
-  // Handle string like 'Fri Sep 19 2025 15:42:22 GMT...' or ISO strings
-  const parsed = new Date(dateVal);
-  if (!isNaN(parsed.getTime())) {
-    return parsed;
-  }
-
   const str = String(dateVal).trim();
   const dmyRegex = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?)?(?:\s*(AM|PM))?/i;
   const match = str.match(dmyRegex);
@@ -85,16 +80,40 @@ const parseToDateObject = (dateVal) => {
     return new Date(year, month, day, hour, minute);
   }
 
+  const parsed = new Date(dateVal);
+  if (!isNaN(parsed.getTime())) {
+    return parsed;
+  }
+
   return new Date(0);
+};
+
+const getLotVersionInfo = (lotNo, designs = []) => {
+  const lotStr = String(lotNo || '').trim();
+  if (lotStr.includes('-V')) {
+    const parts = lotStr.split('-V');
+    return {
+      displayLot: parts[0],
+      versionText: `Recreated (Run ${parts[1]})`,
+      isRecreated: true
+    };
+  }
+  return {
+    displayLot: lotStr,
+    versionText: 'Original Lot',
+    isRecreated: false
+  };
 };
 
 export default function HistoryView({ designs = [], currencySymbol = 'R', currentUser }) {
   const [selectedLotId, setSelectedLotId] = useState('');
+  const [itemCategory, setItemCategory] = useState('all'); // 'all' | 'designs' | 'rgps' | 'pos'
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [rgpStatusFilter, setRgpStatusFilter] = useState('all');
   const [ageSort, setAgeSort] = useState('newest');
   const [dateFilter, setDateFilter] = useState('all');
-  const [viewMode, setViewMode] = useState('pipeline'); // 'pipeline' or 'chronological'
+  const [viewMode, setViewMode] = useState('pipeline'); // 'pipeline' | 'chronological' | 'calendar'
 
   // Data lists fetched from backend
   const [historyLogs, setHistoryLogs] = useState([]);
@@ -107,6 +126,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
   const [transfers, setTransfers] = useState([]);
   const [extraMaterialIssues, setExtraMaterialIssues] = useState([]);
   const [weightCaptures, setWeightCaptures] = useState([]);
+  const [rgpList, setRgpList] = useState([]);
 
   // Loading & error states
   const [isLoading, setIsLoading] = useState(false);
@@ -120,7 +140,10 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       const backendUrl = getBackendUrl();
 
       try {
-        const [historyRes, scansRes, headersRes, dooriRes, zipRes, posRes, issueRes, transferRes, extraRes, weightRes] = await Promise.all([
+        const [
+          historyRes, scansRes, headersRes, dooriRes, zipRes,
+          posRes, issueRes, transferRes, extraRes, weightRes, rgpRes
+        ] = await Promise.all([
           fetch(`${backendUrl}/api/design-history`),
           fetch(`${backendUrl}/api/scans`),
           fetch(`${backendUrl}/api/cutting-headers`),
@@ -130,7 +153,8 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
           fetch(`${backendUrl}/api/issue-logs`),
           fetch(`${backendUrl}/api/transfers`),
           fetch(`${backendUrl}/api/extra-material-issues`),
-          fetch(`${backendUrl}/api/weight-capture`)
+          fetch(`${backendUrl}/api/weight-capture`),
+          fetch(`${backendUrl}/api/rgp`)
         ]);
 
         if (historyRes.ok) setHistoryLogs(await historyRes.json());
@@ -146,6 +170,10 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
           const wData = await weightRes.json();
           setWeightCaptures(wData.success && Array.isArray(wData.data) ? wData.data : (Array.isArray(wData) ? wData : []));
         }
+        if (rgpRes && rgpRes.ok) {
+          const rData = await rgpRes.json();
+          setRgpList(Array.isArray(rData) ? rData : []);
+        }
       } catch (err) {
         console.error('Failed to load history lists:', err);
         setErrorMessage('Failed to connect to the backend server. Make sure port 5000 is running.');
@@ -157,52 +185,169 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     fetchHistoryData();
   }, []);
 
-  const lotOptions = useMemo(() => {
-    const set = new Set();
-    designs.forEach(d => { if (d.id) set.add(String(d.id).trim()); });
-    cuttingHeaders.forEach(h => { if (h.Lot_Number) set.add(String(h.Lot_Number).trim()); });
-    dooriOrders.forEach(o => { if (o.Lot_Number) set.add(String(o.Lot_Number).trim()); });
-    zipOrders.forEach(z => { if (z.Lot_Number) set.add(String(z.Lot_Number).trim()); });
-    scanLogs.forEach(s => { if (s.lot_number) set.add(String(s.lot_number).trim()); });
-    pos.forEach(p => {
-      if (p.poNumber) set.add(String(p.poNumber).trim());
-      if (p.designName) set.add(String(p.designName).trim());
+  // Processed RGP list with safe entries parsing and computed statuses
+  const processedRgpList = useMemo(() => {
+    return rgpList.map(rgp => {
+      let parsedEntries = [];
+      try {
+        if (Array.isArray(rgp.entries)) {
+          parsedEntries = rgp.entries;
+        } else if (typeof rgp.entries === 'string') {
+          parsedEntries = JSON.parse(rgp.entries);
+        }
+      } catch (e) {
+        parsedEntries = [];
+      }
+
+      // Check scans for this RGP
+      const rgpScans = scanLogs.filter(s => {
+        const scanLot = String(s.lot_number || '').trim().toLowerCase();
+        const rgpNoStr = String(rgp.rgpNo || '').trim().toLowerCase();
+        if (scanLot === rgpNoStr) return true;
+        if (s.rgp_payload) {
+          try {
+            const p = JSON.parse(s.rgp_payload);
+            if (p && String(p.rgpNo || '').toLowerCase() === rgpNoStr) return true;
+          } catch (_) { }
+        }
+        return false;
+      });
+
+      const gateOutScan = rgpScans.find(s => s.scan_type === 'rgp_entry');
+      const gateInScan = rgpScans.find(s => s.scan_type === 'rgp_return');
+      const gateEntryScans = rgpScans.filter(s => s.scan_type === 'gate_entry');
+
+      // Status computation
+      let status = 'In Transit';
+      const isReturned = Boolean(gateInScan || rgp.status?.toLowerCase() === 'returned');
+      const isOverdue = !isReturned && rgp.expectedReturnDate && (new Date(rgp.expectedReturnDate) < new Date());
+
+      if (isReturned) {
+        status = 'Returned';
+      } else if (isOverdue) {
+        status = 'Overdue';
+      } else {
+        status = 'In Transit';
+      }
+
+      const totalQty1 = parsedEntries.reduce((sum, item) => sum + (parseFloat(item.qty1) || 0), 0);
+      const totalQty2 = parsedEntries.reduce((sum, item) => sum + (parseFloat(item.qty2) || 0), 0);
+
+      return {
+        ...rgp,
+        entries: parsedEntries,
+        computedStatus: status,
+        isReturned,
+        isOverdue,
+        scans: rgpScans,
+        gateOutScan,
+        gateInScan,
+        gateEntryScans,
+        totalItemsCount: parsedEntries.length,
+        totalQty1,
+        totalQty2
+      };
     });
-    return Array.from(set).filter(Boolean).sort();
-  }, [designs, cuttingHeaders, dooriOrders, zipOrders, scanLogs, pos]);
+  }, [rgpList, scanLogs]);
+
+  // Unified items list representing Design Lots, RGP Passes, and POs
+  const unifiedItemsList = useMemo(() => {
+    const list = [];
+    const seenIds = new Set();
+
+    // 1. Design Lots
+    designs.forEach(d => {
+      if (d.id && !seenIds.has(String(d.id).toLowerCase())) {
+        seenIds.add(String(d.id).toLowerCase());
+        list.push({
+          id: String(d.id),
+          itemType: 'design',
+          title: `Lot #${getLotVersionInfo(d.id, designs).displayLot}`,
+          subTitle: `${d.brand || 'Client'} (${d.category || 'Design'})`,
+          secondaryText: d.style || 'Custom Style',
+          date: d.created_at || d.date || '',
+          imageUrl: d.imageUrl || null,
+          design: d
+        });
+      }
+    });
+
+    // 2. RGP Returnable Gate Passes
+    processedRgpList.forEach(r => {
+      if (r.rgpNo && !seenIds.has(String(r.rgpNo).toLowerCase())) {
+        seenIds.add(String(r.rgpNo).toLowerCase());
+        list.push({
+          id: String(r.rgpNo),
+          itemType: 'rgp',
+          title: `RGP #${r.rgpNo}`,
+          subTitle: `${r.vendor || 'Vendor'} • ${r.rgpType || 'Gate Pass'}`,
+          secondaryText: `${r.totalItemsCount || 0} items (${r.computedStatus})`,
+          date: r.date || '',
+          imageUrl: null,
+          rgp: r
+        });
+      }
+    });
+
+    // 3. Purchase Orders
+    pos.forEach(p => {
+      if (p.poNumber && !seenIds.has(String(p.poNumber).toLowerCase())) {
+        seenIds.add(String(p.poNumber).toLowerCase());
+        list.push({
+          id: String(p.poNumber),
+          itemType: 'po',
+          title: `PO #${p.poNumber}`,
+          subTitle: `${p.vendorName || 'Supplier'}`,
+          secondaryText: `${p.designName || 'Purchase Order'} (${p.status || 'Active'})`,
+          date: p.date || '',
+          imageUrl: null,
+          po: p
+        });
+      }
+    });
+
+    // 4. Cutting Headers / Other Scan Lots
+    cuttingHeaders.forEach(h => {
+      if (h.Lot_Number && !seenIds.has(String(h.Lot_Number).toLowerCase())) {
+        seenIds.add(String(h.Lot_Number).toLowerCase());
+        list.push({
+          id: String(h.Lot_Number),
+          itemType: 'cutting',
+          title: `Lot #${h.Lot_Number}`,
+          subTitle: `${h.Style || 'Cutting Lot'}`,
+          secondaryText: `${h.Garment_Type || 'Garment'}`,
+          date: h.Created_At || h.Date || '',
+          imageUrl: null
+        });
+      }
+    });
+
+    return list;
+  }, [designs, processedRgpList, pos, cuttingHeaders]);
 
   // Filter approved/verification lot list for selection
   const filteredLotsList = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
 
-    // Build a list of objects representing each lot ID/PO number
-    let list = lotOptions.map(id => {
-      // Find matching design if any
-      const d = designs.find(des => String(des.id).toLowerCase() === String(id).toLowerCase());
-      // Find matching PO if any (to resolve PO name)
-      const po = pos.find(p => String(p.poNumber).toLowerCase() === String(id).toLowerCase());
+    let list = unifiedItemsList.filter(item => {
+      // 1. Category filter
+      if (itemCategory === 'designs' && item.itemType !== 'design' && item.itemType !== 'cutting') return false;
+      if (itemCategory === 'rgps' && item.itemType !== 'rgp') return false;
+      if (itemCategory === 'pos' && item.itemType !== 'po') return false;
 
-      return {
-        id: id,
-        style: d ? d.style : (po ? 'Purchase Order' : 'External Run'),
-        brand: d ? d.brand : (po ? po.vendorName : 'N/A'),
-        category: d ? d.category : 'Trims/Accessory',
-        imageUrl: d ? d.imageUrl : null,
-        date: d ? (d.created_at || d.date) : (po ? po.date : '')
-      };
-    });
+      // 2. Design Type filter (for designs)
+      if (typeFilter === 'original' && item.itemType === 'design' && String(item.id).includes('-V')) return false;
+      if (typeFilter === 'version' && item.itemType === 'design' && !String(item.id).includes('-V')) return false;
 
-    // 1. Filter by Design Type (Original vs Version)
-    if (typeFilter === 'original') {
-      list = list.filter(item => !String(item.id).includes('-V'));
-    } else if (typeFilter === 'version') {
-      list = list.filter(item => String(item.id).includes('-V'));
-    }
+      // 3. RGP Status filter (for rgps)
+      if (item.itemType === 'rgp' && rgpStatusFilter !== 'all') {
+        const rgpStatus = item.rgp?.computedStatus?.toLowerCase().replace(' ', '_');
+        if (rgpStatus !== rgpStatusFilter) return false;
+      }
 
-    // 2. Filter by Date range
-    if (dateFilter !== 'all') {
-      const now = new Date();
-      list = list.filter(item => {
+      // 4. Date range filter
+      if (dateFilter !== 'all') {
+        const now = new Date();
         if (!item.date) return false;
         const dDate = parseToDateObject(item.date);
         if (dDate.getTime() === 0) return false;
@@ -210,55 +355,54 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         const diffTime = Math.abs(now - dDate);
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-        if (dateFilter === 'today') {
-          return dDate.toDateString() === now.toDateString();
-        } else if (dateFilter === 'yesterday') {
+        if (dateFilter === 'today' && dDate.toDateString() !== now.toDateString()) return false;
+        if (dateFilter === 'yesterday') {
           const yesterday = new Date();
           yesterday.setDate(now.getDate() - 1);
-          return dDate.toDateString() === yesterday.toDateString();
-        } else if (dateFilter === 'week') {
-          return diffDays <= 7;
-        } else if (dateFilter === 'month') {
-          return diffDays <= 30;
+          if (dDate.toDateString() !== yesterday.toDateString()) return false;
         }
-        return true;
-      });
-    }
-
-    // 3. Filter by text search
-    if (q) {
-      list = list.filter(item =>
-        item.id.toLowerCase().includes(q) ||
-        item.style.toLowerCase().includes(q) ||
-        item.brand.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q)
-      );
-    }
-
-    // 4. Sort by Age/Date
-    list.sort((a, b) => {
-      const dateA = parseToDateObject(a.date);
-      const dateB = parseToDateObject(b.date);
-
-      const valA = dateA.getTime();
-      const valB = dateB.getTime();
-
-      if (ageSort === 'newest') {
-        return valB - valA;
-      } else {
-        return valA - valB;
+        if (dateFilter === 'week' && diffDays > 7) return false;
+        if (dateFilter === 'month' && diffDays > 30) return false;
       }
+
+      // 5. Search query
+      if (q) {
+        const matchId = String(item.id).toLowerCase().includes(q);
+        const matchTitle = String(item.title).toLowerCase().includes(q);
+        const matchSub = String(item.subTitle).toLowerCase().includes(q);
+        const matchSec = String(item.secondaryText).toLowerCase().includes(q);
+        if (!matchId && !matchTitle && !matchSub && !matchSec) return false;
+      }
+
+      return true;
+    });
+
+    // Sort items
+    list.sort((a, b) => {
+      const dateA = parseToDateObject(a.date).getTime();
+      const dateB = parseToDateObject(b.date).getTime();
+      return ageSort === 'newest' ? dateB - dateA : dateA - dateB;
     });
 
     return list;
-  }, [lotOptions, designs, pos, searchQuery, typeFilter, ageSort, dateFilter]);
+  }, [unifiedItemsList, itemCategory, typeFilter, rgpStatusFilter, dateFilter, searchQuery, ageSort]);
 
-  // Auto-select first lot so timeline is immediately active and not blank
+  // Auto-select first item when list changes or resets
   useEffect(() => {
     if (!selectedLotId && filteredLotsList.length > 0) {
       setSelectedLotId(filteredLotsList[0].id);
     }
   }, [filteredLotsList, selectedLotId]);
+
+  // Selected Item Resolvers
+  const selectedRgp = useMemo(() => {
+    if (!selectedLotId) return null;
+    const cleanId = String(selectedLotId).trim().toLowerCase();
+    return processedRgpList.find(r => 
+      String(r.rgpNo).toLowerCase() === cleanId ||
+      String(r.id).toLowerCase() === cleanId
+    ) || null;
+  }, [selectedLotId, processedRgpList]);
 
   const resolvedLotId = useMemo(() => {
     if (!selectedLotId) return '';
@@ -274,11 +418,113 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
 
   const selectedDesign = designs.find(d => String(d.id).toLowerCase() === String(resolvedLotId).toLowerCase());
 
+  // Helper function to resolve dynamic design image preview URLs
+  const getCleanImageUrl = (url) => {
+    if (!url) return '';
+    return url.replace('wait', `${getBackendUrl()}`);
+  };
+
   // Compile timeline events dynamically for the selected lot ID
   const getTimelineEvents = () => {
     if (!selectedLotId) return [];
 
     const events = [];
+
+    // IF RGP IS SELECTED: Compile pure RGP operational events
+    if (selectedRgp) {
+      // 1. RGP Creation
+      events.push({
+        type: 'rgp_created',
+        title: `Returnable Gate Pass Issued (#${selectedRgp.rgpNo})`,
+        timestamp: formatDateTime(selectedRgp.date) || 'Pass Created',
+        dateObj: parseToDateObject(selectedRgp.date),
+        actor: selectedRgp.preparedBy || 'Store Incharge',
+        icon: <FileText size={16} />,
+        color: '#a855f7',
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+              <div><strong>Vendor/Processor:</strong> {selectedRgp.vendor || 'N/A'}</div>
+              <div><strong>RGP Type:</strong> {selectedRgp.rgpType || 'RGP'}</div>
+              <div><strong>Department:</strong> {selectedRgp.department || 'Dispatch'}</div>
+              <div><strong>Purpose:</strong> {selectedRgp.purpose || 'Processing'}</div>
+              <div><strong>Expected Return:</strong> {formatDateTime(selectedRgp.expectedReturnDate) || '—'}</div>
+              <div><strong>Vehicle No:</strong> {selectedRgp.vehicleNo || 'N/A'}</div>
+            </div>
+            {selectedRgp.authorizedBy && (
+              <div style={{ marginTop: '4px' }}><strong>Authorized By:</strong> {selectedRgp.authorizedBy}</div>
+            )}
+            {selectedRgp.remarks && (
+              <div style={{ marginTop: '4px', fontStyle: 'italic', color: 'var(--text-muted)' }}>Remarks: {selectedRgp.remarks}</div>
+            )}
+          </div>
+        )
+      });
+
+      // 2. Security Gate Out Dispatch Scan
+      if (selectedRgp.gateOutScan) {
+        const s = selectedRgp.gateOutScan;
+        events.push({
+          type: 'gate_out_scan',
+          title: `Security Gate Out Scan Verified (#${selectedRgp.rgpNo})`,
+          timestamp: formatDateTime(s.scanned_at) || 'Scanned Out',
+          dateObj: parseToDateObject(s.scanned_at),
+          actor: s.person_name || 'Security Gatekeeper',
+          icon: <Truck size={16} />,
+          color: '#3b82f6',
+          details: (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <p><strong>Gatekeeper Log:</strong> Verified outward dispatch bundle destined for <strong>{s.supplier_name || selectedRgp.vendor}</strong>.</p>
+              <p><strong>Item / Material:</strong> {s.material_name || 'Fabric/Trims'}</p>
+              {s.quantity > 0 && <p><strong>Dispatched Units:</strong> {s.quantity} pcs</p>}
+            </div>
+          )
+        });
+      }
+
+      // 3. Security Gate Entry scans
+      selectedRgp.gateEntryScans.forEach(s => {
+        events.push({
+          type: 'gate_entry_scan',
+          title: `Security Gate Entry Logged (#${selectedRgp.rgpNo})`,
+          timestamp: formatDateTime(s.scanned_at) || 'Scanned',
+          dateObj: parseToDateObject(s.scanned_at),
+          actor: s.person_name || 'Gatekeeper',
+          icon: <QrCode size={16} />,
+          color: '#06b6d4',
+          details: (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <p><strong>Gate Log:</strong> {s.material_name} verified at checkpoint from <strong>{s.supplier_name}</strong>.</p>
+            </div>
+          )
+        });
+      });
+
+      // 4. Security Gate In Return Scan
+      if (selectedRgp.gateInScan) {
+        const s = selectedRgp.gateInScan;
+        events.push({
+          type: 'gate_in_scan',
+          title: `Security Gate In Return Scan Verified (#${selectedRgp.rgpNo})`,
+          timestamp: formatDateTime(s.scanned_at) || 'Returned',
+          dateObj: parseToDateObject(s.scanned_at),
+          actor: s.person_name || 'Security Gatekeeper',
+          icon: <ShieldCheck size={16} />,
+          color: '#10b981',
+          details: (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <p><strong>Return Check-in:</strong> Material successfully returned from <strong>{s.supplier_name || selectedRgp.vendor}</strong> and verified at entry gate.</p>
+              <p><strong>Returned Material:</strong> {s.material_name || 'Fabric/Trims'}</p>
+              {s.quantity > 0 && <p><strong>Verified Quantity:</strong> {s.quantity} pcs</p>}
+            </div>
+          )
+        });
+      }
+
+      return events.sort((a, b) => a.dateObj - b.dateObj);
+    }
+
+    // IF DESIGN LOT IS SELECTED: Compile comprehensive lot lifecycle events
     const lotIdLower = resolvedLotId.toLowerCase();
 
     // 1. Milestone: Design Registration
@@ -373,7 +619,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       });
     });
 
-    // 4. Milestone: Zip PO compiled — from zip table directly
+    // 4. Milestone: Zip PO compiled
     const matchingZipOrder = zipOrders.find(z => String(z.Lot_Number).toLowerCase() === lotIdLower);
     if (matchingZipOrder) {
       const zipPoNum = matchingZipOrder.po_number || '';
@@ -384,7 +630,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       } catch (_) { }
       events.push({
         type: 'zip_po_created',
-        title: `Zip Purcharge Orders Compiled${zipPoNum ? ` — ${zipPoNum}` : ''}`,
+        title: `Zip Purchase Orders Compiled${zipPoNum ? ` — ${zipPoNum}` : ''}`,
         timestamp: formatDateTime(zipTime) || 'Processed',
         dateObj: parseToDateObject(zipTime),
         actor: matchingZipOrder.Supervisor || 'Storekeeper',
@@ -397,18 +643,13 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
             <p><strong>Total Pieces:</strong> {parseInt(matchingZipOrder.Total_Pieces_CH || matchingZipOrder.Total_Pieces) || 0} pcs</p>
             <p><strong>Total Cost:</strong> ₹{parseFloat(matchingZipOrder.Total_Cost || 0).toLocaleString('en-IN')}</p>
             <p><strong>Supervisor:</strong> {matchingZipOrder.Supervisor || 'N/A'}</p>
-            {placements.length > 0 && (
-              <p><strong>Placements:</strong> {placements.join(', ')}</p>
-            )}
-            {matchingZipOrder.Gate_Entry_Person && <p><strong>Gate Entry:</strong> {matchingZipOrder.Gate_Entry_Person} on {matchingZipOrder.Gate_Entry_Date ? new Date(matchingZipOrder.Gate_Entry_Date).toLocaleDateString('en-GB') : ''}</p>}
-            {matchingZipOrder.Material_Received_By && <p><strong>Material Received:</strong> {matchingZipOrder.Material_Received_By} on {matchingZipOrder.Material_Received_Date ? new Date(matchingZipOrder.Material_Received_Date).toLocaleDateString('en-GB') : ''}</p>}
-            {matchingZipOrder.Supplier_Name && <p><strong>Supplier:</strong> {matchingZipOrder.Supplier_Name}</p>}
+            {placements.length > 0 && <p><strong>Placements:</strong> {placements.join(', ')}</p>}
           </div>
         )
       });
     }
 
-    // 5. Milestone: Doori PO compiled — from doori table directly
+    // 5. Milestone: Doori PO compiled
     const matchingDooriOrder = dooriOrders.find(h => String(h.Lot_Number).toLowerCase() === lotIdLower);
     if (matchingDooriOrder && matchingDooriOrder.dori_payload) {
       const doriPoNum = matchingDooriOrder.po_number || '';
@@ -432,149 +673,93 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
             <p><strong>Total Pieces:</strong> {parseInt(matchingDooriOrder.Total_Pieces) || 0} pcs</p>
             <p><strong>Total Cost:</strong> ₹{parseFloat(matchingDooriOrder.Total_Cost || 0).toLocaleString('en-IN')}</p>
             <p><strong>Supervisor:</strong> {matchingDooriOrder.Supervisor || 'N/A'}</p>
-            {placements.length > 0 && (
-              <p><strong>Placements:</strong> {placements.join(', ')}</p>
-            )}
-            {matchingDooriOrder.Gate_Entry_Person && <p><strong>Gate Entry:</strong> {matchingDooriOrder.Gate_Entry_Person} on {matchingDooriOrder.Gate_Entry_Date ? new Date(matchingDooriOrder.Gate_Entry_Date).toLocaleDateString('en-GB') : ''}</p>}
-            {matchingDooriOrder.Material_Received_By && <p><strong>Material Received:</strong> {matchingDooriOrder.Material_Received_By} on {matchingDooriOrder.Material_Received_Date ? new Date(matchingDooriOrder.Material_Received_Date).toLocaleDateString('en-GB') : ''}</p>}
-            {matchingDooriOrder.Supplier_Name && <p><strong>Supplier:</strong> {matchingDooriOrder.Supplier_Name}</p>}
+            {placements.length > 0 && <p><strong>Placements:</strong> {placements.join(', ')}</p>}
           </div>
         )
       });
     }
 
-    // 6. Milestones: Scanner activity and Returnable Gate Passes (RGPs) (from scans table)
-    // First, find all RGP document numbers that are associated with the selected design lot
-    const associatedRgpNumbers = new Set();
-    scanLogs.forEach(s => {
-      if (s.rgp_payload) {
-        try {
-          const rgpData = JSON.parse(s.rgp_payload);
-          const hasLot = rgpData && Array.isArray(rgpData.entries) &&
-            rgpData.entries.some(entry => String(entry.lotNo).toLowerCase() === lotIdLower);
-          if (hasLot) {
-            associatedRgpNumbers.add(String(s.lot_number).toLowerCase());
-            if (rgpData.rgpNo) {
-              associatedRgpNumbers.add(String(rgpData.rgpNo).toLowerCase());
-            }
-          }
-        } catch (e) { }
+    // 6. Milestone: Associated Returnable Gate Passes (RGPs) from processedRgpList
+    const associatedRgps = processedRgpList.filter(r => {
+      if (String(r.rgpNo).toLowerCase() === lotIdLower) return true;
+      if (Array.isArray(r.entries)) {
+        return r.entries.some(e => String(e.lotNo || '').toLowerCase() === lotIdLower);
       }
+      return false;
     });
 
+    associatedRgps.forEach(r => {
+      events.push({
+        type: 'rgp_registered',
+        title: `Returnable Gate Pass Issued (#${r.rgpNo})`,
+        timestamp: formatDateTime(r.date) || 'Issued',
+        dateObj: parseToDateObject(r.date),
+        actor: r.preparedBy || 'Dispatch Head',
+        icon: <Truck size={16} />,
+        color: '#a855f7',
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <p><strong>Vendor / Processor:</strong> {r.vendor} ({r.department})</p>
+            <p><strong>Purpose:</strong> {r.purpose}</p>
+            <p><strong>Pass Status:</strong> <span className={`status-badge ${r.computedStatus === 'Returned' ? 'verified' : 'in-verification'}`}>{r.computedStatus}</span></p>
+            {r.entries.length > 0 && (
+              <div style={{ marginTop: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Dispatched {r.totalItemsCount} item(s) • Total Qty: {r.totalQty1}</span>
+              </div>
+            )}
+          </div>
+        )
+      });
+    });
+
+    // 7. Milestone: Scans & Gate Entries from scanLogs
     const matchingScans = scanLogs.filter(s => {
       const scanLotLower = String(s.lot_number).toLowerCase();
-      // Direct Design Lot match
       if (scanLotLower === lotIdLower) return true;
-      // RGP Number match
-      if (associatedRgpNumbers.has(scanLotLower)) return true;
-      return false;
+      return associatedRgps.some(r => String(r.rgpNo).toLowerCase() === scanLotLower);
     });
 
     matchingScans.forEach(s => {
       const isRGP = s.scan_type === 'rgp_entry' || s.scan_type === 'rgp_return' || s.rgp_payload;
+      const isGate = s.scan_type === 'gate_entry';
+      const isPrintingOut = s.scan_type === 'printing_gate_out';
+
+      let title = 'Arrival Scanned at Gate';
+      let color = '#14b8a6';
 
       if (isRGP) {
-        let rgpData = null;
-        try {
-          rgpData = s.rgp_payload ? JSON.parse(s.rgp_payload) : null;
-        } catch (e) { }
-
-        events.push({
-          type: 'rgp_log',
-          title: (s.scan_type === 'rgp_return' ? 'Fabric RGP Returned' : 'Fabric RGP Dispatched') + ` (#${s.lot_number})`,
-          timestamp: formatDateTime(s.scanned_at) || 'Logged',
-          dateObj: parseToDateObject(s.scanned_at),
-          actor: s.person_name || 'Gatekeeper',
-          icon: <Truck size={16} />,
-          color: '#a855f7',
-          details: (
-            <div style={{ fontSize: '12px', marginTop: '6px' }}>
-              <p><strong>Processor:</strong> {s.supplier_name}</p>
-              <p><strong>Dispatched Item:</strong> {s.material_name}</p>
-              {rgpData && (
-                <>
-                  {rgpData.rollsInfo && <p><strong>Rolls/Bales:</strong> {rgpData.rollsInfo}</p>}
-
-                  {/* Detailed itemized list from the RGP entries */}
-                  {rgpData.entries && rgpData.entries.length > 0 && (
-                    <div style={{ marginTop: '10px', borderTop: '1px dashed var(--border-color)', paddingTop: '8px' }}>
-                      <strong style={{ display: 'block', marginBottom: '4px', color: 'var(--accent-color)' }}>RGP Dispatch List:</strong>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginTop: '4px' }}>
-                        <thead>
-                          <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                            <th style={{ padding: '4px' }}>Item Details</th>
-                            <th style={{ padding: '4px', textAlign: 'right' }}>Qty 1</th>
-                            <th style={{ padding: '4px', textAlign: 'right' }}>Qty 2</th>
-                            <th style={{ padding: '4px' }}>Purpose</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rgpData.entries.map((entry, idx) => (
-                            <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                              <td style={{ padding: '4px' }}>{entry.itemDesc || 'N/A'}</td>
-                              <td style={{ padding: '4px', textAlign: 'right' }}>{entry.qty1 || 0} {entry.uom || 'pcs'}</td>
-                              <td style={{ padding: '4px', textAlign: 'right' }}>{entry.qty2 || 0} {entry.uom || 'pcs'}</td>
-                              <td style={{ padding: '4px' }}>{entry.purpose || 'N/A'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )
-        });
-      } else {
-        // Barcode scans (Gate Entry, Material Received, or Printing Gate Out)
-        const isGate = s.scan_type === 'gate_entry';
-        const isPrintingOut = s.scan_type === 'printing_gate_out';
-        
-        let title = 'Arrival Scanned at Gate';
-        let color = '#14b8a6';
-        if (isPrintingOut) {
-          title = 'Printing Gate Out Scan';
-          color = '#f97316';
-        } else if (!isGate) {
-          title = 'Material Received & Checked-In';
-          color = '#06b6d4';
-        }
-
-        events.push({
-          type: 'barcode_scan',
-          title: title,
-          timestamp: formatDateTime(s.scanned_at) || 'Scanned',
-          dateObj: parseToDateObject(s.scanned_at),
-          actor: s.person_name,
-          icon: <QrCode size={16} />,
-          color: color,
-          details: (
-            <div style={{ fontSize: '12px', marginTop: '6px', backgroundColor: 'rgba(255,255,255,0.02)', padding: '6px 10px', borderRadius: '6px', border: '1px dashed var(--border-color)' }}>
-              {isGate ? (
-                <p><strong>Gatekeeper Log:</strong> Verified delivery bundle from <strong>{s.supplier_name}</strong> carrying item: <em>{s.material_name}</em>.</p>
-              ) : isPrintingOut ? (
-                <p><strong>Printing Log:</strong> Sent out <strong>{s.quantity} pcs</strong> of <strong>{s.material_name}</strong> for printing by <strong>{s.person_name}</strong>.</p>
-              ) : (
-                <p><strong>Store Log:</strong> Checked-in <strong>{s.quantity} pcs</strong> of <strong>{s.material_name}</strong> into catalog stock from supplier <strong>{s.supplier_name}</strong>.</p>
-              )}
-            </div>
-          )
-        });
+        title = (s.scan_type === 'rgp_return' ? 'Fabric RGP Returned' : 'Fabric RGP Dispatched') + ` (#${s.lot_number})`;
+        color = s.scan_type === 'rgp_return' ? '#10b981' : '#a855f7';
+      } else if (isPrintingOut) {
+        title = 'Printing Gate Out Scan';
+        color = '#f97316';
+      } else if (!isGate) {
+        title = 'Material Received & Checked-In';
+        color = '#06b6d4';
       }
+
+      events.push({
+        type: isRGP ? 'rgp_scan' : 'barcode_scan',
+        title: title,
+        timestamp: formatDateTime(s.scanned_at) || 'Scanned',
+        dateObj: parseToDateObject(s.scanned_at),
+        actor: s.person_name || 'Gatekeeper',
+        icon: isRGP ? <Truck size={16} /> : <QrCode size={16} />,
+        color: color,
+        details: (
+          <div style={{ fontSize: '12px', marginTop: '6px' }}>
+            <p><strong>Operator:</strong> {s.person_name} | <strong>Party:</strong> {s.supplier_name}</p>
+            {s.material_name && <p><strong>Material:</strong> {s.material_name} {s.quantity > 0 ? `(${s.quantity} pcs)` : ''}</p>}
+          </div>
+        )
+      });
     });
 
-    // 7. Milestone: Material Issues and Returns (from issue_logs table)
+    // 8. Milestone: Material Issues (issue_logs)
     const lotIssueLogs = issueLogs.filter(log => String(log.lotId).toLowerCase() === lotIdLower);
     lotIssueLogs.forEach(log => {
       const isRet = log.isReturn === 1 || log.isReturn === true;
       const isRe = log.isReissue === 1 || log.isReissue === true;
-
-      let parsedMaterials = [];
-      try {
-        parsedMaterials = typeof log.materials === 'string' ? JSON.parse(log.materials) : log.materials || [];
-      } catch (e) { }
 
       let title = "Materials Issued";
       if (isRet) title = "Materials Returned";
@@ -591,120 +776,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         details: (
           <div style={{ fontSize: '12px', marginTop: '6px' }}>
             <p><strong>Category:</strong> {log.category || 'N/A'}</p>
-            <p><strong>Issuer Person:</strong> {log.personName || 'Storekeeper'}</p>
-            {log.receiverName && (
-              <p><strong>Received By:</strong> <span style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{log.receiverName}</span> {log.receiverDept ? `(${log.receiverDept})` : ''}</p>
-            )}
             <p><strong>Total Items Count:</strong> {log.volume || 0} pcs</p>
-            {parsedMaterials.length > 0 && (
-              <table style={{ width: '100%', marginTop: '6px', borderCollapse: 'collapse', fontSize: '11px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '4px' }}>Material Item</th>
-                    <th style={{ padding: '4px', textAlign: 'right' }}>Qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedMaterials.map((mat, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '4px' }}>{mat.name || mat.materialName || mat.description}</td>
-                      <td style={{ padding: '4px', textAlign: 'right' }}>{mat.qty || mat.quantity || mat.issueQty || 0} {mat.unit || 'pcs'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )
-      });
-    });
-
-    // 8. Milestone: Dedicated Extra Material Issues (from extra_material_issues table)
-    const lotExtraIssues = extraMaterialIssues.filter(ei => String(ei.lotId).toLowerCase() === lotIdLower);
-    lotExtraIssues.forEach(ei => {
-      const alreadyInIssueLogs = lotIssueLogs.some(l => String(l.id).includes(String(ei.voucherId)));
-      if (alreadyInIssueLogs) return;
-
-      const items = Array.isArray(ei.items) ? ei.items : [];
-      events.push({
-        type: 'extra_material_issue',
-        title: `Extra Material Requisition (${ei.voucherId || 'Voucher'})`,
-        timestamp: formatDateTime(ei.issueDate || ei.createdAt) || 'Processed',
-        dateObj: parseToDateObject(ei.issueDate || ei.createdAt),
-        actor: ei.personName || 'Store Staff',
-        icon: <AlertCircle size={16} />,
-        color: '#dc2626',
-        details: (
-          <div style={{ fontSize: '12px', marginTop: '6px' }}>
-            <p><strong>Voucher No:</strong> <span style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{ei.voucherId}</span></p>
-            <p><strong>Receiver:</strong> {ei.receiverName || 'Tailor'} ({ei.receiverDept || 'Cutting'})</p>
-            <p><strong>Status:</strong> <span className="status-badge verified">{ei.status || 'Issued'}</span></p>
-            {items.length > 0 && (
-              <table style={{ width: '100%', marginTop: '6px', borderCollapse: 'collapse', fontSize: '11px' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '4px' }}>Component / Material</th>
-                    <th style={{ padding: '4px', textAlign: 'right' }}>Extra Qty</th>
-                    <th style={{ padding: '4px' }}>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((it, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '4px' }}>{it.bomItemName || it.materialName}</td>
-                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 'bold', color: '#dc2626' }}>+{it.totalRequired} {it.unit}</td>
-                      <td style={{ padding: '4px', fontSize: '10.5px' }}>{it.reason || 'Extra requisition'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )
-      });
-    });
-
-    // 9. Milestone: Weight Captures (from weight_capture table)
-    const lotWeights = weightCaptures.filter(wc => String(wc.lotNo).toLowerCase() === lotIdLower);
-    lotWeights.forEach(wc => {
-      events.push({
-        type: 'weight_capture_log',
-        title: `Material Weight Captured (${wc.materialName || 'Fabric/Trims'})`,
-        timestamp: formatDateTime(wc.capturedAt || wc.createdAt) || 'Processed',
-        dateObj: parseToDateObject(wc.capturedAt || wc.createdAt),
-        actor: wc.storeIncharge || 'Weighbridge Staff',
-        icon: <ShieldCheck size={16} />,
-        color: '#8b5cf6',
-        details: (
-          <div style={{ fontSize: '12px', marginTop: '6px' }}>
-            <p><strong>Material:</strong> {wc.materialName} ({wc.materialCode || '—'})</p>
-            <p><strong>Pieces:</strong> {wc.pieces || 0} pcs</p>
-            <p><strong>Net Weight:</strong> {wc.netWeightKg || wc.weight || 0} kg</p>
-            <p><strong>Operator:</strong> {wc.storeIncharge || 'Store'}</p>
-          </div>
-        )
-      });
-    });
-
-    // 10. Milestone: Material Transfers
-    const lotTransfers = transfers.filter(t => 
-      (t.lotId && String(t.lotId).toLowerCase() === lotIdLower) ||
-      (t.lotNumber && String(t.lotNumber).toLowerCase() === lotIdLower)
-    );
-    lotTransfers.forEach(t => {
-      events.push({
-        type: 'stock_transfer_log',
-        title: `Stock Transferred to ${t.toLocation}`,
-        timestamp: formatDateTime(t.transferredAt || t.date) || 'Transferred',
-        dateObj: parseToDateObject(t.transferredAt || t.date),
-        actor: t.operator || t.transferredBy || 'Admin',
-        icon: <Shuffle size={16} />,
-        color: '#f59e0b',
-        details: (
-          <div style={{ fontSize: '12px', marginTop: '6px' }}>
-            <p><strong>Material:</strong> {t.materialName || t.materialCode}</p>
-            <p><strong>From:</strong> {t.fromLocation || 'Store'} → <strong>To:</strong> {t.toLocation}</p>
-            <p><strong>Quantity:</strong> {t.quantity || t.qty} packets/units</p>
           </div>
         )
       });
@@ -714,9 +786,102 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     return events.sort((a, b) => a.dateObj - b.dateObj);
   };
 
+  // Compile workflow steps for selected Lot or RGP
   const getWorkflowSteps = () => {
     if (!selectedLotId) return [];
 
+    // IF RGP IS SELECTED: 4 Operational Process Stages
+    if (selectedRgp) {
+      const rgpCreated = Boolean(selectedRgp.date || selectedRgp.rgpNo);
+      const gateOutDone = Boolean(selectedRgp.gateOutScan || selectedRgp.scans.length > 0);
+      const vendorTransitDone = Boolean(selectedRgp.date);
+      const returnDone = selectedRgp.isReturned;
+
+      return [
+        {
+          id: 'rgp_issue',
+          name: 'Stage 1: Returnable Gate Pass Issued & Authorized',
+          isComplete: rgpCreated,
+          date: selectedRgp.date,
+          actor: selectedRgp.preparedBy || 'Dispatch Head',
+          icon: <FileText size={16} />,
+          details: (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', marginBottom: '8px' }}>
+                <div><strong>Vendor:</strong> {selectedRgp.vendor}</div>
+                <div><strong>Pass Type:</strong> {selectedRgp.rgpType}</div>
+                <div><strong>Department:</strong> {selectedRgp.department}</div>
+                <div><strong>Purpose:</strong> {selectedRgp.purpose}</div>
+                <div><strong>Vehicle No:</strong> {selectedRgp.vehicleNo || 'N/A'}</div>
+                <div><strong>Authorized By:</strong> {selectedRgp.authorizedBy || 'Authorized'}</div>
+              </div>
+              {selectedRgp.entries.length > 0 && (
+                <div style={{ color: 'var(--accent-color)', fontWeight: '600' }}>
+                  ✓ {selectedRgp.totalItemsCount} item(s) logged in gate pass manifest (Total Qty: {selectedRgp.totalQty1})
+                </div>
+              )}
+            </div>
+          )
+        },
+        {
+          id: 'rgp_gate_out',
+          name: 'Stage 2: Security Gate Out Dispatch Scan',
+          isComplete: gateOutDone,
+          date: selectedRgp.gateOutScan ? selectedRgp.gateOutScan.scanned_at : (selectedRgp.scans[0]?.scanned_at || selectedRgp.date),
+          actor: selectedRgp.gateOutScan ? selectedRgp.gateOutScan.person_name : (selectedRgp.scans[0]?.person_name || 'Gatekeeper'),
+          icon: <Truck size={16} />,
+          details: gateOutDone ? (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <p><strong>Checkpoint Log:</strong> Verified outward dispatch at exit security post.</p>
+              <p><strong>Processor Destination:</strong> {selectedRgp.gateOutScan?.supplier_name || selectedRgp.vendor}</p>
+              {selectedRgp.gateOutScan?.scanned_at && (
+                <p><strong>Scanned Out:</strong> {formatDateTime(selectedRgp.gateOutScan.scanned_at)}</p>
+              )}
+            </div>
+          ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Awaiting security scanner gate-out check.</span>
+        },
+        {
+          id: 'rgp_transit',
+          name: 'Stage 3: Vendor Processing & Transit Window',
+          isComplete: vendorTransitDone,
+          date: selectedRgp.expectedReturnDate,
+          actor: selectedRgp.vendor,
+          icon: <Activity size={16} />,
+          details: (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span><strong>Target Return Date:</strong> {formatDateTime(selectedRgp.expectedReturnDate) || 'Flexible'}</span>
+                <span className={`status-badge ${selectedRgp.isReturned ? 'verified' : (selectedRgp.isOverdue ? 'overdue' : 'in-verification')}`}>
+                  {selectedRgp.computedStatus}
+                </span>
+              </div>
+              <p style={{ marginTop: '4px', color: 'var(--text-muted)' }}>
+                {selectedRgp.isReturned
+                  ? 'Material batch returned back to premises.'
+                  : (selectedRgp.isOverdue ? '⚠️ Return is overdue. Follow-up required with vendor.' : 'Processing in progress within turnaround window.')}
+              </p>
+            </div>
+          )
+        },
+        {
+          id: 'rgp_gate_in',
+          name: 'Stage 4: Security Gate In Return Scan & Inventory Inward',
+          isComplete: returnDone,
+          date: selectedRgp.gateInScan?.scanned_at,
+          actor: selectedRgp.gateInScan?.person_name || (returnDone ? 'Gatekeeper' : ''),
+          icon: <ShieldCheck size={16} />,
+          details: returnDone ? (
+            <div style={{ fontSize: '12px', marginTop: '6px' }}>
+              <p><strong>Return Verification:</strong> Security scanner verified return inward.</p>
+              {selectedRgp.gateInScan?.person_name && <p><strong>Verified By:</strong> {selectedRgp.gateInScan.person_name}</p>}
+              {selectedRgp.gateInScan?.scanned_at && <p><strong>Inward Scanned At:</strong> {formatDateTime(selectedRgp.gateInScan.scanned_at)}</p>}
+            </div>
+          ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Pending return delivery and gate scanner verification.</span>
+        }
+      ];
+    }
+
+    // IF DESIGN LOT IS SELECTED: Standard 6 stages with integrated RGP and Scan substeps
     const lotIdLower = resolvedLotId.toLowerCase().trim();
 
     // 1. Design Stage
@@ -738,33 +903,19 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     const poReleased = matchingPOs.length > 0;
     const poDate = poReleased ? matchingPOs[0].date : '';
 
-    // 4. RGP Stage — gather all associated scans grouped by RGP number
-    const associatedRgpNumbers = new Set();
-    scanLogs.forEach(s => {
-      if (s.rgp_payload) {
-        try {
-          const rgpData = JSON.parse(s.rgp_payload);
-          const hasLot = rgpData && Array.isArray(rgpData.entries) &&
-            rgpData.entries.some(entry => String(entry.lotNo).toLowerCase() === lotIdLower);
-          if (hasLot) {
-            associatedRgpNumbers.add(String(s.lot_number).toLowerCase());
-            if (rgpData.rgpNo) associatedRgpNumbers.add(String(rgpData.rgpNo).toLowerCase());
-          }
-        } catch (e) { }
+    // 4. Fabric RGP Stage
+    const associatedRgps = processedRgpList.filter(r => {
+      if (String(r.rgpNo).toLowerCase() === lotIdLower) return true;
+      if (Array.isArray(r.entries)) {
+        return r.entries.some(e => String(e.lotNo || '').toLowerCase() === lotIdLower);
       }
-    });
-
-    const rgpScans = scanLogs.filter(s => {
-      const scanLotLower = String(s.lot_number).toLowerCase();
-      if (scanLotLower === lotIdLower) return s.scan_type === 'rgp_entry' || s.scan_type === 'rgp_return' || s.rgp_payload;
-      if (associatedRgpNumbers.has(scanLotLower)) return true;
       return false;
     });
-    const rgpReleased = rgpScans.length > 0;
-    const rgpDate = rgpReleased ? rgpScans[0].scanned_at : '';
-    const rgpActor = rgpReleased ? rgpScans[0].person_name : '';
+    const rgpReleased = associatedRgps.length > 0;
+    const rgpDate = rgpReleased ? associatedRgps[0].date : '';
+    const rgpActor = rgpReleased ? associatedRgps[0].preparedBy : '';
 
-    // Helper: build scanner sub-steps for a given lot reference
+    // Helper: build scanner sub-steps
     const buildScannerSubSteps = (lotRef) => {
       const ref = String(lotRef).toLowerCase();
       const gate = scanLogs.find(s => String(s.lot_number).toLowerCase() === ref && s.scan_type === 'gate_entry');
@@ -777,28 +928,22 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       ];
     };
 
-    // RGP scanner sub-steps (use the lot ID for direct scans)
     const rgpSubSteps = buildScannerSubSteps(lotIdLower);
 
-    // 5. ZIP Stage — from zip table
+    // 5. ZIP Stage
     const matchingZipOrder = zipOrders.find(z => String(z.Lot_Number).toLowerCase() === lotIdLower);
     const zipCompiled = !!matchingZipOrder;
     const zipDate = zipCompiled ? (matchingZipOrder.Saved_At || matchingZipOrder.Issue_Date || '') : '';
     const zipActor = zipCompiled ? (matchingZipOrder.Supervisor || 'Storekeeper') : '';
     const zipPoNum = zipCompiled ? (matchingZipOrder.po_number || '') : '';
-
-    // Zip PO scanner sub-steps
     const zipSubSteps = buildScannerSubSteps(lotIdLower);
 
     // 6. Doori PO Stage
     const matchingDooriOrder = dooriOrders.find(h => String(h.Lot_Number).toLowerCase() === lotIdLower);
-    const dooriPayloadExists = matchingDooriOrder && matchingDooriOrder.dori_payload;
-    const dooriReleased = !!dooriPayloadExists;
+    const dooriReleased = !!(matchingDooriOrder && matchingDooriOrder.dori_payload);
     const dooriDate = dooriReleased ? (matchingDooriOrder.Issue_Date || matchingDooriOrder.Timestamp || '') : '';
     const dooriActor = dooriReleased ? (matchingDooriOrder.Supervisor || 'Storekeeper') : '';
     const doriPoNum = dooriReleased ? (matchingDooriOrder.po_number || '') : '';
-
-    // Doori PO scanner sub-steps
     const dooriSubSteps = buildScannerSubSteps(lotIdLower);
 
     return [
@@ -864,20 +1009,20 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
         details: rgpReleased ? (
           <div style={{ fontSize: '12px', marginTop: '6px' }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-              {rgpScans.map((s, idx) => (
+              {associatedRgps.map((r, idx) => (
                 <span key={idx} style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)', color: '#a855f7', padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: '700' }}>
-                  RGP #{s.lot_number}
+                  RGP #{r.rgpNo} ({r.computedStatus})
                 </span>
               ))}
             </div>
-            <div><strong>Supplier:</strong> {rgpScans[0]?.supplier_name || 'N/A'}</div>
-            <div><strong>Material:</strong> {rgpScans[0]?.material_name || 'N/A'}</div>
+            <div><strong>Primary Vendor:</strong> {associatedRgps[0]?.vendor || 'N/A'}</div>
+            <div><strong>Department:</strong> {associatedRgps[0]?.department || 'N/A'}</div>
           </div>
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Returnable Gate Pass dispatch has not been logged.</span>
       },
       {
         id: 'zip',
-        name: `Zip Purcharge Orders — Zipper Selection${zipPoNum ? ` (${zipPoNum})` : ''}`,
+        name: `Zip Purchase Orders — Zipper Selection${zipPoNum ? ` (${zipPoNum})` : ''}`,
         isComplete: zipCompiled,
         date: zipDate,
         actor: zipActor,
@@ -889,13 +1034,12 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
             <div><strong>Garment:</strong> {matchingZipOrder.Garment_Type || matchingZipOrder.ch_garment || 'N/A'} — {matchingZipOrder.Style || matchingZipOrder.ch_style || ''}</div>
             <div><strong>Total Pieces:</strong> {parseInt(matchingZipOrder.Total_Pieces_CH || matchingZipOrder.Total_Pieces) || 0} pcs</div>
             <div><strong>Total Cost:</strong> ₹{parseFloat(matchingZipOrder.Total_Cost || 0).toLocaleString('en-IN')}</div>
-            <div><strong>Supervisor:</strong> {matchingZipOrder.Supervisor || 'N/A'}</div>
           </div>
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Zipper specifications not yet compiled.</span>
       },
       {
         id: 'doori',
-        name: `Dori Purcharge Orders — Thread / Drawstring${doriPoNum ? ` (${doriPoNum})` : ''}`,
+        name: `Dori Purchase Orders — Thread / Drawstring${doriPoNum ? ` (${doriPoNum})` : ''}`,
         isComplete: dooriReleased,
         date: dooriDate,
         actor: dooriActor,
@@ -907,60 +1051,145 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
             <div><strong>Garment:</strong> {matchingDooriOrder.Garment_Type || 'N/A'} — {matchingDooriOrder.Style || ''}</div>
             <div><strong>Total Pieces:</strong> {parseInt(matchingDooriOrder.Total_Pieces) || 0} pcs</div>
             <div><strong>Total Cost:</strong> ₹{parseFloat(matchingDooriOrder.Total_Cost || 0).toLocaleString('en-IN')}</div>
-            <div><strong>Supervisor:</strong> {matchingDooriOrder.Supervisor || 'N/A'}</div>
           </div>
         ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>Thread / doori purchase specifications not yet compiled.</span>
       },
     ];
   };
 
+  // PDF Generator for selected item (RGP or Design Lot)
   const downloadWorkflowPDF = () => {
+    // If RGP is selected: Download dedicated RGP Pass & Security Scanner Audit
+    if (selectedRgp) {
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const r = selectedRgp;
+
+      // Header
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.setTextColor(31, 41, 55);
+      doc.text('RETURNABLE GATE PASS (RGP) AUDIT REPORT', 40, 50);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(107, 114, 128);
+      doc.text(`Generated on: ${new Date().toLocaleString('en-GB')} | Pass Ref: #${r.rgpNo}`, 40, 68);
+
+      // Status Badge in PDF
+      const statusColor = r.isReturned ? [16, 185, 129] : (r.isOverdue ? [239, 68, 68] : [245, 158, 11]);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+      doc.text(`STATUS: ${r.computedStatus.toUpperCase()}`, 380, 50);
+      doc.setTextColor(31, 41, 55);
+
+      // RGP Meta Table
+      autoTable(doc, {
+        startY: 85,
+        margin: { left: 40, right: 40 },
+        theme: 'grid',
+        head: [['Field', 'Details', 'Field', 'Details']],
+        body: [
+          ['RGP Number', `#${r.rgpNo}`, 'Status', r.computedStatus],
+          ['Date Issued', r.date || '—', 'Expected Return', r.expectedReturnDate || '—'],
+          ['Vendor / Processor', r.vendor || '—', 'Department', r.department || '—'],
+          ['Pass Type', r.rgpType || '—', 'Vehicle No', r.vehicleNo || '—'],
+          ['Prepared By', r.preparedBy || '—', 'Authorized By', r.authorizedBy || '—'],
+          ['Purpose', r.purpose || '—', 'Remarks', r.remarks || '—']
+        ],
+        styles: { fontSize: 8.5, cellPadding: 5 },
+        headStyles: { fillColor: [147, 51, 234], textColor: [255, 255, 255] }
+      });
+
+      // Itemized Matrix
+      const itemsY = doc.lastAutoTable.finalY + 20;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(31, 41, 55);
+      doc.text('1. Itemized Dispatched Items Matrix', 40, itemsY);
+
+      const itemRows = r.entries.map((e, idx) => [
+        idx + 1,
+        e.lotNo || '—',
+        e.itemDesc || '—',
+        `${e.qty1 || 0} ${e.uom || 'pcs'}`,
+        `${e.qty2 || 0} ${e.uom || 'pcs'}`,
+        e.purpose || '—',
+        e.remarks || '—'
+      ]);
+
+      autoTable(doc, {
+        startY: itemsY + 10,
+        margin: { left: 40, right: 40 },
+        theme: 'striped',
+        head: [['#', 'Lot No', 'Description / Fabric Details', 'Qty 1', 'Qty 2', 'Purpose', 'Remarks']],
+        body: itemRows.length > 0 ? itemRows : [['—', '—', 'No itemized rows found', '—', '—', '—', '—']],
+        styles: { fontSize: 8, cellPadding: 5 },
+        headStyles: { fillColor: [55, 65, 81], textColor: [255, 255, 255] }
+      });
+
+      // Scanner Logs Table
+      const scansY = doc.lastAutoTable.finalY + 20;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(31, 41, 55);
+      doc.text('2. Security Gate Scanner & Verification Records', 40, scansY);
+
+      const scanRows = r.scans.map((s, idx) => [
+        idx + 1,
+        formatDateTime(s.scanned_at),
+        s.scan_type === 'rgp_entry' ? 'Gate Out (Dispatch)' : (s.scan_type === 'rgp_return' ? 'Gate In (Return)' : s.scan_type || 'Gate Entry'),
+        s.person_name || 'Gatekeeper',
+        s.supplier_name || r.vendor || '—',
+        `${s.quantity || 0} pcs`,
+        'VERIFIED SCAN'
+      ]);
+
+      autoTable(doc, {
+        startY: scansY + 10,
+        margin: { left: 40, right: 40 },
+        theme: 'striped',
+        head: [['#', 'Timestamp', 'Gate Event', 'Security Gatekeeper', 'Vendor / Destination', 'Quantity', 'Verification']],
+        body: scanRows.length > 0 ? scanRows : [['—', '—', 'Awaiting gate scanner verification', '—', '—', '—', 'PENDING']],
+        styles: { fontSize: 8, cellPadding: 5 },
+        headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255] }
+      });
+
+      doc.save(`RGP_${r.rgpNo}_Audit_Report.pdf`);
+      return;
+    }
+
+    // If Design Lot is selected: Download Lot Workflow Report
     if (!selectedDesign) return;
 
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
     const lotId = selectedDesign.id;
-    const lotIdLower = lotId.toLowerCase().trim();
-    const matchingZipHeader = cuttingHeaders.find(h => String(h.Lot_Number).toLowerCase() === lotIdLower);
-    const matchingDooriOrder = dooriOrders.find(h => String(h.Lot_Number).toLowerCase() === lotIdLower);
-
     const allSteps = getWorkflowSteps();
-    const steps = allSteps.filter(step => {
-      if (step.id === 'design' || step.id === 'approved') return true;
-      return step.isComplete;
-    });
-    const gateScanDone = allSteps.find(s => s.id === 'gate_scan')?.isComplete;
-    const materialScanDone = allSteps.find(s => s.id === 'material_scan')?.isComplete;
-    const supplierScanDone = allSteps.find(s => s.id === 'supplier_scan')?.isComplete;
-    const designApproved = allSteps.find(s => s.id === 'approved')?.isComplete;
-    const allComplete = designApproved && (gateScanDone || materialScanDone || supplierScanDone);
+    const steps = allSteps.filter(step => step.id === 'design' || step.id === 'approved' || step.isComplete);
+    const allComplete = steps.length >= 4;
 
     // Title / Header
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(20);
-    doc.setTextColor(31, 41, 55); // slate-800
+    doc.setTextColor(31, 41, 55);
     doc.text('Lot Operational Workflow Report', 40, 50);
 
-    // Subtitle
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    doc.setTextColor(107, 114, 128); // gray-500
+    doc.setTextColor(107, 114, 128);
     doc.text(`Generated on: ${new Date().toLocaleString('en-GB')}`, 40, 68);
 
     // Status Banner in PDF
     const statusText = allComplete ? 'WORKFLOW STATUS: COMPLETE' : 'WORKFLOW STATUS: IN PROGRESS';
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    if (allComplete) {
-      doc.setTextColor(16, 185, 129); // green-500
-    } else {
-      doc.setTextColor(245, 158, 11); // amber-500
-    }
+    doc.setTextColor(allComplete ? 16 : 245, allComplete ? 185 : 158, allComplete ? 129 : 11);
     doc.text(statusText, 380, 50);
-    doc.setTextColor(31, 41, 55); // Reset
+    doc.setTextColor(31, 41, 55);
 
     // Lot Info Box
-    doc.setDrawColor(229, 231, 235); // gray-200
-    doc.setFillColor(249, 250, 251); // gray-50
+    doc.setDrawColor(229, 231, 235);
+    doc.setFillColor(249, 250, 251);
     doc.rect(40, 85, 515, 90, 'FD');
 
     doc.setFontSize(10);
@@ -983,19 +1212,13 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     doc.text('1. Workflow Stage Progress Checklist', 40, 205);
 
     const checklistHeaders = [['Step', 'Workflow Stage', 'Status', 'Completed Date/Time', 'Actor / Operator']];
-    const checklistBody = steps.map((step, idx) => {
-      let stepStatusText = step.isComplete ? 'COMPLETED' : 'PENDING';
-      let formattedDate = step.isComplete ? formatDateTime(step.date) : '—';
-      let actorName = step.isComplete ? step.actor : '—';
-
-      return [
-        idx + 1,
-        step.name,
-        stepStatusText,
-        formattedDate,
-        actorName
-      ];
-    });
+    const checklistBody = steps.map((step, idx) => [
+      idx + 1,
+      step.name,
+      step.isComplete ? 'COMPLETED' : 'PENDING',
+      step.isComplete ? formatDateTime(step.date) : '—',
+      step.isComplete ? step.actor : '—'
+    ]);
 
     autoTable(doc, {
       head: checklistHeaders,
@@ -1004,17 +1227,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       margin: { left: 40, right: 40 },
       theme: 'grid',
       styles: { fontSize: 8.5, cellPadding: 6 },
-      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255] }, // indigo-600
-      didParseCell: function (data) {
-        if (data.column.index === 2) {
-          if (data.cell.text[0] === 'COMPLETED') {
-            data.cell.styles.textColor = [16, 185, 129];
-            data.cell.styles.fontStyle = 'bold';
-          } else {
-            data.cell.styles.textColor = [156, 163, 175];
-          }
-        }
-      }
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255] }
     });
 
     // Section 2: Chronological History Audit Log
@@ -1025,40 +1238,12 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     doc.text('2. Detailed Operational History Log', 40, nextY);
 
     const logHeaders = [['Timestamp', 'Event Title', 'Actor / Operator', 'Operational Details']];
-    const logBody = timelineEvents.map(evt => {
-      let detailsText = '';
-      if (evt.type === 'registration') {
-        detailsText = `Style: ${selectedDesign.style || 'N/A'}, Category: ${selectedDesign.category || 'N/A'}, Brand: ${selectedDesign.brand || 'N/A'}, Target: ${selectedDesign.quantity || 100} pcs`;
-      } else if (evt.type === 'verification') {
-        const matchingLog = historyLogs.find(h => formatDateTime(h.timestamp) === evt.timestamp);
-        detailsText = matchingLog?.details || 'Technical Verification approved.';
-      } else if (evt.type === 'po_general') {
-        const poNum = evt.title.match(/\(([^)]+)\)/)?.[1] || '';
-        const matchingPo = pos.find(p => p.poNumber === poNum);
-        detailsText = `Supplier: ${matchingPo?.vendorName || 'N/A'}, Total Amount: ${currencySymbol}${matchingPo?.total || 0}`;
-      } else if (evt.type === 'zip_po_created') {
-        detailsText = `Compiled zipper specification selection. Priority: ${matchingZipHeader?.Priority || 'Normal'}`;
-      } else if (evt.type === 'doori_po_created') {
-        detailsText = `Compiled doori/thread specifications. Priority: ${matchingDooriOrder?.priority || 'Normal'}`;
-      } else if (evt.type === 'rgp_log') {
-        detailsText = `Dispatched/Returned fabric gate pass. Processor: ${evt.actor}`;
-      } else if (evt.type === 'barcode_scan') {
-        const isGate = evt.title.includes('Arrival');
-        detailsText = isGate ? 'Scanned entry gate pass check.' : 'Materials received and catalog stock checked-in.';
-      } else if (evt.type === 'material_issue_log') {
-        const matchingLog = issueLogs.find(l => formatDateTime(l.date) === evt.timestamp);
-        detailsText = `Category: ${matchingLog?.category || 'N/A'}, Vol: ${matchingLog?.volume || 0}`;
-      } else {
-        detailsText = 'Status update compiled in system logs.';
-      }
-
-      return [
-        evt.timestamp,
-        evt.title,
-        evt.actor || 'System',
-        detailsText
-      ];
-    });
+    const logBody = timelineEvents.map(evt => [
+      evt.timestamp,
+      evt.title,
+      evt.actor || 'System',
+      typeof evt.details === 'string' ? evt.details : 'Status logged in system records'
+    ]);
 
     autoTable(doc, {
       head: logHeaders,
@@ -1067,7 +1252,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
       margin: { left: 40, right: 40 },
       theme: 'striped',
       styles: { fontSize: 8, cellPadding: 5 },
-      headStyles: { fillColor: [55, 65, 81], textColor: [255, 255, 255] } // gray-700
+      headStyles: { fillColor: [55, 65, 81], textColor: [255, 255, 255] }
     });
 
     doc.save(`Lot_${lotId}_Workflow_Report.pdf`);
@@ -1077,26 +1262,18 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
   const workflowSteps = getWorkflowSteps();
   const completedStepsCount = workflowSteps.filter(s => s.isComplete).length;
   const visibleSteps = workflowSteps.filter(step => {
-    if (step.id === 'design' || step.id === 'approved') return true;
+    if (step.id === 'design' || step.id === 'approved' || step.id === 'rgp_issue') return true;
     return step.isComplete;
   });
-  const designApproved = workflowSteps.find(s => s.id === 'approved')?.isComplete;
-  const rgpDone = workflowSteps.find(s => s.id === 'rgp')?.isComplete;
-  const zipDone = workflowSteps.find(s => s.id === 'zip')?.isComplete;
-  const dooriDone = workflowSteps.find(s => s.id === 'doori')?.isComplete;
-  const allComplete = designApproved && (rgpDone || zipDone || dooriDone);
-
-  // Helper function to resolve dynamic design image preview URLs
-  const getCleanImageUrl = (url) => {
-    if (!url) return '';
-    return url.replace('wait', `${getBackendUrl()}`);
-  };
+  const allComplete = selectedRgp ? selectedRgp.isReturned : (completedStepsCount >= 4);
 
   return (
     <div className="animate-fade">
       <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>Production Work History</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Compile the complete operational history of a design lot (registration, approvals, PO creations, returnable gate pass, gate check-ins, and store receipts).</p>
+        <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>Production &amp; RGP Work History</h2>
+        <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>
+          Complete operational register &amp; workflow audit for Design Lots, Returnable Gate Passes (RGPs), Purchase Orders, and Security Gate Scanner records.
+        </p>
       </div>
 
       {errorMessage && (
@@ -1114,55 +1291,54 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
           gap: '12px',
           marginBottom: '24px'
         }}>
-          {/* Total Lots */}
           {[
             {
-              label: 'Total Lots',
-              value: filteredLotsList.length,
-              icon: <ClipboardList size={18} />,
+              label: 'Total Items',
+              value: unifiedItemsList.length,
+              icon: <Boxes size={18} />,
               color: '#0284c7',
               bg: '#e0f2fe',
               pct: 100
             },
             {
-              label: 'With Issues',
-              value: issueLogs.filter(l => filteredLotsList.some(d => String(d.id) === String(l.lotId))).length,
+              label: 'RGP Passes',
+              value: processedRgpList.length,
+              icon: <Truck size={18} />,
+              color: '#a855f7',
+              bg: '#f3e8ff',
+              pct: processedRgpList.length > 0 ? 100 : 0
+            },
+            {
+              label: 'In Transit RGPs',
+              value: processedRgpList.filter(r => r.computedStatus === 'In Transit').length,
               icon: <Activity size={18} />,
-              color: '#059669',
+              color: '#f59e0b',
+              bg: '#fef3c7',
+              pct: processedRgpList.length > 0 ? Math.round((processedRgpList.filter(r => r.computedStatus === 'In Transit').length / processedRgpList.length) * 100) : 0
+            },
+            {
+              label: 'Returned RGPs',
+              value: processedRgpList.filter(r => r.computedStatus === 'Returned').length,
+              icon: <ShieldCheck size={18} />,
+              color: '#10b981',
               bg: '#d1fae5',
-              pct: filteredLotsList.length > 0 ? Math.round((new Set(issueLogs.map(l => String(l.lotId))).size / filteredLotsList.length) * 100) : 0
+              pct: processedRgpList.length > 0 ? Math.round((processedRgpList.filter(r => r.computedStatus === 'Returned').length / processedRgpList.length) * 100) : 0
             },
             {
-              label: 'Transfers',
-              value: transfers.length,
-              icon: <Shuffle size={18} />,
-              color: '#2563eb',
-              bg: '#eff6ff',
-              pct: filteredLotsList.length > 0 ? Math.min(Math.round((transfers.length / filteredLotsList.length) * 100), 100) : 0
-            },
-            {
-              label: 'Scan Events',
+              label: 'Gate Scan Events',
               value: scanLogs.length,
               icon: <QrCode size={18} />,
               color: '#06b6d4',
               bg: '#cffafe',
-              pct: filteredLotsList.length > 0 ? Math.min(Math.round((scanLogs.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
+              pct: 100
             },
             {
-              label: 'Extra Issues',
-              value: extraMaterialIssues.length,
-              icon: <TrendingUp size={18} />,
-              color: '#d97706',
-              bg: '#fef3c7',
-              pct: filteredLotsList.length > 0 ? Math.min(Math.round((extraMaterialIssues.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
-            },
-            {
-              label: 'Weight Captures',
-              value: weightCaptures.length,
-              icon: <BarChart3 size={18} />,
-              color: '#7c3aed',
-              bg: '#ede9fe',
-              pct: filteredLotsList.length > 0 ? Math.min(Math.round((weightCaptures.length / Math.max(filteredLotsList.length, 1)) * 100), 100) : 0
+              label: 'Material Issues',
+              value: issueLogs.length,
+              icon: <ClipboardList size={18} />,
+              color: '#059669',
+              bg: '#d1fae5',
+              pct: 100
             },
           ].map((stat, i) => (
             <div
@@ -1202,44 +1378,118 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
 
       <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
-        {/* Left Panel: Search & Lot select */}
-        <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        {/* Left Panel: Category Tabs, Search & Item Selector */}
+        <div style={{ flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="panel" style={{ padding: '20px' }}>
-            <h3 className="panel-title" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <h3 className="panel-title" style={{ marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Search size={16} />
-              <span>Select Design Lot</span>
+              <span>Select Item to Track</span>
             </h3>
 
-            <div style={{ position: 'relative', marginBottom: '14px' }}>
+            {/* Category Selector Tabs */}
+            <div style={{
+              display: 'flex',
+              gap: '4px',
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '3px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              marginBottom: '14px',
+              flexWrap: 'wrap'
+            }}>
+              {[
+                { id: 'all', label: 'All Items', count: unifiedItemsList.length },
+                { id: 'designs', label: 'Lots', count: designs.length },
+                { id: 'rgps', label: 'RGPs', count: processedRgpList.length, highlight: '#a855f7' },
+                { id: 'pos', label: 'POs', count: pos.length }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setItemCategory(tab.id)}
+                  style={{
+                    flex: 1,
+                    minWidth: '55px',
+                    padding: '5px 8px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '11px',
+                    fontWeight: itemCategory === tab.id ? '800' : '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                    backgroundColor: itemCategory === tab.id ? 'var(--bg-primary)' : 'transparent',
+                    color: itemCategory === tab.id ? (tab.highlight || 'var(--accent-color)') : 'var(--text-muted)',
+                    boxShadow: itemCategory === tab.id ? 'var(--shadow-sm)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span style={{
+                    fontSize: '9px',
+                    opacity: 0.8,
+                    background: itemCategory === tab.id ? 'rgba(99,102,241,0.1)' : 'rgba(0,0,0,0.04)',
+                    padding: '1px 4px',
+                    borderRadius: '4px'
+                  }}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Search input */}
+            <div style={{ position: 'relative', marginBottom: '12px' }}>
               <input
                 type="text"
-                placeholder="Search Lot, Style, Brand..."
+                placeholder="Search Lot, RGP #, Vendor, PO..."
                 className="form-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                style={{ width: '100%', paddingLeft: '36px' }}
+                style={{ width: '100%', paddingLeft: '34px', fontSize: '12px' }}
               />
-              <Search size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             </div>
 
-            {/* Quick Filters */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
-              <div>
-                <label style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '3px', textTransform: 'uppercase' }}>Design Type</label>
-                <select
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
-                  style={{
-                    width: '100%', padding: '6px 8px', borderRadius: '6px',
-                    border: '1.5px solid var(--border-color)', background: 'var(--bg-primary)',
-                    fontSize: '11px', fontWeight: '700', color: 'var(--text-main)', outline: 'none'
-                  }}
-                >
-                  <option value="all">All Designs</option>
-                  <option value="original">Original</option>
-                  <option value="version">Recreated</option>
-                </select>
-              </div>
+            {/* Quick Filters Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+              {itemCategory === 'rgps' ? (
+                <div>
+                  <label style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '3px', textTransform: 'uppercase' }}>RGP Status</label>
+                  <select
+                    value={rgpStatusFilter}
+                    onChange={(e) => setRgpStatusFilter(e.target.value)}
+                    style={{
+                      width: '100%', padding: '6px 8px', borderRadius: '6px',
+                      border: '1.5px solid var(--border-color)', background: 'var(--bg-primary)',
+                      fontSize: '11px', fontWeight: '700', color: 'var(--text-main)', outline: 'none'
+                    }}
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="in_transit">In Transit</option>
+                    <option value="returned">Returned</option>
+                    <option value="overdue">Overdue</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '3px', textTransform: 'uppercase' }}>Design Type</label>
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    style={{
+                      width: '100%', padding: '6px 8px', borderRadius: '6px',
+                      border: '1.5px solid var(--border-color)', background: 'var(--bg-primary)',
+                      fontSize: '11px', fontWeight: '700', color: 'var(--text-main)', outline: 'none'
+                    }}
+                  >
+                    <option value="all">All Designs</option>
+                    <option value="original">Original</option>
+                    <option value="version">Recreated</option>
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '3px', textTransform: 'uppercase' }}>Sort Order</label>
@@ -1258,85 +1508,136 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
               </div>
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <label style={{ fontSize: '9px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '3px', textTransform: 'uppercase' }}>Date Range</label>
-              <select
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-                style={{
-                  width: '100%', padding: '6px 8px', borderRadius: '6px',
-                  border: '1.5px solid var(--border-color)', background: 'var(--bg-primary)',
-                  fontSize: '11px', fontWeight: '700', color: 'var(--text-main)', outline: 'none'
-                }}
-              >
-                <option value="all">All Dates</option>
-                <option value="today">Today</option>
-                <option value="yesterday">Yesterday</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-              </select>
-            </div>
-
+            {/* List of Filtered Items */}
             <div style={{
               display: 'flex', flexDirection: 'column', gap: '6px',
               maxHeight: '340px', overflowY: 'auto', paddingRight: '4px',
               border: '1px solid var(--border-color)', borderRadius: '8px', padding: '6px'
             }}>
-              {filteredLotsList.map(d => (
-                <div
-                  key={d.id}
-                  onClick={() => setSelectedLotId(d.id)}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                    transition: 'all 0.15s',
-                    backgroundColor: selectedLotId === d.id ? 'var(--accent-light, rgba(99, 102, 241, 0.08))' : 'transparent',
-                    border: '1px solid',
-                    borderColor: selectedLotId === d.id ? 'var(--accent-color)' : 'transparent',
-                    color: selectedLotId === d.id ? 'var(--accent-color)' : 'var(--text-main)'
-                  }}
-                  onMouseEnter={(e) => {
-                    if (selectedLotId !== d.id) e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (selectedLotId !== d.id) e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span style={{ fontWeight: '700' }}>
-                      {String(d.id).toUpperCase().startsWith('PO-') ? '' : 'Lot #'}
-                      {getLotVersionInfo(d.id, designs).displayLot}
-                    </span>
-                    {getLotVersionInfo(d.id, designs).isRecreated && (
-                      <span className="status-badge in-verification" style={{ fontSize: '9px', padding: '1px 4px', textTransform: 'none' }}>
-                        {getLotVersionInfo(d.id, designs).versionText}
-                      </span>
+              {filteredLotsList.map(item => {
+                const isSelected = selectedLotId === item.id;
+                const isRgp = item.itemType === 'rgp';
+                const isPo = item.itemType === 'po';
+
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => setSelectedLotId(item.id)}
+                    style={{
+                      padding: '9px 11px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      fontSize: '13px',
+                      transition: 'all 0.15s',
+                      backgroundColor: isSelected
+                        ? (isRgp ? 'rgba(168, 85, 247, 0.1)' : 'var(--accent-light, rgba(99, 102, 241, 0.08))')
+                        : 'transparent',
+                      border: '1.5px solid',
+                      borderColor: isSelected
+                        ? (isRgp ? '#a855f7' : 'var(--accent-color)')
+                        : 'transparent',
+                      color: isSelected
+                        ? (isRgp ? '#a855f7' : 'var(--accent-color)')
+                        : 'var(--text-main)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {isRgp ? <Truck size={14} style={{ color: '#a855f7' }} /> : (isPo ? <ClipboardList size={14} style={{ color: '#6366f1' }} /> : <FileText size={14} />)}
+                        <span style={{ fontWeight: '700', fontSize: '13px' }}>
+                          {item.title}
+                        </span>
+                      </div>
+
+                      {isRgp && item.rgp && (
+                        <span className={`status-badge ${item.rgp.computedStatus === 'Returned' ? 'verified' : (item.rgp.computedStatus === 'Overdue' ? 'overdue' : 'in-verification')}`} style={{ fontSize: '9px', padding: '1px 5px', textTransform: 'none' }}>
+                          {item.rgp.computedStatus}
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                      <span>{item.subTitle}</span>
+                      <span>{item.secondaryText}</span>
+                    </div>
+
+                    {item.date && (
+                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px', opacity: 0.75 }}>
+                        <Clock size={9} />
+                        <span>{formatDateTime(item.date)}</span>
+                      </div>
                     )}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    <span>{d.brand} ({d.category})</span>
-                    <span>{d.style}</span>
-                  </div>
-                  {d.date && (
-                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px', opacity: 0.75 }}>
-                      <Clock size={9} />
-                      <span>{formatDateTime(d.date)}</span>
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
+
               {filteredLotsList.length === 0 && (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
-                  No design lots found
+                  No records match the current filters
                 </div>
               )}
             </div>
           </div>
 
-          {/* Lot Summary Details Card */}
-          {selectedDesign && (
+          {/* Left Panel: Contextual Specification Card */}
+          {selectedRgp ? (
+            /* RGP Pass Specifications Card */
+            <div className="panel animate-scale" style={{ padding: '20px', borderLeft: '4px solid #a855f7' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 className="panel-title" style={{ margin: 0, color: '#a855f7', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Truck size={16} />
+                  <span>RGP Pass Manifest</span>
+                </h3>
+                <span className={`status-badge ${selectedRgp.computedStatus === 'Returned' ? 'verified' : (selectedRgp.computedStatus === 'Overdue' ? 'overdue' : 'in-verification')}`}>
+                  {selectedRgp.computedStatus}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12.5px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>RGP Number</span>
+                  <span style={{ fontWeight: '800', color: '#a855f7' }}>#{selectedRgp.rgpNo}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Vendor / Processor</span>
+                  <span style={{ fontWeight: '600' }}>{selectedRgp.vendor || 'N/A'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Department</span>
+                  <span style={{ fontWeight: '600' }}>{selectedRgp.department || 'Dispatch'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Pass Type</span>
+                  <span style={{ fontWeight: '600' }}>{selectedRgp.rgpType || 'RGP'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Expected Return</span>
+                  <span style={{ fontWeight: '700', color: selectedRgp.isOverdue ? '#ef4444' : 'var(--text-main)' }}>
+                    {formatDateTime(selectedRgp.expectedReturnDate) || '—'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Vehicle No</span>
+                  <span style={{ fontWeight: '600' }}>{selectedRgp.vehicleNo || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--border-color)', paddingBottom: '6px' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Authorized By</span>
+                  <span style={{ fontWeight: '600' }}>{selectedRgp.authorizedBy || selectedRgp.preparedBy || '—'}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Total Line Items</span>
+                  <span style={{ fontWeight: '800', color: 'var(--accent-color)' }}>{selectedRgp.totalItemsCount} items</span>
+                </div>
+              </div>
+            </div>
+          ) : selectedDesign ? (
+            /* Design Lot Specifications Card */
             <div className="panel animate-scale" style={{ padding: '20px' }}>
               <h3 className="panel-title" style={{ marginBottom: '14px' }}>Lot Specifications</h3>
 
@@ -1385,19 +1686,24 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Right Panel: Workflow Timeline */}
+        {/* Right Panel: Workflow Timeline & Scanner Audit */}
         <div style={{ flex: '2 1 500px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
           <div className="panel" style={{ padding: '24px', minHeight: '400px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
               <h3 className="panel-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Clock size={18} />
-                <span>Timeline Workflow {selectedLotId ? `for Lot #${selectedLotId}` : ''}</span>
+                <span>
+                  {selectedRgp 
+                    ? `Operational Pipeline & Gate Scanner Trail for RGP #${selectedRgp.rgpNo}` 
+                    : `Workflow Timeline ${selectedLotId ? `for #${selectedLotId}` : ''}`}
+                </span>
               </h3>
             </div>
 
+            {/* Workflow Operational Status Banner */}
             {selectedLotId && (
               <div style={{
                 marginBottom: '20px',
@@ -1405,9 +1711,11 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 borderRadius: '12px',
                 background: allComplete
                   ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.04))'
+                  : selectedRgp?.isOverdue
+                  ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(239, 68, 68, 0.04))'
                   : 'linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.04))',
                 border: '1.5px solid',
-                borderColor: allComplete ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                borderColor: allComplete ? 'rgba(16, 185, 129, 0.25)' : (selectedRgp?.isOverdue ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)'),
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
@@ -1419,29 +1727,38 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                     width: '36px',
                     height: '36px',
                     borderRadius: '50%',
-                    backgroundColor: allComplete ? 'var(--success)' : 'var(--warning)',
+                    backgroundColor: allComplete ? 'var(--success)' : (selectedRgp?.isOverdue ? '#ef4444' : 'var(--warning)'),
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: '#ffffff',
                     boxShadow: 'var(--shadow-sm)'
                   }}>
-                    {allComplete ? <Check size={20} /> : <Clock size={20} />}
+                    {allComplete ? <Check size={20} /> : (selectedRgp?.isOverdue ? <AlertCircle size={20} /> : <Clock size={20} />)}
                   </div>
                   <div>
                     <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main)' }}>
-                      Production Work Status: {allComplete ? 'Complete' : 'In Progress'}
+                      {selectedRgp 
+                        ? `RGP Operational Status: ${selectedRgp.computedStatus.toUpperCase()}`
+                        : `Production Work Status: ${allComplete ? 'Complete' : 'In Progress'}`}
                     </h4>
                     <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-                      {allComplete
-                        ? 'All stages in the lot operational process have been successfully executed.'
-                        : `${completedStepsCount} of ${workflowSteps.length} process stages completed. Awaiting remaining workflow steps.`}
+                      {selectedRgp
+                        ? (selectedRgp.isReturned
+                            ? `Gate In return verified. Material batch successfully received back from ${selectedRgp.vendor}.`
+                            : (selectedRgp.isOverdue 
+                                ? `⚠️ Return is overdue against target date ${formatDateTime(selectedRgp.expectedReturnDate)}.`
+                                : `Dispatched to ${selectedRgp.vendor}. Expected return on ${formatDateTime(selectedRgp.expectedReturnDate)}.`))
+                        : (allComplete
+                            ? 'All stages in the lot operational process have been successfully executed.'
+                            : `${completedStepsCount} of ${workflowSteps.length} process stages completed.`)}
                     </p>
                   </div>
                 </div>
               </div>
             )}
 
+            {/* View switcher & Action Toolbar */}
             {selectedLotId && (
               <div style={{
                 display: 'flex',
@@ -1524,13 +1841,13 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                     fontWeight: '800',
                     cursor: 'pointer',
                     transition: 'all 0.2s',
-                    backgroundColor: allComplete ? 'var(--success)' : 'var(--accent-color)',
+                    backgroundColor: selectedRgp ? '#9333ea' : (allComplete ? 'var(--success)' : 'var(--accent-color)'),
                     color: '#ffffff',
                     boxShadow: 'var(--shadow-sm)'
                   }}
                 >
                   <Download size={14} />
-                  <span>Download PDF Report</span>
+                  <span>{selectedRgp ? 'Download RGP PDF' : 'Download PDF Report'}</span>
                 </button>
               </div>
             )}
@@ -1543,8 +1860,8 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
             ) : !selectedLotId ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <Clock size={40} style={{ marginBottom: '16px', opacity: 0.3 }} />
-                <h4 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '4px' }}>No Lot Selected</h4>
-                <p style={{ fontSize: '13px', maxWidth: '360px' }}>Select an active design lot number from the left panel list to view its entire workflow sequence timeline.</p>
+                <h4 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '4px' }}>No Item Selected</h4>
+                <p style={{ fontSize: '13px', maxWidth: '360px' }}>Select an active design lot or RGP pass from the left panel list to view its entire workflow sequence timeline.</p>
               </div>
             ) : viewMode === 'calendar' ? (
               <DailyWeeklyCalendarReport
@@ -1575,7 +1892,7 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 }}></div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                  {visibleSteps.map((step, idx) => (
+                  {visibleSteps.map((step) => (
                     <div key={step.id} style={{ position: 'relative', display: 'flex', gap: '16px', zIndex: 2 }}>
                       {/* Node circle */}
                       <div style={{
@@ -1656,7 +1973,6 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                                     border: '1px solid',
                                     borderColor: sub.done ? 'rgba(16,185,129,0.2)' : 'var(--border-color)'
                                   }}>
-                                    {/* Sub-step indicator */}
                                     <div style={{
                                       width: '16px', height: '16px', borderRadius: '50%', flexShrink: 0, marginTop: '2px',
                                       backgroundColor: sub.done ? 'var(--success)' : 'transparent',
@@ -1700,12 +2016,139 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                     </div>
                   ))}
                 </div>
+
+                {/* If RGP Selected: Display Itemized Table & Gate Scanner Audit Trail */}
+                {selectedRgp && (
+                  <div style={{ marginTop: '28px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {/* Itemized Dispatched Items Matrix */}
+                    <div style={{
+                      backgroundColor: 'var(--bg-secondary)',
+                      borderRadius: '12px',
+                      border: '1.5px solid var(--border-color)',
+                      padding: '16px 20px',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Boxes size={16} style={{ color: '#a855f7' }} />
+                        <span>Itemized Dispatched Items Matrix ({selectedRgp.totalItemsCount} rows)</span>
+                      </h4>
+
+                      {selectedRgp.entries && selectedRgp.entries.length > 0 ? (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>
+                                <th style={{ padding: '8px' }}>#</th>
+                                <th style={{ padding: '8px' }}>Lot Reference</th>
+                                <th style={{ padding: '8px' }}>Item Description</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Qty 1</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Qty 2</th>
+                                <th style={{ padding: '8px' }}>Purpose</th>
+                                <th style={{ padding: '8px' }}>Remarks</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedRgp.entries.map((entry, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                  <td style={{ padding: '8px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                  <td style={{ padding: '8px', fontWeight: '700' }}>{entry.lotNo || '—'}</td>
+                                  <td style={{ padding: '8px', fontWeight: '600' }}>{entry.itemDesc || '—'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'right', fontWeight: '700', color: '#a855f7' }}>
+                                    {entry.qty1 || 0} {entry.uom || 'pcs'}
+                                  </td>
+                                  <td style={{ padding: '8px', textAlign: 'right' }}>
+                                    {entry.qty2 ? `${entry.qty2} ${entry.uom || 'pcs'}` : '—'}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{entry.purpose || '—'}</td>
+                                  <td style={{ padding: '8px', color: 'var(--text-muted)', fontSize: '11px' }}>{entry.remarks || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          No itemized rows recorded in pass payload.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Security Gate Scanner Activity Trail */}
+                    <div style={{
+                      backgroundColor: 'var(--bg-secondary)',
+                      borderRadius: '12px',
+                      border: '1.5px solid var(--border-color)',
+                      padding: '16px 20px',
+                      boxShadow: 'var(--shadow-sm)'
+                    }}>
+                      <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <QrCode size={16} style={{ color: '#06b6d4' }} />
+                        <span>Security Gate Scanner Activity Trail ({selectedRgp.scans.length} events)</span>
+                      </h4>
+
+                      {selectedRgp.scans && selectedRgp.scans.length > 0 ? (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '2px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>
+                                <th style={{ padding: '8px' }}>Timestamp</th>
+                                <th style={{ padding: '8px' }}>Gate Event Type</th>
+                                <th style={{ padding: '8px' }}>Gatekeeper / Officer</th>
+                                <th style={{ padding: '8px' }}>Party / Processor</th>
+                                <th style={{ padding: '8px' }}>Material / Info</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Verified Qty</th>
+                                <th style={{ padding: '8px', textAlign: 'center' }}>Security Badge</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedRgp.scans.map((s, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                  <td style={{ padding: '8px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                                    {formatDateTime(s.scanned_at)}
+                                  </td>
+                                  <td style={{ padding: '8px', fontWeight: '700' }}>
+                                    {s.scan_type === 'rgp_entry' ? (
+                                      <span style={{ color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <ArrowUpRight size={13} /> Gate Out (Dispatch)
+                                      </span>
+                                    ) : s.scan_type === 'rgp_return' ? (
+                                      <span style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <ArrowDownLeft size={13} /> Gate In (Return)
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: '#06b6d4' }}>{s.scan_type || 'Gate Entry'}</span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '8px', fontWeight: '600' }}>{s.person_name || 'Gatekeeper'}</td>
+                                  <td style={{ padding: '8px' }}>{s.supplier_name || selectedRgp.vendor}</td>
+                                  <td style={{ padding: '8px' }}>{s.material_name || 'Fabric/Trims'}</td>
+                                  <td style={{ padding: '8px', textAlign: 'right', fontWeight: '700' }}>
+                                    {s.quantity ? `${s.quantity} pcs` : '—'}
+                                  </td>
+                                  <td style={{ padding: '8px', textAlign: 'center' }}>
+                                    <span className="status-badge verified" style={{ fontSize: '10px' }}>
+                                      ✓ Verified
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                          Awaiting security scanner checkpoints for this gate pass.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : timelineEvents.length === 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <AlertCircle size={40} style={{ marginBottom: '16px', opacity: 0.3 }} />
                 <h4 style={{ fontSize: '16px', fontWeight: '600', color: 'var(--text-main)', marginBottom: '4px' }}>No timeline logs found</h4>
-                <p style={{ fontSize: '13px', maxWidth: '360px' }}>We couldn't compile logs for this lot ID. Check if there are design status updates or scans linked to this lot.</p>
+                <p style={{ fontSize: '13px', maxWidth: '360px' }}>We couldn't compile logs for this ID. Check if there are design status updates, gate passes, or scans linked.</p>
               </div>
             ) : (
               /* Original Timeline view (Chronological Log) */
@@ -1763,20 +2206,3 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
     </div>
   );
 }
-
-const getLotVersionInfo = (lotNo, designs = []) => {
-  const lotStr = String(lotNo || '').trim();
-  if (lotStr.includes('-V')) {
-    const parts = lotStr.split('-V');
-    return {
-      displayLot: parts[0],
-      versionText: `Recreated (Run ${parts[1]})`,
-      isRecreated: true
-    };
-  }
-  return {
-    displayLot: lotStr,
-    versionText: 'Original Lot',
-    isRecreated: false
-  };
-};

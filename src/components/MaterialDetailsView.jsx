@@ -185,10 +185,10 @@ const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5
   );
 };
 
-// Barcode Renderer Component (Guaranteed crisp black/white Code-128 visual style, 0% bar overlap)
+// Barcode Renderer Component (Guaranteed crisp black/white Code-128 visual style, bold bars, enhanced spacing)
 const BarcodeVisual = ({ code }) => {
   const str = String(code || 'MT1000-A01');
-  let currentX = 4;
+  let currentX = 6;
   const bars = [];
 
   // Code 128 Start B pattern [2, 1, 1, 2, 1, 4]
@@ -196,9 +196,9 @@ const BarcodeVisual = ({ code }) => {
   let isBar = true;
   startPattern.forEach((w, idx) => {
     if (isBar) {
-      bars.push(<rect key={`st-${idx}`} x={currentX} y={0} width={w * 1.5} height={45} fill="#000000" />);
+      bars.push(<rect key={`st-${idx}`} x={currentX} y={0} width={w * 1.8} height={55} fill="#000000" />);
     }
-    currentX += w * 1.5;
+    currentX += w * 1.8;
     isBar = !isBar;
   });
 
@@ -216,20 +216,20 @@ const BarcodeVisual = ({ code }) => {
     let barFlag = true;
     widths.forEach((w, wIdx) => {
       if (barFlag) {
-        bars.push(<rect key={`c-${i}-${wIdx}`} x={currentX} y={0} width={w * 1.3} height={45} fill="#000000" />);
+        bars.push(<rect key={`c-${i}-${wIdx}`} x={currentX} y={0} width={w * 1.6} height={55} fill="#000000" />);
       }
-      currentX += w * 1.3;
+      currentX += w * 1.6;
       barFlag = !barFlag;
     });
   }
 
   // Stop pattern [2, 3, 3, 1, 1, 1, 2]
   [2, 3, 3, 1, 1, 1, 2].forEach((w, idx) => {
-    bars.push(<rect key={`sp-${idx}`} x={currentX} y={0} width={w * 1.3} height={45} fill="#000000" />);
-    currentX += w * 1.3;
+    bars.push(<rect key={`sp-${idx}`} x={currentX} y={0} width={w * 1.6} height={55} fill="#000000" />);
+    currentX += w * 1.6;
   });
 
-  const totalWidth = Math.max(150, Math.ceil(currentX + 8));
+  const totalWidth = Math.max(160, Math.ceil(currentX + 12));
 
   return (
     <div style={{
@@ -237,25 +237,25 @@ const BarcodeVisual = ({ code }) => {
       flexDirection: 'column',
       alignItems: 'center',
       backgroundColor: '#ffffff',
-      padding: '8px 12px',
-      border: '1.5px solid #333333',
+      padding: '10px 14px',
+      border: '1.5px solid #222222',
       borderRadius: '6px',
       width: '100%',
-      maxWidth: '260px',
+      maxWidth: '280px',
       boxSizing: 'border-box',
       color: '#000000',
       textAlign: 'center',
       margin: '0 auto'
     }}>
-      <svg width="100%" height="45" viewBox={`0 0 ${totalWidth} 45`} preserveAspectRatio="xMidYMid meet">
+      <svg width="100%" height="55" viewBox={`0 0 ${totalWidth} 55`} preserveAspectRatio="xMidYMid meet">
         <g>{bars}</g>
       </svg>
       <span style={{ 
-        fontSize: '11px', 
+        fontSize: '12px', 
         fontFamily: 'monospace', 
-        fontWeight: 'bold', 
-        marginTop: '4px', 
-        letterSpacing: '1px',
+        fontWeight: '900', 
+        marginTop: '6px', 
+        letterSpacing: '2px',
         color: '#000000'
       }}>
         {str}

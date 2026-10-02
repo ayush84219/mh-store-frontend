@@ -89,6 +89,10 @@ export default function WeightCapture({ racks = [], currentUser = null }) {
       });
     });
 
+    if (slotMap.size === 0) {
+      ['Main Store - Rack 1', 'Main Store - Rack 2', 'Main Store - Rack 3', 'Main Store - Rack 4', 'Main Store - Rack 5', 'Hall 1 - Rack 1', 'Hall 1 - Rack 2', 'Hall 2 - Rack 1'].forEach(loc => addSlot(loc));
+    }
+
     return Array.from(slotMap.values());
   }, [racks, liveLocations, dbMaterials]);
   const [now, setNow] = useState(new Date());

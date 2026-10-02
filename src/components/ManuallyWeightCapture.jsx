@@ -59,11 +59,14 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     if (source && source.length > 0) {
       source.forEach(rack => {
         const warehouse = rack.warehouse || 'Main Store';
-        const rawCode = String(rack.code || '').trim();
-        const displayLabel = rack.warehouse && rawCode.includes(rack.warehouse)
-          ? rawCode
-          : `${warehouse} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
-        if (!slotMap.has(displayLabel)) {
+        const rawCode = String(rack.code || rack.name || '').trim();
+        let displayLabel = rawCode;
+        if (!displayLabel.toLowerCase().includes('rack') && !displayLabel.toLowerCase().includes('hall') && !displayLabel.toLowerCase().includes('bin') && !displayLabel.toLowerCase().includes('shelf')) {
+          displayLabel = `${warehouse} - Rack ${rawCode}`;
+        } else if (rack.warehouse && !rawCode.includes(rack.warehouse)) {
+          displayLabel = `${warehouse} - ${rawCode}`;
+        }
+        if (displayLabel && !slotMap.has(displayLabel)) {
           slotMap.set(displayLabel, {
             code: displayLabel,
             label: displayLabel,
@@ -74,7 +77,17 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       });
     }
 
-
+    // Ensure common structured rack options are available if list is empty or minimal
+    if (slotMap.size === 0) {
+      ['Main Store - Rack 1', 'Main Store - Rack 2', 'Main Store - Rack 3', 'Main Store - Rack 4', 'Main Store - Rack 5', 'Hall 1 - Rack 1', 'Hall 1 - Rack 2', 'Hall 2 - Rack 1'].forEach(loc => {
+        slotMap.set(loc, {
+          code: loc,
+          label: loc,
+          rawCode: loc,
+          warehouse: loc.split(' - ')[0]
+        });
+      });
+    }
 
     return Array.from(slotMap.values());
   }, [racks, liveLocations]);
@@ -150,29 +163,30 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     );
   };
 
-  const getPacketLocationForIndex = (packetNo) => {
+  const getPacketLocationForIndex = (packetNo, targetLoc = '') => {
+    const fallback = targetLoc || form.storeLocation || 'Main Store - Rack 1';
     if (locationMode === 'same' || !locationGroups || locationGroups.length === 0) {
-      return form.storeLocation || 'Main Store';
+      return fallback;
     }
     let offset = 0;
     for (const group of locationGroups) {
       const cnt = parseInt(group.count, 10) || 0;
       if (packetNo > offset && packetNo <= offset + cnt) {
-        return group.location.trim() || form.storeLocation || 'Main Store';
+        return group.location?.trim() || fallback;
       }
       offset += cnt;
     }
-    return form.storeLocation || 'Main Store';
+    return fallback;
   };
 
   const getCombinedLocationSummary = () => {
     if (locationMode === 'same' || !locationGroups || locationGroups.length === 0) {
-      return form.storeLocation || 'Main Store';
+      return form.storeLocation || 'Main Store - Rack 1';
     }
     const parts = locationGroups
-      .filter(g => g.location.trim() && parseInt(g.count, 10) > 0)
+      .filter(g => g.location?.trim() && parseInt(g.count, 10) > 0)
       .map(g => `${g.location.trim()} (${g.count} pkt${parseInt(g.count, 10) > 1 ? 's' : ''})`);
-    return parts.length > 0 ? parts.join(', ') : (form.storeLocation || 'Main Store');
+    return parts.length > 0 ? parts.join(', ') : (form.storeLocation || 'Main Store - Rack 1');
   };
 
   // Fetch captures log and highest material code from DB on mount
@@ -310,7 +324,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   };
 
   const handleAutoFillDemo = () => {
-    const loc = generatedLocations[0]?.code || 'Hall 1 - Rack 1';
+    const loc = generatedLocations[0]?.code || 'Main Store - Rack 1';
     setForm(prev => ({
       ...prev,
       materialName: 'YKK #5 Brass Zipper 28"',
@@ -483,7 +497,13 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
           return;
         }
 
-        const pktLoc = getPacketLocationForIndex(currentPkt);
+        let pktLoc = printTargetData.location;
+        if (locationMode === 'multiple' && locationGroups && locationGroups.length > 0) {
+          pktLoc = getPacketLocationForIndex(currentPkt, printTargetData.location);
+        }
+        if (!pktLoc || pktLoc === 'Default' || pktLoc === 'Main Store') {
+          pktLoc = (printTargetData.location && printTargetData.location !== 'Default') ? printTargetData.location : (form.storeLocation || 'Main Store - Rack 1');
+        }
         const pktBarcodeId = printTargetData.materialCode;
 
         pws.send(JSON.stringify({
@@ -505,7 +525,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             lotNo: printTargetData.materialCode || 'N/A',
             totalPackets: numStickers,
             barcodeId: pktBarcodeId,
-            location: pktLoc || printTargetData.location || 'Main Store',
+            location: pktLoc || 'Main Store - Rack 1',
             packetNo: currentPkt,
             date: printTargetData.date || new Date().toLocaleString('en-GB')
           }

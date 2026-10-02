@@ -131,13 +131,19 @@ export default function PublicScanView({ initialAction = '', initialLot = '', in
     }
   }, [bomMaterials, allMaterials, initialPoType]);
 
-  // Set default supplier selection based on matching PO or vendors
+  // Set default supplier selection based on matching PO, RGP, Dori, Zip, or vendors
   useEffect(() => {
+    if (designInfo && designInfo.brand && designInfo.brand !== 'N/A' && designInfo.brand !== '—' && designInfo.brand !== 'Mohit Hosiery') {
+      setSupplierName(designInfo.brand);
+      return;
+    }
+
     if (lotNumber && allPOs.length > 0) {
       const trimmedLot = lotNumber.trim().toUpperCase();
       const matchingPO = allPOs.find(po => {
         const designName = String(po.designName || '').toUpperCase();
-        return designName.includes(trimmedLot);
+        const poNum = String(po.poNumber || '').toUpperCase();
+        return designName.includes(trimmedLot) || poNum === trimmedLot;
       });
       if (matchingPO && matchingPO.vendorName) {
         setSupplierName(matchingPO.vendorName);
@@ -150,7 +156,14 @@ export default function PublicScanView({ initialAction = '', initialLot = '', in
     } else {
       setSupplierName('other');
     }
-  }, [lotNumber, allPOs, vendors]);
+  }, [lotNumber, allPOs, vendors, designInfo]);
+
+  // Set default quantity from lot/po/rgp if available
+  useEffect(() => {
+    if (designInfo && designInfo.quantity && !quantity) {
+      setQuantity(String(designInfo.quantity));
+    }
+  }, [designInfo]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
