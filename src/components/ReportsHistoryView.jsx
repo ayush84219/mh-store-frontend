@@ -185,9 +185,20 @@ export default function ReportsHistoryView({
       transition: 'all 0.2s'
     }
   };
-  const [activeReportTab, setActiveReportTab] = useState('daily_weekly_calendar'); // 'daily_weekly_calendar', 'material_ledger', 'designer_audits', 'store_audits'
+  const [activeReportTab, setActiveReportTab] = useState('master_operations_report'); // 'master_operations_report', 'daily_weekly_calendar', 'rgp_reports', 'material_ledger', 'designer_audits', 'store_audits'
   const [selectedLotId, setSelectedLotId] = useState('');
   
+  // Master Operations & Logistics (RGP, Dori, Zip, PO, Extra Pieces, Scanner) states
+  const [masterModuleFilter, setMasterModuleFilter] = useState('all'); // 'all', 'rgp', 'rgp_closed', 'rgp_intransit', 'rgp_overdue', 'dori_po', 'zip_po', 'po', 'extra_pieces', 'scanner'
+  const [masterDeptFilter, setMasterDeptFilter] = useState('all');
+  const [masterStatusFilter, setMasterStatusFilter] = useState('all');
+  const [masterSearch, setMasterSearch] = useState('');
+  const [masterDateFrom, setMasterDateFrom] = useState('');
+  const [masterDateTo, setMasterDateTo] = useState('');
+  const [masterSort, setMasterSort] = useState('latest');
+  const [selectedMasterRecordForModal, setSelectedMasterRecordForModal] = useState(null);
+  const [masterLoading, setMasterLoading] = useState(false);
+
   // Audit states
   const [designHistory, setDesignHistory] = useState([]);
   const [transfers, setTransfers] = useState([]);
@@ -240,6 +251,35 @@ export default function ReportsHistoryView({
   const [expandedRgpIds, setExpandedRgpIds] = useState(new Set());
   const [rgpViewMode, setRgpViewMode] = useState('table');
 
+  // Consolidated Lot-Wise Operations Report states
+  const [lotWiseList, setLotWiseList] = useState([]);
+  const [lotWiseLoading, setLotWiseLoading] = useState(false);
+  const [lotSearch, setLotSearch] = useState('');
+  const [lotStatusFilter, setLotStatusFilter] = useState('all');
+  const [lotBrandFilter, setLotBrandFilter] = useState('all');
+  const [lotSort, setLotSort] = useState('lot_desc');
+  const [selectedLotForModal, setSelectedLotForModal] = useState(null);
+  const [expandedLotIds, setExpandedLotIds] = useState(new Set());
+
+  // Fetch lot-wise consolidated summary from backend
+  const fetchLotWiseData = async () => {
+    setLotWiseLoading(true);
+    const backendUrl = getBackendUrl();
+    try {
+      const res = await fetch(`${backendUrl}/api/reports/lot-wise-summary`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setLotWiseList(json.data);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching lot-wise summary:', err);
+    } finally {
+      setLotWiseLoading(false);
+    }
+  };
+
   // Auto-select first design lot if available
   useEffect(() => {
     if (!selectedLotId && designs.length > 0) {
@@ -247,9 +287,51 @@ export default function ReportsHistoryView({
     }
   }, [designs, selectedLotId]);
 
+  // Comprehensive fetch function for all datasets
+  const fetchAllMasterData = async () => {
+    setMasterLoading(true);
+    const backendUrl = getBackendUrl();
+    try {
+      const [issueRes, extraRes, designHRes, zipRes, dooriRes, scansRes, transferRes, weightRes, rgpRes] = await Promise.all([
+        fetch(`${backendUrl}/api/issue-logs`),
+        fetch(`${backendUrl}/api/extra-material-issues`),
+        fetch(`${backendUrl}/api/design-history`),
+        fetch(`${backendUrl}/api/zip-orders`),
+        fetch(`${backendUrl}/api/doori-orders`),
+        fetch(`${backendUrl}/api/scans`),
+        fetch(`${backendUrl}/api/transfers`),
+        fetch(`${backendUrl}/api/weight-capture`),
+        fetch(`${backendUrl}/api/rgp`)
+      ]);
+
+      if (issueRes.ok) setFetchedIssueLogs(await issueRes.json());
+      if (extraRes.ok) setExtraMaterialIssues(await extraRes.json());
+      if (designHRes.ok) setDesignHistory(await designHRes.json());
+      if (zipRes.ok) setZipOrders(await zipRes.json());
+      if (dooriRes.ok) setDooriOrders(await dooriRes.json());
+      if (scansRes.ok) setScans(await scansRes.json());
+      if (transferRes.ok) setTransfers(await transferRes.json());
+      if (weightRes.ok) {
+        const wData = await weightRes.json();
+        setWeightCaptures(wData.success && Array.isArray(wData.data) ? wData.data : (Array.isArray(wData) ? wData : []));
+      }
+      if (rgpRes.ok) {
+        const rData = await rgpRes.json();
+        setRgpList(Array.isArray(rData) ? rData : []);
+      }
+      fetchLotWiseData();
+    } catch (err) {
+      console.error('Error fetching master data:', err);
+    } finally {
+      setMasterLoading(false);
+    }
+  };
+
   // Load audit data on mount and tab changes
   useEffect(() => {
     const backendUrl = getBackendUrl();
+
+    fetchLotWiseData();
 
     // Fetch issue logs
     fetch(`${backendUrl}/api/issue-logs`)
@@ -966,6 +1048,676 @@ export default function ReportsHistoryView({
     return { total, returned, overdue, inTransit, totalDispatchedQty, scannedAtGate, scanRate, typeCounts };
   }, [processedRgpList]);
 
+  // Date Range Checker Helper
+  const isDateInRange = (dateVal, fromDateStr, toDateStr) => {
+    if (!fromDateStr && !toDateStr) return true;
+    const d = parseToDateObject(dateVal);
+    if (d.getTime() === 0) return true;
+    
+    if (fromDateStr) {
+      const fromDate = new Date(fromDateStr);
+      fromDate.setHours(0, 0, 0, 0);
+      if (d < fromDate) return false;
+    }
+    if (toDateStr) {
+      const toDate = new Date(toDateStr);
+      toDate.setHours(23, 59, 59, 999);
+      if (d > toDate) return false;
+    }
+    return true;
+  };
+
+  // Quick Date Preset Handler
+  const handleApplyDatePreset = (preset) => {
+    const now = new Date();
+    if (preset === 'today') {
+      const dStr = now.toISOString().split('T')[0];
+      setMasterDateFrom(dStr);
+      setMasterDateTo(dStr);
+    } else if (preset === 'yesterday') {
+      const y = new Date();
+      y.setDate(now.getDate() - 1);
+      const dStr = y.toISOString().split('T')[0];
+      setMasterDateFrom(dStr);
+      setMasterDateTo(dStr);
+    } else if (preset === 'this_week') {
+      const w = new Date();
+      w.setDate(now.getDate() - 7);
+      setMasterDateFrom(w.toISOString().split('T')[0]);
+      setMasterDateTo(now.toISOString().split('T')[0]);
+    } else if (preset === 'this_month') {
+      const m = new Date();
+      m.setDate(now.getDate() - 30);
+      setMasterDateFrom(m.toISOString().split('T')[0]);
+      setMasterDateTo(now.toISOString().split('T')[0]);
+    } else if (preset === 'clear') {
+      setMasterDateFrom('');
+      setMasterDateTo('');
+    }
+  };
+
+  // Unified Master Operations Records (RGP, Dori PO, Zip PO, General PO, Extra Pieces, Scanner Logs)
+  const unifiedMasterRecords = useMemo(() => {
+    const list = [];
+
+    // 1. RGP Records
+    (processedRgpList || []).forEach(r => {
+      const entries = Array.isArray(r.entries) ? r.entries : [];
+      let itemDesc = 'Material Goods';
+      if (entries.length > 1) {
+        itemDesc = `See Items (${entries.length})`;
+      } else if (entries.length === 1 && entries[0].itemDesc) {
+        itemDesc = entries[0].itemDesc;
+      } else if (r.itemDesc || r.particulars) {
+        itemDesc = r.itemDesc || r.particulars;
+      }
+
+      const qty = r.totalQty1 || Number(r.qty) || 0;
+      const uom = (entries[0] && entries[0].uom) || r.uom || 'PCS';
+      const statusLabel = r.status || (r.isReturned ? 'Returned' : (r.isOverdue ? 'Overdue' : 'In Transit'));
+
+      list.push({
+        id: `RGP-${r.id || r.rgpNo}`,
+        docNo: r.rgpNo || `RGP-${r.id}`,
+        moduleType: 'rgp',
+        moduleLabel: 'RGP',
+        badgeColor: '#7c3aed',
+        date: r.date || '',
+        dateObj: r.issueDateObj || parseToDateObject(r.date),
+        type: r.rgpType || 'BUTTONS / TRIMS',
+        department: r.department || 'Store',
+        vendor: r.vendor || '—',
+        purpose: r.purpose || 'DYEING / PROCESSING',
+        itemDescription: itemDesc,
+        items: entries,
+        quantity: qty,
+        uom: uom,
+        status: statusLabel,
+        isReturned: r.isReturned,
+        isOverdue: r.isOverdue,
+        expectedReturnDate: r.expectedReturnDate || '',
+        vehicleNo: r.vehicleNo || '',
+        preparedBy: r.preparedBy || '',
+        authorizedBy: r.authorizedBy || '',
+        scans: r.matchingScans || [],
+        raw: r
+      });
+    });
+
+    // 2. Dori PO Records
+    (dooriOrders || []).forEach(d => {
+      const docNo = d.po_number || `DORI-PO-${d.id}`;
+      let placements = [];
+      try {
+        placements = JSON.parse(d.Selected_Placements || '[]');
+      } catch (_) {}
+
+      const itemDesc = d.Style 
+        ? `${d.Style} • ${d.Garment_Type || 'Garment'} (${d.Total_Pieces || 0} pcs)`
+        : `Dori Thread • ${d.Total_Pieces || 0} pcs`;
+
+      // Find matching scans for this Dori PO
+      const doriScans = (scans || []).filter(s => {
+        const sLot = String(s.lot_number || '').trim().toLowerCase();
+        const dLot = String(d.Lot_Number || '').trim().toLowerCase();
+        const dPo = String(d.po_number || '').trim().toLowerCase();
+        return (sLot && (sLot === dLot || sLot === dPo)) || (s.material_name && String(s.material_name).toLowerCase().includes('dori'));
+      });
+
+      let statusLabel = d.status || 'Active';
+      if (doriScans.some(s => s.scan_type === 'material_in')) {
+        statusLabel = 'Material Received';
+      } else if (doriScans.some(s => s.scan_type === 'gate_entry')) {
+        statusLabel = 'Gate Entry Verified';
+      }
+
+      list.push({
+        id: `DORI-${d.id || d.po_number}`,
+        docNo: docNo,
+        moduleType: 'dori_po',
+        moduleLabel: 'Dori PO',
+        badgeColor: '#f59e0b',
+        date: d.Issue_Date || d.Timestamp || '',
+        dateObj: parseToDateObject(d.Issue_Date || d.Timestamp),
+        type: d.Garment_Type ? `Dori (${d.Garment_Type})` : 'Dori Order',
+        department: d.department || 'Store',
+        vendor: d.Supplier || d.Supervisor || 'Vendor',
+        purpose: d.Style ? `Dori Procurement for ${d.Style}` : 'Thread & Dori Order',
+        itemDescription: itemDesc,
+        items: placements.map((p) => ({ lotNo: d.Lot_Number, itemDesc: `Placement: ${p}`, qty1: d.Total_Pieces, uom: 'PCS' })),
+        quantity: parseInt(d.Total_Pieces) || 0,
+        uom: 'PCS',
+        status: statusLabel,
+        cost: d.Total_Cost || 0,
+        preparedBy: d.Supervisor || 'Store',
+        scans: doriScans,
+        raw: d
+      });
+    });
+
+    // 3. Zip PO Records
+    (zipOrders || []).forEach(z => {
+      const docNo = z.po_number || `ZIP-PO-${z.id}`;
+      let placements = [];
+      try {
+        placements = JSON.parse(z.Selected_Placements || '[]');
+      } catch (_) {}
+
+      const totalPcs = parseInt(z.Total_Pieces_CH || z.Total_Pieces) || 0;
+      const itemDesc = z.Style 
+        ? `${z.Style} • Teeth: ${z.Teeth_Color || 'STD'} (${totalPcs} pcs)`
+        : `Zipper Trims • ${totalPcs} pcs`;
+
+      // Find matching scans for this Zip PO
+      const zipScans = (scans || []).filter(s => {
+        const sLot = String(s.lot_number || '').trim().toLowerCase();
+        const zLot = String(z.Lot_Number || '').trim().toLowerCase();
+        const zPo = String(z.po_number || '').trim().toLowerCase();
+        return (sLot && (sLot === zLot || sLot === zPo)) || (s.material_name && String(s.material_name).toLowerCase().includes('zip'));
+      });
+
+      let statusLabel = z.status || 'Active';
+      if (zipScans.some(s => s.scan_type === 'material_in')) {
+        statusLabel = 'Material Received';
+      } else if (zipScans.some(s => s.scan_type === 'gate_entry')) {
+        statusLabel = 'Gate Entry Verified';
+      }
+
+      list.push({
+        id: `ZIP-${z.id || z.po_number}`,
+        docNo: docNo,
+        moduleType: 'zip_po',
+        moduleLabel: 'Zip PO',
+        badgeColor: '#ec4899',
+        date: z.Saved_At || z.Issue_Date || '',
+        dateObj: parseToDateObject(z.Saved_At || z.Issue_Date),
+        type: z.Garment_Type ? `Zip (${z.Garment_Type})` : 'Zipper Order',
+        department: z.department || 'Store',
+        vendor: z.Supplier || z.Supervisor || 'Puneet Zip',
+        purpose: z.Style ? `Zipper Procurement for ${z.Style}` : 'Zipper Order',
+        itemDescription: itemDesc,
+        items: placements.map((p) => ({ lotNo: z.Lot_Number, itemDesc: `Placement: ${p}`, qty1: totalPcs, uom: 'PCS' })),
+        quantity: totalPcs,
+        uom: 'PCS',
+        status: statusLabel,
+        cost: z.Total_Cost || 0,
+        preparedBy: z.Supervisor || 'Store',
+        scans: zipScans,
+        raw: z
+      });
+    });
+
+    // 4. Purchase Orders (General PO)
+    (pos || []).forEach(p => {
+      let parsedItems = [];
+      try {
+        parsedItems = typeof p.items === 'string' ? JSON.parse(p.items) : (p.items || []);
+      } catch (_) {}
+
+      const itemDesc = parsedItems.length > 1 
+        ? `See Items (${parsedItems.length})` 
+        : (parsedItems[0]?.description || p.category || 'Trims & Accessories');
+
+      const totalQty = parsedItems.reduce((s, it) => s + (parseFloat(it.qty) || 0), 0) || parsedItems.length;
+
+      // Find matching scans for General PO
+      const poScans = (scans || []).filter(s => {
+        const sLot = String(s.lot_number || '').trim().toLowerCase();
+        const pPo = String(p.poNumber || '').trim().toLowerCase();
+        const pDes = String(p.designName || '').trim().toLowerCase();
+        return (sLot && (sLot === pPo || sLot === pDes));
+      });
+
+      let statusLabel = p.status || 'Active';
+      if (poScans.some(s => s.scan_type === 'material_in')) {
+        statusLabel = 'Material Received';
+      } else if (poScans.some(s => s.scan_type === 'gate_entry')) {
+        statusLabel = 'Gate Entry Verified';
+      }
+
+      list.push({
+        id: `PO-${p.id || p.poNumber}`,
+        docNo: p.poNumber || `PO-${p.id}`,
+        moduleType: 'po',
+        moduleLabel: 'General PO',
+        badgeColor: '#3b82f6',
+        date: p.date || '',
+        dateObj: parseToDateObject(p.date),
+        type: p.category || 'Accessories',
+        department: p.department || 'Store',
+        vendor: p.vendorName || 'Supplier',
+        purpose: p.designName ? `Procurement for Lot #${p.designName}` : 'Trim Procurement',
+        itemDescription: itemDesc,
+        items: parsedItems.map(it => ({ lotNo: p.lotId || p.designName, itemDesc: it.description || it.name, qty1: it.qty, uom: it.uom || 'PCS' })),
+        quantity: totalQty,
+        uom: parsedItems[0]?.uom || 'PCS',
+        status: statusLabel,
+        cost: p.total || 0,
+        scans: poScans,
+        raw: p
+      });
+    });
+
+    // 5. PO Extra Pieces / Extra Material Issues
+    (extraMaterialIssues || []).forEach(ex => {
+      const exItems = Array.isArray(ex.items) ? ex.items : [];
+      const totalQty = exItems.reduce((s, it) => s + (parseFloat(it.totalRequired || it.qty || it.extraQty) || 0), 0);
+      const itemDesc = exItems.length > 1 
+        ? `See Extra Items (${exItems.length})` 
+        : (exItems[0] ? `+${exItems[0].totalRequired || exItems[0].qty || 0} ${exItems[0].unit || 'pcs'} ${exItems[0].bomItemName || exItems[0].materialName || ''}` : 'Extra Material Requisition');
+
+      const exScans = (scans || []).filter(s => {
+        const sLot = String(s.lot_number || '').trim().toLowerCase();
+        const exLot = String(ex.lot_no || ex.lotId || '').trim().toLowerCase();
+        return sLot && (sLot === exLot || sLot === `ex-${ex.id}` || sLot === `ex-${ex.voucherId}`);
+      });
+
+      list.push({
+        id: `EX-${ex.voucherId || ex.id}`,
+        docNo: ex.voucherId ? `EX-${ex.voucherId}` : `EX-${ex.id}`,
+        moduleType: 'extra_pieces',
+        moduleLabel: 'Extra Pieces',
+        badgeColor: '#ef4444',
+        date: ex.issueDate || ex.createdAt || ex.date || '',
+        dateObj: parseToDateObject(ex.issueDate || ex.createdAt || ex.date),
+        type: 'Extra Material Requisition',
+        department: ex.department || 'Stitching',
+        vendor: ex.receiverName ? `${ex.personName || 'Store'} → ${ex.receiverName}` : (ex.receiverName || ex.personName || 'Production Dept'),
+        purpose: ex.reason ? `Extra Requisition: ${ex.reason} (Lot #${ex.lotId})` : `Extra Pieces for Lot #${ex.lotId}`,
+        itemDescription: itemDesc,
+        items: exItems.map(it => ({ lotNo: ex.lotId, itemDesc: it.bomItemName || it.materialName, qty1: it.totalRequired || it.qty, uom: it.unit || 'PCS' })),
+        quantity: totalQty,
+        uom: exItems[0]?.unit || 'PCS',
+        status: 'Issued / Requisition',
+        preparedBy: ex.personName || 'Store',
+        scans: exScans,
+        raw: ex
+      });
+    });
+
+    // 6. Scanner Logs / QR Scans
+    (scans || []).forEach(sc => {
+      const scanType = sc.scan_type === 'gate_entry' 
+        ? 'Gate Entry (Gate In)' 
+        : (sc.scan_type === 'material_in' 
+          ? 'Material Entry (Received)' 
+          : (sc.scan_type === 'printing_gate_out' 
+            ? 'Printing Gate Out' 
+            : (sc.scan_type === 'supplier_entry'
+              ? 'Supplier Check-In'
+              : (sc.scan_type === 'rgp_entry' 
+                ? 'RGP Gate Out (Issue)' 
+                : (sc.scan_type === 'rgp_return' 
+                  ? 'RGP Gate In (Return)' 
+                  : sc.scan_type)))));
+
+      const scanBadgeColor = sc.scan_type === 'gate_entry'
+        ? '#10b981'
+        : (sc.scan_type === 'material_in'
+          ? '#3b82f6'
+          : (sc.scan_type === 'printing_gate_out'
+            ? '#f97316'
+            : (sc.scan_type === 'supplier_entry'
+              ? '#f59e0b'
+              : (sc.scan_type === 'rgp_entry'
+                ? '#a855f7'
+                : (sc.scan_type === 'rgp_return' ? '#ec4899' : '#06b6d4')))));
+
+      let statusLabel = 'Gate Entry Verified';
+      if (sc.scan_type === 'material_in') statusLabel = 'Material Received';
+      else if (sc.scan_type === 'supplier_entry') statusLabel = 'Supplier Check-In';
+      else if (sc.scan_type === 'printing_gate_out') statusLabel = 'Printing Dispatched';
+      else if (sc.scan_type === 'rgp_entry') statusLabel = 'RGP Dispatched';
+      else if (sc.scan_type === 'rgp_return') statusLabel = 'RGP Returned';
+
+      list.push({
+        id: `SCAN-${sc.id}`,
+        docNo: sc.lot_number ? `SCAN-${sc.id} (#${sc.lot_number})` : `SCAN-${sc.id}`,
+        moduleType: 'scanner',
+        scanSubType: sc.scan_type,
+        moduleLabel: 'Scanner Log',
+        badgeColor: scanBadgeColor,
+        date: sc.scanned_at || sc.timestamp || '',
+        dateObj: parseToDateObject(sc.scanned_at || sc.timestamp),
+        type: scanType,
+        department: sc.department || (sc.scan_type === 'printing_gate_out' ? 'Printing' : 'Gate / Security'),
+        vendor: sc.supplier_name || 'Vendor / Processor',
+        purpose: sc.lot_number ? `Gate Checkpoint for Lot #${sc.lot_number} (${sc.supplier_name || 'Vendor'})` : `Security Verification (${sc.supplier_name || 'Checkpoint'})`,
+        itemDescription: sc.material_name ? `${sc.material_name} — Verified at Gate (${sc.quantity || 0} pcs)` : `Materials Checked-In (${sc.quantity || 0} pcs)`,
+        items: [{ lotNo: sc.lot_number, itemDesc: sc.material_name || 'Goods', qty1: sc.quantity || 0, uom: 'PCS' }],
+        quantity: parseFloat(sc.quantity) || 0,
+        uom: 'PCS',
+        status: statusLabel,
+        preparedBy: sc.person_name || 'Security Guard',
+        scans: [sc],
+        raw: sc
+      });
+    });
+
+    return list;
+  }, [processedRgpList, dooriOrders, zipOrders, pos, extraMaterialIssues, scans]);
+
+  // Master Filtered Records
+  const filteredMasterRecords = useMemo(() => {
+    let list = unifiedMasterRecords.filter(r => {
+      // 1. Module Filter
+      if (masterModuleFilter === 'rgp') {
+        if (r.moduleType !== 'rgp') return false;
+      } else if (masterModuleFilter === 'rgp_closed') {
+        if (r.moduleType !== 'rgp') return false;
+        const s = String(r.status).toLowerCase();
+        if (!s.includes('returned') && !s.includes('closed')) return false;
+      } else if (masterModuleFilter === 'rgp_intransit') {
+        if (r.moduleType !== 'rgp') return false;
+        const s = String(r.status).toLowerCase();
+        if (!s.includes('transit') && !s.includes('open')) return false;
+      } else if (masterModuleFilter === 'rgp_overdue') {
+        if (r.moduleType !== 'rgp') return false;
+        const s = String(r.status).toLowerCase();
+        if (!s.includes('overdue')) return false;
+      } else if (masterModuleFilter === 'dori_po') {
+        if (r.moduleType !== 'dori_po') return false;
+      } else if (masterModuleFilter === 'zip_po') {
+        if (r.moduleType !== 'zip_po') return false;
+      } else if (masterModuleFilter === 'po') {
+        if (r.moduleType !== 'po') return false;
+      } else if (masterModuleFilter === 'extra_pieces') {
+        if (r.moduleType !== 'extra_pieces') return false;
+      } else if (masterModuleFilter === 'scanner') {
+        if (r.moduleType !== 'scanner') return false;
+      } else if (masterModuleFilter === 'scanner_gate_entry') {
+        if (r.moduleType !== 'scanner' || r.scanSubType !== 'gate_entry') return false;
+      } else if (masterModuleFilter === 'scanner_material_in') {
+        if (r.moduleType !== 'scanner' || (r.scanSubType !== 'material_in' && r.scanSubType !== 'material_entry')) return false;
+      } else if (masterModuleFilter === 'scanner_supplier') {
+        if (r.moduleType !== 'scanner' || r.scanSubType !== 'supplier_entry') return false;
+      } else if (masterModuleFilter === 'scanner_printing') {
+        if (r.moduleType !== 'scanner' || r.scanSubType !== 'printing_gate_out') return false;
+      } else if (masterModuleFilter === 'scanner_rgp') {
+        if (r.moduleType !== 'scanner' || (r.scanSubType !== 'rgp_entry' && r.scanSubType !== 'rgp_return')) return false;
+      }
+
+      // 2. Department Filter
+      if (masterDeptFilter !== 'all') {
+        if (!String(r.department || '').toLowerCase().includes(masterDeptFilter.toLowerCase())) {
+          return false;
+        }
+      }
+
+      // 3. Status Filter
+      if (masterStatusFilter !== 'all') {
+        const s = String(r.status || '').toLowerCase();
+        if (masterStatusFilter === 'closed' && !s.includes('closed') && !s.includes('returned')) return false;
+        if (masterStatusFilter === 'in_transit' && !s.includes('transit') && !s.includes('open') && !s.includes('pending')) return false;
+        if (masterStatusFilter === 'overdue' && !s.includes('overdue')) return false;
+        if (masterStatusFilter === 'verified' && !s.includes('verified') && !s.includes('approved')) return false;
+        if (masterStatusFilter === 'scanned' && !s.includes('scanned') && !s.includes('logged') && !s.includes('received')) return false;
+      }
+
+      // 4. Date Range Filter
+      if (masterDateFrom || masterDateTo) {
+        if (!isDateInRange(r.date, masterDateFrom, masterDateTo)) return false;
+      }
+
+      // 5. Search Text Filter
+      if (masterSearch.trim()) {
+        const q = masterSearch.toLowerCase().trim();
+        const matchDoc = String(r.docNo || '').toLowerCase().includes(q);
+        const matchType = String(r.type || '').toLowerCase().includes(q);
+        const matchDept = String(r.department || '').toLowerCase().includes(q);
+        const matchVendor = String(r.vendor || '').toLowerCase().includes(q);
+        const matchPurpose = String(r.purpose || '').toLowerCase().includes(q);
+        const matchItem = String(r.itemDescription || '').toLowerCase().includes(q);
+        const matchPrep = String(r.preparedBy || '').toLowerCase().includes(q);
+        const matchAuth = String(r.authorizedBy || '').toLowerCase().includes(q);
+        const matchVehicle = String(r.vehicleNo || '').toLowerCase().includes(q);
+        const matchItemsList = (r.items || []).some(it => 
+          String(it.lotNo || '').toLowerCase().includes(q) || 
+          String(it.itemDesc || it.name || '').toLowerCase().includes(q)
+        );
+
+        if (!matchDoc && !matchType && !matchDept && !matchVendor && !matchPurpose && !matchItem && !matchPrep && !matchAuth && !matchVehicle && !matchItemsList) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Sort
+    list.sort((a, b) => {
+      if (masterSort === 'latest') {
+        return (b.dateObj?.getTime() || 0) - (a.dateObj?.getTime() || 0);
+      } else if (masterSort === 'oldest') {
+        return (a.dateObj?.getTime() || 0) - (b.dateObj?.getTime() || 0);
+      } else if (masterSort === 'qty_desc') {
+        return (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0);
+      } else if (masterSort === 'qty_asc') {
+        return (parseFloat(a.quantity) || 0) - (parseFloat(b.quantity) || 0);
+      }
+      return 0;
+    });
+
+    return list;
+  }, [unifiedMasterRecords, masterModuleFilter, masterDeptFilter, masterStatusFilter, masterDateFrom, masterDateTo, masterSearch, masterSort]);
+
+  // Master KPI Stats
+  const masterKPIStats = useMemo(() => {
+    const totalRecords = filteredMasterRecords.length;
+    const totalPieces = filteredMasterRecords.reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
+    const closedCount = filteredMasterRecords.filter(r => String(r.status).toLowerCase().includes('closed') || String(r.status).toLowerCase().includes('returned')).length;
+    const openCount = filteredMasterRecords.filter(r => String(r.status).toLowerCase().includes('transit') || String(r.status).toLowerCase().includes('open') || String(r.status).toLowerCase().includes('pending') || String(r.status).toLowerCase().includes('active')).length;
+    const overdueCount = filteredMasterRecords.filter(r => String(r.status).toLowerCase().includes('overdue')).length;
+    const scanCount = filteredMasterRecords.filter(r => r.moduleType === 'scanner' || (r.scans && r.scans.length > 0)).length;
+
+    return { totalRecords, totalPieces, closedCount, openCount, overdueCount, scanCount };
+  }, [filteredMasterRecords]);
+
+  // Reset Master Filters
+  const handleResetMasterFilters = () => {
+    setMasterModuleFilter('all');
+    setMasterDeptFilter('all');
+    setMasterStatusFilter('all');
+    setMasterSearch('');
+    setMasterDateFrom('');
+    setMasterDateTo('');
+    setMasterSort('latest');
+  };
+
+  // Dynamic Title for Master Report
+  const getMasterReportTitle = () => {
+    if (masterModuleFilter === 'rgp_closed') return 'Closed RGP Dashboard';
+    if (masterModuleFilter === 'rgp') return 'Returnable Gate Pass (RGP) Register';
+    if (masterModuleFilter === 'rgp_intransit') return 'In-Transit RGP Dashboard';
+    if (masterModuleFilter === 'rgp_overdue') return 'Overdue RGP Tracking Register';
+    if (masterModuleFilter === 'dori_po') return 'Dori PO Sourcing & Dispatch Register';
+    if (masterModuleFilter === 'zip_po') return 'Zip PO Sourcing & Order Register';
+    if (masterModuleFilter === 'po') return 'General Purchase Orders (PO) Register';
+    if (masterModuleFilter === 'extra_pieces') return 'PO Extra Pieces & Material Issues Report';
+    if (masterModuleFilter === 'scanner_gate_entry') return 'Gate Entry (Gate In) Scanner Checkpoints Report';
+    if (masterModuleFilter === 'scanner_material_in') return 'Material Entry & Received Scans Report';
+    if (masterModuleFilter === 'scanner_supplier') return 'Supplier Check-In Gate Logs Report';
+    if (masterModuleFilter === 'scanner_printing') return 'Printing Gate Out Dispatch Report';
+    if (masterModuleFilter === 'scanner_rgp') return 'RGP Gate Dispatch & Return Scans Report';
+    if (masterModuleFilter === 'scanner') return 'QR Scanner Logs & Gate Entry Report';
+    return 'Master Operations & Logistics Report';
+  };
+
+  // Dynamic Filter Badge Details
+  const getMasterFilterBadge = () => {
+    if (masterModuleFilter === 'rgp_closed') return { text: 'Showing Closed RGP Only', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)', border: 'rgba(239, 68, 68, 0.25)' };
+    if (masterModuleFilter === 'rgp') return { text: 'Showing All RGP Passes', color: '#7c3aed', bg: 'rgba(124, 58, 237, 0.1)', border: 'rgba(124, 58, 237, 0.25)' };
+    if (masterModuleFilter === 'rgp_intransit') return { text: 'Showing In-Transit RGP Only', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.25)' };
+    if (masterModuleFilter === 'rgp_overdue') return { text: 'Showing Overdue RGP Only', color: '#dc2626', bg: 'rgba(220, 38, 38, 0.1)', border: 'rgba(220, 38, 38, 0.25)' };
+    if (masterModuleFilter === 'dori_po') return { text: 'Showing Dori POs Only', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.25)' };
+    if (masterModuleFilter === 'zip_po') return { text: 'Showing Zip POs Only', color: '#ec4899', bg: 'rgba(236, 72, 153, 0.1)', border: 'rgba(236, 72, 153, 0.25)' };
+    if (masterModuleFilter === 'po') return { text: 'Showing General POs Only', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)', border: 'rgba(59, 130, 246, 0.25)' };
+    if (masterModuleFilter === 'extra_pieces') return { text: 'Showing PO Extra Pieces Only', color: '#ef4444', bg: 'rgba(239, 68, 68, 0.1)', border: 'rgba(239, 68, 68, 0.25)' };
+    if (masterModuleFilter === 'scanner_gate_entry') return { text: 'Showing Gate Entry Scans Only', color: '#10b981', bg: 'rgba(16, 185, 129, 0.1)', border: 'rgba(16, 185, 129, 0.25)' };
+    if (masterModuleFilter === 'scanner_material_in') return { text: 'Showing Material Received Only', color: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)', border: 'rgba(59, 130, 246, 0.25)' };
+    if (masterModuleFilter === 'scanner_supplier') return { text: 'Showing Supplier Check-Ins Only', color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)', border: 'rgba(245, 158, 11, 0.25)' };
+    if (masterModuleFilter === 'scanner_printing') return { text: 'Showing Printing Gate Out Only', color: '#f97316', bg: 'rgba(249, 115, 22, 0.1)', border: 'rgba(249, 115, 22, 0.25)' };
+    if (masterModuleFilter === 'scanner_rgp') return { text: 'Showing RGP Gate Scans Only', color: '#a855f7', bg: 'rgba(168, 85, 247, 0.1)', border: 'rgba(168, 85, 247, 0.25)' };
+    if (masterModuleFilter === 'scanner') return { text: 'Showing All QR Scanner Logs Only', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.1)', border: 'rgba(6, 182, 212, 0.25)' };
+    return { text: 'Showing All Modules (RGP, Dori, Zip, PO, Extra Pieces, Scanner)', color: '#2563eb', bg: 'rgba(37, 99, 235, 0.1)', border: 'rgba(37, 99, 235, 0.25)' };
+  };
+
+  // Master Excel Export
+  const handleExportMasterExcel = (filteredData, filterName = 'Operations_Report') => {
+    if (!filteredData || filteredData.length === 0) {
+      alert('No records available to export.');
+      return;
+    }
+    
+    const headers = [
+      'Module / Category',
+      'Document / Reference No',
+      'Date / Time',
+      'Type / Subtype',
+      'Department',
+      'Vendor / Party / Operator',
+      'Purpose / Remarks',
+      'Item Description',
+      'Quantity Sent / Pieces',
+      'UOM',
+      'Expected Return / Status',
+      'Vehicle No',
+      'Prepared / Authorized By',
+      'Total Cost / Amount'
+    ];
+
+    const rows = filteredData.map(r => [
+      r.moduleLabel || r.moduleType || '',
+      r.docNo || '',
+      formatDateTime(r.date) || r.date || '',
+      r.type || '',
+      r.department || '',
+      r.vendor || '',
+      r.purpose || '',
+      r.itemDescription || '',
+      r.quantity || 0,
+      r.uom || 'PCS',
+      r.status || '',
+      r.vehicleNo || '',
+      [r.preparedBy, r.authorizedBy].filter(Boolean).join(' / ') || '',
+      r.cost ? `₹${r.cost}` : ''
+    ]);
+
+    const csvContent = '\uFEFF' + [
+      headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(','),
+      ...rows.map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(','))
+    ].join('\r\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${filterName.replace(/[^a-zA-Z0-9_-]/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Master PDF Report Export
+  const handleExportMasterPDF = (filteredData, activeTitle = 'Operations & Logistics Master Report') => {
+    if (!filteredData || filteredData.length === 0) {
+      alert('No records to export to PDF.');
+      return;
+    }
+
+    const doc = new jsPDF('landscape', 'pt', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Header Banner
+    doc.setFillColor(0, 75, 135); // Deep corporate blue
+    doc.rect(0, 0, pageWidth, 55, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(255, 255, 255);
+    doc.text(activeTitle.toUpperCase(), 35, 34);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(224, 242, 254);
+    doc.text(`Generated on: ${new Date().toLocaleString('en-GB')} | Total Records: ${filteredData.length}`, pageWidth - 35, 34, { align: 'right' });
+
+    // Summary Metrics Banner
+    const totalQty = filteredData.reduce((sum, r) => sum + (parseFloat(r.quantity) || 0), 0);
+    const closedCount = filteredData.filter(r => String(r.status).toLowerCase().includes('closed') || String(r.status).toLowerCase().includes('returned')).length;
+    const inTransitCount = filteredData.filter(r => String(r.status).toLowerCase().includes('transit') || String(r.status).toLowerCase().includes('open') || String(r.status).toLowerCase().includes('pending') || String(r.status).toLowerCase().includes('active')).length;
+
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(35, 65, pageWidth - 70, 32, 4, 4, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Total Records: ${filteredData.length}   |   Total Quantity/Pieces: ${totalQty.toLocaleString()}   |   Closed / Returned: ${closedCount}   |   In-Transit / Open: ${inTransitCount}`, 45, 85);
+
+    const tableHead = [['#', 'DOC / RGP NO', 'DATE', 'TYPE', 'DEPT', 'VENDOR / PARTY', 'PURPOSE', 'ITEM DESCRIPTION', 'QTY', 'UOM', 'STATUS']];
+
+    const tableBody = filteredData.map((r, idx) => [
+      idx + 1,
+      r.docNo || '—',
+      formatDateTime(r.date) || r.date || '—',
+      r.type || r.moduleLabel || '—',
+      r.department || '—',
+      r.vendor || '—',
+      r.purpose || '—',
+      (r.itemDescription || '—').length > 35 ? (r.itemDescription || '—').substring(0, 35) + '...' : (r.itemDescription || '—'),
+      (parseFloat(r.quantity) || 0).toLocaleString(),
+      r.uom || 'PCS',
+      r.status || 'Active'
+    ]);
+
+    autoTable(doc, {
+      startY: 108,
+      head: tableHead,
+      body: tableBody,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [0, 75, 135],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        halign: 'left'
+      },
+      styles: {
+        fontSize: 8,
+        cellPadding: 4.5,
+        overflow: 'linebreak',
+        textColor: [30, 41, 59]
+      },
+      columnStyles: {
+        0: { cellWidth: 25, halign: 'center' },
+        1: { cellWidth: 80, fontStyle: 'bold' },
+        2: { cellWidth: 65 },
+        3: { cellWidth: 65 },
+        4: { cellWidth: 60 },
+        5: { cellWidth: 80 },
+        6: { cellWidth: 65 },
+        7: { cellWidth: 150 },
+        8: { cellWidth: 45, halign: 'right', fontStyle: 'bold' },
+        9: { cellWidth: 35, halign: 'center' },
+        10: { cellWidth: 65, halign: 'center' }
+      },
+      margin: { left: 35, right: 35 },
+      didDrawPage: (data) => {
+        const pageNum = doc.internal.getNumberOfPages();
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Page ${data.pageNumber} of ${pageNum} — Production & Logistics Operations Report`, pageWidth / 2, pageHeight - 15, { align: 'center' });
+      }
+    });
+
+    const filename = `${activeTitle.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+    doc.save(filename);
+  };
+
   // CSV Export for RGPs
   const handleExportRgpCSV = () => {
     if (!filteredRgpList.length) {
@@ -1187,6 +1939,424 @@ export default function ReportsHistoryView({
     }
   };
 
+  // Unique lot brands
+  const uniqueLotBrands = useMemo(() => {
+    const set = new Set();
+    (lotWiseList || []).forEach(l => {
+      if (l.brand && l.brand !== '—' && l.brand !== '') set.add(l.brand);
+    });
+    return Array.from(set).sort();
+  }, [lotWiseList]);
+
+  // Filtered Lot-Wise List
+  const filteredLotWiseList = useMemo(() => {
+    let list = (lotWiseList || []).filter(lot => {
+      // 1. Process Status Filter
+      if (lotStatusFilter === 'complete') {
+        if (!lot.isCompleted) return false;
+      } else if (lotStatusFilter === 'in_progress') {
+        if (lot.isCompleted) return false;
+      } else if (lotStatusFilter === 'pending_rgp') {
+        if (!String(lot.processStatus).toLowerCase().includes('pending rgp')) return false;
+      } else if (lotStatusFilter === 'pending_gate') {
+        if (!String(lot.processStatus).toLowerCase().includes('pending gate')) return false;
+      } else if (lotStatusFilter === 'pending_receive') {
+        if (!String(lot.processStatus).toLowerCase().includes('pending store')) return false;
+      } else if (lotStatusFilter === 'overdue') {
+        if (!String(lot.processStatus).toLowerCase().includes('overdue')) return false;
+      } else if (lotStatusFilter === 'bom_registered') {
+        if (!String(lot.processStatus).toLowerCase().includes('bom registered')) return false;
+      }
+
+      // 2. Brand Filter
+      if (lotBrandFilter !== 'all') {
+        if (String(lot.brand || '').toLowerCase() !== lotBrandFilter.toLowerCase()) return false;
+      }
+
+      // 3. Search Query
+      if (lotSearch.trim()) {
+        const q = lotSearch.toLowerCase().trim();
+        const matchLot = String(lot.lotNo || '').toLowerCase().includes(q);
+        const matchStyle = String(lot.style || '').toLowerCase().includes(q);
+        const matchBrand = String(lot.brand || '').toLowerCase().includes(q);
+        const matchFabric = String(lot.fabricType || '').toLowerCase().includes(q);
+        const matchVendors = (lot.vendors || []).some(v => String(v).toLowerCase().includes(q));
+        const matchMaterials = (lot.materials || []).some(m => String(m.name || '').toLowerCase().includes(q) || String(m.source || '').toLowerCase().includes(q));
+        const matchRgps = (lot.rgps || []).some(r => String(r.rgpNo || '').toLowerCase().includes(q) || String(r.vendor || '').toLowerCase().includes(q));
+        const matchPos = (lot.pos || []).some(p => String(p.poNumber || '').toLowerCase().includes(q) || String(p.vendorName || '').toLowerCase().includes(q));
+        const matchDoori = (lot.dooriOrders || []).some(d => String(d.po_number || d.Lot_Number || '').toLowerCase().includes(q));
+        const matchZip = (lot.zipOrders || []).some(z => String(z.po_number || z.Lot_Number || '').toLowerCase().includes(q));
+        const matchExtra = (lot.extraIssues || []).some(ex => String(ex.voucher_id || ex.voucherId || ex.id || '').toLowerCase().includes(q));
+
+        if (!matchLot && !matchStyle && !matchBrand && !matchFabric && !matchVendors && !matchMaterials && !matchRgps && !matchPos && !matchDoori && !matchZip && !matchExtra) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Sort
+    list.sort((a, b) => {
+      const numA = parseInt(String(a.lotNo).replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.lotNo).replace(/\D/g, ''), 10) || 0;
+      if (lotSort === 'lot_desc') return numB - numA;
+      if (lotSort === 'lot_asc') return numA - numB;
+      if (lotSort === 'target_desc') return (b.targetPieces || 0) - (a.targetPieces || 0);
+      if (lotSort === 'target_asc') return (a.targetPieces || 0) - (b.targetPieces || 0);
+      if (lotSort === 'ops_desc') {
+        const opsA = (a.counts?.rgp || 0) + (a.counts?.po || 0) + (a.counts?.doori || 0) + (a.counts?.zip || 0) + (a.counts?.scans || 0);
+        const opsB = (b.counts?.rgp || 0) + (b.counts?.po || 0) + (b.counts?.doori || 0) + (b.counts?.zip || 0) + (b.counts?.scans || 0);
+        return opsB - opsA;
+      }
+      return 0;
+    });
+
+    return list;
+  }, [lotWiseList, lotStatusFilter, lotBrandFilter, lotSearch, lotSort]);
+
+  // KPI stats for Lot-Wise Report
+  const lotWiseKPIStats = useMemo(() => {
+    const total = filteredLotWiseList.length;
+    const completed = filteredLotWiseList.filter(l => l.isCompleted).length;
+    const inProgress = total - completed;
+    const totalTargetPcs = filteredLotWiseList.reduce((sum, l) => sum + (l.targetPieces || 0), 0);
+    const totalRgpPcs = filteredLotWiseList.reduce((sum, l) => sum + (l.totalRgpPcs || 0), 0);
+    const totalReceivedPcs = filteredLotWiseList.reduce((sum, l) => sum + (l.totalReceivedPcs || 0), 0);
+    const overdueCount = filteredLotWiseList.filter(l => String(l.processStatus).toLowerCase().includes('overdue')).length;
+
+    return { total, completed, inProgress, totalTargetPcs, totalRgpPcs, totalReceivedPcs, overdueCount };
+  }, [filteredLotWiseList]);
+
+  // Toggle row expansion in Lot-Wise table
+  const toggleLotExpand = (lotNo) => {
+    setExpandedLotIds(prev => {
+      const next = new Set(prev);
+      if (next.has(lotNo)) next.delete(lotNo);
+      else next.add(lotNo);
+      return next;
+    });
+  };
+
+  // Reset Lot-Wise Filters
+  const handleResetLotFilters = () => {
+    setLotSearch('');
+    setLotStatusFilter('all');
+    setLotBrandFilter('all');
+    setLotSort('lot_desc');
+  };
+
+  // Export Lot-Wise Summary to Excel / CSV
+  const handleExportLotSummaryExcel = () => {
+    const headers = [
+      'Lot Number',
+      'Style Code',
+      'Brand / Client',
+      'Fabric Type',
+      'Target Pieces',
+      'RGP Tags Breakdown',
+      'RGP Dori Breakdown',
+      'RGP Zip & Trims Breakdown',
+      'Dori PO Orders',
+      'Zip PO Orders',
+      'General PO & Extra Requisitions',
+      'Vendors Involved',
+      'Gate Entry (Gate In) Trail',
+      'Material In (Store Received) Trail',
+      'Material Out (Gate Dispatch) Trail',
+      'Process Status',
+      'Is Complete'
+    ];
+
+    const rows = filteredLotWiseList.map(l => {
+      const rgpTagsStr = (l.rgpTagList || []).map(t => `${t.rgpNo}: ${t.itemDesc} (${t.qty} ${t.uom}) [${t.status}]`).join('; ');
+      const rgpDoriStr = (l.rgpDoriList || []).map(d => `${d.rgpNo}: ${d.itemDesc} (${d.qty} ${d.uom}) [${d.status}]`).join('; ');
+      const rgpZipStr = (l.rgpZipList || []).map(z => `${z.rgpNo}: ${z.itemDesc} (${z.qty} ${z.uom}) [${z.status}]`).join('; ');
+      const doriOrdersStr = (l.dooriOrders || []).map(d => `PO #${d.po_number || d.Lot_Number}: ${d.Total_Pieces} pcs (${d.Style || ''})`).join('; ');
+      const zipOrdersStr = (l.zipOrders || []).map(z => `PO #${z.po_number || z.Lot_Number}: ${z.Total_Pieces_CH || z.Total_Pieces} pcs (Teeth: ${z.Teeth_Color || 'STD'})`).join('; ');
+      const posStr = [...(l.pos || []).map(p => `PO #${p.poNumber} (${p.vendorName || ''})`), ...(l.extraIssues || []).map(ex => `Extra #${ex.voucher_id || ex.voucherId || ex.id} (${ex.reason || ''})`)].join('; ');
+      const gateInStr = (l.gateInScans || []).map(s => `${s.person_name || 'Guard'}: ${s.quantity || 0} pcs from ${s.supplier_name || ''} at ${formatDateTime(s.scanned_at || s.timestamp)}`).join('; ');
+      const matInStr = (l.materialInScans || []).map(s => `${s.person_name || 'Verifier'}: ${s.material_name || ''} (${s.quantity || 0} pcs) at ${formatDateTime(s.scanned_at || s.timestamp)}`).join('; ');
+      const matOutStr = (l.materialOutScans || []).map(s => `${s.person_name || 'Guard'}: ${s.material_name || ''} (${s.quantity || 0} pcs) at ${formatDateTime(s.scanned_at || s.timestamp)}`).join('; ');
+
+      return [
+        `"${l.lotNo}"`,
+        `"${String(l.style || '').replace(/"/g, '""')}"`,
+        `"${String(l.brand || '').replace(/"/g, '""')}"`,
+        `"${String(l.fabricType || '').replace(/"/g, '""')}"`,
+        l.targetPieces || 0,
+        `"${rgpTagsStr.replace(/"/g, '""')}"`,
+        `"${rgpDoriStr.replace(/"/g, '""')}"`,
+        `"${rgpZipStr.replace(/"/g, '""')}"`,
+        `"${doriOrdersStr.replace(/"/g, '""')}"`,
+        `"${zipOrdersStr.replace(/"/g, '""')}"`,
+        `"${posStr.replace(/"/g, '""')}"`,
+        `"${(l.vendors || []).join(', ').replace(/"/g, '""')}"`,
+        `"${gateInStr.replace(/"/g, '""')}"`,
+        `"${matInStr.replace(/"/g, '""')}"`,
+        `"${matOutStr.replace(/"/g, '""')}"`,
+        `"${l.processStatus}"`,
+        l.isCompleted ? 'YES (COMPLETE)' : 'NO (IN PROGRESS)'
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `Lot_Wise_Operations_Report_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download Single Lot PDF Dossier
+  const handleDownloadLotPDF = (lot) => {
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' });
+
+      // Title & Header
+      doc.setFillColor(0, 75, 135);
+      doc.rect(40, 30, 515, 45, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(15);
+      doc.setTextColor(255, 255, 255);
+      doc.text(`MANUFACTURING LOT AUDIT DOSSIER — LOT #${lot.lotNo}`, 50, 58);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated on: ${new Date().toLocaleString('en-GB')} | Consolidated Operations Dossier`, 40, 90);
+
+      // Metadata Table
+      autoTable(doc, {
+        startY: 100,
+        margin: { left: 40, right: 40 },
+        theme: 'grid',
+        head: [['Lot Metadata', 'Details', 'Process Lifecycle', 'Status Details']],
+        body: [
+          ['Lot Number', `#${lot.lotNo}`, 'Lifecycle Status', lot.isCompleted ? '✓ COMPLETE (All Processes Finished)' : lot.processStatus],
+          ['Style Code', lot.style || '—', 'Target Pieces', `${lot.targetPieces || 0} PCS`],
+          ['Brand / Client', lot.brand || '—', 'RGP Operations', `Tags: ${lot.rgpTagList?.length || 0} | Dori: ${lot.rgpDoriList?.length || 0} | Zip: ${lot.rgpZipList?.length || 0}`],
+          ['Fabric Type', lot.fabricType || '—', 'Scanners Verified', `Gate In: ${lot.gateInScans?.length || 0} | Material In: ${lot.materialInScans?.length || 0} | Out: ${lot.materialOutScans?.length || 0}`],
+          ['Vendors Involved', (lot.vendors || []).join(', ') || '—', 'PO & Trims Orders', `Dori: ${lot.totalDoriPcs || 0} pcs | Zip: ${lot.totalZipPcs || 0} pcs | PO: ${lot.totalPoPcs || 0} pcs`]
+        ],
+        styles: { fontSize: 8.5, cellPadding: 5 },
+        headStyles: { fillColor: [0, 75, 135], textColor: [255, 255, 255] }
+      });
+
+      let nextY = doc.lastAutoTable.finalY + 16;
+
+      // 1. Materials Matrix
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59);
+      doc.text('1. Consolidated Raw Materials & Accessories Breakdown', 40, nextY);
+      nextY += 8;
+
+      const matRows = (lot.materials || []).map((m, idx) => [
+        idx + 1,
+        m.name || 'Material',
+        m.color || '—',
+        `${m.qty || 0} ${m.uom || 'PCS'}`,
+        m.source || 'PO/RGP',
+        m.meta || '—'
+      ]);
+
+      autoTable(doc, {
+        startY: nextY,
+        margin: { left: 40, right: 40 },
+        theme: 'striped',
+        head: [['#', 'Material Name', 'Color / Teeth', 'Total Qty', 'Document Source', 'Purpose / Placement']],
+        body: matRows.length > 0 ? matRows : [['—', 'No direct materials recorded', '—', '—', '—', '—']],
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [124, 58, 237], textColor: [255, 255, 255] }
+      });
+
+      nextY = doc.lastAutoTable.finalY + 16;
+
+      // 2. Connected RGPs & POs
+      if (nextY > 680) { doc.addPage(); nextY = 50; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59);
+      doc.text('2. Returnable Gate Passes (RGP) & Purchase Orders Record', 40, nextY);
+      nextY += 8;
+
+      const rgpPoRows = [];
+      (lot.rgps || []).forEach(r => {
+        rgpPoRows.push([
+          `RGP #${r.rgpNo}`,
+          'RGP Pass',
+          r.vendor || '—',
+          formatDateTime(r.date),
+          r.expectedReturnDate ? formatDateTime(r.expectedReturnDate) : '—',
+          r.status || 'Dispatched'
+        ]);
+      });
+      (lot.pos || []).forEach(p => {
+        rgpPoRows.push([
+          `PO #${p.poNumber}`,
+          'General PO',
+          p.vendorName || '—',
+          formatDateTime(p.date),
+          '—',
+          p.status || 'Active'
+        ]);
+      });
+      (lot.dooriOrders || []).forEach(d => {
+        rgpPoRows.push([
+          `Dori #${d.po_number || d.Lot_Number}`,
+          'Dori PO',
+          d.Supplier_Name || d.Supplier || '—',
+          formatDateTime(d.Issue_Date || d.Timestamp),
+          '—',
+          'Compiled'
+        ]);
+      });
+      (lot.zipOrders || []).forEach(z => {
+        rgpPoRows.push([
+          `Zip #${z.po_number || z.Lot_Number}`,
+          'Zip PO',
+          z.Supplier_Name || z.Supplier || '—',
+          formatDateTime(z.Saved_At || z.Issue_Date),
+          '—',
+          'Compiled'
+        ]);
+      });
+
+      autoTable(doc, {
+        startY: nextY,
+        margin: { left: 40, right: 40 },
+        theme: 'grid',
+        head: [['Doc Ref #', 'Module Type', 'Vendor / Party', 'Issued Date', 'Expected Return', 'Status']],
+        body: rgpPoRows.length > 0 ? rgpPoRows : [['—', 'No sub-orders or RGPs logged', '—', '—', '—', '—']],
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [55, 65, 81], textColor: [255, 255, 255] }
+      });
+
+      nextY = doc.lastAutoTable.finalY + 16;
+
+      // 3. Security Gate & Scanner Trail
+      if (nextY > 680) { doc.addPage(); nextY = 50; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59);
+      doc.text('3. Security Gate Entry & Scanner Inward Verification Trail', 40, nextY);
+      nextY += 8;
+
+      const scanRows = (lot.scans || []).map((s, idx) => [
+        idx + 1,
+        s.scan_type === 'gate_entry' ? 'Gate Entry (Gate In)' : (s.scan_type === 'material_in' ? 'Material Received (Inward)' : (s.scan_type === 'rgp_entry' ? 'Gate Out (Dispatch)' : s.scan_type)),
+        s.person_name || 'Guard',
+        s.supplier_name || 'Vendor',
+        `${s.quantity || 0} pcs of ${s.material_name || 'Goods'}`,
+        formatDateTime(s.scanned_at || s.timestamp)
+      ]);
+
+      autoTable(doc, {
+        startY: nextY,
+        margin: { left: 40, right: 40 },
+        theme: 'grid',
+        head: [['#', 'Scan Event', 'Officer / Guard', 'Party Verified', 'Material & Quantity', 'Scanned Timestamp']],
+        body: scanRows.length > 0 ? scanRows : [['—', 'No QR scanner checkpoints logged yet', '—', '—', '—', '—']],
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [16, 185, 129], textColor: [255, 255, 255] }
+      });
+
+      nextY = doc.lastAutoTable.finalY + 25;
+      if (nextY > 720) { doc.addPage(); nextY = 50; }
+
+      // Signatures
+      doc.setDrawColor(203, 213, 225);
+      doc.line(50, nextY + 30, 180, nextY + 30);
+      doc.line(220, nextY + 30, 350, nextY + 30);
+      doc.line(390, nextY + 30, 520, nextY + 30);
+
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(71, 85, 105);
+      doc.text('Prepared By (Store)', 50, nextY + 42);
+      doc.text('Security Gate Incharge', 220, nextY + 42);
+      doc.text('Factory Manager / Auth', 390, nextY + 42);
+
+      doc.save(`Lot_${lot.lotNo}_Operations_Dossier.pdf`);
+    } catch (err) {
+      console.error('Error generating Lot PDF:', err);
+      alert('Could not generate Lot PDF: ' + err.message);
+    }
+  };
+
+  // Download All Filtered Lots PDF Master Register
+  const handleDownloadAllLotsPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a3' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(0, 75, 135);
+      doc.text('CONSOLIDATED LOT-WISE OPERATIONS MASTER REGISTER', 40, 40);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated: ${new Date().toLocaleString('en-GB')} | Total Manufacturing Lots: ${filteredLotWiseList.length}`, 40, 56);
+
+      const tableRows = filteredLotWiseList.map((l, idx) => {
+        const rgpTags = (l.rgpTagList || []).map(t => `${t.rgpNo} (${t.qty} pcs)`).join(', ') || '—';
+        const rgpDori = (l.rgpDoriList || []).map(d => `${d.rgpNo} (${d.qty} pcs)`).join(', ') || '—';
+        const rgpZip = (l.rgpZipList || []).map(z => `${z.rgpNo} (${z.qty} pcs)`).join(', ') || '—';
+        const doriPO = (l.dooriOrders || []).map(d => `PO #${d.po_number || d.Lot_Number} (${d.Total_Pieces} pcs)`).join(', ') || '—';
+        const zipPO = (l.zipOrders || []).map(z => `PO #${z.po_number || z.Lot_Number} (${z.Total_Pieces_CH || z.Total_Pieces} pcs)`).join(', ') || '—';
+        const genPO = [...(l.pos || []).map(p => `PO #${p.poNumber}`), ...(l.extraIssues || []).map(ex => `Ex #${ex.voucher_id || ex.voucherId || ex.id}`)].join(', ') || '—';
+        const gateIn = (l.gateInScans || []).map(s => `${s.quantity || 0} pcs (${s.person_name || 'Guard'})`).join(', ') || '—';
+        const matIn = (l.materialInScans || []).map(s => `${s.quantity || 0} pcs (${s.material_name || 'Goods'})`).join(', ') || '—';
+        const matOut = (l.materialOutScans || []).map(s => `${s.quantity || 0} pcs (${s.person_name || 'Guard'})`).join(', ') || '—';
+
+        return [
+          idx + 1,
+          `#${l.lotNo}\n${l.style || ''}`,
+          `${l.targetPieces || 0} PCS`,
+          rgpTags,
+          rgpDori,
+          rgpZip,
+          doriPO,
+          zipPO,
+          genPO,
+          (l.vendors || []).slice(0, 2).join(', ') || '—',
+          gateIn,
+          matIn,
+          matOut,
+          l.isCompleted ? '✓ COMPLETE' : l.processStatus
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 68,
+        margin: { left: 30, right: 30 },
+        theme: 'grid',
+        head: [['#', 'Lot No & Style', 'Target', 'RGP Tags', 'RGP Dori', 'RGP Zip/Trims', 'Dori PO', 'Zip PO', 'General PO / Extra', 'Vendors', 'Gate In (Entry)', 'Material In (Store)', 'Material Out (Gate)', 'Process Status']],
+        body: tableRows.length > 0 ? tableRows : [['—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', '—', 'No matching lots']],
+        styles: { fontSize: 7.5, cellPadding: 3.5, overflow: 'linebreak' },
+        headStyles: { fillColor: [0, 75, 135], textColor: [255, 255, 255], fontStyle: 'bold' }
+      });
+
+      doc.save(`Consolidated_Lot_Operations_Master_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error('Error generating master PDF:', err);
+      alert('Could not generate master PDF: ' + err.message);
+    }
+  };
+
+  // Print single lot dossier modal view
+  const handlePrintLotDossier = (lot) => {
+    setSelectedLotForModal(lot);
+    setTimeout(() => {
+      window.print();
+    }, 300);
+  };
+
   // Render a responsive bar/line chart using SVG
   const monthData = [
     { label: 'March', amount: 45000 },
@@ -1218,6 +2388,48 @@ export default function ReportsHistoryView({
         flexWrap: 'wrap',
         gap: '4px'
       }}>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('master_operations_report')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'master_operations_report' ? 'var(--accent-color, #2563eb)' : 'transparent',
+            color: activeReportTab === 'master_operations_report' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <FileSpreadsheet size={14} />
+          <span>Master Operations Report ({filteredMasterRecords.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('lot_wise_report')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'lot_wise_report' ? 'var(--accent-color, #2563eb)' : 'transparent',
+            color: activeReportTab === 'lot_wise_report' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <Layers size={14} />
+          <span>Lot-Wise Operations Report ({filteredLotWiseList.length})</span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveReportTab('daily_weekly_calendar')}
@@ -1388,6 +2600,1994 @@ export default function ReportsHistoryView({
         </button>
       </div>
 
+
+      {activeReportTab === 'master_operations_report' && (
+        <div className="animate-scale" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Top Header Card */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            backgroundColor: 'var(--bg-secondary)',
+            padding: '16px 20px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                backgroundColor: '#004b87',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 12px rgba(0, 75, 135, 0.25)'
+              }}>
+                {masterModuleFilter === 'rgp' || masterModuleFilter === 'rgp_closed' ? (
+                  <Truck size={22} />
+                ) : masterModuleFilter === 'scanner' ? (
+                  <QrCode size={22} />
+                ) : masterModuleFilter === 'extra_pieces' ? (
+                  <Boxes size={22} />
+                ) : (
+                  <FileSpreadsheet size={22} />
+                )}
+              </div>
+              <div>
+                <h2 style={{
+                  margin: 0,
+                  fontSize: '20px',
+                  fontWeight: '800',
+                  color: 'var(--text-main)',
+                  letterSpacing: '-0.3px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span>{getMasterReportTitle()}</span>
+                </h2>
+                <p style={{ margin: '3px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                  Real-time multi-filter reporting across RGP Passes, Dori PO, Zip PO, General POs, Extra Pieces Requisitions &amp; QR Scanner Logs.
+                </p>
+              </div>
+            </div>
+
+            {/* Top Action Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleResetMasterFilters}
+                className="btn btn-secondary btn-sm"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  height: '36px',
+                  padding: '0 14px',
+                  borderRadius: '8px',
+                  fontWeight: '600'
+                }}
+                title="Reset all search queries and date filters"
+              >
+                <RotateCcw size={14} />
+                <span>Back / Reset</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={fetchAllMasterData}
+                disabled={masterLoading}
+                className="btn btn-secondary btn-sm"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  height: '36px',
+                  padding: '0 14px',
+                  borderRadius: '8px',
+                  fontWeight: '600'
+                }}
+                title="Live reload from MySQL database"
+              >
+                <RefreshCw size={14} className={masterLoading ? 'animate-spin' : ''} />
+                <span>{masterLoading ? 'Refreshing...' : 'Refresh'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExportMasterExcel(filteredMasterRecords, getMasterReportTitle())}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  height: '36px',
+                  padding: '0 16px',
+                  borderRadius: '8px',
+                  backgroundColor: '#059669',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)',
+                  transition: 'all 0.15s'
+                }}
+                title="Download complete filtered dataset to CSV / Excel spreadsheet"
+              >
+                <FileSpreadsheet size={15} />
+                <span>Excel</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleExportMasterPDF(filteredMasterRecords, getMasterReportTitle())}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  height: '36px',
+                  padding: '0 16px',
+                  borderRadius: '8px',
+                  backgroundColor: '#0284c7',
+                  color: '#ffffff',
+                  border: 'none',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 6px rgba(2, 132, 199, 0.25)',
+                  transition: 'all 0.15s'
+                }}
+                title="Generate print-ready multi-page PDF Report document"
+              >
+                <Download size={15} />
+                <span>PDF Report</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Badges and Summary Chips Row */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+            padding: '4px 0'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {(() => {
+                const badge = getMasterFilterBadge();
+                return (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    backgroundColor: badge.bg,
+                    color: badge.color,
+                    border: `1px solid ${badge.border}`
+                  }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: badge.color }}></span>
+                    <span>{badge.text}</span>
+                  </span>
+                );
+              })()}
+
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '700',
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                color: '#6366f1',
+                border: '1px solid rgba(99, 102, 241, 0.2)'
+              }}>
+                <BarChart3 size={13} />
+                <span>{filteredMasterRecords.length} Records</span>
+              </span>
+
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '600',
+                backgroundColor: 'var(--bg-secondary)',
+                color: 'var(--text-muted)',
+                border: '1px solid var(--border-color)'
+              }}>
+                <Search size={13} />
+                <span>Real-time Search &amp; Filters</span>
+              </span>
+
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 12px',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '600',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                color: '#10b981',
+                border: '1px solid rgba(16, 185, 129, 0.2)'
+              }}>
+                <CheckCircle size={13} />
+                <span>Live MySQL Sync</span>
+              </span>
+            </div>
+
+            {/* Metric summary numbers */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+              <span>Total Qty/Pcs: <strong style={{ color: 'var(--text-main)', fontSize: '13px' }}>{masterKPIStats.totalPieces.toLocaleString()}</strong></span>
+              <span>Closed/Returned: <strong style={{ color: '#10b981', fontSize: '13px' }}>{masterKPIStats.closedCount}</strong></span>
+              <span>Open/In-Transit: <strong style={{ color: '#f59e0b', fontSize: '13px' }}>{masterKPIStats.openCount}</strong></span>
+            </div>
+          </div>
+
+          {/* Filter Bar with Search, Module, Department, Status, Date Pickers */}
+          <div style={{
+            display: 'flex',
+            gap: '10px',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            padding: '14px 16px',
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '180px' }}>
+              <Search size={15} style={{
+                position: 'absolute',
+                left: '12px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-muted)'
+              }} />
+              <input
+                type="text"
+                placeholder="Search anything..."
+                value={masterSearch}
+                onChange={(e) => setMasterSearch(e.target.value)}
+                style={{
+                  paddingLeft: '36px',
+                  paddingRight: masterSearch ? '30px' : '12px',
+                  height: '38px',
+                  fontSize: '13px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary, #ffffff)',
+                  color: 'var(--text-main)',
+                  width: '100%',
+                  outline: 'none',
+                  transition: 'border-color 0.2s'
+                }}
+              />
+              {masterSearch && (
+                <button
+                  type="button"
+                  onClick={() => setMasterSearch('')}
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    padding: '2px'
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* Module / Record Category Filter */}
+            <select
+              value={masterModuleFilter}
+              onChange={(e) => setMasterModuleFilter(e.target.value)}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                fontWeight: '600',
+                padding: '0 28px 0 12px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--border-color)',
+                background: 'var(--bg-primary, #ffffff)',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                outline: 'none',
+                minWidth: '170px'
+              }}
+            >
+              <option value="all">📦 All Modules &amp; Categories</option>
+              <option value="rgp_closed">🔴 Closed RGP Only</option>
+              <option value="rgp">🚚 All RGP Passes</option>
+              <option value="rgp_intransit">🟡 In-Transit RGP Only</option>
+              <option value="rgp_overdue">🚨 Overdue RGP Only</option>
+              <option value="dori_po">🧵 Dori PO (Thread Orders)</option>
+              <option value="zip_po">✂️ Zip PO (Zipper Orders)</option>
+              <option value="po">📋 General Purchase Orders</option>
+              <option value="extra_pieces">⚡ PO Extra Pieces Requisitions</option>
+              <option value="scanner">📲 All Scanner Logs</option>
+              <option value="scanner_gate_entry">🔒 Gate Entry (Gate In) Only</option>
+              <option value="scanner_material_in">📦 Material Entry / Received Only</option>
+              <option value="scanner_supplier">🏭 Supplier Check-In Only</option>
+              <option value="scanner_printing">🖨️ Printing Gate Out Only</option>
+              <option value="scanner_rgp">🚚 RGP Dispatch &amp; Return Scans</option>
+            </select>
+
+            {/* Department Dropdown */}
+            <select
+              value={masterDeptFilter}
+              onChange={(e) => setMasterDeptFilter(e.target.value)}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                fontWeight: '600',
+                padding: '0 28px 0 12px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--border-color)',
+                background: 'var(--bg-primary, #ffffff)',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                outline: 'none',
+                minWidth: '150px'
+              }}
+            >
+              <option value="all">🏢 All Departments</option>
+              <option value="Store">Store</option>
+              <option value="Stitching">Stitching</option>
+              <option value="Sampling">Sampling</option>
+              <option value="Production">Production</option>
+              <option value="Cutting">Cutting</option>
+              <option value="Finishing">Finishing</option>
+              <option value="Quality">Quality</option>
+              <option value="Packing">Packing</option>
+              <option value="Dyeing">Dyeing</option>
+              <option value="Printing">Printing</option>
+              <option value="jacket">jacket</option>
+              <option value="Other">Other</option>
+            </select>
+
+            {/* Status Filter */}
+            <select
+              value={masterStatusFilter}
+              onChange={(e) => setMasterStatusFilter(e.target.value)}
+              style={{
+                height: '38px',
+                fontSize: '13px',
+                fontWeight: '600',
+                padding: '0 28px 0 12px',
+                borderRadius: '8px',
+                border: '1.5px solid var(--border-color)',
+                background: 'var(--bg-primary, #ffffff)',
+                color: 'var(--text-main)',
+                cursor: 'pointer',
+                outline: 'none',
+                minWidth: '135px'
+              }}
+            >
+              <option value="all">⚙️ All Statuses</option>
+              <option value="closed">Closed / Returned</option>
+              <option value="in_transit">In Transit / Pending</option>
+              <option value="overdue">Overdue</option>
+              <option value="verified">Verified / Approved</option>
+              <option value="scanned">Scanned / Received</option>
+            </select>
+
+            {/* Date Range Inputs */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <input
+                type="date"
+                value={masterDateFrom}
+                onChange={(e) => setMasterDateFrom(e.target.value)}
+                style={{
+                  height: '38px',
+                  fontSize: '12.5px',
+                  padding: '0 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary, #ffffff)',
+                  color: 'var(--text-main)',
+                  outline: 'none'
+                }}
+                title="From Date"
+              />
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>to</span>
+              <input
+                type="date"
+                value={masterDateTo}
+                onChange={(e) => setMasterDateTo(e.target.value)}
+                style={{
+                  height: '38px',
+                  fontSize: '12.5px',
+                  padding: '0 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary, #ffffff)',
+                  color: 'var(--text-main)',
+                  outline: 'none'
+                }}
+                title="To Date"
+              />
+            </div>
+
+            {/* Date Preset Pills */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <button
+                type="button"
+                onClick={() => handleApplyDatePreset('today')}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Today
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyDatePreset('this_week')}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Week
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyDatePreset('this_month')}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '11px',
+                  borderRadius: '5px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                Month
+              </button>
+              {(masterDateFrom || masterDateTo) && (
+                <button
+                  type="button"
+                  onClick={() => handleApplyDatePreset('clear')}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '11px',
+                    borderRadius: '5px',
+                    border: 'none',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#ef4444',
+                    cursor: 'pointer',
+                    fontWeight: '700'
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Master Data Table */}
+          <div style={{
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)',
+            overflow: 'hidden'
+          }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '13px',
+                textAlign: 'left'
+              }}>
+                <thead>
+                  <tr style={{
+                    backgroundColor: '#004b87',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.4px',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    <th style={{ padding: '13px 14px', width: '130px' }}>RGP / DOC NO</th>
+                    <th style={{ padding: '13px 14px', width: '115px' }}>MATERIAL OUT DATE</th>
+                    <th style={{ padding: '13px 14px', width: '120px' }}>RGP TYPE</th>
+                    <th style={{ padding: '13px 14px', width: '110px' }}>DEPARTMENT</th>
+                    <th style={{ padding: '13px 14px', width: '140px' }}>VENDOR / PARTY</th>
+                    <th style={{ padding: '13px 14px', width: '120px' }}>PURPOSE</th>
+                    <th style={{ padding: '13px 14px', minWidth: '220px' }}>ITEM DESCRIPTION</th>
+                    <th style={{ padding: '13px 14px', width: '110px', textAlign: 'right' }}>QUANTITY SENT</th>
+                    <th style={{ padding: '13px 14px', width: '70px', textAlign: 'center' }}>UOM</th>
+                    <th style={{ padding: '13px 14px', width: '130px', textAlign: 'center' }}>EXP / STATUS</th>
+                    <th style={{ padding: '13px 14px', width: '90px', textAlign: 'center' }}>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredMasterRecords.length === 0 ? (
+                    <tr>
+                      <td colSpan={11} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                          <AlertCircle size={32} color="#94a3b8" />
+                          <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>No matching operational records found</strong>
+                          <p style={{ margin: 0, fontSize: '13px' }}>Try adjusting your search keywords, department filter, module filter or date range.</p>
+                          <button
+                            type="button"
+                            onClick={handleResetMasterFilters}
+                            className="btn btn-secondary btn-sm"
+                            style={{ marginTop: '8px' }}
+                          >
+                            Reset All Filters
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMasterRecords.map((r, idx) => {
+                      const isEven = idx % 2 === 0;
+                      const isClosed = String(r.status).toLowerCase().includes('returned') || String(r.status).toLowerCase().includes('closed');
+                      const isOverdue = String(r.status).toLowerCase().includes('overdue');
+                      const isInTransit = String(r.status).toLowerCase().includes('transit') || String(r.status).toLowerCase().includes('open');
+                      const isScanner = r.moduleType === 'scanner';
+                      const hasLinkedScans = r.scans && r.scans.length > 0;
+
+                      return (
+                        <tr
+                          key={r.id || idx}
+                          style={{
+                            borderBottom: '1px solid var(--border-color)',
+                            backgroundColor: isEven ? 'var(--bg-secondary)' : 'var(--bg-primary, #f8fafc)',
+                            transition: 'background-color 0.15s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(0, 75, 135, 0.04)'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isEven ? 'var(--bg-secondary)' : 'var(--bg-primary, #f8fafc)'}
+                        >
+                          {/* Doc / RGP No */}
+                          <td style={{ padding: '12px 14px', fontWeight: '800' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <span style={{ color: '#004b87', fontSize: '13px' }}>{r.docNo}</span>
+                              <span style={{
+                                fontSize: '9.5px',
+                                fontWeight: '800',
+                                width: 'fit-content',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                backgroundColor: `${r.badgeColor}18`,
+                                color: r.badgeColor
+                              }}>
+                                {r.moduleLabel}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Material Out Date */}
+                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                            {formatDateTime(r.date) || r.date || '—'}
+                          </td>
+
+                          {/* RGP Type */}
+                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)', fontWeight: '600' }}>
+                            {r.type}
+                          </td>
+
+                          {/* Department */}
+                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                            {r.department || 'Store'}
+                          </td>
+
+                          {/* Vendor / Party */}
+                          <td style={{ padding: '12px 14px', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-main)' }}>
+                            {r.vendor || '—'}
+                          </td>
+
+                          {/* Purpose */}
+                          <td style={{ padding: '12px 14px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                            {r.purpose || '—'}
+                          </td>
+
+                          {/* Item Description */}
+                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)' }}>
+                            {r.items && r.items.length > 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedMasterRecordForModal(r)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  padding: 0,
+                                  color: '#004b87',
+                                  fontWeight: '700',
+                                  textDecoration: 'underline',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <span>{r.itemDescription}</span>
+                                <ArrowUpRight size={12} />
+                              </button>
+                            ) : (
+                              <span>{r.itemDescription}</span>
+                            )}
+                          </td>
+
+                          {/* Quantity Sent */}
+                          <td style={{ padding: '12px 14px', fontSize: '13.5px', fontWeight: '800', textAlign: 'right', color: 'var(--text-main)' }}>
+                            {Number(r.quantity || 0).toLocaleString()}
+                          </td>
+
+                          {/* UOM */}
+                          <td style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '700', textAlign: 'center', color: 'var(--text-muted)' }}>
+                            {r.uom || 'PCS'}
+                          </td>
+
+                          {/* Status & Expected Date / Scanner Verification */}
+                          <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '12px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                backgroundColor: isScanner
+                                  ? `${r.badgeColor}18`
+                                  : isClosed 
+                                    ? 'rgba(16, 185, 129, 0.12)' 
+                                    : isOverdue 
+                                      ? 'rgba(239, 68, 68, 0.12)' 
+                                      : 'rgba(245, 158, 11, 0.12)',
+                                color: isScanner ? r.badgeColor : (isClosed ? '#10b981' : isOverdue ? '#ef4444' : '#f59e0b'),
+                                border: `1px solid ${isScanner ? `${r.badgeColor}35` : (isClosed ? 'rgba(16, 185, 129, 0.25)' : isOverdue ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)')}`
+                              }}>
+                                {r.status}
+                              </span>
+
+                              {/* Linked Gate Scanner Badge */}
+                              {!isScanner && hasLinkedScans && (
+                                <span style={{
+                                  fontSize: '9.5px',
+                                  fontWeight: '700',
+                                  color: '#06b6d4',
+                                  backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  <QrCode size={9} />
+                                  <span>{r.scans.length} Scan{r.scans.length > 1 ? 's' : ''} Logged</span>
+                                </span>
+                              )}
+
+                              {r.expectedReturnDate && (
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                  Exp: {formatDateTime(r.expectedReturnDate)}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Actions */}
+                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedMasterRecordForModal(r)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '4px 8px', height: '28px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title="View complete record details and verification logs"
+                            >
+                              <Eye size={13} />
+                              <span>View</span>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Master Record Details Modal */}
+          {selectedMasterRecordForModal && (
+            <div style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.65)',
+              backdropFilter: 'blur(3px)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 9999,
+              padding: '20px'
+            }}>
+              <div className="animate-scale" style={{
+                backgroundColor: 'var(--bg-secondary)',
+                borderRadius: '16px',
+                border: '1px solid var(--border-color)',
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)',
+                width: '100%',
+                maxWidth: '850px',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                padding: '24px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '18px'
+              }}>
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '8px',
+                      backgroundColor: `${selectedMasterRecordForModal.badgeColor}20`,
+                      color: selectedMasterRecordForModal.badgeColor,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {selectedMasterRecordForModal.moduleType === 'scanner' ? <QrCode size={18} /> : <FileText size={18} />}
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: 'var(--text-main)' }}>
+                        {selectedMasterRecordForModal.docNo}
+                      </h3>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        {selectedMasterRecordForModal.moduleLabel} Details &bull; {formatDateTime(selectedMasterRecordForModal.date)}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMasterRecordForModal(null)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '4px'
+                    }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Overview Grid */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                  gap: '12px',
+                  backgroundColor: 'var(--bg-primary)',
+                  padding: '16px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Vendor / Party / Destination</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedMasterRecordForModal.vendor || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Department</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedMasterRecordForModal.department || 'Store'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Purpose / Checkpoint</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedMasterRecordForModal.purpose || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Total Quantity</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{Number(selectedMasterRecordForModal.quantity || 0).toLocaleString()} {selectedMasterRecordForModal.uom}</strong>
+                  </div>
+                  {selectedMasterRecordForModal.vehicleNo && (
+                    <div>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Vehicle No</span>
+                      <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedMasterRecordForModal.vehicleNo}</strong>
+                    </div>
+                  )}
+                  {selectedMasterRecordForModal.cost && (
+                    <div>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Total Amount</span>
+                      <strong style={{ fontSize: '13.5px', color: '#059669' }}>₹{Number(selectedMasterRecordForModal.cost).toLocaleString()}</strong>
+                    </div>
+                  )}
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Verification Status</span>
+                    <strong style={{ fontSize: '13.5px', color: '#10b981' }}>{selectedMasterRecordForModal.status}</strong>
+                  </div>
+                </div>
+
+                {/* Items Table */}
+                {selectedMasterRecordForModal.items && selectedMasterRecordForModal.items.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: '800', margin: '0 0 10px 0', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Boxes size={16} color="#6366f1" />
+                      <span>Material / Items Breakdown ({selectedMasterRecordForModal.items.length} items)</span>
+                    </h4>
+                    <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>
+                            <th style={{ padding: '8px 10px' }}>#</th>
+                            <th style={{ padding: '8px 10px' }}>Lot No</th>
+                            <th style={{ padding: '8px 10px' }}>Item Description</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Qty 1</th>
+                            <th style={{ padding: '8px 10px', textAlign: 'right' }}>Qty 2</th>
+                            <th style={{ padding: '8px 10px' }}>UOM</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedMasterRecordForModal.items.map((it, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '8px 10px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                              <td style={{ padding: '8px 10px', fontWeight: '700', color: '#7c3aed' }}>{it.lotNo ? `#${it.lotNo}` : '—'}</td>
+                              <td style={{ padding: '8px 10px', fontWeight: '600' }}>{it.itemDesc || it.description || it.name || it.bomItemName || 'Item'}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700' }}>{Number(it.qty1 || it.qty || it.totalRequired || 0).toLocaleString()}</td>
+                              <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)' }}>{it.qty2 || '—'}</td>
+                              <td style={{ padding: '8px 10px' }}>{it.uom || it.unit || 'PCS'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Security Gate & Material Scanner Verification Trail */}
+                {selectedMasterRecordForModal.scans && selectedMasterRecordForModal.scans.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: '14px', fontWeight: '800', margin: '0 0 10px 0', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <QrCode size={16} color="#06b6d4" />
+                      <span>Security Gate &amp; Material Scanner Verification Trail ({selectedMasterRecordForModal.scans.length} events)</span>
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {selectedMasterRecordForModal.scans.map((s, idx) => {
+                        const isReturn = s.scan_type === 'rgp_return';
+                        const isGateIn = s.scan_type === 'gate_entry';
+                        const isMatIn = s.scan_type === 'material_in';
+                        const isPrinting = s.scan_type === 'printing_gate_out';
+
+                        let badgeText = 'Gate Entry (Gate In)';
+                        let badgeBg = 'rgba(16, 185, 129, 0.15)';
+                        let badgeColor = '#10b981';
+
+                        if (isReturn) {
+                          badgeText = 'Gate In (Return)';
+                          badgeBg = 'rgba(236, 72, 153, 0.15)';
+                          badgeColor = '#ec4899';
+                        } else if (isMatIn) {
+                          badgeText = 'Material Received';
+                          badgeBg = 'rgba(59, 130, 246, 0.15)';
+                          badgeColor = '#3b82f6';
+                        } else if (isPrinting) {
+                          badgeText = 'Printing Gate Out';
+                          badgeBg = 'rgba(249, 115, 22, 0.15)';
+                          badgeColor = '#f97316';
+                        } else if (s.scan_type === 'rgp_entry') {
+                          badgeText = 'Gate Out (Dispatch)';
+                          badgeBg = 'rgba(168, 85, 247, 0.15)';
+                          badgeColor = '#a855f7';
+                        }
+
+                        return (
+                          <div key={idx} style={{
+                            padding: '10px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-color)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '12.5px',
+                            flexWrap: 'wrap',
+                            gap: '8px'
+                          }}>
+                            <div>
+                              <span style={{
+                                fontSize: '10.5px',
+                                fontWeight: '800',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                backgroundColor: badgeBg,
+                                color: badgeColor,
+                                marginRight: '8px'
+                              }}>
+                                {badgeText}
+                              </span>
+                              <strong>Guard/Officer: {s.person_name || 'Security'}</strong> &bull; {s.material_name || 'Goods'} ({s.quantity || 0} pcs) &bull; Party: {s.supplier_name || 'Vendor'}
+                            </div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '11.5px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <Clock size={11} />
+                              <span>{formatDateTime(s.scanned_at || s.timestamp)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal Footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '14px', marginTop: '4px' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Prepared: <strong>{selectedMasterRecordForModal.preparedBy || 'Store Incharge'}</strong>
+                    {selectedMasterRecordForModal.authorizedBy && <> &bull; Authorized: <strong>{selectedMasterRecordForModal.authorizedBy}</strong></>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMasterRecordForModal(null)}
+                      className="btn btn-secondary btn-sm"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeReportTab === 'lot_wise_report' && (
+        <div className="animate-scale" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Top Header Card */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '16px',
+            backgroundColor: 'var(--bg-secondary)',
+            padding: '16px 20px',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                backgroundColor: '#7c3aed',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 12px rgba(124, 58, 237, 0.25)'
+              }}>
+                <Layers size={22} />
+              </div>
+              <div>
+                <h2 style={{
+                  margin: 0,
+                  fontSize: '20px',
+                  fontWeight: '800',
+                  color: 'var(--text-main)',
+                  letterSpacing: '-0.3px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span>Consolidated Lot-Wise Operations &amp; Verification Register</span>
+                </h2>
+                <p style={{ margin: '3px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                  Complete single-view operations master register: RGP Tags, RGP Dori, RGP Zip, Dori PO, Zip PO, General PO, Extra Pieces &amp; Gate Scanner Checkpoints visible in one line.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="print-hide" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleResetLotFilters}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', height: '36px', padding: '0 12px' }}
+              >
+                <RotateCcw size={13} />
+                <span>Reset Filters</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={fetchLotWiseData}
+                disabled={lotWiseLoading}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', height: '36px', padding: '0 12px' }}
+              >
+                <RefreshCw size={13} className={lotWiseLoading ? 'spin' : ''} />
+                <span>{lotWiseLoading ? 'Syncing...' : 'Refresh'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="btn btn-primary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', height: '36px', padding: '0 14px' }}
+              >
+                <Printer size={14} />
+                <span>Print Master Register</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadAllLotsPDF}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', height: '36px', padding: '0 14px', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+              >
+                <Download size={14} />
+                <span>PDF Master (A3)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportLotSummaryExcel}
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', height: '36px', padding: '0 14px', borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10b981' }}
+              >
+                <FileSpreadsheet size={14} />
+                <span>Excel Export</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Visual Analytics & Graphs Dashboard */}
+          <div className="print-hide" style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '14px'
+          }}>
+            {/* Graph 1: Process Completion & Pipeline Health Gauge */}
+            <div style={{
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '16px 18px',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-sm)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Activity size={16} color="#7c3aed" />
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>Pipeline Process Health</span>
+                </div>
+                <span style={{ fontSize: '11px', fontWeight: '700', padding: '2px 8px', borderRadius: '12px', backgroundColor: 'rgba(16, 185, 129, 0.15)', color: '#059669' }}>
+                  {lotWiseKPIStats.total > 0 ? Math.round((lotWiseKPIStats.completed / lotWiseKPIStats.total) * 100) : 0}% Fully Complete
+                </span>
+              </div>
+
+              {/* Progress Multi-Bar */}
+              <div style={{ width: '100%', height: '14px', borderRadius: '7px', backgroundColor: 'var(--bg-primary)', overflow: 'hidden', display: 'flex', border: '1px solid var(--border-color)', marginBottom: '12px' }}>
+                <div style={{ width: `${lotWiseKPIStats.total > 0 ? (lotWiseKPIStats.completed / lotWiseKPIStats.total) * 100 : 0}%`, backgroundColor: '#10b981' }} title={`Complete: ${lotWiseKPIStats.completed}`} />
+                <div style={{ width: `${lotWiseKPIStats.total > 0 ? (lotWiseKPIStats.overdueCount / lotWiseKPIStats.total) * 100 : 0}%`, backgroundColor: '#f59e0b' }} title={`Pending RGP: ${lotWiseKPIStats.overdueCount}`} />
+                <div style={{ width: `${lotWiseKPIStats.total > 0 ? (Math.max(0, lotWiseKPIStats.inProgress - lotWiseKPIStats.overdueCount) / lotWiseKPIStats.total) * 100 : 0}%`, backgroundColor: '#3b82f6' }} title={`In Progress: ${lotWiseKPIStats.inProgress}`} />
+              </div>
+
+              {/* Legend & Numbers */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', fontSize: '11.5px' }}>
+                <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px' }}>✓ Completed</span>
+                  <strong style={{ fontSize: '14px', color: '#059669' }}>{lotWiseKPIStats.completed} lots</strong>
+                </div>
+                <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px' }}>⏳ Pending RGP</span>
+                  <strong style={{ fontSize: '14px', color: '#d97706' }}>{lotWiseKPIStats.overdueCount} lots</strong>
+                </div>
+                <div style={{ padding: '6px 8px', borderRadius: '6px', backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                  <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px' }}>⚡ In Progress</span>
+                  <strong style={{ fontSize: '14px', color: '#2563eb' }}>{lotWiseKPIStats.inProgress} lots</strong>
+                </div>
+              </div>
+            </div>
+
+            {/* Graph 2: Volume Comparison Graph */}
+            <div style={{
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '16px 18px',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-sm)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <BarChart3 size={16} color="#06b6d4" />
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>Production Volume Metrics</span>
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Target vs Verified</span>
+              </div>
+
+              {/* Volume Bars */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Cutting Planned Target</span>
+                    <strong style={{ color: '#06b6d4' }}>{lotWiseKPIStats.totalTargetPcs.toLocaleString()} PCS</strong>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', borderRadius: '4px', backgroundColor: 'var(--bg-primary)', overflow: 'hidden' }}>
+                    <div style={{ width: '100%', height: '100%', backgroundColor: '#06b6d4' }} />
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '3px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Materials Store Inward Received</span>
+                    <strong style={{ color: '#10b981' }}>{lotWiseKPIStats.totalReceivedPcs.toLocaleString()} PCS</strong>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', borderRadius: '4px', backgroundColor: 'var(--bg-primary)', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${lotWiseKPIStats.totalTargetPcs > 0 ? Math.min(100, (lotWiseKPIStats.totalReceivedPcs / lotWiseKPIStats.totalTargetPcs) * 100) : (lotWiseKPIStats.totalReceivedPcs > 0 ? 100 : 0)}%`,
+                      height: '100%',
+                      backgroundColor: '#10b981'
+                    }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Graph 3: 4-Step Security Gate & Scanner Flow Funnel */}
+            <div style={{
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '16px 18px',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-sm)',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <QrCode size={16} color="#ec4899" />
+                  <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>Security &amp; Gate Scanner Funnel</span>
+                </div>
+                <span style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '700' }}>Active Checkpoints</span>
+              </div>
+
+              {/* 4 Funnel Checkpoint Pills */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px', textAlign: 'center' }}>
+                <div style={{ padding: '6px 4px', borderRadius: '6px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>1. Gate In</span>
+                  <strong style={{ fontSize: '13px', color: '#10b981' }}>
+                    {filteredLotWiseList.reduce((s, l) => s + (l.gateInScans?.length || 0), 0)}
+                  </strong>
+                </div>
+                <div style={{ padding: '6px 4px', borderRadius: '6px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>2. Store In</span>
+                  <strong style={{ fontSize: '13px', color: '#3b82f6' }}>
+                    {filteredLotWiseList.reduce((s, l) => s + (l.materialInScans?.length || 0), 0)}
+                  </strong>
+                </div>
+                <div style={{ padding: '6px 4px', borderRadius: '6px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>3. Gate Out</span>
+                  <strong style={{ fontSize: '13px', color: '#a855f7' }}>
+                    {filteredLotWiseList.reduce((s, l) => s + (l.materialOutScans?.length || 0), 0)}
+                  </strong>
+                </div>
+                <div style={{ padding: '6px 4px', borderRadius: '6px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                  <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>4. RGP Ret</span>
+                  <strong style={{ fontSize: '13px', color: '#06b6d4' }}>
+                    {filteredLotWiseList.reduce((s, l) => s + (l.rgpReturnScans?.length || 0), 0)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Filter Bar */}
+          <div className="print-hide" style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            flexWrap: 'wrap',
+            backgroundColor: 'var(--bg-secondary)',
+            padding: '12px 16px',
+            borderRadius: '10px',
+            border: '1px solid var(--border-color)'
+          }}>
+            {/* Search Input */}
+            <div style={{ position: 'relative', flex: '1 1 240px' }}>
+              <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                type="text"
+                placeholder="Search Lot #, Style, Brand, Material, Vendor, RGP, PO..."
+                className="form-input"
+                value={lotSearch}
+                onChange={(e) => setLotSearch(e.target.value)}
+                style={{ width: '100%', paddingLeft: '34px', height: '36px', fontSize: '12.5px' }}
+              />
+              {lotSearch && (
+                <button
+                  type="button"
+                  onClick={() => setLotSearch('')}
+                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Status Filter */}
+            <div style={{ minWidth: '170px' }}>
+              <select
+                className="form-select"
+                value={lotStatusFilter}
+                onChange={(e) => setLotStatusFilter(e.target.value)}
+                style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+              >
+                <option value="all">All Process Statuses</option>
+                <option value="complete">✓ Complete (All Processes Over)</option>
+                <option value="in_progress">In Progress (Active)</option>
+                <option value="pending_rgp">Pending RGP Return</option>
+                <option value="pending_gate">Pending Gate Entry (Gate In)</option>
+                <option value="pending_receive">Pending Store Check-In</option>
+                <option value="overdue">Overdue RGPs</option>
+                <option value="bom_registered">BOM Registered Only</option>
+              </select>
+            </div>
+
+            {/* Brand Filter */}
+            {uniqueLotBrands.length > 0 && (
+              <div style={{ minWidth: '140px' }}>
+                <select
+                  className="form-select"
+                  value={lotBrandFilter}
+                  onChange={(e) => setLotBrandFilter(e.target.value)}
+                  style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+                >
+                  <option value="all">All Brands / Clients</option>
+                  {uniqueLotBrands.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Sort Selector */}
+            <div style={{ minWidth: '160px' }}>
+              <select
+                className="form-select"
+                value={lotSort}
+                onChange={(e) => setLotSort(e.target.value)}
+                style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+              >
+                <option value="lot_desc">Lot No (Highest First)</option>
+                <option value="lot_asc">Lot No (Lowest First)</option>
+                <option value="target_desc">Target Units (High to Low)</option>
+                <option value="target_asc">Target Units (Low to High)</option>
+                <option value="ops_desc">Most Operations Count</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Master Multi-Column One-Line Operations Table */}
+          <div style={{
+            backgroundColor: 'var(--bg-secondary)',
+            borderRadius: '12px',
+            border: '1px solid var(--border-color)',
+            overflow: 'hidden',
+            boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', minWidth: '1500px' }}>
+                <thead>
+                  <tr style={{
+                    backgroundColor: 'var(--bg-primary)',
+                    borderBottom: '2px solid var(--border-color)',
+                    color: 'var(--text-muted)',
+                    fontSize: '10.5px',
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.4px',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', width: '35px' }}>#</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>LOT NO. &amp; STYLE</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', width: '90px' }}>TARGET PCS</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '190px' }}>RGP (TAGS &amp; LABELS)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '190px' }}>RGP (DORI / DRAWSTRING)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>RGP (ZIP &amp; TRIMS)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>DORI PO ORDERS</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>ZIP PO ORDERS</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>GENERAL PO &amp; EXTRAS</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '130px' }}>VENDORS / PARTIES</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '170px' }}>GATE ENTRY (GATE IN)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '170px' }}>MATERIAL IN (STORE)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>MATERIAL OUT (DISPATCH)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', minWidth: '140px' }}>PROCESS STATUS</th>
+                    <th className="print-hide" style={{ padding: '10px 12px', textAlign: 'right', minWidth: '110px' }}>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredLotWiseList.map((lot, idx) => {
+                    const isCompleted = lot.isCompleted;
+
+                    let statusBadgeBg = 'rgba(59, 130, 246, 0.12)';
+                    let statusBadgeColor = '#2563eb';
+                    let statusBadgeBorder = 'rgba(59, 130, 246, 0.25)';
+
+                    if (isCompleted) {
+                      statusBadgeBg = 'rgba(16, 185, 129, 0.15)';
+                      statusBadgeColor = '#059669';
+                      statusBadgeBorder = 'rgba(16, 185, 129, 0.35)';
+                    } else if (String(lot.processStatus).toLowerCase().includes('overdue')) {
+                      statusBadgeBg = 'rgba(239, 68, 68, 0.15)';
+                      statusBadgeColor = '#dc2626';
+                      statusBadgeBorder = 'rgba(239, 68, 68, 0.35)';
+                    } else if (String(lot.processStatus).toLowerCase().includes('pending rgp')) {
+                      statusBadgeBg = 'rgba(168, 85, 247, 0.15)';
+                      statusBadgeColor = '#7c3aed';
+                      statusBadgeBorder = 'rgba(168, 85, 247, 0.3)';
+                    } else if (String(lot.processStatus).toLowerCase().includes('pending gate')) {
+                      statusBadgeBg = 'rgba(245, 158, 11, 0.15)';
+                      statusBadgeColor = '#d97706';
+                      statusBadgeBorder = 'rgba(245, 158, 11, 0.3)';
+                    }
+
+                    return (
+                      <tr
+                        key={lot.lotNo}
+                        style={{
+                          borderBottom: '1px solid var(--border-color)',
+                          backgroundColor: idx % 2 === 1 ? 'rgba(0, 0, 0, 0.015)' : 'transparent',
+                          transition: 'background-color 0.15s'
+                        }}
+                      >
+                        {/* 1. Serial # */}
+                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                          {idx + 1}
+                        </td>
+
+                        {/* 2. Lot No & Style & Brand */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ fontWeight: '800', fontSize: '13.5px', color: '#7c3aed' }}>
+                              #{lot.lotNo}
+                            </span>
+                            {lot.isRecreated && (
+                              <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 4px', borderRadius: '3px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706' }}>
+                                RUN-V
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontWeight: '700', color: 'var(--text-main)', marginTop: '2px', fontSize: '12px' }}>
+                            {lot.style || 'Custom Design'}
+                          </div>
+                          <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                            {lot.brand && <span>{lot.brand} &bull; </span>}
+                            <span>{lot.fabricType || 'Fabric'}</span>
+                          </div>
+                        </td>
+
+                        {/* 3. Target Cutting Pcs */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <span style={{ fontWeight: '800', fontSize: '13.5px', color: 'var(--text-main)' }}>
+                            {Number(lot.targetPieces || 0).toLocaleString()}
+                          </span>
+                          <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>PCS</span>
+                        </td>
+
+                        {/* 4. RGP (Tags & Labels) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.rgpTagList && lot.rgpTagList.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {lot.rgpTagList.map((t, tI) => (
+                                <div key={tI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(124, 58, 237, 0.06)', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <strong style={{ color: '#7c3aed', fontSize: '11px' }}>{t.rgpNo}</strong>
+                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: t.status === 'Returned' ? '#10b981' : '#7c3aed' }}>{t.status}</span>
+                                  </div>
+                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
+                                    {t.itemDesc} &bull; <strong>{t.qty} {t.uom}</strong>
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                    Party: {t.vendor} {t.purpose && `(${t.purpose})`}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 5. RGP (Dori / Drawstring) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.rgpDoriList && lot.rgpDoriList.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {lot.rgpDoriList.map((d, dI) => (
+                                <div key={dI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <strong style={{ color: '#d97706', fontSize: '11px' }}>{d.rgpNo}</strong>
+                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: d.status === 'Returned' ? '#10b981' : '#d97706' }}>{d.status}</span>
+                                  </div>
+                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
+                                    {d.itemDesc} &bull; <strong>{d.qty} {d.uom}</strong>
+                                  </div>
+                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                                    Party: {d.vendor} {d.purpose && `(${d.purpose})`}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 6. RGP (Zip & Other Trims) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.rgpZipList && lot.rgpZipList.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {lot.rgpZipList.map((z, zI) => (
+                                <div key={zI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(236, 72, 153, 0.06)', border: '1px solid rgba(236, 72, 153, 0.2)' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <strong style={{ color: '#db2777', fontSize: '11px' }}>{z.rgpNo}</strong>
+                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: z.status === 'Returned' ? '#10b981' : '#db2777' }}>{z.status}</span>
+                                  </div>
+                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
+                                    {z.itemDesc} &bull; <strong>{z.qty} {z.uom}</strong>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 7. Dori PO Orders */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.dooriOrders && lot.dooriOrders.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {lot.dooriOrders.map((d, dI) => (
+                                <div key={dI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                                  <strong style={{ color: '#d97706', fontSize: '11px' }}>PO #{d.po_number || d.Lot_Number}</strong>
+                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
+                                    <strong>{d.Total_Pieces} pcs</strong> &bull; {d.Garment_Type || d.Style || 'Dori'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 8. Zip PO Orders */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.zipOrders && lot.zipOrders.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {lot.zipOrders.map((z, zI) => (
+                                <div key={zI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                                  <strong style={{ color: '#db2777', fontSize: '11px' }}>PO #{z.po_number || z.Lot_Number}</strong>
+                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
+                                    <strong>{z.Total_Pieces_CH || z.Total_Pieces} pcs</strong> &bull; {z.Teeth_Color || 'Teeth'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 9. General PO & Extras */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.pos?.length > 0 || lot.extraIssues?.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {(lot.pos || []).map((p, pI) => (
+                                <div key={pI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', fontSize: '10.5px' }}>
+                                  <strong style={{ color: '#2563eb' }}>PO #{p.poNumber}</strong> &bull; ₹{Number(p.total || 0).toLocaleString()}
+                                </div>
+                              ))}
+                              {(lot.extraIssues || []).map((ex, exI) => (
+                                <div key={exI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '10.5px', color: '#dc2626' }}>
+                                  <strong>Extra #{ex.voucher_id || ex.voucherId || ex.id}</strong> ({ex.reason || 'Extra'})
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* 10. Vendors / Parties */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-main)' }}>
+                            {(lot.vendors || []).join(', ') || 'Internal Store'}
+                          </div>
+                        </td>
+
+                        {/* 11. Gate Entry (Gate In) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.gateInScans && lot.gateInScans.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {lot.gateInScans.map((sc, scI) => (
+                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                                  <strong style={{ color: '#059669' }}>✓ Gate In: {sc.quantity || 0} pcs</strong>
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                                    {sc.person_name || 'Guard'} &bull; {sc.supplier_name || 'Party'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate In Scan</span>
+                          )}
+                        </td>
+
+                        {/* 12. Material In (Store Received) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.materialInScans && lot.materialInScans.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {lot.materialInScans.map((sc, scI) => (
+                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
+                                  <strong style={{ color: '#2563eb' }}>✓ Inward: {sc.quantity || 0} pcs</strong> ({sc.material_name || 'Goods'})
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                                    {sc.person_name || 'Verifier'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>Pending Inward</span>
+                          )}
+                        </td>
+
+                        {/* 13. Material Out (Gate Dispatch) */}
+                        <td style={{ padding: '10px 12px' }}>
+                          {(lot.materialOutScans && lot.materialOutScans.length > 0) ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {lot.materialOutScans.map((sc, scI) => (
+                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
+                                  <strong style={{ color: '#7c3aed' }}>Gate Out: {sc.quantity || 0} pcs</strong>
+                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
+                                    {sc.person_name || 'Guard'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate Out</span>
+                          )}
+                        </td>
+
+                        {/* 14. Process Status */}
+                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                          <div style={{
+                            display: 'inline-block',
+                            padding: '4px 10px',
+                            borderRadius: '20px',
+                            backgroundColor: statusBadgeBg,
+                            color: statusBadgeColor,
+                            border: `1px solid ${statusBadgeBorder}`,
+                            fontSize: '10.5px',
+                            fontWeight: '800',
+                            letterSpacing: '-0.1px',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {isCompleted ? '✓ COMPLETE (All Over)' : lot.processStatus}
+                          </div>
+                        </td>
+
+                        {/* 15. Actions */}
+                        <td className="print-hide" style={{ padding: '10px 12px', textAlign: 'right' }}>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedLotForModal(lot)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '3px 7px', fontSize: '11px', height: '26px' }}
+                              title="Inspect Full Lot Operations Dossier"
+                            >
+                              <Eye size={11} />
+                              <span>View</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadLotPDF(lot)}
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '3px 7px', fontSize: '11px', height: '26px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                              title="Download Lot Audit PDF"
+                            >
+                              <Download size={11} />
+                              <span>PDF</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {filteredLotWiseList.length === 0 && (
+                    <tr>
+                      <td colSpan={15} style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <Layers size={36} style={{ margin: '0 auto 12px auto', opacity: 0.4, display: 'block' }} />
+                        <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-main)' }}>No Manufacturing Lots Found</h4>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '12.5px' }}>Try adjusting search filters, brand selection, or process status.</p>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Print Signature Authority Section for Physical Printing */}
+            <div className="print-only" style={{
+              display: 'none',
+              marginTop: '30px',
+              paddingTop: '20px',
+              borderTop: '2px solid #333',
+              justifyContent: 'space-between'
+            }}>
+              <div>
+                <div style={{ width: '160px', borderTop: '1px solid #000', marginBottom: '4px' }}></div>
+                <strong style={{ fontSize: '11px' }}>Prepared By (Store Incharge)</strong>
+              </div>
+              <div>
+                <div style={{ width: '160px', borderTop: '1px solid #000', marginBottom: '4px' }}></div>
+                <strong style={{ fontSize: '11px' }}>Security Gate Officer</strong>
+              </div>
+              <div>
+                <div style={{ width: '160px', borderTop: '1px solid #000', marginBottom: '4px' }}></div>
+                <strong style={{ fontSize: '11px' }}>Factory Manager / Plant Head</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Single Lot Dossier & Print View Modal */}
+          {selectedLotForModal && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                backdropFilter: 'blur(4px)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                padding: '20px'
+              }}
+              onClick={() => setSelectedLotForModal(null)}
+            >
+              <div
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderRadius: '14px',
+                  border: '1px solid var(--border-color)',
+                  maxWidth: '880px',
+                  width: '100%',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  padding: '24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '18px',
+                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)'
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '38px',
+                      height: '38px',
+                      borderRadius: '8px',
+                      backgroundColor: '#7c3aed',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <Layers size={18} />
+                    </div>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>
+                        Manufacturing Lot Operations Dossier — Lot #{selectedLotForModal.lotNo}
+                      </h3>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                        Consolidated Process Lifecycle Audit &bull; Generated: {new Date().toLocaleDateString('en-GB')}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLotForModal(null)}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Lot Overview Specs */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                  gap: '10px',
+                  backgroundColor: 'var(--bg-primary)',
+                  padding: '14px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--border-color)'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Lot Reference</span>
+                    <strong style={{ fontSize: '14px', color: '#7c3aed' }}>#{selectedLotForModal.lotNo}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Style Code</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedLotForModal.style || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Brand / Client</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedLotForModal.brand || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Fabric Type</span>
+                    <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>{selectedLotForModal.fabricType || '—'}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Target Pieces</span>
+                    <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>{Number(selectedLotForModal.targetPieces || 0).toLocaleString()} PCS</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Lifecycle Status</span>
+                    <strong style={{ fontSize: '13.5px', color: selectedLotForModal.isCompleted ? '#10b981' : '#f59e0b' }}>
+                      {selectedLotForModal.isCompleted ? '✓ COMPLETE (All Processes Finished)' : selectedLotForModal.processStatus}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Milestone Process Flow Checklist */}
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: '800', margin: '0 0 8px 0', color: 'var(--text-main)' }}>
+                    Process Milestone Verification Checklist
+                  </h4>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                    gap: '8px'
+                  }}>
+                    {[
+                      { step: '1. BOM & Cutting', done: true },
+                      { step: '2. Orders & RGPs', done: (selectedLotForModal.counts?.po + selectedLotForModal.counts?.doori + selectedLotForModal.counts?.zip + selectedLotForModal.counts?.rgp) > 0 },
+                      { step: '3. Gate In Scan', done: (selectedLotForModal.gateInScans?.length || 0) > 0 },
+                      { step: '4. Material Store In', done: (selectedLotForModal.materialInScans?.length || 0) > 0 },
+                      { step: '5. RGP Returns / Closed', done: selectedLotForModal.isCompleted || selectedLotForModal.counts?.rgp === 0 }
+                    ].map((st, sIdx) => (
+                      <div
+                        key={sIdx}
+                        style={{
+                          padding: '8px',
+                          borderRadius: '6px',
+                          backgroundColor: st.done ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-primary)',
+                          border: `1px solid ${st.done ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-color)'}`,
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          color: st.done ? '#059669' : 'var(--text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        {st.done ? <Check size={13} color="#10b981" /> : <Clock size={13} />}
+                        <span>{st.step}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Granular Sub-Records Matrix: RGPs, Dori, Zip, POs */}
+                <div>
+                  <h4 style={{ fontSize: '13px', fontWeight: '800', margin: '0 0 8px 0', color: 'var(--text-main)' }}>
+                    Sub-Orders &amp; Gate Passes Breakdown
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '10px' }}>
+                    {/* RGPs list */}
+                    <div style={{ padding: '10px', borderRadius: '8px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                      <strong style={{ fontSize: '12px', color: '#7c3aed', display: 'block', marginBottom: '6px' }}>
+                        Returnable Gate Passes (RGPs) ({selectedLotForModal.rgps?.length || 0})
+                      </strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
+                        {(selectedLotForModal.rgps || []).map((r, rI) => (
+                          <div key={rI} style={{ padding: '4px 6px', borderRadius: '4px', backgroundColor: 'var(--bg-secondary)' }}>
+                            <strong>RGP #{r.rgpNo}</strong> &bull; {r.vendor} &bull; <span style={{ color: r.status === 'Returned' ? '#10b981' : '#7c3aed', fontWeight: '700' }}>{r.status || 'Dispatched'}</span>
+                          </div>
+                        ))}
+                        {(!selectedLotForModal.rgps || selectedLotForModal.rgps.length === 0) && (
+                          <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No RGP passes</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Dori & Zip */}
+                    <div style={{ padding: '10px', borderRadius: '8px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                      <strong style={{ fontSize: '12px', color: '#d97706', display: 'block', marginBottom: '6px' }}>
+                        Dori &amp; Zip PO Orders
+                      </strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
+                        {(selectedLotForModal.dooriOrders || []).map((d, dI) => (
+                          <div key={dI} style={{ padding: '4px 6px', borderRadius: '4px', backgroundColor: 'var(--bg-secondary)' }}>
+                            <strong>Dori PO #{d.po_number || d.Lot_Number}</strong>: {d.Total_Pieces} pcs
+                          </div>
+                        ))}
+                        {(selectedLotForModal.zipOrders || []).map((z, zI) => (
+                          <div key={zI} style={{ padding: '4px 6px', borderRadius: '4px', backgroundColor: 'var(--bg-secondary)' }}>
+                            <strong>Zip PO #{z.po_number || z.Lot_Number}</strong>: {z.Total_Pieces_CH || z.Total_Pieces} pcs ({z.Teeth_Color || 'STD'})
+                          </div>
+                        ))}
+                        {(!selectedLotForModal.dooriOrders?.length && !selectedLotForModal.zipOrders?.length) && (
+                          <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No Dori/Zip POs</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Itemized Materials Breakdown */}
+                {selectedLotForModal.materials && selectedLotForModal.materials.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: '13px', fontWeight: '800', margin: '0 0 8px 0', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Boxes size={14} color="#6366f1" />
+                      <span>Consolidated Materials &amp; Accessories Manifest ({selectedLotForModal.materials.length} items)</span>
+                    </h4>
+                    <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ backgroundColor: 'var(--bg-primary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>
+                            <th style={{ padding: '7px 10px', textAlign: 'left' }}>#</th>
+                            <th style={{ padding: '7px 10px', textAlign: 'left' }}>Material Name</th>
+                            <th style={{ padding: '7px 10px', textAlign: 'left' }}>Color / Teeth</th>
+                            <th style={{ padding: '7px 10px', textAlign: 'right' }}>Total Qty</th>
+                            <th style={{ padding: '7px 10px', textAlign: 'left' }}>Document Source</th>
+                            <th style={{ padding: '7px 10px', textAlign: 'left' }}>Placement / Purpose</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedLotForModal.materials.map((m, mI) => (
+                            <tr key={mI} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                              <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{mI + 1}</td>
+                              <td style={{ padding: '7px 10px', fontWeight: '600' }}>{m.name}</td>
+                              <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{m.color || '—'}</td>
+                              <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '700' }}>{Number(m.qty).toLocaleString()} {m.uom}</td>
+                              <td style={{ padding: '7px 10px', color: '#7c3aed', fontWeight: '600' }}>{m.source}</td>
+                              <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>{m.meta || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Security Gate Scanner Trail */}
+                {selectedLotForModal.scans && selectedLotForModal.scans.length > 0 && (
+                  <div>
+                    <h4 style={{ fontSize: '13px', fontWeight: '800', margin: '0 0 8px 0', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <QrCode size={14} color="#06b6d4" />
+                      <span>Security Gate &amp; Scanner Inward Verification Trail ({selectedLotForModal.scans.length} scans)</span>
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {selectedLotForModal.scans.map((sc, scI) => (
+                        <div
+                          key={scI}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--bg-primary)',
+                            border: '1px solid var(--border-color)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '12px',
+                            flexWrap: 'wrap',
+                            gap: '6px'
+                          }}
+                        >
+                          <div>
+                            <span style={{
+                              fontSize: '10px',
+                              fontWeight: '800',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              backgroundColor: sc.scan_type === 'gate_entry' ? 'rgba(16, 185, 129, 0.15)' : (sc.scan_type === 'material_in' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(124, 58, 237, 0.15)'),
+                              color: sc.scan_type === 'gate_entry' ? '#10b981' : (sc.scan_type === 'material_in' ? '#3b82f6' : '#7c3aed'),
+                              marginRight: '8px'
+                            }}>
+                              {sc.scan_type === 'gate_entry' ? 'Gate Entry (Gate In)' : (sc.scan_type === 'material_in' ? 'Material Received' : (sc.scan_type === 'rgp_entry' ? 'Gate Out' : sc.scan_type))}
+                            </span>
+                            <strong>Guard/Officer: {sc.person_name || 'Security'}</strong> &bull; {sc.material_name || 'Goods'} ({sc.quantity || 0} pcs) &bull; Party: {sc.supplier_name || 'Vendor'}
+                          </div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Clock size={11} />
+                            <span>{formatDateTime(sc.scanned_at || sc.timestamp)}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Signatures & Footer */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border-color)', paddingTop: '14px', marginTop: '4px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    Vendors: <strong>{(selectedLotForModal.vendors || []).join(', ') || 'Internal Store'}</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadLotPDF(selectedLotForModal)}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#ef4444' }}
+                    >
+                      <Download size={13} />
+                      <span>Download PDF Dossier</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePrintLotDossier(selectedLotForModal)}
+                      className="btn btn-primary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                    >
+                      <Printer size={13} />
+                      <span>Print Dossier</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {activeReportTab === 'daily_weekly_calendar' && (
         <DailyWeeklyCalendarReport
