@@ -84,6 +84,7 @@ export default function DashboardView({
     weightTransactions.filter(w => {
       const q = wcSearchQuery.toLowerCase().trim();
       const matchesSearch = !q || (
+        (w.itemCode || '').toLowerCase().includes(q) ||
         (w.materialName || '').toLowerCase().includes(q) ||
         (w.materialCode || '').toLowerCase().includes(q) ||
         (w.lotNo || '').toLowerCase().includes(q) ||
@@ -529,7 +530,7 @@ export default function DashboardView({
                     <td style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>{w.id}</td>
                     <td>
                       <div style={{ fontWeight: '600', fontSize: '13px' }}>{w.materialName}</div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.materialCode}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{w.itemCode || w.materialCode}</div>
                     </td>
                     <td style={{ fontWeight: '600' }}>{w.lotNo || '—'}</td>
                     <td style={{ fontSize: '12px' }}>{w.supplier || '—'}</td>

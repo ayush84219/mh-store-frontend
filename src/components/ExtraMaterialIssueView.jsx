@@ -542,15 +542,16 @@ export default function ExtraMaterialIssueView({
     setBarcodeScanFeedback(null);
     const upperRaw = raw.toUpperCase();
 
-    // 1. Find material in inventory matching id, materialCode, barcodeId, or name
+    // 1. Find material in inventory matching itemCode, id, materialCode, barcodeId, or name
     const matchedMat = materials.find(m => {
+      const itemCode = String(m.itemCode || '').toUpperCase();
       const id = String(m.id || '').toUpperCase();
       const code = String(m.materialCode || m.code || '').toUpperCase();
       const bar = String(m.barcodeId || '').toUpperCase();
       const name = String(m.name || '').toUpperCase();
       const category = String(m.category || '').toUpperCase();
 
-      return id === upperRaw || code === upperRaw || bar === upperRaw ||
+      return itemCode === upperRaw || id === upperRaw || code === upperRaw || bar === upperRaw ||
              name.includes(upperRaw) || category.includes(upperRaw);
     });
 
@@ -607,7 +608,7 @@ export default function ExtraMaterialIssueView({
     setHighlightedRowIndex(matchedRowId);
     setBarcodeScanFeedback({
       type: 'success',
-      msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row selected for Extra Issue.`
+      msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.itemCode || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row selected for Extra Issue.`
     });
 
     setBarcodeInput('');

@@ -737,7 +737,7 @@ export default function MaterialTransferView({
 
     const stickers = [];
     for (let pkt = 1; pkt <= totalToPrint; pkt++) {
-      const pktBarcodeId = item.materialCode;
+      const pktBarcodeId = material?.itemCode || capture?.itemCode || item.itemCode || item.materialCode;
       const capture = matchingCaptures.find(c => c.barcodeId === pktBarcodeId)
         || matchingCaptures[pkt - 1]
         || matchingCaptures[0];
@@ -751,7 +751,7 @@ export default function MaterialTransferView({
 
       stickers.push({
         barcodeId: pktBarcodeId,
-        materialCode: item.materialCode,
+        materialCode: material?.itemCode || capture?.itemCode || item.itemCode || item.materialCode,
         materialName: item.materialName || material?.name || 'Accessory Material',
         category: material?.category || 'Accessory',
         shade: material?.color || 'Default',
@@ -765,7 +765,7 @@ export default function MaterialTransferView({
         poNumber: displayPo,
         billNo: displayBill,
         cmp: displayCmp,
-        lotNo: material?.id || item.materialCode,
+        lotNo: material?.itemCode || material?.id || item.itemCode || item.materialCode,
         operator: item.operator || 'Admin',
         packetNo: pkt,
         totalPackets: totalPkts
@@ -962,7 +962,7 @@ export default function MaterialTransferView({
       return [
         `"${dateStr}"`,
         `"${timeStr}"`,
-        `"${item.materialCode || ''}"`,
+        `"${item.itemCode || item.materialCode || ''}"`,
         `"${(item.materialName || '').replace(/"/g, '""')}"`,
         `"${item.fromLocation || ''}"`,
         `"${item.toLocation || ''}"`,
@@ -986,7 +986,7 @@ export default function MaterialTransferView({
     let list = (history || []).filter(item => {
       if (logSearch.trim()) {
         const q = logSearch.toLowerCase().trim();
-        const matchStr = `${item.materialCode || ''} ${item.materialName || ''} ${item.fromLocation || ''} ${item.toLocation || ''} ${item.operator || ''}`.toLowerCase();
+        const matchStr = `${item.itemCode || ''} ${item.materialCode || ''} ${item.materialName || ''} ${item.fromLocation || ''} ${item.toLocation || ''} ${item.operator || ''}`.toLowerCase();
         if (!matchStr.includes(q)) return false;
       }
 
@@ -1314,7 +1314,7 @@ export default function MaterialTransferView({
               <div>
                 <strong style={{ color: '#065f46', fontSize: '13px' }}>Transfer Completed Successfully!</strong>
                 <div style={{ fontSize: '12px', color: '#047857', marginTop: '2px' }}>
-                  Moved <strong>{lastTransferSuccess.quantity} packet(s)</strong> of {lastTransferSuccess.materialName} ({lastTransferSuccess.materialCode}) from <strong>{lastTransferSuccess.fromLocation}</strong> to <strong>{lastTransferSuccess.toLocation}</strong>.
+                  Moved <strong>{lastTransferSuccess.quantity} packet(s)</strong> of {lastTransferSuccess.materialName} ({lastTransferSuccess.itemCode || lastTransferSuccess.materialCode}) from <strong>{lastTransferSuccess.fromLocation}</strong> to <strong>{lastTransferSuccess.toLocation}</strong>.
                 </div>
               </div>
             </div>
@@ -1807,7 +1807,7 @@ export default function MaterialTransferView({
                   Date & Time {orderBy === 'transferredAt' ? (order === 'asc' ? '▲' : '▼') : ''}
                 </th>
                 <th style={{ padding: '12px 14px', cursor: 'pointer', width: '130px' }} onClick={() => handleSort('materialCode')}>
-                  Material Code {orderBy === 'materialCode' ? (order === 'asc' ? '▲' : '▼') : ''}
+                  Item Code {orderBy === 'materialCode' ? (order === 'asc' ? '▲' : '▼') : ''}
                 </th>
                 <th style={{ padding: '12px 14px', cursor: 'pointer' }} onClick={() => handleSort('materialName')}>
                   Material Name {orderBy === 'materialName' ? (order === 'asc' ? '▲' : '▼') : ''}
@@ -1865,7 +1865,7 @@ export default function MaterialTransferView({
                           border: '1px solid rgba(2, 132, 199, 0.25)', padding: '2px 8px', borderRadius: '4px',
                           fontSize: '11.5px', fontWeight: '800', fontFamily: 'monospace'
                         }}>
-                          {row.materialCode}
+                          {row.itemCode || row.materialCode}
                         </span>
                       </td>
 
@@ -2160,7 +2160,7 @@ export default function MaterialTransferView({
                     printWin.document.write(`
                       <html>
                         <head>
-                          <title>Print Transfer Barcode - ${printModalData.item.materialCode}</title>
+                          <title>Print Transfer Barcode - ${printModalData.item.itemCode || printModalData.item.materialCode}</title>
                           <style>
                             @page { size: 2.4in 1.75in; margin: 0; }
                             body { margin: 0; padding: 4px; display: flex; flex-direction: column; align-items: center; }

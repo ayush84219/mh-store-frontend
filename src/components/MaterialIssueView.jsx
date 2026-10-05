@@ -141,12 +141,13 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
       if (Number(m.stock) <= 0) return false;
       const q = searchQuery.toLowerCase().trim();
       if (!q) return true;
+      const itemCodeStr = String(m.itemCode || '').toLowerCase();
       const codeStr = String(m.id || '').toLowerCase();
       const nameStr = String(m.name || '').toLowerCase();
       const colorStr = String(m.color || '').toLowerCase();
       const catStr = String(m.category || '').toLowerCase();
       const locStr = String(m.location || '').toLowerCase();
-      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
+      return itemCodeStr.includes(q) || codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
     })
     .sort((a, b) => {
       // Brand-matched items always float to the top
@@ -208,7 +209,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 borderRadius: '4px',
                 flexShrink: 0
               }}>
-                {selectedMaterial.id}
+                {selectedMaterial.itemCode || selectedMaterial.id}
               </span>
               <span style={{ fontWeight: '600', color: '#0f172a' }}>
                 {selectedMaterial.name}
@@ -287,7 +288,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
             <input
               type="text"
               autoFocus
-              placeholder="Search MT Code, Name, Location..."
+              placeholder="Search Item Code, Name, Location..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onClick={(e) => e.stopPropagation()}
@@ -438,7 +439,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                             borderRadius: '4px',
                             flexShrink: 0
                           }}>
-                            {m.id}
+                            {m.itemCode || m.id}
                           </span>
                           <span style={{
                             fontWeight: isSelected ? '700' : isBrand ? '700' : '600',
@@ -950,13 +951,17 @@ export default function MaterialIssueView({
     const raw = barcodeInput.trim();
     const upper = raw.toUpperCase();
 
-    // 1. Resolve material from inventory (id, packet code, materialCode, barcodeId, name)
-    let matchedMaterial = materials.find(m => String(m.id).toUpperCase() === upper);
+    // 1. Resolve material from inventory (itemCode, id, packet code, materialCode, barcodeId, name)
+    let matchedMaterial = materials.find(m =>
+      String(m.itemCode || '').toUpperCase() === upper ||
+      String(m.id).toUpperCase() === upper
+    );
 
     if (!matchedMaterial && upper.includes('-A')) {
       const parts = upper.split('-A');
       const base = parts[0];
       matchedMaterial = materials.find(m =>
+        String(m.itemCode || '').toUpperCase() === base ||
         String(m.id).toUpperCase() === base ||
         String(m.materialCode || '').toUpperCase() === base
       );
@@ -964,6 +969,7 @@ export default function MaterialIssueView({
 
     if (!matchedMaterial) {
       matchedMaterial = materials.find(m =>
+        String(m.itemCode || '').toUpperCase() === upper ||
         String(m.barcodeId || '').toUpperCase() === upper ||
         String(m.materialCode || '').toUpperCase() === upper
       );
@@ -971,6 +977,7 @@ export default function MaterialIssueView({
 
     if (!matchedMaterial) {
       matchedMaterial = materials.find(m =>
+        String(m.itemCode || '').toUpperCase().includes(upper) ||
         String(m.id).toUpperCase().includes(upper) ||
         String(m.name || '').toUpperCase().includes(upper)
       );

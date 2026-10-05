@@ -546,7 +546,7 @@ export default function MaterialDetailsView({
         <div class="header-box">
           <div>
             <h2>Garment PDMS — Material Lifecycle & Traceability Audit</h2>
-            <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.id}</strong> • Material: <strong>${material.name}</strong> (${material.category})</div>
+            <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.itemCode || material.id}</strong> • Material: <strong>${material.name}</strong> (${material.category})</div>
           </div>
           <div style="text-align: right; font-size: 10.5px;">
             <div>Generated: ${new Date().toLocaleString()}</div>
@@ -569,7 +569,7 @@ export default function MaterialDetailsView({
           <tbody>
             ${captures.length === 0 ? '<tr><td colspan="8" style="text-align:center;">No inward captures logged</td></tr>' : captures.map(c => `
               <tr>
-                <td>${c.barcodeId || c.materialCode || c.id}</td>
+                <td>${c.itemCode || c.barcodeId || c.materialCode || c.id}</td>
                 <td>${c.capturedAt ? new Date(c.capturedAt).toLocaleDateString('en-GB') : (c.date || 'N/A')}</td>
                 <td>${c.invoiceNo || 'N/A'} (PO: ${c.poNumber || 'N/A'})</td>
                 <td>${c.supplier || 'N/A'}</td>
@@ -867,7 +867,7 @@ export default function MaterialDetailsView({
         }
 
         const pktLoc = getPacketLocationForMaterial(material, nextPkt);
-        const pktBarcodeId = material.id;
+        const pktBarcodeId = material.itemCode || material.id;
         const pktQty = Math.round((Number(material.stock || 0) / pkts) * 100) / 100;
         const qtyFormatted = `${pktQty} ${material.unit || 'Pcs'}`;
         const poNumberVal = customFields.poNumber || material.poNumber || material.po || material.poNo || material.billNo || material.invoiceNo || 'N/A';
@@ -878,7 +878,7 @@ export default function MaterialDetailsView({
           data: {
             cmp: customFields.supplier || material.supplier || 'MH STORE',
             materialName: material.name || material.materialName || 'MT',
-            materialCode: material.id,
+            materialCode: material.itemCode || material.id,
             category: material.category || 'Accessory',
             shade: material.color || 'Default',
             weight: qtyFormatted,
@@ -891,7 +891,7 @@ export default function MaterialDetailsView({
             printDate: printDate,
             poNumber: poNumberVal,
             billNo: customFields.invoiceNo || material.invoiceNo || material.billNo || 'N/A',
-            lotNo: material.id,
+            lotNo: material.itemCode || material.id,
             operator: receivedByVal,
             receivedBy: receivedByVal,
             authorized: receivedByVal,
@@ -903,7 +903,7 @@ export default function MaterialDetailsView({
 
         setPrintStatus({
           type: 'info',
-          message: `🖨️ Direct printing sticker ${nextPkt} of ${pkts} on machine (${material.id})...`
+          message: `🖨️ Direct printing sticker ${nextPkt} of ${pkts} on machine (${material.itemCode || material.id})...`
         });
 
         pws.send(JSON.stringify(payload));
@@ -1008,6 +1008,7 @@ export default function MaterialDetailsView({
       if (!m) return false;
       const query = debouncedSearchQuery.toLowerCase().trim();
       const matchesSearch = !query || (
+        String(m.itemCode || '').toLowerCase().includes(query) ||
         String(m.id || '').toLowerCase().includes(query) ||
         String(m.name || '').toLowerCase().includes(query) ||
         String(m.category || '').toLowerCase().includes(query) ||
@@ -1922,7 +1923,7 @@ export default function MaterialDetailsView({
           <table className="custom-table">
             <thead>
               <tr style={{ borderBottom: '1.5px solid var(--border-color)' }}>
-                <th style={{ width: '130px', minWidth: '110px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item ID</th>
+                <th style={{ width: '130px', minWidth: '110px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item Code</th>
                 <th style={{ width: '65px', minWidth: '55px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Photo</th>
                 <th style={{ minWidth: '160px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Material Details</th>
                 <th style={{ minWidth: '100px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</th>
@@ -1963,7 +1964,7 @@ export default function MaterialDetailsView({
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {expandedMaterialId === m.id ? <ChevronUp size={15} style={{ color: 'var(--accent-color)' }} /> : <ChevronDown size={15} style={{ color: 'var(--text-muted)' }} />}
-                            <span style={{ fontFamily: 'monospace', color: 'var(--accent-color)', fontWeight: '800', fontSize: '13px' }}>{m.id}</span>
+                            <span style={{ fontFamily: 'monospace', color: 'var(--accent-color)', fontWeight: '800', fontSize: '13px' }}>{m.itemCode || m.id}</span>
                             <Barcode size={14} style={{ color: 'var(--accent-color)', opacity: 0.75 }} />
                           </div>
                         </td>
@@ -2491,8 +2492,8 @@ export default function MaterialDetailsView({
                                         gap: '5px'
                                       }}>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Barcode ID:</span>
-                                          <strong style={{ fontFamily: 'monospace', color: 'var(--text-main)', fontSize: '12px' }}>{m.id}</strong>
+                                          <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>Item Code:</span>
+                                          <strong style={{ fontFamily: 'monospace', color: 'var(--text-main)', fontSize: '12px' }}>{m.itemCode || m.id}</strong>
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
                                           <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>MAT Name:</span>

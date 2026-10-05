@@ -9,6 +9,7 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
+import ItemCodeReportView from './ItemCodeReportView';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '—';
@@ -1914,6 +1915,22 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 >
                   📅 Calendar Tracker
                 </button>
+                <button
+                  onClick={() => setViewMode('item_code')}
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    backgroundColor: viewMode === 'item_code' ? 'var(--accent-color)' : 'transparent',
+                    color: viewMode === 'item_code' ? '#ffffff' : 'var(--text-muted)'
+                  }}
+                >
+                  📦 Item Code Ledger
+                </button>
               </div>
 
               <button
@@ -1944,6 +1961,13 @@ export default function HistoryView({ designs = [], currencySymbol = 'R', curren
                 <div style={{ width: '32px', height: '32px', borderRadius: '50%', border: '3px solid var(--accent-light)', borderTopColor: 'var(--accent-color)', animation: 'spin 1s linear infinite' }}></div>
                 <span style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Compiling Workflow History Logs...</span>
               </div>
+            ) : viewMode === 'item_code' ? (
+              <ItemCodeReportView
+                weightCaptures={weightCaptures}
+                issueLogs={issueLogs}
+                transfers={transfers}
+                currencySymbol={currencySymbol}
+              />
             ) : !selectedLotId ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '80px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
                 <Clock size={40} style={{ marginBottom: '16px', opacity: 0.3 }} />

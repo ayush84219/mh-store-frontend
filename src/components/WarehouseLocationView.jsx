@@ -359,6 +359,7 @@ export default function WarehouseLocationView({
         const matLabel = m.color && m.color !== 'Default' ? `${m.name} (${m.color})` : m.name;
         materialDetailsList.push({
           id: m.id,
+          itemCode: m.itemCode || m.id,
           name: matLabel,
           rawName: m.name,
           category: m.category || '',
@@ -371,7 +372,7 @@ export default function WarehouseLocationView({
           fullMaterial: m
         });
         if (m.poNumber && m.poNumber !== 'N/A') poNumbers.push(m.poNumber);
-        lotNumbers.push(`Lot #${m.id}`);
+        lotNumbers.push(`Lot #${m.itemCode || m.id}`);
       });
 
       matchedCaptures.forEach(c => {
@@ -2385,7 +2386,7 @@ export default function WarehouseLocationView({
                           const cat = m.category || m.fullMaterial?.category;
                           return (
                             <option key={m.id} value={m.id}>
-                              {cat ? `[${cat.toUpperCase()}] ` : ''}{m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — Lot #{m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({m.packets} Pkts Available)
+                              {cat ? `[${cat.toUpperCase()}] ` : ''}{m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — {m.itemCode || m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({m.packets} Pkts Available)
                             </option>
                           );
                         })
@@ -2747,9 +2748,9 @@ export default function WarehouseLocationView({
                                     PO: <strong style={{ color: '#334155' }}>{item.poNumber}</strong>
                                   </div>
                                 )}
-                                {(item.id || item.fullMaterial?.id) && (
+                                {(item.itemCode || item.fullMaterial?.itemCode || item.id || item.fullMaterial?.id) && (
                                   <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', backgroundColor: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
-                                    #{item.id || item.fullMaterial?.id}
+                                    #{item.itemCode || item.fullMaterial?.itemCode || item.id || item.fullMaterial?.id}
                                   </div>
                                 )}
                               </div>

@@ -1790,7 +1790,7 @@ export default function ApprovalQueueView({
                             borderRadius: '8px',
                             border: '1px solid var(--border-color)'
                           }}>
-                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Material Code:</span> <div style={{ fontWeight: '800', fontFamily: 'monospace' }}>{inwardItem.materialCode || req.materialId}</div></div>
+                            <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Item Code:</span> <div style={{ fontWeight: '800', fontFamily: 'monospace' }}>{inwardItem.itemCode || inwardItem.materialCode || req.materialId}</div></div>
                             <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Material Name:</span> <div style={{ fontWeight: '800' }}>{inwardItem.materialName || req.materialName}</div></div>
                             <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Supplier / Vendor:</span> <div style={{ fontWeight: '800', color: 'var(--accent-color)' }}>{inwardItem.supplier || 'N/A'}</div></div>
                             <div><span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Bill / Invoice No:</span> <div style={{ fontWeight: '800' }}>{inwardItem.invoiceNo || 'N/A'}</div></div>

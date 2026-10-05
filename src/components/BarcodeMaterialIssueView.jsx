@@ -88,7 +88,7 @@ const playFeedbackSound = (type = 'success') => {
 
 // Visual Barcode SVG generator
 const BarcodeVisual = ({ code, height = 38 }) => {
-  const str = String(code || 'MT1000-A01');
+  const str = String(code || 'ST00001-A01');
   let currentX = 4;
   const bars = [];
   const startPattern = [2, 1, 1, 2, 1, 4];
@@ -200,16 +200,20 @@ export default function BarcodeMaterialIssueView({
     const cleanCode = rawCode.trim();
     const upperCode = cleanCode.toUpperCase();
 
-    // 1. Check for exact ID match
-    let match = materials.find(m => String(m.id).toUpperCase() === upperCode);
+    // 1. Check for exact Item Code or ID match
+    let match = materials.find(m => 
+      String(m.itemCode || '').toUpperCase() === upperCode ||
+      String(m.id).toUpperCase() === upperCode
+    );
     let packetMatch = null;
 
-    // 2. Check for Packet Barcode Pattern: e.g. "MT1001-A01" or "1001-A02"
+    // 2. Check for Packet Barcode Pattern: e.g. "ST00352-A01" or "MT1001-A01"
     if (!match && upperCode.includes('-A')) {
       const parts = upperCode.split('-A');
       const baseCode = parts[0];
       const pktNum = parseInt(parts[1], 10);
       match = materials.find(m => 
+        String(m.itemCode || '').toUpperCase() === baseCode ||
         String(m.id).toUpperCase() === baseCode || 
         String(m.materialCode || '').toUpperCase() === baseCode
       );
@@ -225,17 +229,19 @@ export default function BarcodeMaterialIssueView({
       }
     }
 
-    // 3. Check for barcodeId / materialCode field match
+    // 3. Check for itemCode / barcodeId / materialCode field match
     if (!match) {
       match = materials.find(m => 
+        String(m.itemCode || '').toUpperCase() === upperCode ||
         String(m.barcodeId || '').toUpperCase() === upperCode ||
         String(m.materialCode || '').toUpperCase() === upperCode
       );
     }
 
-    // 4. Fuzzy fallback search on ID or Name
+    // 4. Fuzzy fallback search on Item Code, ID or Name
     if (!match) {
       match = materials.find(m => 
+        String(m.itemCode || '').toUpperCase().includes(upperCode) ||
         String(m.id).toUpperCase().includes(upperCode) ||
         String(m.name || '').toUpperCase().includes(upperCode)
       );
@@ -403,7 +409,7 @@ export default function BarcodeMaterialIssueView({
         bomItemName: selectedMaterial.category || 'Accessory',
         totalRequired: numIssueQty,
         unit: selectedMaterial.unit || 'Pcs',
-        barcode: scannedBarcode || selectedMaterial.id,
+        barcode: scannedBarcode || selectedMaterial.itemCode || selectedMaterial.id,
         initialStock: currentStock,
         remainingStock: remainingStock
       };
@@ -435,12 +441,12 @@ export default function BarcodeMaterialIssueView({
         remarks: remarks.trim(),
         items: [
           {
-            materialCode: selectedMaterial.id,
+            materialCode: selectedMaterial.itemCode || selectedMaterial.id,
             materialName: selectedMaterial.name,
             category: selectedMaterial.category,
             color: selectedMaterial.color || 'Default',
             location: selectedMaterial.location || 'Main Store',
-            barcode: scannedBarcode || selectedMaterial.id,
+            barcode: scannedBarcode || selectedMaterial.itemCode || selectedMaterial.id,
             previousStock: currentStock,
             issuedQty: numIssueQty,
             totalStock: remainingStock,
@@ -522,7 +528,7 @@ export default function BarcodeMaterialIssueView({
         receiverDept: receiverDept.trim() || 'Cutting',
         remarks: remarks.trim(),
         items: issueCart.map(item => ({
-          materialCode: item.material.id,
+          materialCode: item.material.itemCode || item.material.id,
           materialName: item.material.name,
           category: item.material.category,
           color: item.material.color || 'Default',
@@ -621,7 +627,7 @@ export default function BarcodeMaterialIssueView({
 
     autoTable(doc, {
       startY: receipt.remarks ? 64 : 56,
-      head: [['#', 'Code', 'Material Name', 'Shade', 'Barcode / Tag', 'Stock Before', 'Issued Qty', 'Total Balance', 'Store Loc']],
+      head: [['#', 'Item Code', 'Material Name', 'Shade', 'Barcode / Tag', 'Stock Before', 'Issued Qty', 'Total Balance', 'Store Loc']],
       body: tableBody,
       theme: 'grid',
       headStyles: {
@@ -664,6 +670,7 @@ export default function BarcodeMaterialIssueView({
     if (!filterQuery.trim()) return materials.slice(0, 15);
     const q = filterQuery.toLowerCase().trim();
     return materials.filter(m => 
+      String(m.itemCode || '').toLowerCase().includes(q) ||
       String(m.id).toLowerCase().includes(q) ||
       String(m.name || '').toLowerCase().includes(q) ||
       String(m.category || '').toLowerCase().includes(q) ||
@@ -966,7 +973,7 @@ export default function BarcodeMaterialIssueView({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
                 <Barcode size={22} color="#0284c7" />
-                <span>SCAN BARCODE / ENTER MATERIAL ID</span>
+                <span>SCAN BARCODE / ENTER ITEM CODE</span>
               </label>
               <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', background: '#f1f5f9', padding: '3px 8px', borderRadius: '6px' }}>
                 Hardware USB Scanner / Keyboard Autofocus
@@ -980,7 +987,7 @@ export default function BarcodeMaterialIssueView({
                   type="text"
                   value={scanInput}
                   onChange={(e) => setScanInput(e.target.value)}
-                  placeholder="Scan Packet Barcode (e.g. MT1001-A01) or Type Material ID..."
+                  placeholder="Scan Packet Barcode (e.g. ST00001-A01) or Type Item Code..."
                   autoFocus
                   style={{
                     width: '100%',
@@ -1023,7 +1030,7 @@ export default function BarcodeMaterialIssueView({
 
             {/* Quick barcode helper hint */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '12px', fontSize: '12px', color: '#64748b' }}>
-              <span>💡 Format examples: <code>MT1001-A01</code>, <code>MT1005</code>, <code>1002</code></span>
+              <span>💡 Format examples: <code>ST00001-A01</code>, <code>ST00001</code>, <code>ST00050</code></span>
               <span style={{ color: '#0284c7', fontWeight: '600' }}>{materials.length} Materials Loaded</span>
             </div>
           </div>
@@ -1050,7 +1057,7 @@ export default function BarcodeMaterialIssueView({
                       padding: '3px 9px',
                       borderRadius: '6px'
                     }}>
-                      {selectedMaterial.id}
+                      {selectedMaterial.itemCode || selectedMaterial.id}
                     </span>
                     <span style={{
                       background: '#f1f5f9',
@@ -1081,7 +1088,7 @@ export default function BarcodeMaterialIssueView({
                 </div>
 
                 <div style={{ textAlign: 'right' }}>
-                  <BarcodeVisual code={scannedBarcode || selectedMaterial.id} height={32} />
+                  <BarcodeVisual code={scannedBarcode || selectedMaterial.itemCode || selectedMaterial.id} height={32} />
                 </div>
               </div>
 
@@ -1699,7 +1706,7 @@ export default function BarcodeMaterialIssueView({
                   key={mat.id}
                   onClick={() => {
                     setSelectedMaterial(mat);
-                    setScannedBarcode(mat.id);
+                    setScannedBarcode(mat.itemCode || mat.id);
                     setScannedPacketInfo(null);
                     setIssueQty(mat.stock > 0 ? 1 : 0);
                     if (soundEnabled) playFeedbackSound('scan');
@@ -1719,7 +1726,7 @@ export default function BarcodeMaterialIssueView({
                   <div>
                     <div style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>{mat.name}</div>
                     <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {mat.id} • {mat.color || 'Default'} • {mat.location || 'Store'}
+                      {mat.itemCode || mat.id} • {mat.color || 'Default'} • {mat.location || 'Store'}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>

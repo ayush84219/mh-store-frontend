@@ -34,6 +34,8 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
   const [dbMaterials, setDbMaterials] = useState([]);
   const [itemCodesList, setItemCodesList] = useState([]);
   const [selectedItemCode, setSelectedItemCode] = useState('');
+  const [itemCodeSearch, setItemCodeSearch] = useState('');
+  const [icDropdownOpen, setIcDropdownOpen] = useState(false);
 
   useEffect(() => {
     const fetchLocations = async () => {
@@ -213,21 +215,24 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
     fetch(`${getBackendUrl()}/api/item-codes`)
       .then(r => r.json())
       .then(res => {
-        const list = res.data || res.itemCodes || (Array.isArray(res) ? res : []);
-        if (Array.isArray(list) && list.length > 0) {
+        const raw = res.data || res.itemCodes || (Array.isArray(res) ? res : []);
+        const list = Array.isArray(raw) ? raw.filter(ic => !String(ic.item_code || '').startsWith('_TMP_') && !String(ic.item_code || '').startsWith('__TEMP_')) : [];
+        if (list.length > 0) {
           setItemCodesList(list);
         } else {
           // Fallback to localStorage cache if DB fetch returns empty or fails
           try {
             const cached = JSON.parse(localStorage.getItem('po_saved_item_codes') || '[]');
-            if (Array.isArray(cached) && cached.length > 0) setItemCodesList(cached);
+            const cleanCached = Array.isArray(cached) ? cached.filter(ic => !String(ic.item_code || '').startsWith('_TMP_') && !String(ic.item_code || '').startsWith('__TEMP_')) : [];
+            if (cleanCached.length > 0) setItemCodesList(cleanCached);
           } catch (e) {}
         }
       })
       .catch(() => {
         try {
           const cached = JSON.parse(localStorage.getItem('po_saved_item_codes') || '[]');
-          if (Array.isArray(cached) && cached.length > 0) setItemCodesList(cached);
+          const cleanCached = Array.isArray(cached) ? cached.filter(ic => !String(ic.item_code || '').startsWith('_TMP_') && !String(ic.item_code || '').startsWith('__TEMP_')) : [];
+          if (cleanCached.length > 0) setItemCodesList(cleanCached);
         } catch (e) {}
       });
 
@@ -240,33 +245,40 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
       })
       .catch(() => {});
 
-    fetch(`${getBackendUrl()}/api/weight-capture`)
-      .then(r => r.json())
-      .then(res => {
-        if (res.success && res.data && res.data.length > 0) {
-          const dbCaptures = res.data.map(item => ({
-            id: item.id,
-            materialCode: item.materialCode,
-            time: item.capturedAt ? new Date(item.capturedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '00:00:00',
-            date: item.capturedAt ? new Date(item.capturedAt).toLocaleDateString('en-IN') : '',
-            po: item.poNumber || 'N/A',
-            material: item.materialName,
-            category: item.category || '',
-            weight: item.grossWeightKg ? item.grossWeightKg.toFixed(3) : '0.000',
-            netWeightKg: item.netWeightKg || 0,
-            pieces: item.pieces || 0,
-            packets: item.packets || 1,
-            unit: item.unit || 'Pcs',
-            barcodeId: item.barcodeId || '',
-            invoiceNo: item.invoiceNo || 'N/A',
-            location: item.storeLocation || 'Main Store',
-            operator: item.storeIncharge || 'Pooja',
-            imageUrl: item.imageUrl || '',
-            entryMode: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
-            status: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
-            approvalStatus: item.approvalStatus || 'Approved'
-          }));
-          setCaptures(dbCaptures);
+    const fetchCaptures = async () => {
+      try {
+        const r = await fetch(`${getBackendUrl()}/api/weight-capture`);
+        const res = await r.json();
+        if (res.success && res.data && Array.isArray(res.data)) {
+          const map = new Map();
+          res.data.forEach(item => {
+            if (item && item.id != null && !map.has(item.id)) {
+              map.set(item.id, {
+                id: item.id,
+                materialCode: item.itemCode || item.materialCode,
+                itemCode: item.itemCode || item.materialCode,
+                time: item.capturedAt ? new Date(item.capturedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '00:00:00',
+                date: item.capturedAt ? new Date(item.capturedAt).toLocaleDateString('en-IN') : '',
+                po: item.poNumber || 'N/A',
+                material: item.materialName,
+                category: item.category || '',
+                weight: item.grossWeightKg ? Number(item.grossWeightKg).toFixed(3) : '0.000',
+                netWeightKg: item.netWeightKg || 0,
+                pieces: item.pieces || 0,
+                packets: item.packets || 1,
+                unit: item.unit || 'Pcs',
+                barcodeId: item.itemCode || item.barcodeId || item.materialCode || '',
+                invoiceNo: item.invoiceNo || 'N/A',
+                location: item.storeLocation || 'Main Store',
+                operator: item.storeIncharge || 'Pooja',
+                imageUrl: item.imageUrl || '',
+                entryMode: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
+                status: (item.entryMode === 'Manual' || item.entryMode === 'Manually' || item.status === 'Manual' || item.status === 'Manually') ? 'Manually' : 'Weight Machine',
+                approvalStatus: item.approvalStatus || 'Approved'
+              });
+            }
+          });
+          setCaptures(Array.from(map.values()));
 
           const nums = res.data
             .map(row => parseMTNum(row.materialCode))
@@ -277,8 +289,10 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             setNextCodeNum(next);
           }
         }
-      })
-      .catch(() => { });
+      } catch (e) {}
+    };
+
+    fetchCaptures();
   }, []);
 
   // Autocomplete suggestions for Material Name & Category
@@ -406,9 +420,12 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
       const barcodeId = form.materialCode;
       const finalLocation = getCombinedLocationSummary();
 
+      const tempId = `tmp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       const newEntry = {
-        id: captures.length + 1,
+        id: tempId,
+        _tempId: tempId,
         materialCode: form.materialCode,
+        itemCode: form.materialCode,
         time: now.toTimeString().slice(0, 8),
         date: now.toLocaleDateString('en-IN'),
         po: form.poNumber || 'N/A',
@@ -428,7 +445,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         status: 'Manually',
       };
 
-      setCaptures(prev => [newEntry, ...prev]);
+      setCaptures(prev => [newEntry, ...prev.filter(c => c.id !== tempId)]);
       setSaving(false);
       setSaveDialog(false);
 
@@ -510,7 +527,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         .then(r => r.json())
         .then(res => {
           if (res.success && res.id) {
-            setCaptures(prev => prev.map(item => item.materialCode === newEntry.materialCode ? { ...item, id: res.id } : item));
+            setCaptures(prev => prev.map(item => item._tempId === tempId ? { ...item, id: res.id, _tempId: undefined } : item));
           }
         })
         .catch(() => { });
@@ -566,14 +583,14 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         if (!pktLoc || pktLoc === 'Default' || pktLoc === 'Main Store') {
           pktLoc = (printTargetData.location && printTargetData.location !== 'Default') ? printTargetData.location : (form.storeLocation || 'Main Store - Rack 1');
         }
-        const pktBarcodeId = printTargetData.materialCode;
+        const pktBarcodeId = printTargetData.itemCode || printTargetData.materialCode;
 
         pws.send(JSON.stringify({
           type: 'print_accessory',
           data: {
             cmp: printTargetData.supplier || 'Vendor',
             materialName: printTargetData.materialName,
-            materialCode: printTargetData.materialCode,
+            materialCode: printTargetData.itemCode || printTargetData.materialCode,
             category: printTargetData.category || 'ACCESSORY',
             weight: `${printTargetData.pieces} ${printTargetData.unit || 'Pcs'}`,
             pieces: String(printTargetData.pieces),
@@ -584,7 +601,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             authorized: printTargetData.storeIncharge || 'Operator',
             poNumber: printTargetData.poNumber || 'N/A',
             billNo: printTargetData.invoiceNo || 'N/A',
-            lotNo: printTargetData.materialCode || 'N/A',
+            lotNo: printTargetData.itemCode || printTargetData.materialCode || 'N/A',
             totalPackets: numStickers,
             barcodeId: pktBarcodeId,
             location: pktLoc || 'Main Store - Rack 1',
@@ -1360,19 +1377,111 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                 </button>
               )}
             </div>
-            <select
-              className="wcs-input"
-              value={selectedItemCode}
-              onChange={e => handleItemCodeSelect(e.target.value)}
-              style={{ height: '44px', fontSize: '14px', fontWeight: '800', background: '#ffffff', color: '#0f172a', borderColor: selectedItemCode ? '#10b981' : '#3b82f6' }}
-            >
-              <option value="">-- Choose Item Code from Master (e.g. ST00001) --</option>
-              {itemCodesList.map(item => (
-                <option key={item.id || item.item_code} value={item.item_code}>
-                  {item.item_code} — {item.item_name} [{item.category || 'General'}] (UOM: {item.uom || 'PCS'})
-                </option>
-              ))}
-            </select>
+            {/* ── Searchable Item Code Dropdown ── */}
+            <div style={{ position: 'relative' }}>
+              {/* Search Input */}
+              <div style={{ position: 'relative', marginBottom: '4px' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b', pointerEvents: 'none', display: 'flex', alignItems: 'center' }}>🔍</span>
+                <input
+                  type="text"
+                  className="wcs-input"
+                  placeholder="🔍 Search item code, name, brand, category..."
+                  value={itemCodeSearch}
+                  onChange={e => { setItemCodeSearch(e.target.value); setIcDropdownOpen(true); }}
+                  onFocus={() => setIcDropdownOpen(true)}
+                  onBlur={() => setTimeout(() => setIcDropdownOpen(false), 200)}
+                  style={{
+                    height: '44px', fontSize: '13.5px', fontWeight: '700',
+                    paddingLeft: '36px',
+                    background: '#ffffff', color: '#0f172a',
+                    borderColor: selectedItemCode ? '#10b981' : '#3b82f6',
+                    borderWidth: '1.5px', borderStyle: 'solid', borderRadius: '8px',
+                    width: '100%', boxSizing: 'border-box'
+                  }}
+                />
+                {selectedItemCode && (
+                  <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: '#dcfce7', color: '#166534', padding: '2px 8px', borderRadius: '12px', fontSize: '11px', fontWeight: '800', pointerEvents: 'none' }}>
+                    ✓ {selectedItemCode}
+                  </span>
+                )}
+              </div>
+
+              {/* Dropdown Panel */}
+              {icDropdownOpen && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999,
+                  background: '#ffffff', border: '1.5px solid #3b82f6', borderRadius: '10px',
+                  boxShadow: '0 8px 32px rgba(30,64,175,0.18)', maxHeight: '260px',
+                  overflowY: 'auto', marginTop: '4px'
+                }}>
+                  {/* Clear selection option */}
+                  <div
+                    onMouseDown={() => { handleItemCodeSelect(''); setItemCodeSearch(''); setIcDropdownOpen(false); }}
+                    style={{ padding: '10px 14px', fontSize: '12.5px', color: '#94a3b8', fontWeight: '700', cursor: 'pointer', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}
+                  >
+                    — Choose Item Code from Master (e.g. ST00001) —
+                  </div>
+                  {itemCodesList
+                    .filter(item => {
+                      const q = itemCodeSearch.toLowerCase().trim();
+                      if (!q) return true;
+                      return (
+                        (item.item_code || '').toLowerCase().includes(q) ||
+                        (item.item_name || '').toLowerCase().includes(q) ||
+                        (item.brand || '').toLowerCase().includes(q) ||
+                        (item.category || '').toLowerCase().includes(q) ||
+                        (item.uom || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map(item => {
+                      const isSelected = selectedItemCode === item.item_code;
+                      return (
+                        <div
+                          key={item.id || item.item_code}
+                          onMouseDown={() => { handleItemCodeSelect(item.item_code); setItemCodeSearch(''); setIcDropdownOpen(false); }}
+                          style={{
+                            padding: '10px 14px', cursor: 'pointer', fontSize: '13px',
+                            display: 'flex', alignItems: 'center', gap: '10px',
+                            background: isSelected ? '#eff6ff' : 'transparent',
+                            borderBottom: '1px solid #f1f5f9',
+                            transition: 'background 0.12s'
+                          }}
+                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f0f9ff'; }}
+                          onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                        >
+                          <span style={{ background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '6px', fontWeight: '900', fontSize: '11.5px', fontFamily: 'monospace', flexShrink: 0 }}>
+                            {item.item_code}
+                          </span>
+                          <span style={{ fontWeight: '700', color: '#0f172a', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.item_name}
+                          </span>
+                          <span style={{ fontSize: '11px', color: '#64748b', flexShrink: 0 }}>
+                            [{item.category || 'General'}] {item.uom || 'PCS'}
+                          </span>
+                          {isSelected && <span style={{ color: '#10b981', fontWeight: '900', flexShrink: 0 }}>✓</span>}
+                        </div>
+                      );
+                    })
+                  }
+                  {itemCodesList.filter(item => {
+                    const q = itemCodeSearch.toLowerCase().trim();
+                    if (!q) return true;
+                    return (
+                      (item.item_code || '').toLowerCase().includes(q) ||
+                      (item.item_name || '').toLowerCase().includes(q) ||
+                      (item.brand || '').toLowerCase().includes(q) ||
+                      (item.category || '').toLowerCase().includes(q) ||
+                      (item.uom || '').toLowerCase().includes(q)
+                    );
+                  }).length === 0 && (
+                    <div style={{ padding: '18px', textAlign: 'center', color: '#94a3b8', fontSize: '13px', fontWeight: '700' }}>
+                      No item codes match "<strong>{itemCodeSearch}</strong>"
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {!selectedItemCode ? (
               <div style={{ fontSize: '11.5px', color: '#dc2626', marginTop: '6px', fontWeight: '700' }}>
                 ⚠️ Before adding material, user must create and select the Item Code of that item.
@@ -1863,7 +1972,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                 {[
-                  ['# / CODE', 'materialCode'],
+                  ['# / ITEM CODE', 'materialCode'],
                   ['IMAGE', null],
                   ['TIME', 'time'],
                   ['PO NUMBER', 'po'],
@@ -1896,7 +2005,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                 </tr>
               ) : (
                 paginatedData.map((row, idx) => (
-                  <React.Fragment key={row.id}>
+                  <React.Fragment key={row.id ? `cap-${row.id}` : `tmp-${idx}`}>
                     <tr style={{
                       background: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
                       borderBottom: '1px solid #f1f5f9',
@@ -1905,7 +2014,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                       {/* # / CODE */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: '900', color: '#3b82f6', fontSize: '13px' }}>#{row.id}</div>
-                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', fontFamily: 'monospace', marginTop: '2px' }}>{row.materialCode}</div>
+                        <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', fontFamily: 'monospace', marginTop: '2px' }}>{row.itemCode || row.materialCode}</div>
                       </td>
 
                       {/* IMAGE */}
@@ -2347,7 +2456,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                   {printTargetData.materialName}
                 </span>
                 <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--accent-color)', fontFamily: 'monospace' }}>
-                  {printTargetData.materialCode}
+                  {printTargetData.itemCode || printTargetData.materialCode}
                 </span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -2375,10 +2484,10 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             }}>
               <div>
                 <span style={{ fontSize: '10px', fontWeight: '800', color: '#6366f1', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Barcode (Item ID)
+                  Barcode (Item Code)
                 </span>
                 <div style={{ fontSize: '14px', fontWeight: '900', color: '#4338ca', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
-                  {printTargetData.materialCode}
+                  {printTargetData.itemCode || printTargetData.materialCode}
                 </div>
               </div>
               <span style={{

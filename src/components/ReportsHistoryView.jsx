@@ -12,6 +12,7 @@ import autoTable from 'jspdf-autotable';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
 import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
+import ItemCodeReportView from './ItemCodeReportView';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '—';
@@ -479,7 +480,7 @@ export default function ReportsHistoryView({
         id: `TR-${t.id}`,
         type: 'Stock Transfer',
         date: t.transferredAt || t.date || t.timestamp,
-        details: `${t.qty || t.quantity || 0} units of ${t.materialName || t.materialCode || 'trims'} transferred from ${t.fromLocation || 'Store'} to ${t.toLocation}`,
+        details: `${t.qty || t.quantity || 0} units of ${t.materialName || t.itemCode || t.materialCode || 'trims'} transferred from ${t.fromLocation || 'Store'} to ${t.toLocation}`,
         operator: t.transferredBy || t.operator || 'System',
         tag: 'transfer'
       });
@@ -2429,6 +2430,27 @@ export default function ReportsHistoryView({
         >
           <Layers size={14} />
           <span>Lot-Wise Operations Report ({filteredLotWiseList.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('item_code_report')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'item_code_report' ? 'var(--accent-color, #2563eb)' : 'transparent',
+            color: activeReportTab === 'item_code_report' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          <Boxes size={14} />
+          <span>Item Code Master Report &amp; Ledger</span>
         </button>
         <button
           type="button"
@@ -4606,6 +4628,15 @@ export default function ReportsHistoryView({
         />
       )}
 
+      {activeReportTab === 'item_code_report' && (
+        <ItemCodeReportView
+          weightCaptures={weightCaptures}
+          issueLogs={allIssueLogs}
+          transfers={transfers}
+          currencySymbol={currencySymbol}
+        />
+      )}
+
       {activeReportTab === 'material_ledger' && (
         <div className="animate-scale">
           {/* Lot Selector Panel */}
@@ -5360,7 +5391,7 @@ export default function ReportsHistoryView({
                                     <>
                                       <div style={{ fontSize: '12px' }}>
                                         <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material Description</span>
-                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode || 'Trims'})</strong>
+                                        <strong>{detailObj.data.materialName} ({detailObj.data.itemCode || detailObj.data.materialCode || 'Trims'})</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
                                         <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Source Location</span>
@@ -5384,8 +5415,8 @@ export default function ReportsHistoryView({
                                         <strong>Lot #{detailObj.data.lotNo}</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
-                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material Name & Code</span>
-                                        <strong>{detailObj.data.materialName} ({detailObj.data.materialCode || '—'})</strong>
+                                        <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Material Name & Item Code</span>
+                                        <strong>{detailObj.data.materialName} ({detailObj.data.itemCode || detailObj.data.materialCode || '—'})</strong>
                                       </div>
                                       <div style={{ fontSize: '12px' }}>
                                         <span style={{ color: 'var(--text-muted)', display: 'block', fontSize: '10.5px', textTransform: 'uppercase' }}>Net Weight / Gross</span>

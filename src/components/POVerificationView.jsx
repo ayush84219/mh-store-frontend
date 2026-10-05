@@ -316,7 +316,8 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
           date: entryDate,
           invoiceNo: cap.invoiceNo || cap.billNo || 'N/A',
           materialName: resolvedItemName,
-          materialCode: cap.materialCode || 'N/A',
+          itemCode: cap.itemCode || cap.materialCode,
+          materialCode: cap.itemCode || cap.materialCode || 'N/A',
           orderedQty: po.totalOrdered,
           receivedQty: pcs,
           cumulativeReceived: cumulative,
@@ -449,7 +450,7 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
     captures.forEach(cap => {
       const poNum = (cap.poNumber && String(cap.poNumber).trim() && String(cap.poNumber).trim().toUpperCase() !== 'N/A')
         ? String(cap.poNumber).trim()
-        : (cap.materialCode ? `Direct Inward (${cap.materialCode})` : `Direct Inward #${cap.id}`);
+        : ((cap.itemCode || cap.materialCode) ? `Direct Inward (${cap.itemCode || cap.materialCode})` : `Direct Inward #${cap.id}`);
       const norm = cleanPo(poNum);
       if (!knownPoNumbers.has(norm)) {
         const entryModeStr = (cap.entryMode === 'Manual' || cap.entryMode === 'Manually' || cap.status === 'Manual' || cap.status === 'Manually') ? 'Manually' : 'Weight Machine';
@@ -521,7 +522,8 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
           date: entryDate,
           invoiceNo: cap.invoiceNo || cap.billNo || 'N/A',
           materialName: cap.materialName || cap.category || 'Trim Item',
-          materialCode: cap.materialCode || 'N/A',
+          itemCode: cap.itemCode || cap.materialCode,
+          materialCode: cap.itemCode || cap.materialCode || 'N/A',
           orderedQty: 0,
           receivedQty: pcs,
           cumulativeReceived: grouped[norm].approvedReceived,
@@ -2713,7 +2715,7 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                             <span style={{ fontWeight: '800', color: 'var(--text-main)', fontSize: '14.5px' }}>{cap.materialName}</span>
                             <span style={{ fontFamily: 'monospace', fontSize: '11px', color: 'var(--text-muted)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px' }}>
-                              {cap.materialCode}
+                              {cap.itemCode || cap.materialCode}
                             </span>
                             <span style={{
                               padding: '2px 7px', borderRadius: '12px', fontSize: '10.5px', fontWeight: '800',
@@ -3143,9 +3145,9 @@ export default function POVerificationView({ currencySymbol = 'R', currentUser }
                             }}>
                               {entry.materialName}
                             </span>
-                            {entry.materialCode && entry.materialCode !== 'N/A' && (
+                            {(entry.itemCode || entry.materialCode) && (entry.itemCode !== 'N/A' && entry.materialCode !== 'N/A') && (
                               <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: '2px' }}>
-                                {entry.materialCode}
+                                {entry.itemCode || entry.materialCode}
                               </div>
                             )}
                           </td>
