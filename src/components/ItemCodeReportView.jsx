@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getBackendUrl } from '../utils/api';
 import {
   Boxes, QrCode, Search, Filter, Printer, Download, ArrowUpRight, ArrowDownLeft,
@@ -111,11 +111,25 @@ export default function ItemCodeReportView({
   // Overview Filters
   const [overviewSearch, setOverviewSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [brandFilter, setBrandFilter] = useState('all');
+  const [selectedBrands, setSelectedBrands] = useState([]); // Multiple selected brands/vendors
+  const [brandDropdownOpen, setBrandDropdownOpen] = useState(false);
+  const [brandSearchTerm, setBrandSearchTerm] = useState('');
+  const brandDropdownRef = useRef(null);
   const [stockStatusFilter, setStockStatusFilter] = useState('all'); // 'all', 'in_stock', 'low_stock', 'out_of_stock'
   const [overviewSort, setOverviewSort] = useState('code_asc');
   const [page, setPage] = useState(0);
   const [rpp, setRpp] = useState(20);
+
+  // Close brand dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (brandDropdownRef.current && !brandDropdownRef.current.contains(event.target)) {
+        setBrandDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Detail Ledger Filters
   const [detailSubTab, setDetailSubTab] = useState('all'); // 'all', 'inward', 'issue', 'transfer'
@@ -304,18 +318,32 @@ export default function ItemCodeReportView({
     });
   }, [itemCodesList, weightCaptures, issueLogs, transfers, inventoryMaterials]);
 
-  // Extract unique categories & brands/vendors for filter options
+  // Extract unique categories & brands/vendors with counts for filter options
   const filterOptions = useMemo(() => {
-    const cats = new Set();
-    const brands = new Set();
+    const cats = new Map();
+    const brandsMap = new Map();
     allItemCodesSummary.forEach(item => {
-      if (item.category) cats.add(item.category.trim());
-      if (item.brand && item.brand !== 'N/A' && item.brand !== 'General') brands.add(item.brand.trim());
-      if (item.vendor && item.vendor !== 'N/A' && item.vendor !== item.brand) brands.add(item.vendor.trim());
+      if (item.category) {
+        const c = item.category.trim();
+        cats.set(c, (cats.get(c) || 0) + 1);
+      }
+      if (item.brand && item.brand !== 'N/A' && item.brand !== 'General') {
+        const b = item.brand.trim();
+        brandsMap.set(b, (brandsMap.get(b) || 0) + 1);
+      }
+      if (item.vendor && item.vendor !== 'N/A' && item.vendor !== item.brand) {
+        const v = item.vendor.trim();
+        brandsMap.set(v, (brandsMap.get(v) || 0) + 1);
+      }
     });
+
+    const sortedBrands = Array.from(brandsMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ name, count }));
+
     return {
-      categories: Array.from(cats).sort(),
-      brands: Array.from(brands).sort()
+      categories: Array.from(cats.keys()).sort(),
+      brands: sortedBrands
     };
   }, [allItemCodesSummary]);
 
@@ -370,9 +398,12 @@ export default function ItemCodeReportView({
           (item.location || '').toLowerCase().includes(q);
 
         const matchesCat = categoryFilter === 'all' || (item.category || '').toLowerCase() === categoryFilter.toLowerCase();
-        const matchesBrand = brandFilter === 'all' || 
-          (item.brand || '').toLowerCase() === brandFilter.toLowerCase() ||
-          (item.vendor || '').toLowerCase() === brandFilter.toLowerCase();
+        
+        const matchesBrand = selectedBrands.length === 0 || 
+          selectedBrands.some(b => 
+            (item.brand || '').toLowerCase() === b.toLowerCase() ||
+            (item.vendor || '').toLowerCase() === b.toLowerCase()
+          );
 
         let matchesStock = true;
         if (stockStatusFilter === 'in_stock') matchesStock = item.currentStock > 0;
@@ -391,7 +422,7 @@ export default function ItemCodeReportView({
         if (overviewSort === 'tx_desc') return b.totalTxCount - a.totalTxCount;
         return 0;
       });
-  }, [allItemCodesSummary, overviewSearch, categoryFilter, brandFilter, stockStatusFilter, overviewSort]);
+  }, [allItemCodesSummary, overviewSearch, categoryFilter, selectedBrands, stockStatusFilter, overviewSort]);
 
   const paginatedOverviewItems = useMemo(() => {
     const start = page * rpp;
@@ -1177,26 +1208,279 @@ export default function ItemCodeReportView({
               {filterOptions.categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
 
-            {/* Brand Filter */}
-            <select
-              value={brandFilter}
-              onChange={(e) => { setBrandFilter(e.target.value); setPage(0); }}
-              style={{
-                height: '36px',
-                padding: '0 12px',
-                borderRadius: 'var(--border-radius-sm, 6px)',
-                border: '1px solid var(--border-color, #dbeafe)',
-                fontSize: '12.5px',
-                fontWeight: '600',
-                background: 'var(--bg-secondary, #ffffff)',
-                color: 'var(--text-main, #334155)',
-                cursor: 'pointer',
-                minWidth: '150px'
-              }}
-            >
-              <option value="all">All Brands / Vendors ({filterOptions.brands.length})</option>
-              {filterOptions.brands.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
+            {/* Multi-Select Brand / Vendor Filter Dropdown */}
+            <div style={{ position: 'relative' }} ref={brandDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setBrandDropdownOpen(prev => !prev)}
+                style={{
+                  height: '36px',
+                  padding: '0 12px',
+                  borderRadius: 'var(--border-radius-sm, 6px)',
+                  border: selectedBrands.length > 0 ? '1.5px solid #0284c7' : '1px solid var(--border-color, #dbeafe)',
+                  fontSize: '12.5px',
+                  fontWeight: '600',
+                  background: selectedBrands.length > 0 ? '#e0f2fe' : 'var(--bg-secondary, #ffffff)',
+                  color: selectedBrands.length > 0 ? '#0284c7' : 'var(--text-main, #334155)',
+                  cursor: 'pointer',
+                  minWidth: '180px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  boxShadow: brandDropdownOpen ? '0 0 0 3px rgba(2, 132, 199, 0.15)' : 'none'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <Tag size={13} color={selectedBrands.length > 0 ? '#0284c7' : '#64748b'} />
+                  <span>
+                    {selectedBrands.length === 0
+                      ? `All Brands / Vendors (${filterOptions.brands.length})`
+                      : selectedBrands.length === 1
+                        ? `${selectedBrands[0]} (1)`
+                        : `${selectedBrands.length} Brands Selected`}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  {selectedBrands.length > 0 && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedBrands([]);
+                        setPage(0);
+                      }}
+                      style={{
+                        background: 'rgba(2, 132, 199, 0.2)',
+                        color: '#0284c7',
+                        borderRadius: '50%',
+                        width: '16px',
+                        height: '16px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '10px',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                      title="Clear brand filters"
+                    >
+                      ✕
+                    </span>
+                  )}
+                  <ChevronDown size={13} style={{ transform: brandDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                </div>
+              </button>
+
+              {/* Dropdown Menu Popup */}
+              {brandDropdownOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 4px)',
+                  left: 0,
+                  width: '320px',
+                  maxHeight: '380px',
+                  background: 'var(--bg-card, #ffffff)',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                  zIndex: 100,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  padding: '8px 0',
+                  overflow: 'hidden'
+                }}>
+                  {/* Search inside brands */}
+                  <div style={{ padding: '0 8px 8px 8px', borderBottom: '1px solid #e2e8f0', position: 'relative' }}>
+                    <input
+                      type="text"
+                      placeholder="Filter brand / vendor name..."
+                      value={brandSearchTerm}
+                      onChange={(e) => setBrandSearchTerm(e.target.value)}
+                      autoFocus
+                      style={{
+                        width: '100%',
+                        height: '32px',
+                        padding: '0 8px 0 28px',
+                        borderRadius: '6px',
+                        border: '1px solid #cbd5e1',
+                        fontSize: '12px',
+                        outline: 'none',
+                        background: 'var(--bg-secondary, #f8fafc)',
+                        color: 'var(--text-main, #0f172a)'
+                      }}
+                    />
+                    <Search size={13} color="#64748b" style={{ position: 'absolute', left: '16px', top: '10px' }} />
+                    {brandSearchTerm && (
+                      <button
+                        type="button"
+                        onClick={() => setBrandSearchTerm('')}
+                        style={{
+                          position: 'absolute',
+                          right: '16px',
+                          top: '8px',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          color: '#94a3b8'
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Action Bar (Select All / Clear All) */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '6px 12px',
+                    background: '#f8fafc',
+                    borderBottom: '1px solid #e2e8f0',
+                    fontSize: '11.5px'
+                  }}>
+                    <div style={{ color: '#64748b', fontWeight: '600' }}>
+                      {selectedBrands.length} of {filterOptions.brands.length} selected
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const visibleBrandNames = filterOptions.brands
+                            .filter(b => !brandSearchTerm || b.name.toLowerCase().includes(brandSearchTerm.toLowerCase()))
+                            .map(b => b.name);
+                          const combined = Array.from(new Set([...selectedBrands, ...visibleBrandNames]));
+                          setSelectedBrands(combined);
+                          setPage(0);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#0284c7',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          padding: 0
+                        }}
+                      >
+                        Select All
+                      </button>
+                      <span style={{ color: '#cbd5e1' }}>•</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedBrands([]);
+                          setPage(0);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#ef4444',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          padding: 0
+                        }}
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Scrollable Brands List */}
+                  <div style={{ maxHeight: '240px', overflowY: 'auto', padding: '4px 0' }}>
+                    {filterOptions.brands
+                      .filter(b => !brandSearchTerm || b.name.toLowerCase().includes(brandSearchTerm.toLowerCase()))
+                      .length === 0 ? (
+                        <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                          No matching brands found
+                        </div>
+                      ) : (
+                        filterOptions.brands
+                          .filter(b => !brandSearchTerm || b.name.toLowerCase().includes(brandSearchTerm.toLowerCase()))
+                          .map(brandObj => {
+                            const isChecked = selectedBrands.includes(brandObj.name);
+                            return (
+                              <label
+                                key={brandObj.name}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  setSelectedBrands(prev => {
+                                    if (prev.includes(brandObj.name)) {
+                                      return prev.filter(b => b !== brandObj.name);
+                                    } else {
+                                      return [...prev, brandObj.name];
+                                    }
+                                  });
+                                  setPage(0);
+                                }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '7px 12px',
+                                  cursor: 'pointer',
+                                  background: isChecked ? '#eff6ff' : 'transparent',
+                                  transition: 'background 0.1s',
+                                  fontSize: '12px'
+                                }}
+                                onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = '#f8fafc'; }}
+                                onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = 'transparent'; }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {}} // Handled by onClick above
+                                    style={{ cursor: 'pointer', width: '14px', height: '14px', accentColor: '#0284c7' }}
+                                  />
+                                  <span style={{
+                                    fontWeight: isChecked ? '700' : '500',
+                                    color: isChecked ? '#0284c7' : 'var(--text-main, #334155)',
+                                    textTransform: 'uppercase'
+                                  }}>
+                                    {brandObj.name}
+                                  </span>
+                                </div>
+                                <span style={{
+                                  fontSize: '10.5px',
+                                  color: isChecked ? '#0284c7' : '#94a3b8',
+                                  background: isChecked ? '#dbeafe' : '#f1f5f9',
+                                  padding: '1px 6px',
+                                  borderRadius: '10px',
+                                  fontWeight: '600'
+                                }}>
+                                  {brandObj.count}
+                                </span>
+                              </label>
+                            );
+                          })
+                      )}
+                  </div>
+
+                  {/* Footer / Done Button */}
+                  <div style={{ padding: '6px 8px 0 8px', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      onClick={() => setBrandDropdownOpen(false)}
+                      style={{
+                        padding: '5px 14px',
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '5px',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Apply Filters ({selectedBrands.length > 0 ? selectedBrands.length : 'All'})
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Sort Filter */}
             <select
@@ -1224,6 +1508,85 @@ export default function ItemCodeReportView({
               <option value="tx_desc">Most Active Transactions</option>
             </select>
           </div>
+
+          {/* Active Multi-Brand Selected Chips */}
+          {selectedBrands.length > 0 && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              flexWrap: 'wrap',
+              marginTop: '-4px',
+              marginBottom: '14px',
+              padding: '6px 12px',
+              background: '#f0f9ff',
+              borderRadius: '6px',
+              border: '1px solid #bae6fd'
+            }}>
+              <span style={{ fontSize: '11.5px', color: '#0369a1', fontWeight: '700' }}>
+                Filtered Brands ({selectedBrands.length}):
+              </span>
+              {selectedBrands.map(b => (
+                <span
+                  key={b}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: '#ffffff',
+                    color: '#0284c7',
+                    padding: '2px 8px',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    border: '1px solid #93c5fd',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+                  }}
+                >
+                  <span>{b}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBrands(prev => prev.filter(item => item !== b));
+                      setPage(0);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#0284c7',
+                      cursor: 'pointer',
+                      padding: '0 2px',
+                      fontSize: '11px',
+                      lineHeight: 1
+                    }}
+                    title={`Remove ${b}`}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedBrands([]);
+                  setPage(0);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  textDecoration: 'underline',
+                  padding: '2px 6px',
+                  marginLeft: 'auto'
+                }}
+              >
+                Clear All ({selectedBrands.length})
+              </button>
+            </div>
+          )}
 
           {/* Overview Table */}
           <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: '8px' }}>
