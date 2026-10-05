@@ -23,7 +23,7 @@ const parseMTNum = (code) => {
   return m ? parseInt(m[1], 10) : NaN;
 };
 
-export default function ManuallyWeightCapture({ racks = [], currentUser = null }) {
+export default function ManuallyWeightCapture({ racks = [], currentUser = null, onNavigate }) {
   const [captures, setCaptures] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saveDialog, setSaveDialog] = useState(false);
@@ -32,6 +32,8 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
   const [liveLocations, setLiveLocations] = useState([]);
   const [dbMaterials, setDbMaterials] = useState([]);
+  const [itemCodesList, setItemCodesList] = useState([]);
+  const [selectedItemCode, setSelectedItemCode] = useState('');
 
   useEffect(() => {
     const fetchLocations = async () => {
@@ -150,8 +152,25 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   const [metadataFlash, setMetadataFlash] = useState(false);
   const numPieces = parseInt(form.pieces, 10) || 0;
 
+  const handleItemCodeSelect = (code) => {
+    setSelectedItemCode(code);
+    const matched = itemCodesList.find(i => i.item_code === code);
+    if (matched) {
+      setForm(prev => ({
+        ...prev,
+        materialCode: matched.item_code,
+        materialName: matched.item_name,
+        category: matched.category || prev.category,
+        unit: matched.uom || prev.unit
+      }));
+    }
+  };
+
   const areDetailsFilled = () => {
+    const hasItemCode = (form.materialCode || '').trim() !== '' &&
+      (selectedItemCode || itemCodesList.some(i => i.item_code === form.materialCode || i.item_name.toLowerCase() === (form.materialName || '').trim().toLowerCase()));
     return (
+      hasItemCode &&
       (form.materialName || '').trim() !== '' &&
       (form.category || '').trim() !== '' &&
       (form.supplier || '').trim() !== '' &&
@@ -189,9 +208,29 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
     return parts.length > 0 ? parts.join(', ') : (form.storeLocation || 'Main Store - Rack 1');
   };
 
-  // Fetch captures log and highest material code from DB on mount
-
+  // Fetch item codes, captures log and highest material code from DB on mount
   useEffect(() => {
+    fetch(`${getBackendUrl()}/api/item-codes`)
+      .then(r => r.json())
+      .then(res => {
+        const list = res.data || res.itemCodes || (Array.isArray(res) ? res : []);
+        if (Array.isArray(list) && list.length > 0) {
+          setItemCodesList(list);
+        } else {
+          // Fallback to localStorage cache if DB fetch returns empty or fails
+          try {
+            const cached = JSON.parse(localStorage.getItem('po_saved_item_codes') || '[]');
+            if (Array.isArray(cached) && cached.length > 0) setItemCodesList(cached);
+          } catch (e) {}
+        }
+      })
+      .catch(() => {
+        try {
+          const cached = JSON.parse(localStorage.getItem('po_saved_item_codes') || '[]');
+          if (Array.isArray(cached) && cached.length > 0) setItemCodesList(cached);
+        } catch (e) {}
+      });
+
     fetch(`${getBackendUrl()}/api/materials`)
       .then(r => r.json())
       .then(mats => {
@@ -236,7 +275,6 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
             const highest = Math.max(...nums);
             const next = highest + 1;
             setNextCodeNum(next);
-            setForm(p => ({ ...p, materialCode: `MT${next}` }));
           }
         }
       })
@@ -344,6 +382,12 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
   };
 
   const handleSaveClick = () => {
+    if (!selectedItemCode && !itemCodesList.some(i => i.item_code === form.materialCode)) {
+      showToast('⚠️ Item Code is required! Please select a registered Item Code before adding material.', 'error');
+      setMetadataFlash(true);
+      setTimeout(() => setMetadataFlash(false), 2000);
+      return;
+    }
     if (!areDetailsFilled()) {
       showToast('⚠️ Please fill in all required metadata fields and a valid quantity before saving!', 'error');
       setMetadataFlash(true);
@@ -388,9 +432,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       setSaving(false);
       setSaveDialog(false);
 
-      const nextNum = nextCodeNum + 1;
-      setNextCodeNum(nextNum);
-      setForm(p => ({ ...p, pieces: '', packets: '1', imageUrl: '', remarks: '', materialCode: `MT${nextNum}` }));
+      setForm(p => ({ ...p, pieces: '', packets: '1', imageUrl: '', remarks: '' }));
 
       showToast(`✅ Manual Material Inward Saved: ${totalPieces.toLocaleString()} ${form.unit}`);
 
@@ -414,7 +456,27 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
       setPrintProgressText('');
       setPrintModalOpen(true);
 
-      // Save into MySQL table weight_capture (weight fields zeroed out cleanly)
+      // 1. Accumulate stock in materials table & write INWARD entry to item_code_ledger
+      fetch(`${getBackendUrl()}/api/materials/accumulate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemCode: form.materialCode,
+          name: form.materialName,
+          category: form.category,
+          supplier: form.supplier,
+          lotNo: form.lotNo || 'N/A',
+          poNumber: form.poNumber,
+          invoiceNo: form.invoiceNo,
+          location: finalLocation,
+          pieces: totalPieces,
+          netWeightKg: 0,
+          uom: form.unit,
+          personName: form.storeIncharge || currentUser?.name || 'Operator'
+        })
+      }).catch(err => console.error('Error accumulating material stock:', err));
+
+      // 2. Save entry into weight_capture log
       fetch(`${getBackendUrl()}/api/weight-capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1282,69 +1344,89 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null }
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
 
+          {/* ── Registered Item Code Selector (Mandatory Step) ── */}
+          <div className="form-group" style={{ gridColumn: '1 / -1', background: '#eff6ff', padding: '16px', borderRadius: '10px', border: '1.5px solid #93c5fd' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+              <label className="wcs-label" style={{ color: '#1e40af', margin: 0, fontSize: '13px', fontWeight: '900', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Layers size={16} /> SELECT REGISTERED ITEM CODE (REQUIRED BEFORE ADDING MATERIAL) <span style={{ color: '#ef4444' }}>*</span>
+              </label>
+              {onNavigate && (
+                <button
+                  type="button"
+                  onClick={() => onNavigate('item_codes')}
+                  style={{ background: '#2563eb', color: '#fff', border: 'none', padding: '5px 12px', borderRadius: '6px', fontSize: '12px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                >
+                  + Create New Item Code
+                </button>
+              )}
+            </div>
+            <select
+              className="wcs-input"
+              value={selectedItemCode}
+              onChange={e => handleItemCodeSelect(e.target.value)}
+              style={{ height: '44px', fontSize: '14px', fontWeight: '800', background: '#ffffff', color: '#0f172a', borderColor: selectedItemCode ? '#10b981' : '#3b82f6' }}
+            >
+              <option value="">-- Choose Item Code from Master (e.g. ST00001) --</option>
+              {itemCodesList.map(item => (
+                <option key={item.id || item.item_code} value={item.item_code}>
+                  {item.item_code} — {item.item_name} [{item.category || 'General'}] (UOM: {item.uom || 'PCS'})
+                </option>
+              ))}
+            </select>
+            {!selectedItemCode ? (
+              <div style={{ fontSize: '11.5px', color: '#dc2626', marginTop: '6px', fontWeight: '700' }}>
+                ⚠️ Before adding material, user must create and select the Item Code of that item.
+              </div>
+            ) : (
+              <div style={{ fontSize: '11.5px', color: '#059669', marginTop: '6px', fontWeight: '700' }}>
+                ✓ Mapped: Material Code = <strong>{selectedItemCode}</strong> | Material Name = <strong>{form.materialName}</strong> | Category = <strong>{form.category}</strong> | UOM = <strong>{form.unit}</strong>
+              </div>
+            )}
+          </div>
+
           <div className="form-group">
             <label className="wcs-label">
               Material Name <span style={{ color: '#ef4444' }}>*</span>
+              <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '6px', fontWeight: 'bold' }}>(Locked)</span>
             </label>
             <input
               type="text"
               className="wcs-input"
               value={form.materialName}
-              onChange={e => {
-                const val = e.target.value;
-                setForm(prev => {
-                  const matched = (dbMaterials || []).find(m => m.name && m.name.toLowerCase() === val.trim().toLowerCase())
-                               || (captures || []).find(c => (c.material || c.materialName) && (c.material || c.materialName).toLowerCase() === val.trim().toLowerCase());
-                  const newCat = (!prev.category.trim() && matched?.category) ? matched.category.toUpperCase() : prev.category;
-                  return {
-                    ...prev,
-                    materialName: val,
-                    category: newCat
-                  };
-                });
-              }}
-              list="manual-material-suggestions"
-              placeholder="e.g. YKK Brass Zipper (type to search)"
-              autoComplete="on"
-              style={{ height: '40px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
+              readOnly={true}
+              placeholder="Auto-mapped from Item Code"
+              style={{ height: '40px', fontSize: '14px', fontWeight: '800', backgroundColor: '#f1f5f9', color: '#1e293b', cursor: 'not-allowed', border: '1.5px solid #cbd5e1' }}
             />
-            <datalist id="manual-material-suggestions">
-              {materialSuggestions.map((name, idx) => (
-                <option key={idx} value={name} />
-              ))}
-            </datalist>
           </div>
 
           <div className="form-group">
-            <label className="wcs-label">Material Code (Auto) <span style={{ color: '#ef4444' }}>*</span></label>
+            <label className="wcs-label">
+              Material Code (Item Code) <span style={{ color: '#ef4444' }}>*</span>
+              <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '6px', fontWeight: 'bold' }}>(Locked)</span>
+            </label>
             <input
               type="text"
               className="wcs-input"
               value={form.materialCode}
-              onChange={setF('materialCode')}
-              style={{ height: '40px', fontFamily: 'monospace', fontWeight: '900', backgroundColor: '#f8fafc' }}
+              readOnly={true}
+              placeholder="Auto-mapped from Item Code"
+              style={{ height: '40px', fontFamily: 'monospace', fontWeight: '900', backgroundColor: '#f1f5f9', color: '#1e293b', cursor: 'not-allowed', border: '1.5px solid #cbd5e1' }}
             />
           </div>
 
           <div className="form-group">
             <label className="wcs-label">
               Category <span style={{ color: '#ef4444' }}>*</span>
+              <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '6px', fontWeight: 'bold' }}>(Locked)</span>
             </label>
             <input
               type="text"
               className="wcs-input"
               value={form.category}
-              onChange={setF('category')}
-              list="manual-category-suggestions"
-              placeholder="e.g. ZIPPERS / TRIMS (type or select)"
-              autoComplete="on"
-              style={{ height: '40px', fontSize: '14px', fontWeight: '700', color: '#0f172a' }}
+              readOnly={true}
+              placeholder="Auto-mapped from Item Code"
+              style={{ height: '40px', fontSize: '14px', fontWeight: '800', backgroundColor: '#f1f5f9', color: '#1e293b', cursor: 'not-allowed', border: '1.5px solid #cbd5e1' }}
             />
-            <datalist id="manual-category-suggestions">
-              {categorySuggestions.map((cat, idx) => (
-                <option key={idx} value={cat} />
-              ))}
-            </datalist>
           </div>
 
           <div className="form-group">

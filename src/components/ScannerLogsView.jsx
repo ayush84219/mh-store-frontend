@@ -52,14 +52,14 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
     try {
       const date = new Date(dateStr);
       if (isNaN(date.getTime())) return dateStr;
-      
+
       const pad = (num) => String(num).padStart(2, '0');
       const d = pad(date.getDate());
       const m = pad(date.getMonth() + 1);
       const y = date.getFullYear();
       const hr = pad(date.getHours());
       const min = pad(date.getMinutes());
-      
+
       return `${d}/${m}/${y} ${hr}:${min}`;
     } catch {
       return dateStr;
@@ -70,7 +70,7 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
   const filteredLogs = useMemo(() => {
     return logs.filter(log => {
       const q = searchTerm.toLowerCase().trim();
-      const matchesSearch = 
+      const matchesSearch =
         !q ||
         (log.lot_number || '').toLowerCase().includes(q) ||
         (log.person_name || '').toLowerCase().includes(q) ||
@@ -126,7 +126,7 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
   // Export PDF
   const handleExportPDF = () => {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-    
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(18);
     doc.setTextColor(31, 41, 55);
@@ -182,8 +182,8 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
         </div>
 
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <button 
-            onClick={fetchLogs} 
+          <button
+            onClick={fetchLogs}
             className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '7px 12px' }}
           >
@@ -191,8 +191,8 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
             <span>Refresh</span>
           </button>
 
-          <button 
-            onClick={handleExportExcel} 
+          <button
+            onClick={handleExportExcel}
             className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '7px 12px', borderColor: '#10b981', color: '#10b981' }}
           >
@@ -200,8 +200,8 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
             <span>Excel</span>
           </button>
 
-          <button 
-            onClick={handleExportPDF} 
+          <button
+            onClick={handleExportPDF}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', padding: '7px 14px',
               borderRadius: '8px', border: 'none', background: '#004b87', color: '#ffffff', fontWeight: '700', cursor: 'pointer'
@@ -487,7 +487,7 @@ export default function ScannerLogsView({ currencySymbol = 'R' }) {
           </table>
         </div>
       )}
-      
+
       <style>{`
         @keyframes spin {
           0% { transform: rotate(0deg); }

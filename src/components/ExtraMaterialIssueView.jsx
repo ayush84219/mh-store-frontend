@@ -6,7 +6,7 @@ import {
   FileText, Shield, ShieldAlert, ArrowRight, RotateCcw, Clock,
   Package, ChevronDown, CheckCircle, HelpCircle,
   TrendingUp, Sparkles, Filter, RefreshCw, Eye, BarChart3,
-  User, Send, Box, Scissors, Tag, Info, Calendar
+  User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -508,6 +508,113 @@ export default function ExtraMaterialIssueView({
     setExpandedAuditLots(prev => ({ ...prev, [lotId]: !prev[lotId] }));
   };
   const [showAllBom, setShowAllBom] = useState(false);
+
+  // ── Barcode Scanner State & Handlers ─────────────────────────────────────
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeScanFeedback, setBarcodeScanFeedback] = useState(null); // { type: 'success'|'error', msg: '' }
+  const [highlightedRowIndex, setHighlightedRowIndex] = useState(null);
+  const barcodeInputRef = useRef(null);
+
+  // Audio chirp sound for instant scan feedback
+  const playScanChirp = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1600, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+    } catch (e) {}
+  };
+
+  // Process Scanned Barcode and Map to BOM Component Row
+  const handleBarcodeScanSubmit = (e) => {
+    if (e) e.preventDefault();
+    const raw = barcodeInput.trim();
+    if (!raw) return;
+
+    setBarcodeScanFeedback(null);
+    const upperRaw = raw.toUpperCase();
+
+    // 1. Find material in inventory matching id, materialCode, barcodeId, or name
+    const matchedMat = materials.find(m => {
+      const id = String(m.id || '').toUpperCase();
+      const code = String(m.materialCode || m.code || '').toUpperCase();
+      const bar = String(m.barcodeId || '').toUpperCase();
+      const name = String(m.name || '').toUpperCase();
+      const category = String(m.category || '').toUpperCase();
+
+      return id === upperRaw || code === upperRaw || bar === upperRaw ||
+             name.includes(upperRaw) || category.includes(upperRaw);
+    });
+
+    if (!matchedMat) {
+      setBarcodeScanFeedback({
+        type: 'error',
+        msg: `❌ No material found matching barcode/ID "${raw}". Please verify inventory.`
+      });
+      return;
+    }
+
+    // Play crisp scan audio chirp
+    playScanChirp();
+
+    // 2. Auto-map or select row in BOM component table
+    let matchedRowId = null;
+
+    setBomMappings(prev => {
+      const next = [...prev];
+      // Check if material is already assigned to a BOM row
+      const existingIdx = next.findIndex(item => String(item.materialId) === String(matchedMat.id));
+
+      if (existingIdx !== -1) {
+        matchedRowId = next[existingIdx].id;
+        const currentQty = parseFloat(next[existingIdx].extraQty) || 0;
+        next[existingIdx] = {
+          ...next[existingIdx],
+          selectedForExtra: true,
+          extraQty: currentQty > 0 ? currentQty + 1 : 1
+        };
+      } else {
+        // Find first row without assigned material or matching component name
+        const unassignedIdx = next.findIndex(item => !item.materialId || item.materialId === '');
+        if (unassignedIdx !== -1) {
+          matchedRowId = next[unassignedIdx].id;
+          next[unassignedIdx] = {
+            ...next[unassignedIdx],
+            materialId: matchedMat.id,
+            selectedForExtra: true,
+            extraQty: 1
+          };
+        } else if (next.length > 0) {
+          matchedRowId = next[0].id;
+          next[0] = {
+            ...next[0],
+            selectedForExtra: true,
+            extraQty: (parseFloat(next[0].extraQty) || 0) + 1
+          };
+        }
+      }
+      return next;
+    });
+
+    setHighlightedRowIndex(matchedRowId);
+    setBarcodeScanFeedback({
+      type: 'success',
+      msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row selected for Extra Issue.`
+    });
+
+    setBarcodeInput('');
+    setTimeout(() => {
+      if (barcodeInputRef.current) barcodeInputRef.current.focus();
+    }, 100);
+  };
   
   // Printable slip modal
   const [printSlipData, setPrintSlipData] = useState(null);
@@ -1751,27 +1858,27 @@ export default function ExtraMaterialIssueView({
   };
 
   return (
-    <div className="extra-material-issue-container" style={{ padding: '6px 10px 14px 10px', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
+    <div className="extra-material-issue-container" style={{ padding: '16px', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       
-      {/* Top Banner Header - Extra Material Issue Box with padding: 9px */}
+      {/* Top Banner Header - Extra Material Issue Box */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: '8px',
-        padding: '9px 16px',
+        marginBottom: '16px',
+        padding: '14px 20px',
         backgroundColor: 'var(--bg-secondary, #f8fafc)',
-        borderRadius: '9px',
-        border: '1px solid var(--border-color, #e2e8f0)',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+        borderRadius: '12px',
+        border: '1.5px solid var(--border-color, #cbd5e1)',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
         flexWrap: 'wrap',
-        gap: '10px'
+        gap: '12px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
-            width: '34px',
-            height: '34px',
-            borderRadius: '8px',
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
             backgroundColor: 'rgba(99, 102, 241, 0.12)',
             color: '#6366f1',
             display: 'flex',
@@ -1779,22 +1886,22 @@ export default function ExtraMaterialIssueView({
             justifyContent: 'center',
             flexShrink: 0
           }}>
-            <Sparkles size={18} />
+            <Sparkles size={22} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-              <h1 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+              <h1 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
                 Extra Material Issue
               </h1>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', fontWeight: '600' }}>
                 • Approved production lots & extra material requisition slips
               </span>
             </div>
           </div>
         </div>
 
-        {/* Tab switcher: Issue Extra Material vs Extra Issue Logs - Normal and Easy to See */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Tab switcher: Issue Extra Material vs Extra Issue Logs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button
             type="button"
             className={`btn ${activeSubTab === 'issue' ? 'btn-primary' : 'btn-secondary'}`}
@@ -1803,13 +1910,14 @@ export default function ExtraMaterialIssueView({
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '7px 16px',
-              fontSize: '12.5px',
-              fontWeight: '600',
-              borderRadius: '7px'
+              padding: '8px 18px',
+              fontSize: '13px',
+              fontWeight: '700',
+              borderRadius: '8px',
+              boxShadow: activeSubTab === 'issue' ? '0 4px 12px rgba(99, 102, 241, 0.25)' : 'none'
             }}
           >
-            <Layers size={15} />
+            <Layers size={16} />
             <span>Issue Extra Material</span>
           </button>
           <button
@@ -1820,13 +1928,14 @@ export default function ExtraMaterialIssueView({
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '7px 16px',
-              fontSize: '12.5px',
-              fontWeight: '600',
-              borderRadius: '7px'
+              padding: '8px 18px',
+              fontSize: '13px',
+              fontWeight: '700',
+              borderRadius: '8px',
+              boxShadow: activeSubTab === 'history' ? '0 4px 12px rgba(99, 102, 241, 0.25)' : 'none'
             }}
           >
-            <Clock size={15} />
+            <Clock size={16} />
             <span>Extra Issue Logs ({allExtraLogs.length})</span>
           </button>
           <button
@@ -1837,13 +1946,14 @@ export default function ExtraMaterialIssueView({
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              padding: '7px 16px',
-              fontSize: '12.5px',
-              fontWeight: '600',
-              borderRadius: '7px'
+              padding: '8px 18px',
+              fontSize: '13px',
+              fontWeight: '700',
+              borderRadius: '8px',
+              boxShadow: activeSubTab === 'combined_audit' ? '0 4px 12px rgba(99, 102, 241, 0.25)' : 'none'
             }}
           >
-            <BarChart3 size={15} />
+            <BarChart3 size={16} />
             <span>Combined Audit Report ({lotAuditSummary.length})</span>
           </button>
         </div>
@@ -1854,19 +1964,19 @@ export default function ExtraMaterialIssueView({
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          padding: '6px 12px',
+          gap: '10px',
+          padding: '10px 16px',
           backgroundColor: 'rgba(239, 68, 68, 0.1)',
           color: '#dc2626',
-          borderRadius: '6px',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          marginBottom: '6px',
-          fontSize: '11.5px',
-          fontWeight: '500'
+          borderRadius: '8px',
+          border: '1.5px solid rgba(239, 68, 68, 0.3)',
+          marginBottom: '12px',
+          fontSize: '13px',
+          fontWeight: '700'
         }}>
-          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <AlertTriangle size={18} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1 }}>{formError}</div>
-          <button onClick={() => setFormError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626' }}>&times;</button>
+          <button onClick={() => setFormError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '16px' }}>&times;</button>
         </div>
       )}
 
@@ -1874,19 +1984,19 @@ export default function ExtraMaterialIssueView({
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          padding: '6px 12px',
+          gap: '10px',
+          padding: '10px 16px',
           backgroundColor: 'rgba(16, 185, 129, 0.1)',
           color: '#059669',
-          borderRadius: '6px',
-          border: '1px solid rgba(16, 185, 129, 0.3)',
-          marginBottom: '6px',
-          fontSize: '11.5px',
-          fontWeight: '500'
+          borderRadius: '8px',
+          border: '1.5px solid rgba(16, 185, 129, 0.3)',
+          marginBottom: '12px',
+          fontSize: '13px',
+          fontWeight: '700'
         }}>
-          <CheckCircle2 size={15} style={{ flexShrink: 0 }} />
+          <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1 }}>{formSuccess}</div>
-          <button onClick={() => setFormSuccess('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#059669' }}>&times;</button>
+          <button onClick={() => setFormSuccess('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#059669', fontSize: '16px' }}>&times;</button>
         </div>
       )}
 
@@ -1894,8 +2004,8 @@ export default function ExtraMaterialIssueView({
       {activeSubTab === 'issue' && (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '215px minmax(0, 1fr)',
-          gap: '10px',
+          gridTemplateColumns: '280px minmax(0, 1fr)',
+          gap: '16px',
           alignItems: 'start',
           width: '100%',
           minWidth: 0
@@ -1904,33 +2014,34 @@ export default function ExtraMaterialIssueView({
           {/* Left Column: Approved Lots Browser with Search Bar */}
           <div style={{
             backgroundColor: 'var(--bg-secondary, #f8fafc)',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color, #e2e8f0)',
-            padding: '10px',
+            borderRadius: '12px',
+            border: '1.5px solid var(--border-color, #cbd5e1)',
+            padding: '14px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '8px',
-            maxHeight: 'calc(100vh - 100px)',
+            gap: '10px',
+            maxHeight: 'calc(100vh - 120px)',
             position: 'sticky',
-            top: '8px'
+            top: '12px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.03)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <CheckCircle size={14} style={{ color: '#10b981' }} />
-                <h3 style={{ margin: 0, fontSize: '12.5px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle size={16} style={{ color: '#10b981' }} />
+                <h3 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
                   Issued Lots ({filteredDesigns.length})
                 </h3>
               </div>
-              <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: '600' }}>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700', backgroundColor: '#e2e8f0', padding: '2px 8px', borderRadius: '10px' }}>
                 Total: {alreadyIssuedDesigns.length}
               </span>
             </div>
 
             {/* Search Approved & Issued Lots */}
             <div style={{ position: 'relative', width: '100%' }}>
-              <Search size={14} style={{
+              <Search size={15} style={{
                 position: 'absolute',
-                left: '9px',
+                left: '10px',
                 top: '50%',
                 transform: 'translateY(-50%)',
                 color: 'var(--text-muted)'
@@ -1943,12 +2054,14 @@ export default function ExtraMaterialIssueView({
                 className="form-input"
                 style={{
                   width: '100%',
-                  height: '34px',
-                  paddingLeft: '30px',
-                  paddingRight: '26px',
-                  fontSize: '12px',
+                  height: '38px',
+                  paddingLeft: '32px',
+                  paddingRight: '28px',
+                  fontSize: '12.5px',
+                  fontWeight: '600',
                   boxSizing: 'border-box',
-                  borderRadius: '6px'
+                  borderRadius: '8px',
+                  border: '1.5px solid #cbd5e1'
                 }}
               />
               {searchLotQuery && (
@@ -1957,14 +2070,14 @@ export default function ExtraMaterialIssueView({
                   onClick={() => setSearchLotQuery('')}
                   style={{
                     position: 'absolute',
-                    right: '7px',
+                    right: '8px',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     background: 'none',
                     border: 'none',
                     color: 'var(--text-muted)',
                     cursor: 'pointer',
-                    fontSize: '13px'
+                    fontSize: '14px'
                   }}
                 >
                   &times;
@@ -1975,10 +2088,10 @@ export default function ExtraMaterialIssueView({
             {/* Lots List */}
             <div style={{
               overflowY: 'auto',
-              maxHeight: 'calc(100vh - 280px)',
+              maxHeight: 'calc(100vh - 270px)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              gap: '8px',
               paddingRight: '2px'
             }}>
               {filteredDesigns.length === 0 ? (
@@ -1988,8 +2101,8 @@ export default function ExtraMaterialIssueView({
                   color: 'var(--text-muted)',
                   fontSize: '12px',
                   backgroundColor: 'var(--bg-primary)',
-                  borderRadius: '6px',
-                  border: '1px dashed var(--border-color)',
+                  borderRadius: '8px',
+                  border: '1.5px dashed var(--border-color)',
                   lineHeight: 1.5
                 }}>
                   {alreadyIssuedDesigns.length === 0 ? (
@@ -2012,66 +2125,66 @@ export default function ExtraMaterialIssueView({
                       key={d.id}
                       onClick={() => setSelectedDesignId(d.id)}
                       style={{
-                        padding: '9px 11px',
-                        borderRadius: '8px',
-                        border: isSelected ? '2px solid #6366f1' : '1px solid var(--border-color, #e2e8f0)',
-                        backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-primary, #ffffff)',
+                        padding: '11px 13px',
+                        borderRadius: '10px',
+                        border: isSelected ? '2px solid #3b82f6' : '1.5px solid var(--border-color, #cbd5e1)',
+                        backgroundColor: isSelected ? '#eff6ff' : 'var(--bg-primary, #ffffff)',
                         cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                        boxShadow: isSelected ? '0 2px 8px rgba(99, 102, 241, 0.12)' : 'none',
+                        transition: 'all 0.2s ease',
+                        boxShadow: isSelected ? '0 4px 12px rgba(59, 130, 246, 0.12)' : '0 2px 4px rgba(0,0,0,0.02)',
                         display: 'flex',
                         flexDirection: 'column',
-                        gap: '3px'
+                        gap: '4px'
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{
-                            fontWeight: '800',
-                            fontSize: '12.5px',
-                            color: isSelected ? '#4f46e5' : 'var(--text-main, #0f172a)'
+                            fontWeight: '900',
+                            fontSize: '13px',
+                            color: isSelected ? '#1d4ed8' : 'var(--text-main, #0f172a)'
                           }}>
                             Lot {d.id}
                           </span>
                           {d.lotNo2 && (
                             <span style={{
-                              fontSize: '9.5px',
-                              padding: '1px 5px',
+                              fontSize: '10px',
+                              padding: '2px 6px',
                               backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                              color: '#6366f1',
-                              borderRadius: '3px',
-                              fontWeight: '700'
+                              color: '#4f46e5',
+                              borderRadius: '4px',
+                              fontWeight: '800'
                             }}>
-                              {d.lotNo2}
+                              MH: {d.lotNo2}
                             </span>
                           )}
                         </div>
                         <span style={{
-                          fontSize: '9.5px',
-                          fontWeight: '700',
-                          padding: '2px 6px',
-                          borderRadius: '4px',
-                          backgroundColor: '#e0e7ff',
-                          color: '#4338ca',
+                          fontSize: '10px',
+                          fontWeight: '800',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          backgroundColor: '#d1fae5',
+                          color: '#065f46',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '3px'
                         }}>
-                          <CheckCircle size={10} /> Issued
+                          <CheckCircle size={11} /> Issued
                         </span>
                       </div>
 
-                      <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: '600' }}>
                           {d.brand || 'No Brand'} • {d.category}
                         </span>
                         <span style={{
-                          fontWeight: '700',
+                          fontWeight: '800',
                           fontSize: '11px',
                           color: '#4f46e5',
-                          backgroundColor: 'rgba(99, 102, 241, 0.08)',
-                          padding: '1px 6px',
-                          borderRadius: '4px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                          padding: '2px 7px',
+                          borderRadius: '6px',
                           flexShrink: 0
                         }}>
                           {bomCount} BOM
@@ -2079,8 +2192,8 @@ export default function ExtraMaterialIssueView({
                       </div>
 
                       {d.fabricType && (
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          Fabric: {d.fabricType}
+                        <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          Fabric: <strong>{d.fabricType}</strong>
                         </div>
                       )}
                     </div>
@@ -2091,24 +2204,24 @@ export default function ExtraMaterialIssueView({
           </div>
 
           {/* Right Column: Selected Lot Header & BOM Components Table */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0, width: '100%', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 0, width: '100%', overflow: 'hidden' }}>
             
             {!selectedDesign ? (
               <div style={{
                 backgroundColor: 'var(--bg-secondary, #f8fafc)',
-                borderRadius: '10px',
+                borderRadius: '12px',
                 border: '1.5px dashed var(--border-color, #cbd5e1)',
-                padding: '36px 20px',
+                padding: '48px 24px',
                 textAlign: 'center',
                 color: 'var(--text-muted, #64748b)',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
-                gap: '10px'
+                gap: '12px'
               }}>
                 <div style={{
-                  width: '48px',
-                  height: '48px',
+                  width: '54px',
+                  height: '54px',
                   borderRadius: '50%',
                   backgroundColor: 'rgba(99, 102, 241, 0.1)',
                   display: 'flex',
@@ -2116,97 +2229,100 @@ export default function ExtraMaterialIssueView({
                   justifyContent: 'center',
                   color: '#6366f1'
                 }}>
-                  <Layers size={24} />
+                  <Layers size={28} />
                 </div>
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '700', color: 'var(--text-main)' }}>
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-main)' }}>
                   No Lot Selected
                 </h3>
-                <p style={{ margin: 0, fontSize: '12px', maxWidth: '400px' }}>
-                  Please select an already-issued production lot from the left panel to inspect its BOM components and issue extra materials.
+                <p style={{ margin: 0, fontSize: '13px', maxWidth: '420px', lineHeight: '1.5' }}>
+                  Please select an already-issued production lot from the left sidebar to view BOM components and generate extra material requisitions.
                 </p>
               </div>
             ) : (
               <>
-                {/* Lot Header Info Box - Compact View */}
+                {/* Lot Header Info Box - Modern Card View */}
                 <div style={{
-                  backgroundColor: 'var(--bg-secondary, #f8fafc)',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color, #e2e8f0)',
-                  padding: '6px 10px',
+                  backgroundColor: '#ffffff',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--border-color, #cbd5e1)',
+                  padding: '16px 20px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '5px',
-                  boxShadow: '0 1px 4px rgba(0,0,0,0.02)',
+                  gap: '12px',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.03)',
                   width: '100%',
                   boxSizing: 'border-box'
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <div style={{
-                        padding: '2px 7px',
-                        backgroundColor: '#6366f1',
+                        padding: '4px 10px',
+                        backgroundColor: '#4f46e5',
                         color: '#ffffff',
-                        borderRadius: '5px',
-                        fontWeight: '800',
-                        fontSize: '11px',
+                        borderRadius: '6px',
+                        fontWeight: '900',
+                        fontSize: '12.5px',
                         letterSpacing: '0.5px'
                       }}>
                         LOT {selectedDesign.id}
                       </div>
                       {selectedDesign.lotNo2 && (
                         <div style={{
-                          padding: '2px 5px',
+                          padding: '3px 8px',
                           backgroundColor: 'rgba(99, 102, 241, 0.12)',
                           color: '#4f46e5',
-                          borderRadius: '4px',
-                          fontWeight: '700',
-                          fontSize: '10.5px'
+                          borderRadius: '6px',
+                          fontWeight: '800',
+                          fontSize: '11px'
                         }}>
                           MH: {selectedDesign.lotNo2}
                         </div>
                       )}
-                      <span style={{ fontSize: '12.5px', fontWeight: '700', color: 'var(--text-main)' }}>
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-main)' }}>
                         {selectedDesign.brand ? `${selectedDesign.brand} — ` : ''}{selectedDesign.name || selectedDesign.category}
                       </span>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Garment Vol:</span>
-                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#059669' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#ecfdf5', padding: '4px 12px', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                      <span style={{ fontSize: '11.5px', color: '#047857', fontWeight: '700' }}>Garment Volume:</span>
+                      <span style={{ fontSize: '13px', fontWeight: '900', color: '#065f46' }}>
                         {isLoadingPieces ? 'Loading...' : `${pieces.toLocaleString()} Units`}
                       </span>
                     </div>
                   </div>
 
-                  {/* Quick Metadata Row */}
+                  {/* Quick Metadata Pill Row */}
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
                     flexWrap: 'wrap',
-                    gap: '4px 12px',
-                    padding: '3px 8px',
-                    backgroundColor: 'var(--bg-primary, #ffffff)',
-                    borderRadius: '5px',
-                    border: '1px solid var(--border-color, #e2e8f0)',
-                    fontSize: '10.5px'
+                    gap: '6px 16px',
+                    padding: '8px 14px',
+                    backgroundColor: 'var(--bg-secondary, #f8fafc)',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-color, #cbd5e1)',
+                    fontSize: '12px'
                   }}>
                     <div>
                       <span style={{ color: 'var(--text-muted)' }}>Category: </span>
-                      <strong>{selectedDesign.category || 'N/A'}</strong>
+                      <strong style={{ color: '#0f172a' }}>{selectedDesign.category || 'N/A'}</strong>
                     </div>
+                    <div style={{ borderLeft: '1px solid #cbd5e1', height: '14px' }}></div>
                     <div>
                       <span style={{ color: 'var(--text-muted)' }}>Style Code: </span>
-                      <strong>{selectedDesign.style || 'N/A'}</strong>
+                      <strong style={{ color: '#0f172a' }}>{selectedDesign.style || 'N/A'}</strong>
                     </div>
+                    <div style={{ borderLeft: '1px solid #cbd5e1', height: '14px' }}></div>
                     <div>
                       <span style={{ color: 'var(--text-muted)' }}>Fabric: </span>
-                      <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: '140px', verticalAlign: 'bottom' }}>
+                      <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', maxWidth: '180px', verticalAlign: 'bottom', color: '#0f172a' }}>
                         {selectedDesign.fabricType || 'N/A'}
                       </strong>
                     </div>
+                    <div style={{ borderLeft: '1px solid #cbd5e1', height: '14px' }}></div>
                     <div>
                       <span style={{ color: 'var(--text-muted)' }}>Prev Issues: </span>
-                      <strong>{lotPreviousIssues.length} records</strong>
+                      <strong style={{ color: '#2563eb' }}>{lotPreviousIssues.length} records</strong>
                     </div>
                   </div>
 
@@ -2214,24 +2330,26 @@ export default function ExtraMaterialIssueView({
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                    gap: '12px',
-                    paddingTop: '8px',
-                    borderTop: '1px solid var(--border-color, #e2e8f0)'
+                    gap: '16px',
+                    paddingTop: '12px',
+                    borderTop: '1.5px solid var(--border-color, #e2e8f0)'
                   }}>
                     <div>
-                      <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Issuer Person: <span style={{ color: '#ef4444' }}>*</span>
+                      <label className="wcs-label" style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px' }}>
+                        Issuer Person <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
                         style={{
-                          height: '36px',
-                          fontSize: '13px',
+                          height: '38px',
+                          fontSize: '13.5px',
+                          fontWeight: '700',
                           width: '100%',
-                          padding: '6px 12px',
-                          borderRadius: '7px',
-                          borderColor: !personName.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1',
+                          borderColor: !personName.trim() && formError ? '#ef4444' : '#cbd5e1'
                         }}
                         value={personName}
                         onChange={(e) => {
@@ -2242,19 +2360,21 @@ export default function ExtraMaterialIssueView({
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Receiver Person: <span style={{ color: '#ef4444' }}>*</span>
+                      <label className="wcs-label" style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px' }}>
+                        Receiver Person <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
                         style={{
-                          height: '36px',
-                          fontSize: '13px',
+                          height: '38px',
+                          fontSize: '13.5px',
+                          fontWeight: '700',
                           width: '100%',
-                          padding: '6px 12px',
-                          borderRadius: '7px',
-                          borderColor: !receiverName.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1',
+                          borderColor: !receiverName.trim() && formError ? '#ef4444' : '#cbd5e1'
                         }}
                         value={receiverName}
                         onChange={(e) => {
@@ -2265,19 +2385,21 @@ export default function ExtraMaterialIssueView({
                       />
                     </div>
                     <div>
-                      <label style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #334155)', display: 'block', marginBottom: '4px' }}>
-                        Receiver Dept / Line: <span style={{ color: '#ef4444' }}>*</span>
+                      <label className="wcs-label" style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px' }}>
+                        Receiver Dept / Line <span style={{ color: '#ef4444' }}>*</span>
                       </label>
                       <input
                         type="text"
                         className="form-input"
                         style={{
-                          height: '36px',
-                          fontSize: '13px',
+                          height: '38px',
+                          fontSize: '13.5px',
+                          fontWeight: '700',
                           width: '100%',
-                          padding: '6px 12px',
-                          borderRadius: '7px',
-                          borderColor: !receiverDept.trim() && formError ? '#ef4444' : 'var(--border-color)'
+                          padding: '8px 12px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #cbd5e1',
+                          borderColor: !receiverDept.trim() && formError ? '#ef4444' : '#cbd5e1'
                         }}
                         value={receiverDept}
                         onChange={(e) => {
@@ -2382,19 +2504,129 @@ export default function ExtraMaterialIssueView({
                     </div>
                   </div>
 
-                  {/* Table Container - Fits comfortably with clear, legible sizing */}
+                  {/* Barcode Scanner Quick Input Bar */}
+                  <div style={{
+                    marginBottom: '14px',
+                    padding: '12px 16px',
+                    background: 'linear-gradient(135deg, #f0f9ff 0%, #eef2ff 100%)',
+                    borderRadius: '10px',
+                    border: '1.5px solid #a5b4fc',
+                    boxShadow: '0 4px 14px rgba(99, 102, 241, 0.08)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          padding: '7px 9px',
+                          borderRadius: '8px',
+                          backgroundColor: '#6366f1',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          boxShadow: '0 2px 6px rgba(99, 102, 241, 0.3)'
+                        }}>
+                          <Barcode size={18} />
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>Barcode Scanning & Quick Auto-Mapping</strong>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginTop: '1px' }}>
+                            Scan material barcode (e.g. <code style={{ backgroundColor: '#ffffff', padding: '1px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', color: '#4f46e5', fontWeight: '700' }}>MT1001</code>, <code style={{ backgroundColor: '#ffffff', padding: '1px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', color: '#4f46e5', fontWeight: '700' }}>1001-A01</code>, <code style={{ backgroundColor: '#ffffff', padding: '1px 5px', borderRadius: '4px', border: '1px solid #cbd5e1', color: '#4f46e5', fontWeight: '700' }}>ZIP62114</code>) or type ID & press Enter
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleBarcodeScanSubmit} style={{ display: 'flex', gap: '10px', marginTop: '2px' }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          ref={barcodeInputRef}
+                          type="text"
+                          className="form-input"
+                          style={{
+                            width: '100%',
+                            height: '40px',
+                            paddingLeft: '38px',
+                            paddingRight: '12px',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            borderRadius: '8px',
+                            border: '1.5px solid',
+                            borderColor: barcodeScanFeedback?.type === 'error' ? '#ef4444' : '#818cf8',
+                            backgroundColor: '#ffffff',
+                            boxShadow: '0 2px 6px rgba(99, 102, 241, 0.1)'
+                          }}
+                          placeholder="Scan barcode or type Material ID (e.g. MT1001, 1001-A01, ZIP62114) and hit Enter..."
+                          value={barcodeInput}
+                          onChange={(e) => setBarcodeInput(e.target.value)}
+                        />
+                        <Barcode size={17} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#6366f1' }} />
+                      </div>
+
+                      <button
+                        type="submit"
+                        className="btn btn-primary"
+                        style={{
+                          padding: '0 20px',
+                          height: '40px',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          borderRadius: '8px',
+                          backgroundColor: '#6366f1',
+                          color: '#ffffff',
+                          border: 'none',
+                          boxShadow: '0 3px 10px rgba(99, 102, 241, 0.3)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '7px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Sparkles size={14} />
+                        <span>Scan / Auto-Map</span>
+                      </button>
+                    </form>
+
+                    {barcodeScanFeedback && (
+                      <div style={{
+                        padding: '8px 12px',
+                        borderRadius: '7px',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        backgroundColor: barcodeScanFeedback.type === 'error' ? '#fef2f2' : '#ecfdf5',
+                        color: barcodeScanFeedback.type === 'error' ? '#dc2626' : '#047857',
+                        border: `1px solid ${barcodeScanFeedback.type === 'error' ? '#fca5a5' : '#6ee7b7'}`,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <span>{barcodeScanFeedback.msg}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBarcodeScanFeedback(null)}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 'bold', fontSize: '13px' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Table Container */}
                   <div style={{
                     width: '100%',
                     maxWidth: '100%',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-color, #e2e8f0)',
-                    overflowX: 'auto',
+                    borderRadius: '10px',
+                    border: '1px solid #cbd5e1',
+                    overflow: 'hidden',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
                     boxSizing: 'border-box'
                   }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: 'var(--bg-primary, #ffffff)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: '#ffffff' }}>
                       <thead>
-                        <tr style={{ backgroundColor: 'var(--bg-secondary, #f1f5f9)', borderBottom: '1.5px solid var(--border-color, #cbd5e1)', textAlign: 'left' }}>
-                          <th style={{ width: '28px', padding: '9px 4px', textAlign: 'center' }}>
+                        <tr style={{ backgroundColor: '#1e293b', color: '#ffffff', textAlign: 'left' }}>
+                          <th style={{ width: '32px', padding: '11px 6px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
                               checked={displayedBomMappings.length > 0 && displayedBomMappings.every(m => m.selectedForExtra)}
@@ -2403,31 +2635,31 @@ export default function ExtraMaterialIssueView({
                                 const displayedIds = new Set(displayedBomMappings.map(m => m.id));
                                 setBomMappings(prev => prev.map(m => displayedIds.has(m.id) ? { ...m, selectedForExtra: checked } : m));
                               }}
-                              style={{ cursor: 'pointer', width: '15px', height: '15px' }}
+                              style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#6366f1' }}
                               title="Select All"
                             />
                           </th>
-                          <th style={{ width: '115px', padding: '9px 6px', fontWeight: '700' }}>BOM Component</th>
-                          <th style={{ minWidth: '170px', padding: '9px 6px', fontWeight: '700' }}>Assigned Inventory Item Map</th>
-                          <th style={{ width: '55px', padding: '9px 4px', textAlign: 'center', fontWeight: '700' }}>Stock</th>
-                          <th style={{ width: '58px', padding: '9px 4px', textAlign: 'center', fontWeight: '700' }}>Prev Issued</th>
-                          <th style={{ width: '105px', padding: '9px 4px', textAlign: 'center', fontWeight: '700' }}>Extra Qty</th>
-                          <th style={{ width: '115px', padding: '9px 4px', fontWeight: '700' }}>Reason / Remarks</th>
-                          <th style={{ width: '65px', padding: '9px 4px', textAlign: 'center', fontWeight: '700' }}>Action</th>
+                          <th style={{ width: '140px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>BOM Component</th>
+                          <th style={{ minWidth: '220px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Assigned Inventory Item Map</th>
+                          <th style={{ width: '80px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Stock</th>
+                          <th style={{ width: '85px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Prev Issued</th>
+                          <th style={{ width: '140px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Extra Qty</th>
+                          <th style={{ width: '140px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Reason / Remarks</th>
+                          <th style={{ width: '80px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
                         {displayedBomMappings.length === 0 ? (
                           <tr>
-                            <td colSpan={8} style={{ padding: '28px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                            <td colSpan={8} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                                <Package size={24} style={{ opacity: 0.5 }} />
-                                <div style={{ fontSize: '13px', fontWeight: '600' }}>No active BOM components mapped for this lot.</div>
+                                <Package size={28} style={{ opacity: 0.4, color: '#6366f1' }} />
+                                <div style={{ fontSize: '13.5px', fontWeight: '700', color: '#1e293b' }}>No active BOM components mapped for this lot.</div>
                                 <button
                                   type="button"
                                   onClick={() => setShowAllBom(true)}
                                   className="btn btn-secondary btn-sm"
-                                  style={{ marginTop: '4px', fontSize: '11.5px', padding: '5px 12px' }}
+                                  style={{ marginTop: '6px', fontSize: '12px', padding: '6px 14px', borderRadius: '6px', fontWeight: '700', backgroundColor: '#e2e8f0', border: '1px solid #cbd5e1', cursor: 'pointer' }}
                                 >
                                   Show All {bomMappings.length} Template Components
                                 </button>
@@ -2447,54 +2679,57 @@ export default function ExtraMaterialIssueView({
                               <tr
                                 key={item.id}
                                 style={{
-                                  borderBottom: '1px solid var(--border-color, #e2e8f0)',
-                                  backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.05)' : 'transparent',
-                                  transition: 'background-color 0.15s'
+                                  borderBottom: '1px solid #e2e8f0',
+                                  backgroundColor: highlightedRowIndex === item.id
+                                    ? 'rgba(16, 185, 129, 0.12)'
+                                    : (isSelected ? '#f5f3ff' : '#ffffff'),
+                                  transition: 'background-color 0.2s ease'
                                 }}
                               >
                                 {/* Checkbox */}
-                                <td style={{ textAlign: 'center', padding: '10px 6px' }}>
+                                <td style={{ textAlign: 'center', padding: '12px 6px', verticalAlign: 'middle' }}>
                                   <input
                                     type="checkbox"
                                     checked={!!item.selectedForExtra}
                                     onChange={(e) => handleMappingChange(originalIdx, 'selectedForExtra', e.target.checked)}
-                                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                                    style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#6366f1' }}
                                   />
                                 </td>
 
                                 {/* BOM Component Name & Details */}
-                                <td style={{ padding: '10px 8px' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                      <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>
+                                <td style={{ padding: '12px 10px', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                      <strong style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
                                         {item.bomItemName}
                                       </strong>
                                       {item.isRequired && (
                                         <span style={{
                                           fontSize: '9.5px',
-                                          fontWeight: '700',
-                                          padding: '2px 5px',
+                                          fontWeight: '800',
+                                          padding: '2px 6px',
                                           borderRadius: '4px',
-                                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                                          color: '#059669'
+                                          backgroundColor: '#d1fae5',
+                                          color: '#047857',
+                                          border: '1px solid #a7f3d0'
                                         }}>
                                           Required
                                         </span>
                                       )}
                                     </div>
                                     {item.bomItemDetail && (
-                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '135px' }}>
+                                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '160px' }}>
                                         {item.bomItemDetail}
                                       </span>
                                     )}
-                                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
-                                      Req: {item.qtyPerPiece}/pc ({(pieces * item.qtyPerPiece).toFixed(0)} {item.unit})
+                                    <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600' }}>
+                                      Req: <span style={{ color: '#1e293b', fontWeight: '700' }}>{item.qtyPerPiece}/pc</span> ({(pieces * item.qtyPerPiece).toFixed(0)} {item.unit})
                                     </span>
                                   </div>
                                 </td>
 
                                 {/* Material Select */}
-                                <td style={{ padding: '10px 8px' }}>
+                                <td style={{ padding: '12px 10px', verticalAlign: 'middle' }}>
                                   <SearchableMaterialSelect
                                     materials={materials}
                                     value={item.materialId}
@@ -2505,17 +2740,21 @@ export default function ExtraMaterialIssueView({
                                 </td>
 
                                 {/* Stock Badge */}
-                                <td style={{ textAlign: 'center', padding: '10px 6px' }}>
+                                <td style={{ textAlign: 'center', padding: '12px 8px', verticalAlign: 'middle' }}>
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                     <span style={{
                                       fontWeight: '800',
                                       fontSize: '13px',
-                                      color: stock <= 0 ? '#ef4444' : stock < 50 ? '#f59e0b' : '#10b981'
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      backgroundColor: stock <= 0 ? '#fef2f2' : stock < 50 ? '#fffbebf' : '#ecfdf5',
+                                      color: stock <= 0 ? '#dc2626' : stock < 50 ? '#d97706' : '#059669',
+                                      border: `1px solid ${stock <= 0 ? '#fca5a5' : stock < 50 ? '#fde68a' : '#a7f3d0'}`
                                     }}>
                                       {stock} {item.unit}
                                     </span>
                                     {isStockShortage && (
-                                      <span style={{ fontSize: '9px', fontWeight: '700', color: '#ef4444', backgroundColor: '#fee2e2', padding: '1px 4px', borderRadius: '3px', marginTop: '2px' }}>
+                                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#dc2626', backgroundColor: '#fee2e2', padding: '2px 5px', borderRadius: '4px', marginTop: '3px' }}>
                                         Low Stock
                                       </span>
                                     )}
@@ -2523,27 +2762,27 @@ export default function ExtraMaterialIssueView({
                                 </td>
 
                                 {/* Previously Issued */}
-                                <td style={{ textAlign: 'center', padding: '10px 6px' }}>
+                                <td style={{ textAlign: 'center', padding: '12px 8px', verticalAlign: 'middle' }}>
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                                     <span style={{
-                                      fontWeight: '700',
-                                      fontSize: '12.5px',
-                                      color: item.previouslyIssuedQty > 0 ? '#3b82f6' : 'var(--text-muted)'
+                                      fontWeight: '800',
+                                      fontSize: '13px',
+                                      color: item.previouslyIssuedQty > 0 ? '#2563eb' : '#94a3b8'
                                     }}>
-                                      {item.previouslyIssuedQty} {item.unit}
+                                      {item.previouslyIssuedQty} <span style={{ fontSize: '11px', fontWeight: '600' }}>{item.unit}</span>
                                     </span>
                                     {item.previousLogsCount > 0 && (
-                                      <span style={{ fontSize: '9.5px', color: 'var(--text-muted)' }}>
-                                        ({item.previousLogsCount} logs)
+                                      <span style={{ fontSize: '10px', fontWeight: '700', color: '#6366f1', backgroundColor: '#e0e7ff', padding: '1px 6px', borderRadius: '10px', marginTop: '2px' }}>
+                                        {item.previousLogsCount} {item.previousLogsCount === 1 ? 'log' : 'logs'}
                                       </span>
                                     )}
                                   </div>
                                 </td>
 
-                                {/* Extra Quantity Input + Quick Add + Live 5% Threshold Status */}
-                                <td style={{ padding: '8px 4px' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', alignItems: 'center' }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {/* Extra Quantity Input + Quick Add Buttons */}
+                                <td style={{ padding: '10px 8px', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                                       <input
                                         type="number"
                                         min="0"
@@ -2551,43 +2790,47 @@ export default function ExtraMaterialIssueView({
                                         placeholder="0"
                                         className="form-input"
                                         style={{
-                                          width: '52px',
-                                          height: '30px',
+                                          width: '64px',
+                                          height: '34px',
                                           textAlign: 'center',
                                           fontWeight: '800',
-                                          fontSize: '13px',
+                                          fontSize: '13.5px',
                                           padding: '2px 4px',
-                                          borderRadius: '5px',
+                                          borderRadius: '6px',
+                                          border: '1.5px solid',
                                           borderColor: isStockShortage
                                             ? '#ef4444'
                                             : hasExtraQty
                                             ? '#6366f1'
-                                            : 'var(--border-color)'
+                                            : '#cbd5e1',
+                                          boxShadow: hasExtraQty ? '0 0 0 2px rgba(99, 102, 241, 0.15)' : 'none',
+                                          backgroundColor: '#ffffff'
                                         }}
                                         value={item.extraQty === 0 || item.extraQty === '0' ? '' : (item.extraQty ?? '')}
                                         onChange={(e) => handleMappingChange(originalIdx, 'extraQty', e.target.value)}
                                       />
-                                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                      <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: '700' }}>
                                         {item.unit}
                                       </span>
                                     </div>
 
                                     {/* Quick +Buttons */}
-                                    <div style={{ display: 'flex', gap: '2px' }}>
+                                    <div style={{ display: 'flex', gap: '3px' }}>
                                       {[5, 10, 25, 50].map(amt => (
                                         <button
                                           key={amt}
                                           type="button"
                                           onClick={() => handleQuickAddQty(originalIdx, amt)}
                                           style={{
-                                            padding: '2px 4px',
-                                            fontSize: '9px',
-                                            fontWeight: '700',
-                                            borderRadius: '3px',
-                                            border: '1px solid var(--border-color, #cbd5e1)',
-                                            backgroundColor: 'var(--bg-secondary, #f1f5f9)',
-                                            color: 'var(--text-main, #0f172a)',
-                                            cursor: 'pointer'
+                                            padding: '2px 5px',
+                                            fontSize: '9.5px',
+                                            fontWeight: '800',
+                                            borderRadius: '4px',
+                                            border: '1px solid #c7d2fe',
+                                            backgroundColor: '#e0e7ff',
+                                            color: '#3730a3',
+                                            cursor: 'pointer',
+                                            transition: 'all 0.15s ease'
                                           }}
                                           title={`Add +${amt} ${item.unit}`}
                                         >
@@ -2599,11 +2842,11 @@ export default function ExtraMaterialIssueView({
                                 </td>
 
                                 {/* Reason & Remarks */}
-                                <td style={{ padding: '8px 4px' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                <td style={{ padding: '10px 8px', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                     <select
                                       className="form-input"
-                                      style={{ height: '27px', fontSize: '11px', padding: '2px 4px', borderRadius: '5px', width: '100%' }}
+                                      style={{ height: '30px', fontSize: '11.5px', fontWeight: '700', padding: '2px 6px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', backgroundColor: '#ffffff' }}
                                       value={item.extraReason}
                                       onChange={(e) => handleMappingChange(originalIdx, 'extraReason', e.target.value)}
                                     >
@@ -2615,7 +2858,7 @@ export default function ExtraMaterialIssueView({
                                       type="text"
                                       placeholder="Remarks..."
                                       className="form-input"
-                                      style={{ height: '25px', fontSize: '11px', padding: '2px 5px', borderRadius: '5px', width: '100%' }}
+                                      style={{ height: '28px', fontSize: '11.5px', fontWeight: '600', padding: '2px 7px', borderRadius: '6px', border: '1px solid #cbd5e1', width: '100%', backgroundColor: '#ffffff' }}
                                       value={item.extraRemarks}
                                       onChange={(e) => handleMappingChange(originalIdx, 'extraRemarks', e.target.value)}
                                     />
@@ -2623,7 +2866,7 @@ export default function ExtraMaterialIssueView({
                                 </td>
 
                                 {/* Single Component Issue Action */}
-                                <td style={{ textAlign: 'center', padding: '8px 4px' }}>
+                                <td style={{ textAlign: 'center', padding: '10px 8px', verticalAlign: 'middle' }}>
                                   <button
                                     type="button"
                                     onClick={() => handleIssueSingleComponent(originalIdx)}
@@ -2631,24 +2874,24 @@ export default function ExtraMaterialIssueView({
                                     style={{
                                       display: 'inline-flex',
                                       alignItems: 'center',
-                                      gap: '4px',
-                                      padding: '5px 10px',
-                                      fontSize: '11px',
-                                      fontWeight: '700',
-                                      borderRadius: '5px',
+                                      gap: '5px',
+                                      padding: '6px 12px',
+                                      fontSize: '11.5px',
+                                      fontWeight: '800',
+                                      borderRadius: '6px',
                                       backgroundColor: !hasExtraQty
-                                        ? 'var(--bg-secondary, #e2e8f0)'
+                                        ? '#e2e8f0'
                                         : '#6366f1',
-                                      color: !hasExtraQty ? 'var(--text-muted, #64748b)' : '#ffffff',
+                                      color: !hasExtraQty ? '#94a3b8' : '#ffffff',
                                       cursor: hasExtraQty ? 'pointer' : 'not-allowed',
                                       border: 'none',
-                                      boxShadow: hasExtraQty ? '0 1px 4px rgba(99, 102, 241, 0.25)' : 'none',
+                                      boxShadow: hasExtraQty ? '0 2px 6px rgba(99, 102, 241, 0.3)' : 'none',
                                       whiteSpace: 'nowrap'
                                     }}
                                     disabled={!hasExtraQty}
                                     title="Issue Extra Material"
                                   >
-                                    <Send size={11} />
+                                    <Send size={12} />
                                     <span>Issue</span>
                                   </button>
                                 </td>

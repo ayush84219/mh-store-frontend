@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ─── Reusable Pagination Bar ──────────────────────────────────────────────────
 const PaginationBar = ({ page, setPage, rpp, setRpp, totalItems, rppOptions = [5, 10, 20, 50, 100] }) => {
@@ -111,8 +112,10 @@ const LOCAL_STORAGE_KEYS = {
   REQUISITION_NAMES: "po_requisition_names",
   PREPARED_NAMES: "po_prepared_names",
   APPROVED_NAMES: "po_approved_names",
+  DEPARTMENTS: "po_custom_departments",
 };
 
+const DEFAULT_DEPARTMENTS = ["Trims", "Fabric", "Packaging", "Accessories", "Labels", "Threads", "Cords", "Buttons", "Zippers"];
 const DEFAULT_REQUISITION_NAMES = ["JAYBIR", "NITIN KHANNA", "SONU MASTER JI", "EA"];
 const DEFAULT_PREPARED_NAMES = ["RASHMI"];
 const DEFAULT_APPROVED_NAMES = ["SAHIL SIR", "EA", "MOHIT GOYAL"];
@@ -1329,11 +1332,18 @@ export default function GeneratePOView({
   currencySymbol = 'R',
   prefilledPoData = null,
   setPrefilledPoData = () => { },
-  materials = []
+  materials = [],
+  initialPoViewMode = 'create'
 }) {
   const approvedDesigns = designs.filter(d => d.status === 'Approved');
 
-  const [poViewMode, setPoViewMode] = useState('create');
+  const [poViewMode, setPoViewMode] = useState(initialPoViewMode);
+
+  useEffect(() => {
+    if (initialPoViewMode) {
+      setPoViewMode(initialPoViewMode);
+    }
+  }, [initialPoViewMode]);
   const [poSearchQuery, setPoSearchQuery] = useState('');
   const [poStatusFilter, setPoStatusFilter] = useState('all');
   const [poMaterialFilter, setPoMaterialFilter] = useState('all');
@@ -1620,6 +1630,468 @@ export default function GeneratePOView({
     downloadPdfBlob(doc, `${po.poNumber}.pdf`);
   };
 
+  const handleExportPOReportPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const title = "PURCHASE ORDER MASTER REPORT";
+      const dateStr = new Date().toLocaleDateString('en-GB') + " " + new Date().toLocaleTimeString();
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, 40, 40);
+
+      doc.setFontSize(9);
+      doc.setFont("Helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated On: ${dateStr}  |  Total Filtered POs: ${filteredHistoryPOs.length}`, 40, 56);
+
+      const tableHeaders = [
+        ["PO #", "Date Issued", "Vendor / Supplier", "Design Lot", "Items Summary & Dept", "Total Value", "Status", "Signatures & Audit"]
+      ];
+
+      const tableData = filteredHistoryPOs.map(po => {
+        let itemSummaryStr = "";
+        if (po.items) {
+          try {
+            const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+            if (Array.isArray(itms)) {
+              itemSummaryStr = itms.map(i => {
+                const d = i.department || i.dept || 'Trims';
+                const name = i.name || i.description || i.item || 'Item';
+                const q = i.qty || i.quantity || 0;
+                const u = i.unit || i.uom || 'PCS';
+                return `[${d}] ${name} (${q} ${u})`;
+              }).join("\n");
+            }
+          } catch (_) { }
+        }
+        if (!itemSummaryStr && po.designName) {
+          itemSummaryStr = po.designName;
+        }
+
+        const statusTxt = po.status === 'Pending Approval'
+          ? 'Pending Approval'
+          : (po.status === 'Completed' || po.status === 'Received Done'
+            ? 'Completed'
+            : (po.status === 'Partially Received' ? 'Partially Received' : (po.status || 'Sent to Vendor')));
+
+        const auditStr = `Raised: ${po.requisitionRaisedBy || '—'}\nPrep: ${po.preparedBy || '—'}\nApp: ${po.approvedBy || '—'}`;
+
+        return [
+          po.poNumber || '—',
+          po.date || '—',
+          po.vendorName || '—',
+          po.designName && po.designName !== 'Custom PO' ? po.designName : 'General',
+          itemSummaryStr || 'N/A',
+          `₹${fmtMoney(po.total)}`,
+          statusTxt,
+          auditStr
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 70,
+        head: tableHeaders,
+        body: tableData,
+        theme: 'grid',
+        styles: {
+          fontSize: 8.5,
+          cellPadding: 6,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.25,
+          textColor: [15, 23, 42],
+          valign: 'middle'
+        },
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'center',
+          lineColor: [0, 0, 0],
+          lineWidth: 0.25
+        },
+        columnStyles: {
+          0: { fontStyle: 'bold', cellWidth: 70 },
+          1: { cellWidth: 65 },
+          2: { fontStyle: 'bold', cellWidth: 100 },
+          3: { cellWidth: 70 },
+          4: { cellWidth: 180 },
+          5: { halign: 'right', fontStyle: 'bold', cellWidth: 75 },
+          6: { halign: 'center', fontStyle: 'bold', cellWidth: 85 },
+          7: { cellWidth: 110 }
+        },
+        didDrawPage: (data) => {
+          const str = `Page ${doc.internal.getNumberOfPages()}`;
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          doc.text(str, data.settings.margin.left, doc.internal.pageSize.height - 20);
+        }
+      });
+
+      doc.save(`PO_Master_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error("Failed to generate PO report PDF:", err);
+      alert("Could not generate PDF: " + err.message);
+    }
+  };
+
+  const handleExportPOReportCSV = () => {
+    try {
+      const headers = [
+        "PO Number", "Date Issued", "Expected Date", "Vendor / Supplier", "Design Lot",
+        "Department", "Item Description", "UOM", "Qty", "Rate (INR)", "Line Amount (INR)",
+        "PO Total Amount (INR)", "Status", "Requisitioned By", "Prepared By", "Approved By", "Remarks"
+      ];
+
+      const rowsData = [];
+      filteredHistoryPOs.forEach(po => {
+        let items = [];
+        if (po.items) {
+          try {
+            items = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+          } catch (_) { }
+        }
+
+        const statusTxt = po.status === 'Pending Approval'
+          ? 'Pending Approval'
+          : (po.status === 'Completed' || po.status === 'Received Done'
+            ? 'Completed'
+            : (po.status === 'Partially Received' ? 'Partially Received' : (po.status || 'Sent to Vendor')));
+
+        if (Array.isArray(items) && items.length > 0) {
+          items.forEach(i => {
+            const dept = i.department || i.dept || 'Trims';
+            const desc = i.name || i.description || i.item || '';
+            const uom = i.unit || i.uom || 'PCS';
+            const qty = parseFloat(i.qty || i.quantity) || 0;
+            const rate = parseFloat(i.price || i.rate) || 0;
+            const amt = qty * rate;
+
+            rowsData.push([
+              po.poNumber || '',
+              po.date || '',
+              po.deliveryDate || '',
+              po.vendorName || '',
+              po.designName || '',
+              dept,
+              desc,
+              uom,
+              qty,
+              rate,
+              amt,
+              po.total || 0,
+              statusTxt,
+              po.requisitionRaisedBy || '',
+              po.preparedBy || '',
+              po.approvedBy || '',
+              po.remarks || ''
+            ]);
+          });
+        } else {
+          rowsData.push([
+            po.poNumber || '',
+            po.date || '',
+            po.deliveryDate || '',
+            po.vendorName || '',
+            po.designName || '',
+            'General',
+            po.designName || 'N/A',
+            'LOT',
+            1,
+            po.total || 0,
+            po.total || 0,
+            po.total || 0,
+            statusTxt,
+            po.requisitionRaisedBy || '',
+            po.preparedBy || '',
+            po.approvedBy || '',
+            po.remarks || ''
+          ]);
+        }
+      });
+
+      const csvContent = [
+        headers.map(h => `"${h}"`).join(","),
+        ...rowsData.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `PO_Master_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export PO report CSV:", err);
+      alert("Could not export CSV: " + err.message);
+    }
+  };
+
+  // ── Item Code Generator & Registry State ───────────────────────────
+  const [dbItemCodes, setDbItemCodes] = useState(() =>
+    getLocalStorageItem('po_saved_item_codes', [])
+  );
+  const [loadingItemCodes, setLoadingItemCodes] = useState(false);
+  const [icItemName, setIcItemName] = useState('');
+  const [icBrand, setIcBrand] = useState('');
+  const [icStyle, setIcStyle] = useState('');
+  const [icCategory, setIcCategory] = useState('Trims');
+  const [icUom, setIcUom] = useState('PCS');
+  const [icRate, setIcRate] = useState('');
+  const [icSearchQuery, setIcSearchQuery] = useState('');
+  const [icCategoryFilter, setIcCategoryFilter] = useState('all');
+  const [createdItemCodePopup, setCreatedItemCodePopup] = useState(null);
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  const fetchItemCodes = useCallback(async () => {
+    try {
+      setLoadingItemCodes(true);
+      const res = await fetch(`${getBackendUrl()}/api/item-codes`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.itemCodes)) {
+          setDbItemCodes(data.itemCodes);
+          setLocalStorageItem('po_saved_item_codes', data.itemCodes);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch item codes from DB:", err);
+    } finally {
+      setLoadingItemCodes(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchItemCodes();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [fetchItemCodes]);
+
+  const generateUniqueItemCode = (category, brand, style) => {
+    const catCode = (category || 'TRM').slice(0, 3).toUpperCase();
+    const brandCode = (brand || 'GEN').replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'GEN';
+    const styleCode = (style || 'GEN').replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'GEN';
+
+    const prefix = `${catCode}-${brandCode}-${styleCode}`;
+    const matching = dbItemCodes.filter(ic => (ic.item_code || '').startsWith(prefix));
+    const nextSeq = String(matching.length + 1).padStart(4, '0');
+    return `${prefix}-${nextSeq}`;
+  };
+
+  const handleCreateItemCode = async (e) => {
+    if (e) e.preventDefault();
+    if (!icItemName.trim()) {
+      alert("Please enter Item Name.");
+      return;
+    }
+
+    const generatedCode = generateUniqueItemCode(icCategory, icBrand, icStyle);
+    const newRecord = {
+      item_code: generatedCode,
+      item_name: icItemName.trim(),
+      brand: icBrand.trim() || 'General',
+      style: icStyle.trim() || 'N/A',
+      category: icCategory || 'Trims',
+      uom: icUom || 'PCS',
+      rate: parseFloat(icRate) || 0,
+      created_at: new Date().toISOString()
+    };
+
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/item-codes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRecord)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.itemCode) {
+          newRecord.id = data.itemCode.id;
+        }
+      }
+    } catch (err) {
+      console.warn("Server store warning:", err);
+    }
+
+    const updatedList = [newRecord, ...dbItemCodes.filter(c => c.item_code !== generatedCode)];
+    setDbItemCodes(updatedList);
+    setLocalStorageItem('po_saved_item_codes', updatedList);
+
+    const qrData = await toDataURL_QR(generatedCode, 240);
+
+    setCreatedItemCodePopup({
+      ...newRecord,
+      qrDataUrl: qrData
+    });
+
+    setIcItemName('');
+    setIcBrand('');
+    setIcStyle('');
+    setIcRate('');
+  };
+
+  const handleDeleteItemCode = async (id, itemCode) => {
+    if (!window.confirm(`Are you sure you want to delete item code ${itemCode}?`)) return;
+    try {
+      await fetch(`${getBackendUrl()}/api/item-codes/${id}`, { method: 'DELETE' });
+    } catch (_) { }
+    const updated = dbItemCodes.filter(c => c.id !== id && c.item_code !== itemCode);
+    setDbItemCodes(updated);
+    setLocalStorageItem('po_saved_item_codes', updated);
+  };
+
+  const handleUseItemCodeInPO = (itemRecord) => {
+    setRows(prev => [
+      ...prev.filter(r => r.description || r.department),
+      {
+        department: itemRecord.category || 'Trims',
+        description: `[${itemRecord.item_code}] ${itemRecord.item_name}${itemRecord.brand ? ` (${itemRecord.brand})` : ''}`,
+        shade: '',
+        uom: itemRecord.uom || 'PCS',
+        qty: 100,
+        rate: itemRecord.rate || 0
+      }
+    ]);
+    setPoViewMode('create');
+    alert(`Added item [${itemRecord.item_code}] to active PO line editor!`);
+  };
+
+  const filteredItemCodes = useMemo(() => {
+    return dbItemCodes.filter(item => {
+      const q = icSearchQuery.toLowerCase().trim();
+      const matchesCat = icCategoryFilter === 'all' || (item.category || '').toLowerCase() === icCategoryFilter.toLowerCase();
+      let matchesQ = true;
+      if (q) {
+        const code = (item.item_code || '').toLowerCase();
+        const name = (item.item_name || '').toLowerCase();
+        const brand = (item.brand || '').toLowerCase();
+        const style = (item.style || '').toLowerCase();
+        const cat = (item.category || '').toLowerCase();
+        matchesQ = code.includes(q) || name.includes(q) || brand.includes(q) || style.includes(q) || cat.includes(q);
+      }
+      return matchesCat && matchesQ;
+    });
+  }, [dbItemCodes, icSearchQuery, icCategoryFilter]);
+
+  const handleExportItemCodeReportPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const title = "SYSTEM ITEM CODES MASTER REPORT";
+      const dateStr = new Date().toLocaleDateString('en-GB') + " " + new Date().toLocaleTimeString();
+
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, 40, 40);
+
+      doc.setFontSize(9);
+      doc.setFont("Helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated On: ${dateStr}  |  Total Items: ${filteredItemCodes.length}`, 40, 56);
+
+      const tableHeaders = [
+        ["#", "Item Code", "Item Name", "Brand", "Style No.", "Category / Dept", "UOM", "Rate (₹)", "Created Date"]
+      ];
+
+      const tableData = filteredItemCodes.map((ic, idx) => [
+        idx + 1,
+        ic.item_code || '—',
+        ic.item_name || '—',
+        ic.brand || 'General',
+        ic.style || 'N/A',
+        ic.category || 'Trims',
+        ic.uom || 'PCS',
+        `₹${fmtMoney(ic.rate || 0)}`,
+        ic.created_at ? new Date(ic.created_at).toLocaleDateString('en-GB') : '—'
+      ]);
+
+      autoTable(doc, {
+        startY: 70,
+        head: tableHeaders,
+        body: tableData,
+        theme: 'grid',
+        styles: {
+          fontSize: 8.5,
+          cellPadding: 6,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.25,
+          textColor: [15, 23, 42],
+          valign: 'middle'
+        },
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'center',
+          lineColor: [0, 0, 0],
+          lineWidth: 0.25
+        },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 30 },
+          1: { fontStyle: 'bold', cellWidth: 110 },
+          2: { fontStyle: 'bold', cellWidth: 160 },
+          3: { cellWidth: 90 },
+          4: { cellWidth: 80 },
+          5: { cellWidth: 90 },
+          6: { halign: 'center', cellWidth: 45 },
+          7: { halign: 'right', cellWidth: 65 },
+          8: { halign: 'center', cellWidth: 70 }
+        },
+        didDrawPage: (data) => {
+          const str = `Page ${doc.internal.getNumberOfPages()}`;
+          doc.setFontSize(8);
+          doc.setTextColor(100, 116, 139);
+          doc.text(str, data.settings.margin.left, doc.internal.pageSize.height - 20);
+        }
+      });
+
+      doc.save(`Item_Codes_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error("Failed to export item codes PDF:", err);
+      alert("Could not generate PDF: " + err.message);
+    }
+  };
+
+  const handleExportItemCodeReportCSV = () => {
+    try {
+      const headers = ["Item Code", "Item Name", "Brand", "Style No", "Category / Dept", "UOM", "Rate (INR)", "Created Date"];
+      const rowsData = filteredItemCodes.map(ic => [
+        ic.item_code || '',
+        ic.item_name || '',
+        ic.brand || '',
+        ic.style || '',
+        ic.category || '',
+        ic.uom || '',
+        ic.rate || 0,
+        ic.created_at || ''
+      ]);
+
+      const csvContent = [
+        headers.map(h => `"${h}"`).join(","),
+        ...rowsData.map(r => r.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
+      ].join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `Item_Codes_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export item codes CSV:", err);
+      alert("Could not export CSV: " + err.message);
+    }
+  };
+
   useEffect(() => {
     fetch(`${getBackendUrl()}/api/design-history`)
       .then(res => {
@@ -1732,6 +2204,13 @@ export default function GeneratePOView({
   );
   const [showGstDialog, setShowGstDialog] = useState(false);
 
+  const [customDepartments, setCustomDepartments] = useState(() =>
+    getLocalStorageItem(LOCAL_STORAGE_KEYS.DEPARTMENTS, DEFAULT_DEPARTMENTS)
+  );
+  const [showAddDeptDialog, setShowAddDeptDialog] = useState(false);
+  const [newDeptInput, setNewDeptInput] = useState("");
+  const [targetRowForDept, setTargetRowForDept] = useState(null);
+
   const [sheetRows, setSheetRows] = useState([]);
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [sheetError, setSheetError] = useState("");
@@ -1823,18 +2302,21 @@ export default function GeneratePOView({
   // Pre-fill PO handler
   useEffect(() => {
     if (prefilledPoData) {
-      setSelectedDesignId(prefilledPoData.lotId || '');
-      setRows([
-        {
-          department: "Trims",
-          description: prefilledPoData.itemName || "",
-          shade: "",
-          uom: prefilledPoData.unit || 'PCS',
-          qty: prefilledPoData.qty || 0,
-          rate: 0
-        }
-      ]);
+      const data = prefilledPoData;
       setPrefilledPoData(null);
+      setTimeout(() => {
+        setSelectedDesignId(data.lotId || '');
+        setRows([
+          {
+            department: "Trims",
+            description: data.itemName || "",
+            shade: "",
+            uom: data.unit || 'PCS',
+            qty: data.qty || 0,
+            rate: 0
+          }
+        ]);
+      }, 0);
     }
   }, [prefilledPoData, setPrefilledPoData]);
 
@@ -1919,9 +2401,44 @@ export default function GeneratePOView({
   }, [gstEnabled, gstPercentage]);
 
   const departments = useMemo(() => {
-    const set = new Set(sheetRows.map((r) => r.dept).filter(Boolean));
+    const set = new Set([
+      ...DEFAULT_DEPARTMENTS,
+      ...(customDepartments || []),
+      ...sheetRows.map((r) => r.dept).filter(Boolean)
+    ]);
+    rows.forEach(r => { if (r.department) set.add(r.department); });
     return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [sheetRows]);
+  }, [sheetRows, customDepartments, rows]);
+
+  const handleSaveNewDepartment = (deptNameOverride = null) => {
+    const rawVal = deptNameOverride || newDeptInput;
+    if (!rawVal || !rawVal.trim()) return;
+    const cleaned = rawVal.trim();
+    const formatted = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+
+    if (!customDepartments.some(d => d.toLowerCase() === formatted.toLowerCase())) {
+      const updated = [...customDepartments, formatted];
+      setCustomDepartments(updated);
+      setLocalStorageItem(LOCAL_STORAGE_KEYS.DEPARTMENTS, updated);
+    }
+
+    if (targetRowForDept !== null && targetRowForDept !== undefined && targetRowForDept >= 0) {
+      const targetRow = rows[targetRowForDept];
+      const matchedRow = sheetRows.find(r => String(r.item).toLowerCase().trim() === String(targetRow?.description).toLowerCase().trim());
+      const keepDescription = matchedRow && matchedRow.dept === formatted;
+      updateRow(targetRowForDept, { department: formatted, description: keepDescription ? targetRow?.description : "" });
+    }
+
+    setNewDeptInput("");
+    setShowAddDeptDialog(false);
+    setTargetRowForDept(null);
+  };
+
+  const handleDeleteDepartment = (deptToDelete) => {
+    const updated = customDepartments.filter(d => d !== deptToDelete);
+    setCustomDepartments(updated);
+    setLocalStorageItem(LOCAL_STORAGE_KEYS.DEPARTMENTS, updated);
+  };
 
   const itemsByDept = useMemo(() => {
     const map = new Map();
@@ -2588,15 +3105,27 @@ export default function GeneratePOView({
           </button>
           <button
             type="button"
-            className={`btn ${poViewMode === 'history' ? 'btn-primary' : 'btn-ghost'}`}
+            className={`btn ${poViewMode === 'history' || poViewMode === 'report' ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setPoViewMode('history')}
             style={{
               padding: '8px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', height: 'auto', minHeight: 'unset',
-              color: poViewMode === 'history' ? '#fff' : 'var(--text-main)',
+              color: (poViewMode === 'history' || poViewMode === 'report') ? '#fff' : 'var(--text-main)',
               display: 'flex', alignItems: 'center', gap: '6px'
             }}
           >
-            <History size={16} /> Track History
+            <History size={16} /> 📊 PO Entries Master Report
+          </button>
+          <button
+            type="button"
+            className={`btn ${poViewMode === 'itemcode' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => { setPoViewMode('itemcode'); fetchItemCodes(); }}
+            style={{
+              padding: '8px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', height: 'auto', minHeight: 'unset',
+              color: poViewMode === 'itemcode' ? '#fff' : 'var(--text-main)',
+              display: 'flex', alignItems: 'center', gap: '6px'
+            }}
+          >
+            <Award size={16} /> 🏷️ Item Code Generator & Report
           </button>
         </div>
       </div>
@@ -2984,7 +3513,35 @@ export default function GeneratePOView({
                     <thead>
                       <tr>
                         <th style={{ width: '38px', textAlign: 'center' }}>#</th>
-                        <th style={{ width: '130px' }}>Dept *</th>
+                        <th style={{ width: '145px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                            <span>Dept *</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTargetRowForDept(null);
+                                setNewDeptInput("");
+                                setShowAddDeptDialog(true);
+                              }}
+                              style={{
+                                background: 'var(--accent-light, #e0e7ff)',
+                                color: 'var(--accent-color, #4f46e5)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                padding: '2px 6px',
+                                fontSize: '10px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px'
+                              }}
+                              title="Add custom department"
+                            >
+                              + Add
+                            </button>
+                          </div>
+                        </th>
                         <th>Description *</th>
                         {shadeEnabled && <th style={{ width: '120px' }}>Shade</th>}
                         <th style={{ width: '90px', textAlign: 'center' }}>UOM *</th>
@@ -2997,8 +3554,7 @@ export default function GeneratePOView({
                     <tbody>
                       {rows.map((row, idx) => {
                         const rowAmt = (+row.qty || 0) * (+row.rate || 0);
-
-                        let dropdownOptions = [];
+                        let dropdownOptions;
                         const designItems = (designs || []).flatMap(d => d.bom || []);
 
                         if (row.department) {
@@ -3029,19 +3585,25 @@ export default function GeneratePOView({
                                 value={row.department}
                                 onChange={e => {
                                   const newDept = e.target.value;
+                                  if (newDept === '__ADD_NEW__') {
+                                    setTargetRowForDept(idx);
+                                    setNewDeptInput("");
+                                    setShowAddDeptDialog(true);
+                                    return;
+                                  }
                                   const matchedRow = sheetRows.find(r => String(r.item).toLowerCase().trim() === String(row.description).toLowerCase().trim());
                                   const keepDescription = matchedRow && matchedRow.dept === newDept;
                                   updateRow(idx, { department: newDept, description: keepDescription ? row.description : "" });
                                 }}
-                                style={{ padding: '4px 6px', fontSize: '12px' }}
+                                style={{ padding: '4px 6px', fontSize: '12px', width: '100%', borderRadius: '6px', border: '1px solid var(--border-color)' }}
                               >
                                 <option value="">Dept</option>
                                 {departments.map(d => (
                                   <option key={d} value={d}>{d}</option>
                                 ))}
-                                <option value="Trims">Trims</option>
-                                <option value="Fabric">Fabric</option>
-                                <option value="Packaging">Packaging</option>
+                                <option value="__ADD_NEW__" style={{ fontWeight: 'bold', color: 'var(--accent-color, #6366f1)' }}>
+                                  + Add New Dept...
+                                </option>
                               </select>
                             </td>
                             <td style={{ padding: '8px' }}>
@@ -3203,19 +3765,43 @@ export default function GeneratePOView({
             </div>
           </div>
         </div>
-      ) : (
+      ) : (poViewMode === 'history' || poViewMode === 'report') ? (
         <div className="panel" style={{ padding: '24px', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.02)', backgroundColor: 'var(--bg-primary)' }}>
+          
+          {/* Top Header & Export Action Bar */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
             <div>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main)' }}>
-                Purchase Order Issuance Logs
+              <h3 style={{ fontSize: '1.25rem', fontWeight: '800', margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📊 Purchase Order Entries & Master Report</span>
               </h3>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
-                Track, filter, download, or load previously generated purchase orders from the local MySQL database.
+                View complete PO entries with line item details, status tracking, person signatures audit, PDF black-border exports, and Excel formatting.
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleExportPOReportPDF}
+                style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#dc2626', borderColor: '#fca5a5', backgroundColor: '#fef2f2' }}
+                title="Export Filtered PO Report to PDF with solid black cell borders"
+              >
+                <Download size={14} />
+                <span>Export PDF</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleExportPOReportCSV}
+                style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#059669', borderColor: '#6ee7b7', backgroundColor: '#ecfdf5' }}
+                title="Export Filtered PO Report to Excel (CSV)"
+              >
+                <Download size={14} />
+                <span>Export Excel</span>
+              </button>
+
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
@@ -3227,69 +3813,111 @@ export default function GeneratePOView({
                 <RefreshCw size={14} className={loadingLivePOs ? 'spin' : ''} />
                 <span>{loadingLivePOs ? 'Refreshing...' : 'Refresh'}</span>
               </button>
-
-              <select
-                className="FilterSelect"
-                value={poStatusFilter}
-                onChange={e => setPoStatusFilter(e.target.value)}
-                style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)' }}
-              >
-                <option value="all">All Statuses</option>
-                <option value="pending approval">⏳ Pending Approval</option>
-                <option value="completed">✔ Completed</option>
-                <option value="partially received">📦 Partial Inward</option>
-                <option value="sent to vendor">Sent to Vendor</option>
-              </select>
-
-              {(() => {
-                const targetList = livePOs.length > 0 ? livePOs : (pos || []);
-                const matSet = new Set(backendMaterialsList);
-                targetList.forEach(po => {
-                  if (po.items) {
-                    try {
-                      const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
-                      if (Array.isArray(itms)) {
-                        itms.forEach(i => {
-                          const n = (i.name || i.description || i.item || '').trim();
-                          if (n) matSet.add(n);
-                        });
-                      }
-                    } catch (_) { }
-                  }
-                });
-                const uniqueMats = Array.from(matSet).filter(Boolean).sort();
-
-                return (
-                  <select
-                    className="FilterSelect"
-                    value={poMaterialFilter}
-                    onChange={e => setPoMaterialFilter(e.target.value)}
-                    style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)', maxWidth: '180px' }}
-                  >
-                    <option value="all">🧵 All Materials</option>
-                    {uniqueMats.map(mat => (
-                      <option key={mat} value={mat}>{mat}</option>
-                    ))}
-                  </select>
-                );
-              })()}
-
-              <div style={{ position: 'relative', width: '260px' }}>
-                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                  <Search size={16} />
-                </span>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Filter by Material, PO, Vendor..."
-                  value={poSearchQuery}
-                  onChange={e => setPoSearchQuery(e.target.value)}
-                  style={{ paddingLeft: '36px', width: '100%', borderRadius: '8px', height: '38px' }}
-                />
-              </div>
             </div>
           </div>
 
+          {/* KPI Summary Cards */}
+          {(() => {
+            const totalCount = filteredHistoryPOs.length;
+            const totalSum = filteredHistoryPOs.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
+            const pendingCount = filteredHistoryPOs.filter(p => (p.status || '').toLowerCase().includes('pending')).length;
+            const completedCount = filteredHistoryPOs.filter(p => (p.status || '').toLowerCase().includes('completed') || (p.status || '').toLowerCase().includes('received')).length;
+            const sentCount = filteredHistoryPOs.filter(p => !p.status || (p.status || '').toLowerCase().includes('sent')).length;
+
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+                <div style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Filtered POs</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>{totalCount}</div>
+                </div>
+
+                <div style={{ padding: '12px 14px', borderRadius: '12px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Value</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--accent-color)', marginTop: '2px' }}>₹{fmtMoney(totalSum)}</div>
+                </div>
+
+                <div style={{ padding: '12px 14px', borderRadius: '12px', background: 'rgba(99, 102, 241, 0.08)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--accent-color)', textTransform: 'uppercase' }}>Sent to Vendor</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--accent-color)', marginTop: '2px' }}>{sentCount}</div>
+                </div>
+
+                <div style={{ padding: '12px 14px', borderRadius: '12px', background: '#fef3c7', border: '1px solid #fde68a' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#b45309', textTransform: 'uppercase' }}>Pending Approval</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: '#b45309', marginTop: '2px' }}>{pendingCount}</div>
+                </div>
+
+                <div style={{ padding: '12px 14px', borderRadius: '12px', background: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#10b981', textTransform: 'uppercase' }}>Completed</div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: '#10b981', marginTop: '2px' }}>{completedCount}</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Filters Bar */}
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+            <select
+              className="FilterSelect"
+              value={poStatusFilter}
+              onChange={e => setPoStatusFilter(e.target.value)}
+              style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)' }}
+            >
+              <option value="all">All Statuses</option>
+              <option value="pending approval">⏳ Pending Approval</option>
+              <option value="completed">✔ Completed</option>
+              <option value="partially received">📦 Partial Inward</option>
+              <option value="sent to vendor">Sent to Vendor</option>
+            </select>
+
+            {(() => {
+              const targetList = livePOs.length > 0 ? livePOs : (pos || []);
+              const matSet = new Set(backendMaterialsList);
+              targetList.forEach(po => {
+                if (po.items) {
+                  try {
+                    const itms = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                    if (Array.isArray(itms)) {
+                      itms.forEach(i => {
+                        const n = (i.name || i.description || i.item || '').trim();
+                        if (n) matSet.add(n);
+                      });
+                    }
+                  } catch (_) { }
+                }
+              });
+              const uniqueMats = Array.from(matSet).filter(Boolean).sort();
+
+              return (
+                <select
+                  className="FilterSelect"
+                  value={poMaterialFilter}
+                  onChange={e => setPoMaterialFilter(e.target.value)}
+                  style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', maxWidth: '180px' }}
+                >
+                  <option value="all">🧵 All Materials</option>
+                  {uniqueMats.map(mat => (
+                    <option key={mat} value={mat}>{mat}</option>
+                  ))}
+                </select>
+              );
+            })()}
+
+            <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+              <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                <Search size={16} />
+              </span>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search PO #, Vendor, Material, Raised By..."
+                value={poSearchQuery}
+                onChange={e => setPoSearchQuery(e.target.value)}
+                style={{ paddingLeft: '36px', width: '100%', borderRadius: '8px', height: '38px', backgroundColor: 'var(--bg-primary)' }}
+              />
+            </div>
+          </div>
+
+          {/* Main Master Table */}
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
@@ -3297,38 +3925,70 @@ export default function GeneratePOView({
                   <th style={{ padding: '12px 10px' }}>PO Reference</th>
                   <th style={{ padding: '12px 10px' }}>Date Issued</th>
                   <th style={{ padding: '12px 10px' }}>Vendor / Supplier</th>
-                  <th style={{ padding: '12px 10px' }}>Design Lot</th>
+                  <th style={{ padding: '12px 10px' }}>Item Breakdown & Dept</th>
                   <th style={{ padding: '12px 10px', textAlign: 'right' }}>Total Value</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center' }}>Status</th>
+                  <th style={{ padding: '12px 10px', textAlign: 'left' }}>Person Signatures</th>
                   <th style={{ padding: '12px 10px', textAlign: 'center' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredHistoryPOs.length === 0 ? (
                   <tr>
-                    <td colSpan="7" style={{ padding: '28px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                      <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-main)', marginBottom: '4px' }}>No Purchase Order logs found</div>
+                    <td colSpan="8" style={{ padding: '28px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-main)', marginBottom: '4px' }}>No Purchase Order records found</div>
                       <div style={{ fontSize: '11.5px' }}>No purchase orders match your filter criteria or search query.</div>
                     </td>
                   </tr>
                 ) : (
                   paginatedHistoryPOs.map(po => {
                     const isPendingApproval = po.status === 'Pending Approval';
+                    let poItems = [];
+                    if (po.items) {
+                      try {
+                        poItems = typeof po.items === 'string' ? JSON.parse(po.items) : po.items;
+                      } catch (_) { }
+                    }
+
                     return (
                       <tr key={po.id} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background 0.15s' }}>
-                        <td style={{ padding: '12px 10px', fontWeight: '700', color: 'var(--accent-color)' }}>{po.poNumber}</td>
-                        <td style={{ padding: '12px 10px', color: 'var(--text-main)' }}>{po.date || 'N/A'}</td>
-                        <td style={{ padding: '12px 10px', fontWeight: '600', color: 'var(--text-main)' }}>{po.vendorName || 'N/A'}</td>
-                        <td style={{ padding: '12px 10px', color: 'var(--text-muted)' }}>
+                        <td style={{ padding: '12px 10px', fontWeight: '700', color: 'var(--accent-color)' }}>
+                          <div>{po.poNumber}</div>
                           {po.designName && po.designName !== 'Custom PO' ? (
-                            <span className="badge" style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>
+                            <span className="badge" style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent-color)', fontWeight: '700', padding: '2px 6px', borderRadius: '4px', fontSize: '10px', marginTop: '2px', display: 'inline-block' }}>
                               {po.designName}
                             </span>
                           ) : (
-                            <span style={{ fontStyle: 'italic' }}>General PO</span>
+                            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontStyle: 'italic' }}>General PO</span>
                           )}
                         </td>
-                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: '700', color: 'var(--text-main)' }}>
+                        <td style={{ padding: '12px 10px', color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                          <div>{po.date || 'N/A'}</div>
+                          {po.deliveryDate && (
+                            <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Exp: {po.deliveryDate}</div>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 10px', fontWeight: '600', color: 'var(--text-main)' }}>
+                          {po.vendorName || 'N/A'}
+                        </td>
+                        <td style={{ padding: '12px 10px' }}>
+                          {Array.isArray(poItems) && poItems.length > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', maxHeight: '100px', overflowY: 'auto' }}>
+                              {poItems.map((itm, iIdx) => (
+                                <div key={iIdx} style={{ fontSize: '11px', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                  <span style={{ background: 'var(--bg-secondary)', padding: '1px 5px', borderRadius: '4px', fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                                    {itm.department || itm.dept || 'Trims'}
+                                  </span>
+                                  <span style={{ fontWeight: '600', color: 'var(--text-main)' }}>{itm.name || itm.description || itm.item}</span>
+                                  <span style={{ color: 'var(--accent-color)', fontWeight: '700' }}>({itm.qty || itm.quantity} {itm.unit || itm.uom || 'PCS'})</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{po.designName || 'N/A'}</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: '800', color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
                           {currencySymbol}{fmtMoney(po.total)}
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>
@@ -3354,6 +4014,11 @@ export default function GeneratePOView({
                           }}>
                             {isPendingApproval ? '⏳ Pending Approval' : (po.status || 'Sent to Vendor')}
                           </span>
+                        </td>
+                        <td style={{ padding: '12px 10px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                          <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
+                          <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
+                          <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
@@ -3392,6 +4057,332 @@ export default function GeneratePOView({
             totalItems={filteredHistoryPOs.length}
             rppOptions={[5, 10, 20, 50, 100]}
           />
+        </div>
+      ) : poViewMode === 'itemcode' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Item Code Generator Panel */}
+          <div className="panel" style={{ padding: '24px', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.02)', backgroundColor: 'var(--bg-primary)' }}>
+            <div style={{ marginBottom: '16px' }}>
+              <h3 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Award size={20} style={{ color: 'var(--accent-color)' }} />
+                <span>Generate New Item Code</span>
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                Fill in item name, brand, style, and category to automatically generate a unique, standardized item code stored in system database.
+              </p>
+            </div>
+
+            <form onSubmit={handleCreateItemCode} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '14px', alignItems: 'end' }}>
+              <div>
+                <label className="FormLabel">Item Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Metallic Zipper 5#, Satin Label..."
+                  value={icItemName}
+                  onChange={e => setIcItemName(e.target.value)}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="FormLabel">Brand Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Brooks Brothers, StitchPro..."
+                  value={icBrand}
+                  onChange={e => setIcBrand(e.target.value)}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px' }}
+                />
+              </div>
+
+              <div>
+                <label className="FormLabel">Style / Style No.</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. SS26-001, Formal Shirt..."
+                  value={icStyle}
+                  onChange={e => setIcStyle(e.target.value)}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px' }}
+                />
+              </div>
+
+              <div>
+                <label className="FormLabel">Category / Dept *</label>
+                <select
+                  className="FilterSelect"
+                  value={icCategory}
+                  onChange={e => setIcCategory(e.target.value)}
+                  style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px', padding: '0 10px', fontWeight: '600' }}
+                >
+                  {departments.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="FormLabel">UOM (Unit of Measure)</label>
+                <select
+                  className="FilterSelect"
+                  value={icUom}
+                  onChange={e => setIcUom(e.target.value)}
+                  style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '13px', padding: '0 10px', fontWeight: '600' }}
+                >
+                  {UOM_OPTIONS.slice(0, 15).map(u => (
+                    <option key={u} value={u}>{u}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="FormLabel">Default Rate (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  placeholder="0.00"
+                  value={icRate}
+                  onChange={e => setIcRate(e.target.value)}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px' }}
+                />
+              </div>
+
+              <div style={{ gridColumn: '1 / -1', marginTop: '4px' }}>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{ height: '42px', padding: '0 24px', borderRadius: '10px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}
+                >
+                  <PlusCircle size={18} />
+                  <span>Create Item Code</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Master Report of Item Codes */}
+          <div className="panel" style={{ padding: '24px', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.02)', backgroundColor: 'var(--bg-primary)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', gap: '16px', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>📋 System Item Codes Master Report</span>
+                </h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                  View, filter, export, and load all registered system item codes.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleExportItemCodeReportPDF}
+                  style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#dc2626', borderColor: '#fca5a5', backgroundColor: '#fef2f2' }}
+                  title="Export Item Codes to PDF Report"
+                >
+                  <Download size={14} />
+                  <span>Export PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleExportItemCodeReportCSV}
+                  style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#059669', borderColor: '#6ee7b7', backgroundColor: '#ecfdf5' }}
+                  title="Export Item Codes to Excel/CSV"
+                >
+                  <Download size={14} />
+                  <span>Export Excel</span>
+                </button>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={fetchItemCodes}
+                  disabled={loadingItemCodes}
+                  style={{ height: '38px', borderRadius: '8px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700' }}
+                >
+                  <RefreshCw size={14} className={loadingItemCodes ? 'spin' : ''} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+              <select
+                className="FilterSelect"
+                value={icCategoryFilter}
+                onChange={e => setIcCategoryFilter(e.target.value)}
+                style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', minWidth: '150px' }}
+              >
+                <option value="all">📁 All Categories</option>
+                {departments.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+
+              <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+                <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
+                  <Search size={16} />
+                </span>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="Search by Item Code, Name, Brand, Style..."
+                  value={icSearchQuery}
+                  onChange={e => setIcSearchQuery(e.target.value)}
+                  style={{ paddingLeft: '36px', width: '100%', borderRadius: '8px', height: '38px', backgroundColor: 'var(--bg-primary)' }}
+                />
+              </div>
+            </div>
+
+            {/* Table */}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1.5px solid var(--border-color)', color: 'var(--text-muted)', textAlign: 'left', fontWeight: '800' }}>
+                    <th style={{ padding: '12px 10px', width: '40px', textAlign: 'center' }}>#</th>
+                    <th style={{ padding: '12px 10px' }}>Item Code</th>
+                    <th style={{ padding: '12px 10px' }}>Item Name</th>
+                    <th style={{ padding: '12px 10px' }}>Brand</th>
+                    <th style={{ padding: '12px 10px' }}>Style No.</th>
+                    <th style={{ padding: '12px 10px' }}>Category</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'center' }}>UOM</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'right' }}>Rate (₹)</th>
+                    <th style={{ padding: '12px 10px', textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredItemCodes.length === 0 ? (
+                    <tr>
+                      <td colSpan="9" style={{ padding: '28px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <div style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-main)', marginBottom: '4px' }}>No Item Codes registered</div>
+                        <div style={{ fontSize: '11.5px' }}>Use the form above to generate your first item code!</div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredItemCodes.map((ic, idx) => (
+                      <tr key={ic.id || idx} style={{ borderBottom: '1px solid var(--border-color)', transition: 'background 0.15s' }}>
+                        <td style={{ padding: '12px 10px', textAlign: 'center', color: 'var(--text-muted)', fontWeight: '600' }}>{idx + 1}</td>
+                        <td style={{ padding: '12px 10px' }}>
+                          <span style={{ background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', padding: '3px 8px', borderRadius: '6px', fontWeight: '800', fontSize: '12px' }}>
+                            {ic.item_code}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 10px', fontWeight: '700', color: 'var(--text-main)' }}>{ic.item_name}</td>
+                        <td style={{ padding: '12px 10px', color: 'var(--text-main)' }}>{ic.brand || 'General'}</td>
+                        <td style={{ padding: '12px 10px', color: 'var(--text-muted)' }}>{ic.style || 'N/A'}</td>
+                        <td style={{ padding: '12px 10px' }}>
+                          <span style={{ background: 'var(--bg-secondary)', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>
+                            {ic.category}
+                          </span>
+                        </td>
+                        <td style={{ padding: '12px 10px', textAlign: 'center', color: 'var(--text-muted)' }}>{ic.uom || 'PCS'}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'right', fontWeight: '700', color: 'var(--text-main)' }}>₹{fmtMoney(ic.rate || 0)}</td>
+                        <td style={{ padding: '12px 10px', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleUseItemCodeInPO(ic)}
+                              style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', height: '26px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                              title="Add item directly into active PO editor"
+                            >
+                              <PlusCircle size={12} /> Use in PO
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              onClick={() => handleDeleteItemCode(ic.id, ic.item_code)}
+                              style={{ padding: '4px 6px', borderRadius: '6px', color: 'var(--danger)', height: '26px' }}
+                              title="Delete Item Code"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* MODAL: Created Item Code Popup Window */}
+      {createdItemCodePopup && (
+        <div className="modal-overlay">
+          <div className="modal-content animate-scale" style={{ maxWidth: '440px', borderRadius: '20px', padding: '24px', textAlign: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--accent-color)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                🎉 Item Code Generated
+              </span>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setCreatedItemCodePopup(null)}
+                style={{ borderRadius: '50%', padding: '6px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ background: 'var(--accent-light, #e0e7ff)', borderRadius: '16px', padding: '16px', marginBottom: '16px', border: '1.5px solid var(--accent-color, #6366f1)' }}>
+              <div style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '700', textTransform: 'uppercase', marginBottom: '4px' }}>GENERATED ITEM CODE</div>
+              <div style={{ fontSize: '24px', fontWeight: '900', color: 'var(--accent-color)', letterSpacing: '0.04em' }}>
+                {createdItemCodePopup.item_code}
+              </div>
+            </div>
+
+            {createdItemCodePopup.qrDataUrl && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <img src={createdItemCodePopup.qrDataUrl} alt="Item Code Barcode" style={{ width: '150px', height: '150px', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '6px', background: '#fff' }} />
+              </div>
+            )}
+
+            <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '12px', textAlign: 'left', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px', border: '1px solid var(--border-color)' }}>
+              <div><strong>Item Name:</strong> {createdItemCodePopup.item_name}</div>
+              <div><strong>Brand:</strong> {createdItemCodePopup.brand}</div>
+              <div><strong>Style:</strong> {createdItemCodePopup.style}</div>
+              <div><strong>Category / Dept:</strong> {createdItemCodePopup.category}</div>
+              <div><strong>UOM / Rate:</strong> {createdItemCodePopup.uom} (₹{fmtMoney(createdItemCodePopup.rate)})</div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => {
+                  navigator.clipboard.writeText(createdItemCodePopup.item_code);
+                  setCopyFeedback(true);
+                  setTimeout(() => setCopyFeedback(false), 2000);
+                }}
+                style={{ flex: 1, borderRadius: '10px', height: '40px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                {copyFeedback ? <Check size={16} /> : <FileText size={16} />}
+                <span>{copyFeedback ? 'Copied!' : 'Copy Code'}</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  handleUseItemCodeInPO(createdItemCodePopup);
+                  setCreatedItemCodePopup(null);
+                }}
+                style={{ flex: 1, borderRadius: '10px', height: '40px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <PlusCircle size={16} />
+                <span>Use in PO</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -3486,6 +4477,95 @@ export default function GeneratePOView({
                 style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px' }}
               >
                 {isSubmitting ? 'Saving...' : <><CheckCircle size={16} /> Confirm Issue</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Add & Manage Departments */}
+      {showAddDeptDialog && (
+        <div className="modal-overlay">
+          <div className="modal-content animate-scale" style={{ maxWidth: '450px', borderRadius: '16px' }}>
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="modal-title" style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--text-main)' }}>
+                Manage & Add Departments
+              </h3>
+              <button className="btn btn-secondary btn-sm" onClick={() => setShowAddDeptDialog(false)} style={{ borderRadius: '50%', padding: '6px' }}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: '16px 0' }}>
+              <label className="FormLabel" style={{ display: 'block', marginBottom: '6px', fontWeight: '700' }}>
+                New Department Name *
+              </label>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. Elastic, Packaging, Accessories..."
+                  value={newDeptInput}
+                  onChange={e => setNewDeptInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveNewDepartment(); }}
+                  style={{ flex: 1, borderRadius: '8px', padding: '8px 12px' }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => handleSaveNewDepartment()}
+                  disabled={!newDeptInput.trim()}
+                  style={{ borderRadius: '8px', fontWeight: '700', padding: '0 16px' }}
+                >
+                  Add Dept
+                </button>
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+                <span style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '8px', letterSpacing: '0.04em' }}>
+                  Available Departments ({departments.length})
+                </span>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '160px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {departments.map(dept => {
+                    const isCustom = customDepartments.includes(dept) && !DEFAULT_DEPARTMENTS.includes(dept);
+                    return (
+                      <span
+                        key={dept}
+                        style={{
+                          fontSize: '11.5px',
+                          padding: '4px 10px',
+                          borderRadius: '16px',
+                          background: 'var(--bg-secondary, #f1f5f9)',
+                          border: '1px solid var(--border-color, #cbd5e1)',
+                          color: 'var(--text-main, #0f172a)',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          fontWeight: '600'
+                        }}
+                      >
+                        {dept}
+                        {isCustom && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDepartment(dept)}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 0, display: 'flex' }}
+                            title={`Remove custom department ${dept}`}
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+              <button className="btn btn-secondary" onClick={() => setShowAddDeptDialog(false)} style={{ borderRadius: '8px' }}>
+                Close
               </button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect } from "react";
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // MUST be your deployed /exec URL
 const WEB_APP_URL =
@@ -528,9 +529,14 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const [preparedByCustomValue, setPreparedByCustomValue] = useState("");
   const [authorizedByCustomValue, setAuthorizedByCustomValue] = useState("");
 
-  // Multi-mode configuration
-  const [rgpMode, setRgpMode] = useState("automatic"); // "automatic" or "manual"
+  // Multi-mode configuration: "automatic", "manual", or "report"
+  const [rgpMode, setRgpMode] = useState("automatic");
   const [wizardStep, setWizardStep] = useState(1); // 1 = Lot Search, 2 = Config & Matrix, 3 = Details & Review
+
+  // RGP All Entries Master Report Tab State
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportFilterType, setReportFilterType] = useState('all');
+  const [reportFilterStatus, setReportFilterStatus] = useState('all');
 
   const [zipHeaders, setZipHeaders] = useState([]);
   const [doriOrders, setDoriOrders] = useState([]);
@@ -573,7 +579,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     setOldRgpError("");
     try {
       const backendUrl = getBackendUrl();
-      
+
       // 1. Try to fetch from the new dedicated RGP endpoint first
       let oldPayload = null;
       try {
@@ -607,11 +613,11 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           setOldRgpError("RGP found, but no saved payload data exists.");
           return;
         }
-        oldPayload = typeof foundScan.rgp_payload === "string" 
-          ? JSON.parse(foundScan.rgp_payload) 
+        oldPayload = typeof foundScan.rgp_payload === "string"
+          ? JSON.parse(foundScan.rgp_payload)
           : foundScan.rgp_payload;
       }
-      
+
       // Prefill form
       const oldEntries = Array.isArray(oldPayload.entries) ? oldPayload.entries : [];
       const mappedEntries = oldEntries.map((r, idx) => ({
@@ -640,7 +646,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         authorizedBy: oldPayload.authorizedBy || prev.authorizedBy,
         remarks: oldPayload.remarks || prev.remarks,
       }));
-      
+
       // Handle custom Prepared By option
       if (oldPayload.preparedBy) {
         const isDefaultPrep = PREPARED_BY_OPTIONS.map(x => x.toLowerCase()).includes(oldPayload.preparedBy.toLowerCase());
@@ -652,7 +658,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           setPreparedByCustomValue("");
         }
       }
-      
+
       // Handle custom Authorized By option
       if (oldPayload.authorizedBy) {
         const isDefaultAuth = AUTHORIZED_BY_OPTIONS.map(x => x.toLowerCase()).includes(oldPayload.authorizedBy.toLowerCase());
@@ -664,7 +670,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           setAuthorizedByCustomValue("");
         }
       }
-      
+
       setOldRgpSearch("");
       alert("Old RGP details successfully loaded!");
     } catch (err) {
@@ -715,8 +721,8 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
               }
             });
             if (matchingHeader) {
-              foundPoDetails = typeof matchingHeader.zip_payload === 'string' 
-                ? JSON.parse(matchingHeader.zip_payload) 
+              foundPoDetails = typeof matchingHeader.zip_payload === 'string'
+                ? JSON.parse(matchingHeader.zip_payload)
                 : matchingHeader.zip_payload;
               poType = "zip";
             }
@@ -732,11 +738,11 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           const res = await fetch(`${backendUrl}/api/doori-orders`);
           if (res.ok) {
             const orders = await res.json();
-            const matchingOrder = orders.find(o => 
+            const matchingOrder = orders.find(o =>
               o.po_number && o.po_number.toLowerCase().trim() === trimmed.toLowerCase()
             );
             if (matchingOrder) {
-              foundPoDetails = matchingOrder.dori_payload 
+              foundPoDetails = matchingOrder.dori_payload
                 ? (typeof matchingOrder.dori_payload === 'string' ? JSON.parse(matchingOrder.dori_payload) : matchingOrder.dori_payload)
                 : matchingOrder;
               poType = "dori";
@@ -898,24 +904,24 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         fetch(`${backendUrl}/api/doori-orders`),
         fetch(`${backendUrl}/api/pos`)
       ]);
-      
+
       const rgpData = rgpRes.ok ? await rgpRes.json() : [];
       const scansData = scansRes.ok ? await scansRes.json() : [];
       const zipsData = zipRes.ok ? await zipRes.json() : [];
       const dorisData = doriRes.ok ? await doriRes.json() : [];
       const posData = posRes.ok ? await posRes.json() : [];
-      
+
       setTrackerRgpList(Array.isArray(rgpData) ? rgpData : []);
       setZipHeaders(zipsData);
       setDoriOrders(dorisData);
       setTrimPOs(posData);
-      
+
       const filtered = scansData.filter(
         (s) => s.lot_number && s.lot_number.trim() !== ''
       );
-      
+
       filtered.sort((a, b) => new Date(b.scanned_at) - new Date(a.scanned_at));
-      
+
       setTrackerLogs(filtered);
       if (filtered.length === 0 && (!rgpData || rgpData.length === 0)) {
         setTrackerError("No RGP or scan records found in the database.");
@@ -946,15 +952,15 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         fetch(`${backendUrl}/api/doori-orders`),
         fetch(`${backendUrl}/api/pos`)
       ]);
-      
+
       const rgpData = rgpRes.ok ? await rgpRes.json() : [];
       const scansData = scansRes.ok ? await scansRes.json() : [];
       const zipsData = zipRes.ok ? await zipRes.json() : [];
       const dorisData = doriRes.ok ? await doriRes.json() : [];
       const posData = posRes.ok ? await posRes.json() : [];
-      
+
       const qLower = trimmed.toLowerCase();
-      const filteredRgps = (Array.isArray(rgpData) ? rgpData : []).filter(r => 
+      const filteredRgps = (Array.isArray(rgpData) ? rgpData : []).filter(r =>
         String(r.rgpNo || '').toLowerCase().includes(qLower) ||
         String(r.vendor || '').toLowerCase().includes(qLower) ||
         String(r.department || '').toLowerCase().includes(qLower)
@@ -963,14 +969,14 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       setZipHeaders(zipsData);
       setDoriOrders(dorisData);
       setTrimPOs(posData);
-      
+
       const filteredScans = scansData.filter(
         (s) => (s.lot_number || "").trim().toLowerCase().includes(qLower)
       );
-      
+
       filteredScans.sort((a, b) => new Date(a.scanned_at) - new Date(b.scanned_at));
       setTrackerLogs(filteredScans);
-      
+
       if (filteredScans.length === 0 && filteredRgps.length === 0) {
         setTrackerError(`No records found matching: "${trimmed}".`);
       }
@@ -1588,7 +1594,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           <Emoji size={18} mr={8}>🔄</Emoji>
           <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700', color: '#065f46' }}>Prefill Details</h4>
         </div>
-        
+
         <p style={{ fontSize: '0.8rem', color: '#047857', margin: '0 0 12px 0' }}>
           Copy details from a previous RGP or Purchase Order (PO) to avoid manual typing.
         </p>
@@ -2291,11 +2297,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     );
   };
 
-  const renderTrackerModal = () => {
-    // 1. Compile real RGP records & associated live scanner checkpoints
+  // 1. Compile real RGP records & associated live scanner checkpoints at component scope
+  const compiledRgpRows = React.useMemo(() => {
     const rgpGroups = {};
 
-    // First, seed with all actual RGPs from the database
     trackerRgpList.forEach((rgp) => {
       const rgpNo = String(rgp.rgpNo || '').trim();
       if (!rgpNo) return;
@@ -2338,11 +2343,9 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       };
     });
 
-    // Next, map all scan logs to corresponding RGPs or create standalone scan rows
     trackerLogs.forEach((log) => {
       const scanLot = String(log.lot_number || "Unknown").trim();
-      
-      // Check if log matches an existing RGP
+
       let targetGroup = rgpGroups[scanLot];
       if (!targetGroup && log.rgp_payload) {
         try {
@@ -2350,18 +2353,16 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           if (payload && payload.rgpNo && rgpGroups[payload.rgpNo]) {
             targetGroup = rgpGroups[payload.rgpNo];
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
-      // If still not found, check if scan lot matches any associated lot number
       if (!targetGroup) {
-        const foundKey = Object.keys(rgpGroups).find(k => 
+        const foundKey = Object.keys(rgpGroups).find(k =>
           rgpGroups[k].associatedLots && rgpGroups[k].associatedLots.some(lot => String(lot).toLowerCase() === scanLot.toLowerCase())
         );
         if (foundKey) targetGroup = rgpGroups[foundKey];
       }
 
-      // If standalone scan without an RGP pass
       if (!targetGroup) {
         if (!rgpGroups[scanLot]) {
           rgpGroups[scanLot] = {
@@ -2414,10 +2415,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       }
     });
 
-    let rgpRows = Object.values(rgpGroups);
+    // Filter to only include actual Returnable Gate Passes (excludes PO scans like PO-11002)
+    let rows = Object.values(rgpGroups).filter(row => row.isRealRgp || row.rgpNo.toUpperCase().startsWith('RGP'));
 
-    // Compute status and aging for each row
-    rgpRows = rgpRows.map(row => {
+    rows = rows.map(row => {
       const isReturned = Boolean(row.rgpReturn || row.status?.toLowerCase() === 'returned');
       const isOverdue = !isReturned && row.expectedReturnDate && (new Date(row.expectedReturnDate) < new Date());
       let computedStatus = 'in_transit';
@@ -2435,6 +2436,13 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       };
     });
 
+    rows.sort((a, b) => new Date(b.firstScanDate) - new Date(a.firstScanDate));
+    return rows;
+  }, [trackerRgpList, trackerLogs]);
+
+  const renderTrackerModal = () => {
+    let rgpRows = [...compiledRgpRows];
+
     // Summary KPI metrics
     const totalCount = rgpRows.length;
     const returnedCount = rgpRows.filter(r => r.computedStatus === 'returned').length;
@@ -2444,7 +2452,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     // Filter by search text if entered
     if (trackerRgpNo && trackerRgpNo.trim()) {
       const q = trackerRgpNo.trim().toLowerCase();
-      rgpRows = rgpRows.filter(r => 
+      rgpRows = rgpRows.filter(r =>
         String(r.rgpNo || '').toLowerCase().includes(q) ||
         String(r.supplierName || '').toLowerCase().includes(q) ||
         String(r.materialName || '').toLowerCase().includes(q) ||
@@ -2517,7 +2525,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           </div>
 
           <div style={{ padding: '24px 28px', overflowY: 'auto', maxHeight: 'calc(88vh - 110px)', backgroundColor: '#ffffff' }}>
-            
+
             {/* Top Metric Cards */}
             <div style={{
               display: 'grid',
@@ -2706,10 +2714,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                       const cleanRgpNo = String(row.rgpNo).toLowerCase().trim();
                       const hasZipPo = zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || (row.associatedLots && row.associatedLots.some(lot => zipHeaders.some(h => String(h.Lot_Number).toLowerCase().trim() === String(lot).toLowerCase())));
                       const hasDoriPo = doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === cleanRgpNo) || (row.associatedLots && row.associatedLots.some(lot => doriOrders.some(h => String(h.Lot_Number).toLowerCase().trim() === String(lot).toLowerCase())));
-                      const hasTrimPo = trimPOs.some(po => 
+                      const hasTrimPo = trimPOs.some(po =>
                         (po.designName && String(po.designName).toLowerCase().trim() === cleanRgpNo) ||
                         (po.poNumber && String(po.poNumber).toLowerCase().trim() === cleanRgpNo)
-                      ) || (row.associatedLots && row.associatedLots.some(lot => trimPOs.some(po => 
+                      ) || (row.associatedLots && row.associatedLots.some(lot => trimPOs.some(po =>
                         (po.designName && String(po.designName).toLowerCase().trim() === String(lot).toLowerCase()) ||
                         (po.poNumber && String(po.poNumber).toLowerCase().trim() === String(lot).toLowerCase())
                       )));
@@ -3032,6 +3040,451 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     );
   };
 
+  // Helper to format checkpoint scan person and time
+  const getScanCheckpointInfo = (scanObj, fallbackPerson = '', fallbackTime = '') => {
+    if (scanObj && scanObj.person_name) {
+      const person = scanObj.person_name;
+      const timeStr = scanObj.scanned_at ? new Date(scanObj.scanned_at).toLocaleString('en-GB') : '';
+      return { person, time: timeStr, text: `${person} ${timeStr ? `(${timeStr})` : ''}` };
+    }
+    if (fallbackPerson) {
+      const timeStr = fallbackTime ? new Date(fallbackTime).toLocaleString('en-GB') : '';
+      return { person: fallbackPerson, time: timeStr, text: `${fallbackPerson} ${timeStr ? `(${timeStr})` : ''}` };
+    }
+    return { person: '—', time: '—', text: '—' };
+  };
+
+  // Simple status language helper
+  const getSimpleStatusText = (row) => {
+    if (row.computedStatus === 'returned' || row.rgpReturn) {
+      return 'Returned (Material Back)';
+    }
+    if (row.computedStatus === 'overdue') {
+      return `Overdue (${row.agingDays || 0}d - Material Out)`;
+    }
+    return 'Dispatched (Material Out)';
+  };
+
+  // PDF Export for RGP Entries Master Report
+  const handleExportReportPDF = () => {
+    try {
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+      doc.setFontSize(15);
+      doc.setTextColor(15, 23, 42);
+      doc.text('RETURNABLE GATE PASS (RGP) ALL ENTRIES MASTER REPORT', 14, 15);
+
+      doc.setFontSize(9);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Generated on: ${new Date().toLocaleString('en-GB')} | Total RGP Records: ${compiledRgpRows.length}`, 14, 21);
+
+      const tableRows = [];
+      compiledRgpRows.forEach((row) => {
+        const statusText = getSimpleStatusText(row);
+        const outInfo = getScanCheckpointInfo(row.rgpEntry, row.preparedBy, row.firstScanDate);
+        const returnInfo = getScanCheckpointInfo(row.rgpReturn);
+
+        if (row.rawEntries && row.rawEntries.length > 0) {
+          row.rawEntries.forEach((ent, eIdx) => {
+            tableRows.push([
+              eIdx === 0 ? row.rgpNo : '',
+              eIdx === 0 ? new Date(row.firstScanDate).toLocaleDateString('en-GB') : '',
+              eIdx === 0 ? row.supplierName : '',
+              ent.lotNo || '—',
+              ent.itemDesc || '—',
+              ent.qty1 || '0',
+              ent.uom || 'PCS',
+              eIdx === 0 ? outInfo.text : '',
+              eIdx === 0 ? returnInfo.text : '',
+              eIdx === 0 ? (row.authorizedBy || '—') : '',
+              eIdx === 0 ? statusText : ''
+            ]);
+          });
+        } else {
+          tableRows.push([
+            row.rgpNo,
+            new Date(row.firstScanDate).toLocaleDateString('en-GB'),
+            row.supplierName,
+            '—',
+            row.materialName || '—',
+            row.quantity || '0',
+            'PCS',
+            outInfo.text,
+            returnInfo.text,
+            row.authorizedBy || '—',
+            statusText
+          ]);
+        }
+      });
+
+      autoTable(doc, {
+        startY: 26,
+        head: [['RGP NO', 'DATE', 'VENDOR / PARTY', 'LOT NO', 'ITEM DESCRIPTION', 'QTY', 'UOM', 'OUT SCAN (PERSON & TIME)', 'RETURN SCAN (PERSON & TIME)', 'AUTH BY', 'STATUS']],
+        body: tableRows,
+        theme: 'grid',
+        styles: {
+          fontSize: 7.5,
+          cellPadding: 2,
+          lineColor: [0, 0, 0], // Solid black border
+          lineWidth: 0.25,      // Solid line border thickness
+          textColor: [0, 0, 0]
+        },
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          lineColor: [0, 0, 0],
+          lineWidth: 0.35
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        }
+      });
+
+      doc.save(`RGP_All_Entries_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error('PDF export error:', err);
+    }
+  };
+
+  // CSV / Excel Export for RGP Entries Master Report
+  const handleExportReportCSV = () => {
+    try {
+      const headers = [
+        'RGP Number', 'Date', 'Vendor / Party', 'Lot Number', 'Item Description', 'Qty', 'UOM',
+        'Department', 'Purpose', 'Vehicle No', 'Prepared By', 'Authorized By',
+        'Material Out Scan Person', 'Material Out Scan Time',
+        'Gate Checkin Scan Person', 'Gate Checkin Scan Time',
+        'Store Inward Scan Person', 'Store Inward Scan Time',
+        'Return Received Scan Person', 'Return Received Scan Time',
+        'Material Status'
+      ];
+      const csvRows = [headers.join(',')];
+
+      compiledRgpRows.forEach(row => {
+        const dateStr = new Date(row.firstScanDate).toLocaleDateString('en-GB');
+        const statusText = getSimpleStatusText(row);
+
+        const outInfo = getScanCheckpointInfo(row.rgpEntry, row.preparedBy, row.firstScanDate);
+        const gateInfo = getScanCheckpointInfo(row.gateEntry);
+        const storeInfo = getScanCheckpointInfo(row.materialIn);
+        const returnInfo = getScanCheckpointInfo(row.rgpReturn);
+
+        if (row.rawEntries && row.rawEntries.length > 0) {
+          row.rawEntries.forEach(ent => {
+            csvRows.push([
+              `"${row.rgpNo}"`,
+              `"${dateStr}"`,
+              `"${row.supplierName || ''}"`,
+              `"${ent.lotNo || ''}"`,
+              `"${(ent.itemDesc || '').replace(/"/g, '""')}"`,
+              `"${ent.qty1 || 0}"`,
+              `"${ent.uom || 'PCS'}"`,
+              `"${ent.department || row.department || ''}"`,
+              `"${ent.purpose || row.purpose || ''}"`,
+              `"${row.vehicleNo || ''}"`,
+              `"${row.preparedBy || ''}"`,
+              `"${row.authorizedBy || ''}"`,
+              `"${outInfo.person}"`,
+              `"${outInfo.time}"`,
+              `"${gateInfo.person}"`,
+              `"${gateInfo.time}"`,
+              `"${storeInfo.person}"`,
+              `"${storeInfo.time}"`,
+              `"${returnInfo.person}"`,
+              `"${returnInfo.time}"`,
+              `"${statusText}"`
+            ].join(','));
+          });
+        } else {
+          csvRows.push([
+            `"${row.rgpNo}"`,
+            `"${dateStr}"`,
+            `"${row.supplierName || ''}"`,
+            '""',
+            `"${(row.materialName || '').replace(/"/g, '""')}"`,
+            `"${row.quantity || 0}"`,
+            '"PCS"',
+            `"${row.department || ''}"`,
+            `"${row.purpose || ''}"`,
+            `"${row.vehicleNo || ''}"`,
+            `"${row.preparedBy || ''}"`,
+            `"${row.authorizedBy || ''}"`,
+            `"${outInfo.person}"`,
+            `"${outInfo.time}"`,
+            `"${gateInfo.person}"`,
+            `"${gateInfo.time}"`,
+            `"${storeInfo.person}"`,
+            `"${storeInfo.time}"`,
+            `"${returnInfo.person}"`,
+            `"${returnInfo.time}"`,
+            `"${statusText}"`
+          ].join(','));
+        }
+      });
+
+      const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `RGP_All_Entries_Report_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('CSV export error:', err);
+    }
+  };
+
+  // Render RGP All Entries Master Report View
+  const renderRgpEntriesReportView = () => {
+    const filteredReportRows = compiledRgpRows.filter(row => {
+      const q = reportSearch.toLowerCase().trim();
+      let textMatches = true;
+      if (q) {
+        const rgpNoMatch = String(row.rgpNo || '').toLowerCase().includes(q);
+        const supplierMatch = String(row.supplierName || '').toLowerCase().includes(q);
+        const deptMatch = String(row.department || '').toLowerCase().includes(q);
+        const purposeMatch = String(row.purpose || '').toLowerCase().includes(q);
+        const prepMatch = String(row.preparedBy || '').toLowerCase().includes(q);
+        const authMatch = String(row.authorizedBy || '').toLowerCase().includes(q);
+        const vehicleMatch = String(row.vehicleNo || '').toLowerCase().includes(q);
+
+        const subEntriesMatch = (row.rawEntries || []).some(ent =>
+          String(ent.lotNo || '').toLowerCase().includes(q) ||
+          String(ent.itemDesc || '').toLowerCase().includes(q) ||
+          String(ent.department || '').toLowerCase().includes(q)
+        );
+
+        textMatches = rgpNoMatch || supplierMatch || deptMatch || purposeMatch || prepMatch || authMatch || vehicleMatch || subEntriesMatch;
+      }
+
+      let typeMatches = true;
+      if (reportFilterType !== 'all') {
+        const rgpTypeStr = String(row.rawRgp?.rgpType || row.materialName || '').toLowerCase();
+        typeMatches = rgpTypeStr.includes(reportFilterType.toLowerCase());
+      }
+
+      let statusMatches = true;
+      if (reportFilterStatus !== 'all') {
+        const statusStr = String(row.status || '').toLowerCase();
+        if (reportFilterStatus === 'Returned') {
+          statusMatches = statusStr.includes('returned') || statusStr.includes('completed') || row.rgpReturn !== null;
+        } else if (reportFilterStatus === 'Dispatched') {
+          statusMatches = statusStr.includes('dispatched') || statusStr.includes('open') || row.rgpReturn === null;
+        }
+      }
+
+      return textMatches && typeMatches && statusMatches;
+    });
+
+    const totalPasses = filteredReportRows.length;
+    let totalEntriesCount = 0;
+    let totalIssuedQtySum = 0;
+
+    filteredReportRows.forEach(row => {
+      if (row.rawEntries && row.rawEntries.length > 0) {
+        totalEntriesCount += row.rawEntries.length;
+        row.rawEntries.forEach(ent => {
+          totalIssuedQtySum += parseFloat(ent.qty1) || 0;
+        });
+      } else {
+        totalEntriesCount += 1;
+        totalIssuedQtySum += parseFloat(row.quantity) || 0;
+      }
+    });
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '14px' }}>
+        {/* KPI Cards Summary Header */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+          <div style={{ padding: '16px 20px', borderRadius: '12px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '11.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>📋 Total RGP Passes</div>
+            <div style={{ fontSize: '24px', fontWeight: '800', color: '#1e293b', marginTop: '4px' }}>{totalPasses}</div>
+          </div>
+          <div style={{ padding: '16px 20px', borderRadius: '12px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '11.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>📦 Total Item Sub-Entries</div>
+            <div style={{ fontSize: '24px', fontWeight: '800', color: '#4f46e5', marginTop: '4px' }}>{totalEntriesCount}</div>
+          </div>
+          <div style={{ padding: '16px 20px', borderRadius: '12px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+            <div style={{ fontSize: '11.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>⚖️ Total Issued Quantity</div>
+            <div style={{ fontSize: '24px', fontWeight: '800', color: '#059669', marginTop: '4px' }}>{totalIssuedQtySum.toLocaleString()}</div>
+          </div>
+        </div>
+
+        {/* Filter & Action Controls Header */}
+        <div style={{ padding: '14px 16px', borderRadius: '12px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: '280px' }}>
+              <input
+                type="text"
+                placeholder="Search RGP No, Vendor, Lot No, Item Description, Prepared By..."
+                value={reportSearch}
+                onChange={(e) => setReportSearch(e.target.value)}
+                style={{ width: '100%', height: '38px', padding: '0 12px', fontSize: '13px', borderRadius: '8px', border: '1px solid #cbd5e1' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <select
+                value={reportFilterType}
+                onChange={(e) => setReportFilterType(e.target.value)}
+                style={{ height: '38px', padding: '0 10px', fontSize: '12.5px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#ffffff' }}
+              >
+                <option value="all">All RGP Types</option>
+                {RGP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+
+              <select
+                value={reportFilterStatus}
+                onChange={(e) => setReportFilterStatus(e.target.value)}
+                style={{ height: '38px', padding: '0 10px', fontSize: '12.5px', borderRadius: '8px', border: '1px solid #cbd5e1', backgroundColor: '#ffffff' }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="Dispatched">Dispatched / In-Transit</option>
+                <option value="Returned">Returned / Closed</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={handleExportReportPDF}
+                style={{ height: '38px', padding: '0 14px', backgroundColor: '#4f46e5', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <span>📄 Export PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportReportCSV}
+                style={{ height: '38px', padding: '0 14px', backgroundColor: '#059669', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '12.5px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+              >
+                <span>📊 Export CSV</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Master Entries Table */}
+        <div style={{ borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', backgroundColor: '#ffffff' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #cbd5e1', textAlign: 'left' }}>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>RGP No</th>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>Date</th>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>Vendor / Party</th>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>Type</th>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>Itemized Entries &amp; Sub-Items</th>
+                <th style={{ padding: '12px', textAlign: 'center', fontWeight: '800', color: '#334155' }}>Total Qty</th>
+                <th style={{ padding: '12px', fontWeight: '800', color: '#334155' }}>Scan Checkpoints &amp; Person Audit</th>
+                <th style={{ padding: '12px', textAlign: 'center', fontWeight: '800', color: '#334155' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReportRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: '36px', textAlign: 'center', color: '#64748b' }}>
+                    No RGP entries found matching your filters.
+                  </td>
+                </tr>
+              ) : (
+                filteredReportRows.map((row, idx) => {
+                  const outInfo = getScanCheckpointInfo(row.rgpEntry, row.preparedBy, row.firstScanDate);
+                  const returnInfo = getScanCheckpointInfo(row.rgpReturn);
+
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid #e2e8f0', verticalAlign: 'top' }}>
+                      <td style={{ padding: '12px', fontWeight: '800', color: '#4f46e5', fontFamily: 'monospace' }}>
+                        {row.rgpNo}
+                        {row.vehicleNo && <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '500' }}>🚗 {row.vehicleNo}</div>}
+                      </td>
+                      <td style={{ padding: '12px', color: '#334155', whiteSpace: 'nowrap' }}>
+                        {new Date(row.firstScanDate).toLocaleDateString('en-GB')}
+                      </td>
+                      <td style={{ padding: '12px', fontWeight: '700', color: '#0f172a' }}>
+                        {row.supplierName}
+                      </td>
+                      <td style={{ padding: '12px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: '4px', backgroundColor: '#f1f5f9', fontSize: '11px', fontWeight: '700', color: '#475569' }}>
+                          {row.rawRgp?.rgpType || row.purpose || 'RGP'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px' }}>
+                        {row.rawEntries && row.rawEntries.length > 0 ? (
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', backgroundColor: '#f8fafc', borderRadius: '6px' }}>
+                            <thead>
+                              <tr style={{ borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '10.5px' }}>
+                                <th style={{ padding: '5px 8px', textAlign: 'left' }}>LOT NO</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left' }}>ITEM DESCRIPTION</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'center' }}>QTY</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'center' }}>UOM</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'left' }}>DEPT</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {row.rawEntries.map((ent, eIdx) => (
+                                <tr key={eIdx} style={{ borderBottom: '1px solid #edf2f7' }}>
+                                  <td style={{ padding: '5px 8px', fontWeight: '700', color: '#7c3aed' }}>{ent.lotNo || '—'}</td>
+                                  <td style={{ padding: '5px 8px', fontWeight: '600' }}>{ent.itemDesc || '—'}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: '800', color: '#059669' }}>{ent.qty1 || 0}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'center', color: '#64748b' }}>{ent.uom || 'PCS'}</td>
+                                  <td style={{ padding: '5px 8px', color: '#475569' }}>{ent.department || 'Store'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <span style={{ color: '#64748b' }}>{row.materialName}</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'center', fontWeight: '800', color: '#059669', fontSize: '13px' }}>
+                        {row.quantity}
+                      </td>
+                      <td style={{ padding: '12px', color: '#334155', fontSize: '11.5px' }}>
+                        <div style={{ marginBottom: '4px' }}>
+                          <span style={{ color: '#6366f1', fontWeight: '700' }}>Out Scan: </span>
+                          <strong>{outInfo.person}</strong>
+                          {outInfo.time !== '—' && <div style={{ fontSize: '10.5px', color: '#64748b' }}>{outInfo.time}</div>}
+                        </div>
+                        <div>
+                          <span style={{ color: row.rgpReturn ? '#059669' : '#94a3b8', fontWeight: '700' }}>Return Recv: </span>
+                          <strong>{returnInfo.person}</strong>
+                          {returnInfo.time !== '—' && <div style={{ fontSize: '10.5px', color: '#64748b' }}>{returnInfo.time}</div>}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                        <span style={{
+                          padding: '3px 10px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          backgroundColor: row.computedStatus === 'returned'
+                            ? '#ecfdf5'
+                            : (row.computedStatus === 'overdue' ? '#fef2f2' : '#f5f3ff'),
+                          color: row.computedStatus === 'returned'
+                            ? '#059669'
+                            : (row.computedStatus === 'overdue' ? '#dc2626' : '#7c3aed'),
+                          border: `1px solid ${
+                            row.computedStatus === 'returned'
+                              ? '#a7f3d0'
+                              : (row.computedStatus === 'overdue' ? '#fecaca' : '#ddd6fe')
+                          }`
+                        }}>
+                          {row.computedStatus === 'returned'
+                            ? '✓ Returned'
+                            : (row.computedStatus === 'overdue' ? `⚠️ Overdue (${row.agingDays}d)` : '● Dispatched')}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={styles.container}>
       {/* Professional Header */}
@@ -3093,6 +3546,19 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
             <Emoji size={16} mr={8}>✍️</Emoji>
             Manual RGP (Direct Entry)
           </button>
+          <button
+            type="button"
+            onClick={() => { setRgpMode("report"); fetchAllRgpHistory(); }}
+            style={{
+              ...styles.modeTab,
+              ...(rgpMode === "report" ? styles.modeTabActive : {}),
+              border: 'none',
+              margin: 0
+            }}
+          >
+            <Emoji size={16} mr={8}>📊</Emoji>
+            RGP Entries Report
+          </button>
         </div>
 
         <button
@@ -3120,7 +3586,9 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       </div>
 
       <form onSubmit={handlePreview} style={styles.form}>
-        {rgpMode === "manual" ? (
+        {rgpMode === "report" ? (
+          renderRgpEntriesReportView()
+        ) : rgpMode === "manual" ? (
           /* MANUAL RGP MODE: Direct Entry Layout */
           <div style={styles.formBody}>
             {/* Left Column - Details */}
@@ -3190,7 +3658,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         )}
 
         {/* Action Bar: only active for manual mode or wizard step 3 */}
-        {(rgpMode === "manual" || wizardStep === 3) && (
+        {(rgpMode === "manual" || wizardStep === 3) && rgpMode !== "report" && (
           <div style={styles.actionBar}>
             <button type="button" onClick={handleReset} disabled={submitting || submissionComplete} style={styles.secondaryButton}>
               <Emoji size={16} mr={6}>↺</Emoji>

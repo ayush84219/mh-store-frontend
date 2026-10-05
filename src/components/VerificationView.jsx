@@ -315,123 +315,123 @@ export default function VerificationView({
                   />
                 </div>
 
-                 {/* Specs list */}
-                 <div>
-                   <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Garment Specifications</h4>
-                   <div className="spec-list" style={{ gap: '6px' }}>
-                     {selectedDesign.brand && (
-                       <div className="spec-item" style={{ padding: '4px 0' }}>
-                         <span className="spec-label">Brand</span>
-                         <span className="spec-value" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>{selectedDesign.brand}</span>
-                       </div>
-                     )}
-                     {selectedDesign.style && (
-                       <div className="spec-item" style={{ padding: '4px 0' }}>
-                         <span className="spec-label">Style Code</span>
-                         <span className="spec-value" style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{selectedDesign.style}</span>
-                       </div>
-                     )}
-                     {selectedDesign.lotNo2 && selectedDesign.lotNo2 !== 'N/A' && (
-                       <div className="spec-item" style={{ padding: '4px 0' }}>
-                         <span className="spec-label">Lot No 2</span>
-                         <span className="spec-value">{selectedDesign.lotNo2}</span>
-                       </div>
-                     )}
-                     <div className="spec-item" style={{ padding: '4px 0' }}>
-                       <span className="spec-label">Category</span>
-                       <span className="spec-value">{selectedDesign.category}</span>
-                     </div>
-                     {selectedDesign.section && (
-                       <div className="spec-item" style={{ padding: '4px 0' }}>
-                         <span className="spec-label">Section</span>
-                         <span className="spec-value">{selectedDesign.section}</span>
-                       </div>
-                     )}
-                     {selectedDesign.season && (
-                       <div className="spec-item" style={{ padding: '4px 0' }}>
-                         <span className="spec-label">Season</span>
-                         <span className="spec-value">{selectedDesign.season}</span>
-                       </div>
-                     )}
-                     <div className="spec-item" style={{ padding: '4px 0' }}>
-                       <span className="spec-label">Sizes</span>
-                       <span className="spec-value">{selectedDesign.targetSizes}</span>
-                     </div>
-                     <div className="spec-item" style={{ padding: '4px 0' }}>
-                       <span className="spec-label">Fabric</span>
-                       <span className="spec-value">{selectedDesign.fabricType}</span>
-                     </div>
-                      {selectedDesign.tapeLace && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Tape/Lace</span>
-                          <span className="spec-value">{selectedDesign.tapeLace}</span>
-                        </div>
-                      )}
-                      {selectedDesign.bottomType && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Bottom Type</span>
-                          <span className="spec-value">{selectedDesign.bottomType}</span>
-                        </div>
-                      )}
-                      {selectedDesign.zip && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Zip</span>
-                          <span className="spec-value">{selectedDesign.zip}</span>
-                        </div>
-                      )}
-                      {selectedDesign.sticker && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Sticker</span>
-                          <span className="spec-value">{selectedDesign.sticker}</span>
-                        </div>
-                      )}
-                      {selectedDesign.collar && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Collar</span>
-                          <span className="spec-value">{selectedDesign.collar}</span>
-                        </div>
-                      )}
-                      {selectedDesign.bone && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Bone</span>
-                          <span className="spec-value">{selectedDesign.bone}</span>
-                        </div>
-                      )}
-                      {selectedDesign.fullBaju && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Full Baju</span>
-                          <span className="spec-value">{selectedDesign.fullBaju}</span>
-                        </div>
-                      )}
-                      {selectedDesign.totalCost > 0 && (
-                        <div className="spec-item" style={{ padding: '4px 0' }}>
-                          <span className="spec-label">Unit BOM Cost</span>
-                          <span className="spec-value" style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>
-                            {currencySymbol}{selectedDesign.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                {/* Specs list */}
+                <div>
+                  <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '14px', fontWeight: '600', marginBottom: '8px' }}>Garment Specifications</h4>
+                  <div className="spec-list" style={{ gap: '6px' }}>
+                    {selectedDesign.brand && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Brand</span>
+                        <span className="spec-value" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>{selectedDesign.brand}</span>
+                      </div>
+                    )}
+                    {selectedDesign.style && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Style Code</span>
+                        <span className="spec-value" style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>{selectedDesign.style}</span>
+                      </div>
+                    )}
+                    {selectedDesign.lotNo2 && selectedDesign.lotNo2 !== 'N/A' && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Lot No 2</span>
+                        <span className="spec-value">{selectedDesign.lotNo2}</span>
+                      </div>
+                    )}
+                    <div className="spec-item" style={{ padding: '4px 0' }}>
+                      <span className="spec-label">Category</span>
+                      <span className="spec-value">{selectedDesign.category}</span>
+                    </div>
+                    {selectedDesign.section && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Section</span>
+                        <span className="spec-value">{selectedDesign.section}</span>
+                      </div>
+                    )}
+                    {selectedDesign.season && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Season</span>
+                        <span className="spec-value">{selectedDesign.season}</span>
+                      </div>
+                    )}
+                    <div className="spec-item" style={{ padding: '4px 0' }}>
+                      <span className="spec-label">Sizes</span>
+                      <span className="spec-value">{selectedDesign.targetSizes}</span>
+                    </div>
+                    <div className="spec-item" style={{ padding: '4px 0' }}>
+                      <span className="spec-label">Fabric</span>
+                      <span className="spec-value">{selectedDesign.fabricType}</span>
+                    </div>
+                    {selectedDesign.tapeLace && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Tape/Lace</span>
+                        <span className="spec-value">{selectedDesign.tapeLace}</span>
+                      </div>
+                    )}
+                    {selectedDesign.bottomType && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Bottom Type</span>
+                        <span className="spec-value">{selectedDesign.bottomType}</span>
+                      </div>
+                    )}
+                    {selectedDesign.zip && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Zip</span>
+                        <span className="spec-value">{selectedDesign.zip}</span>
+                      </div>
+                    )}
+                    {selectedDesign.sticker && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Sticker</span>
+                        <span className="spec-value">{selectedDesign.sticker}</span>
+                      </div>
+                    )}
+                    {selectedDesign.collar && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Collar</span>
+                        <span className="spec-value">{selectedDesign.collar}</span>
+                      </div>
+                    )}
+                    {selectedDesign.bone && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Bone</span>
+                        <span className="spec-value">{selectedDesign.bone}</span>
+                      </div>
+                    )}
+                    {selectedDesign.fullBaju && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Full Baju</span>
+                        <span className="spec-value">{selectedDesign.fullBaju}</span>
+                      </div>
+                    )}
+                    {selectedDesign.totalCost > 0 && (
+                      <div className="spec-item" style={{ padding: '4px 0' }}>
+                        <span className="spec-label">Unit BOM Cost</span>
+                        <span className="spec-value" style={{ color: 'var(--accent-color)', fontWeight: 'bold' }}>
+                          {currencySymbol}{selectedDesign.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Accessories brief list */}
+                  <div style={{ marginTop: '16px' }}>
+                    <h5 style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '8px' }}>Garment Accessories BOM</h5>
+                    <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '8px' }}>
+                      {selectedDesign.bom && selectedDesign.bom.map((b, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '6px', borderBottom: '1px solid var(--bg-primary)', marginBottom: '4px', fontSize: '12px' }}>
+                          <div>
+                            <span style={{ fontWeight: '600' }}>{b.name}</span>
+                            {b.detail && <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>{b.detail}</span>}
+                          </div>
+                          <span className={`status-badge ${String(b.status).toLowerCase() === 'yes' ? 'verified' : 'rejected'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                            {b.status}
                           </span>
                         </div>
-                      )}
-                   </div>
- 
-                   {/* Accessories brief list */}
-                   <div style={{ marginTop: '16px' }}>
-                     <h5 style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', marginBottom: '8px' }}>Garment Accessories BOM</h5>
-                     <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '8px' }}>
-                       {selectedDesign.bom && selectedDesign.bom.map((b, idx) => (
-                         <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '6px', borderBottom: '1px solid var(--bg-primary)', marginBottom: '4px', fontSize: '12px' }}>
-                           <div>
-                             <span style={{ fontWeight: '600' }}>{b.name}</span>
-                             {b.detail && <span style={{ display: 'block', fontSize: '10px', color: 'var(--text-muted)' }}>{b.detail}</span>}
-                           </div>
-                           <span className={`status-badge ${String(b.status).toLowerCase() === 'yes' ? 'verified' : 'rejected'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
-                             {b.status}
-                           </span>
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 </div>
-               </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
               {/* Revision history check / Action Forms */}
               <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>

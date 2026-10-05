@@ -7,7 +7,7 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode, Tag
 } from 'lucide-react';
 import './App.css';
 
@@ -22,6 +22,7 @@ const MaterialIssueView = lazy(() => import('./components/MaterialIssueView'));
 const BarcodeMaterialIssueView = lazy(() => import('./components/BarcodeMaterialIssueView'));
 const ExtraMaterialIssueView = lazy(() => import('./components/ExtraMaterialIssueView'));
 const GeneratePOView = lazy(() => import('./components/GeneratePOView'));
+const ItemCodeGeneratorView = lazy(() => import('./components/ItemCodeGeneratorView'));
 const MaterialDetailsView = lazy(() => import('./components/MaterialDetailsView'));
 const ReportsHistoryView = lazy(() => import('./components/ReportsHistoryView'));
 const SettingsView = lazy(() => import('./components/SettingsView'));
@@ -90,7 +91,8 @@ const hasTabAccess = (tabName, role) => {
       'approval_queue',
       'po_verification',
       're_download',
-      'only_cutting'
+      'only_cutting',
+      'item_codes'
     ].includes(tabName);
   }
   if (panel === 'designer') {
@@ -113,7 +115,8 @@ const hasTabAccess = (tabName, role) => {
       'warehouse_locations',
       'approval_queue',
       'only_cutting',
-      'material_details'
+      'material_details',
+      'item_codes'
     ].includes(tabName);
   }
   if (panel === 'store') {
@@ -139,7 +142,8 @@ const hasTabAccess = (tabName, role) => {
       'bone_po',
       'elastic_issue',
       'elastic_po',
-      'only_cutting'
+      'only_cutting',
+      'item_codes'
     ].includes(tabName);
   }
   return false;
@@ -175,6 +179,7 @@ const TAB_ROUTES = {
   warehouse_locations: '/warehouse-locations',
   po_verification: '/po-verification',
   only_cutting: '/only-cutting',
+  item_codes: '/item-codes',
 };
 
 const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
@@ -217,7 +222,7 @@ export default function App() {
         const next = !prev;
         try {
           localStorage.setItem('mh_sidebar_collapsed', next ? 'true' : 'false');
-        } catch (e) {}
+        } catch (e) { }
         return next;
       });
     }
@@ -373,7 +378,7 @@ export default function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: halls })
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [halls]);
 
@@ -405,7 +410,7 @@ export default function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: racks })
-      }).catch(() => {});
+      }).catch(() => { });
     }
   }, [racks]);
 
@@ -527,7 +532,8 @@ export default function App() {
       warehouse_locations: 'Warehouse Locations',
       reports_history: 'Report and History',
       settings: 'Setting',
-      approval_queue: currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests'
+      approval_queue: currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests',
+      item_codes: 'Item Code Generator'
     };
     const title = pageTitles[activeTab] || 'MH Store';
     document.title = `Garment PDMS - ${title}`;
@@ -578,7 +584,7 @@ export default function App() {
       fetch(`${getBackendUrl()}/api/health`, {
         method: 'GET',
         headers: { 'Cache-Control': 'no-cache' }
-      }).catch(() => {});
+      }).catch(() => { });
     };
 
     // Ping once on mount / reload
@@ -1462,9 +1468,9 @@ export default function App() {
       setHalls(['Main Store']);
       await Promise.all([
         fetchMaterials(),
-        fetch(`${getBackendUrl()}/api/designs`).then(r => r.json()).then(d => setDesigns(Array.isArray(d) ? d : [])).catch(() => {}),
-        fetch(`${getBackendUrl()}/api/pos`).then(r => r.json()).then(p => setPOs(Array.isArray(p) ? p : [])).catch(() => {}),
-        fetch(`${getBackendUrl()}/api/vendors`).then(r => r.json()).then(v => setVendors(Array.isArray(v) ? v : [])).catch(() => {})
+        fetch(`${getBackendUrl()}/api/designs`).then(r => r.json()).then(d => setDesigns(Array.isArray(d) ? d : [])).catch(() => { }),
+        fetch(`${getBackendUrl()}/api/pos`).then(r => r.json()).then(p => setPOs(Array.isArray(p) ? p : [])).catch(() => { }),
+        fetch(`${getBackendUrl()}/api/vendors`).then(r => r.json()).then(v => setVendors(Array.isArray(v) ? v : [])).catch(() => { })
       ]);
       setToast({
         type: 'success',
@@ -2056,7 +2062,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_update', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_update', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2113,6 +2119,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'item_codes' ? 'active' : ''}`} onClick={() => handleTabClick('item_codes')} title="Item Code Generator">
+                      <span className="sidebar-text">🏷️ Item Code Generator</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                       <span className="sidebar-text">Production Work</span>
@@ -2173,6 +2182,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'item_codes' ? 'active' : ''}`} onClick={() => handleTabClick('item_codes')} title="Item Code Generator">
+                  <Tag size={18} />
+                  <span className="sidebar-text">Item Code Generator</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
@@ -2265,6 +2278,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'item_codes' ? 'active' : ''}`} onClick={() => handleTabClick('item_codes')} title="Item Code Generator">
+                  <Tag size={18} />
+                  <span className="sidebar-text">Item Code Generator</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
@@ -2385,6 +2402,7 @@ export default function App() {
                 {(activeTab === 'bone_issue' || activeTab === 'bone_po') && 'Bone Issue'}
                 {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && 'Elastic Issue'}
                 {activeTab === 'generate_po' && 'Generate PO'}
+                {activeTab === 'item_codes' && 'Item Code Generator & Master Registry'}
                 {activeTab === 'history' && 'Production Work'}
                 {activeTab === 'scanner_logs' && 'Scanner Log'}
                 {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
@@ -2641,317 +2659,321 @@ export default function App() {
         <div className="page-container">
           <ErrorBoundary>
             <Suspense fallback={
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '60px 20px',
-              color: 'var(--text-muted, #64748b)'
-            }}>
-              <div className="spinner" style={{
-                width: '32px',
-                height: '32px',
-                border: '3px solid rgba(99, 102, 241, 0.2)',
-                borderTopColor: 'var(--accent-color, #6366f1)',
-                borderRadius: '50%',
-                animation: 'spin 0.8s linear infinite',
-                marginBottom: '14px'
-              }}></div>
-              <span style={{ fontSize: '13px', fontWeight: '600' }}>Loading module...</span>
-            </div>
-          }>
-            {activeTab === 'dashboard' && (
-              <DashboardView
-                stats={getStats()}
-                transactions={getTransactions()}
-                designs={designs}
-                onNavigate={setActiveTab}
-                onOpenNewDesignModal={() => setIsNewDesignModalOpen(true)}
-                currencySymbol={currencySymbol}
-                role={currentUser?.role}
-              />
-            )}
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '60px 20px',
+                color: 'var(--text-muted, #64748b)'
+              }}>
+                <div className="spinner" style={{
+                  width: '32px',
+                  height: '32px',
+                  border: '3px solid rgba(99, 102, 241, 0.2)',
+                  borderTopColor: 'var(--accent-color, #6366f1)',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                  marginBottom: '14px'
+                }}></div>
+                <span style={{ fontSize: '13px', fontWeight: '600' }}>Loading module...</span>
+              </div>
+            }>
+              {activeTab === 'dashboard' && (
+                <DashboardView
+                  stats={getStats()}
+                  transactions={getTransactions()}
+                  designs={designs}
+                  onNavigate={setActiveTab}
+                  onOpenNewDesignModal={() => setIsNewDesignModalOpen(true)}
+                  currencySymbol={currencySymbol}
+                  role={currentUser?.role}
+                />
+              )}
 
-            {activeTab === 'design' && (
-              <DesignView
-                designs={designs}
-                materials={materials}
-                onAddDesign={handleAddDesign}
-                currencySymbol={currencySymbol}
-                accessoriesList={accessoriesList}
-                designersList={designersList}
-                onRedirectToTab={handleRedirectToTab}
-                prefilledLotNo={prefilledLotNo}
-                setPrefilledLotNo={setPrefilledLotNo}
-              />
-            )}
+              {activeTab === 'design' && (
+                <DesignView
+                  designs={designs}
+                  materials={materials}
+                  onAddDesign={handleAddDesign}
+                  currencySymbol={currencySymbol}
+                  accessoriesList={accessoriesList}
+                  designersList={designersList}
+                  onRedirectToTab={handleRedirectToTab}
+                  prefilledLotNo={prefilledLotNo}
+                  setPrefilledLotNo={setPrefilledLotNo}
+                />
+              )}
 
-            {activeTab === 'material_verification' && (
-              <MaterialVerificationView
-                designs={designs}
-                materials={materials}
-                vendors={vendors}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-                onRedirectToTab={handleRedirectToTab}
-                onRedirectToZipPO={handleRedirectToZipPO}
-                onRedirectToPO={handleRedirectToPO}
-                onRedirectToRGP={handleRedirectToRGP}
-              />
-            )}
+              {activeTab === 'material_verification' && (
+                <MaterialVerificationView
+                  designs={designs}
+                  materials={materials}
+                  vendors={vendors}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onRedirectToTab={handleRedirectToTab}
+                  onRedirectToZipPO={handleRedirectToZipPO}
+                  onRedirectToPO={handleRedirectToPO}
+                  onRedirectToRGP={handleRedirectToRGP}
+                />
+              )}
 
-            {activeTab === 'material_update' && (
-              <MaterialQuickUpdateView
-                materials={materials}
-                racks={racks}
-                onUpdateMaterial={handleUpdateMaterial}
-                currentUser={currentUser}
-                currencySymbol={currencySymbol}
-              />
-            )}
+              {activeTab === 'material_update' && (
+                <MaterialQuickUpdateView
+                  materials={materials}
+                  racks={racks}
+                  onUpdateMaterial={handleUpdateMaterial}
+                  currentUser={currentUser}
+                  currencySymbol={currencySymbol}
+                />
+              )}
 
-            {activeTab === 'material_issue' && (
-              <MaterialIssueView
-                designs={designs}
-                materials={materials}
-                onIssueMaterials={handleIssueMaterials}
-                onReturnMaterials={handleReturnMaterials}
-                issueLogs={issueLogs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-                onSubmitApproval={handleSubmitApprovalRequest}
-                onRedirectToZipPO={handleRedirectToZipPO}
-                onRedirectToTab={(tab) => handleTabClick(tab)}
-              />
-            )}
+              {activeTab === 'material_issue' && (
+                <MaterialIssueView
+                  designs={designs}
+                  materials={materials}
+                  onIssueMaterials={handleIssueMaterials}
+                  onReturnMaterials={handleReturnMaterials}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onSubmitApproval={handleSubmitApprovalRequest}
+                  onRedirectToZipPO={handleRedirectToZipPO}
+                  onRedirectToTab={(tab) => handleTabClick(tab)}
+                />
+              )}
 
-            {activeTab === 'barcode_material_issue' && (
-              <BarcodeMaterialIssueView
-                materials={materials}
-                designs={designs}
-                onIssueMaterials={handleIssueMaterials}
-                onReturnMaterials={handleReturnMaterials}
-                issueLogs={issueLogs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-                onRedirectToTab={(tab) => handleTabClick(tab)}
-              />
-            )}
+              {activeTab === 'barcode_material_issue' && (
+                <BarcodeMaterialIssueView
+                  materials={materials}
+                  designs={designs}
+                  onIssueMaterials={handleIssueMaterials}
+                  onReturnMaterials={handleReturnMaterials}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onRedirectToTab={(tab) => handleTabClick(tab)}
+                />
+              )}
 
-            {activeTab === 'extra_material_issue' && (
-              <ExtraMaterialIssueView
-                designs={designs}
-                materials={materials}
-                onIssueMaterials={handleIssueMaterials}
-                issueLogs={issueLogs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-                onSubmitApproval={handleSubmitApprovalRequest}
-              />
-            )}
+              {activeTab === 'extra_material_issue' && (
+                <ExtraMaterialIssueView
+                  designs={designs}
+                  materials={materials}
+                  onIssueMaterials={handleIssueMaterials}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onSubmitApproval={handleSubmitApprovalRequest}
+                />
+              )}
 
-            {activeTab === 'return_material' && (
-              <ReturnMaterialView
-                designs={designs}
-                materials={materials}
-                onReturnMaterials={handleReturnMaterials}
-                issueLogs={issueLogs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-              />
-            )}
+              {activeTab === 'return_material' && (
+                <ReturnMaterialView
+                  designs={designs}
+                  materials={materials}
+                  onReturnMaterials={handleReturnMaterials}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                />
+              )}
 
-            {activeTab === 'generate_po' && (
-              <GeneratePOView
-                designs={designs}
-                vendors={vendors}
-                pos={pos}
-                onAddPO={handleAddPO}
-                currencySymbol={currencySymbol}
-                prefilledPoData={prefilledPoData}
-                setPrefilledPoData={setPrefilledPoData}
-                materials={materials}
-              />
-            )}
+              {activeTab === 'generate_po' && (
+                <GeneratePOView
+                  designs={designs}
+                  vendors={vendors}
+                  pos={pos}
+                  onAddPO={handleAddPO}
+                  currencySymbol={currencySymbol}
+                  prefilledPoData={prefilledPoData}
+                  setPrefilledPoData={setPrefilledPoData}
+                  materials={materials}
+                />
+              )}
 
-            {activeTab === 're_download' && (
-              <ReDownloadView
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-              />
-            )}
+              {activeTab === 'item_codes' && (
+                <ItemCodeGeneratorView />
+              )}
 
-            {activeTab === 'zip_po' && (
-              <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="zip" />
-            )}
+              {activeTab === 're_download' && (
+                <ReDownloadView
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                />
+              )}
 
-            {activeTab === 'dori_po' && (
-              <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="dori" />
-            )}
+              {activeTab === 'zip_po' && (
+                <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="zip" />
+              )}
 
-            {(activeTab === 'bone_issue' || activeTab === 'bone_po') && (
-              <BoneIssueView
-                prefilledLotNo={prefilledLotNo}
-                setPrefilledLotNo={setPrefilledLotNo}
-                currentUser={currentUser}
-                currencySymbol={currencySymbol}
-                onNavigate={setActiveTab}
-              />
-            )}
+              {activeTab === 'dori_po' && (
+                <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="dori" />
+              )}
 
-            {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && (
-              <ElasticIssueView
-                prefilledLotNo={prefilledLotNo}
-                setPrefilledLotNo={setPrefilledLotNo}
-                currentUser={currentUser}
-                currencySymbol={currencySymbol}
-                onNavigate={setActiveTab}
-              />
-            )}
+              {(activeTab === 'bone_issue' || activeTab === 'bone_po') && (
+                <BoneIssueView
+                  prefilledLotNo={prefilledLotNo}
+                  setPrefilledLotNo={setPrefilledLotNo}
+                  currentUser={currentUser}
+                  currencySymbol={currencySymbol}
+                  onNavigate={setActiveTab}
+                />
+              )}
 
-            {activeTab === 'material_details' && (
-              <MaterialDetailsView
-                materials={materials}
-                onAddMaterial={handleAddMaterial}
-                onDeleteMaterial={handleDeleteMaterial}
-                onUpdateMaterial={handleUpdateMaterial}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-                onSubmitApproval={handleSubmitApprovalRequest}
-                allowMaterialPhotoEdit={allowMaterialPhotoEdit}
-              />
-            )}
+              {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && (
+                <ElasticIssueView
+                  prefilledLotNo={prefilledLotNo}
+                  setPrefilledLotNo={setPrefilledLotNo}
+                  currentUser={currentUser}
+                  currencySymbol={currencySymbol}
+                  onNavigate={setActiveTab}
+                />
+              )}
 
-            {activeTab === 'reports_history' && (
-              <ReportsHistoryView
-                pos={pos}
-                designs={designs}
-                issueLogs={issueLogs}
-                currencySymbol={currencySymbol}
-              />
-            )}
+              {activeTab === 'material_details' && (
+                <MaterialDetailsView
+                  materials={materials}
+                  onAddMaterial={handleAddMaterial}
+                  onDeleteMaterial={handleDeleteMaterial}
+                  onUpdateMaterial={handleUpdateMaterial}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onSubmitApproval={handleSubmitApprovalRequest}
+                  allowMaterialPhotoEdit={allowMaterialPhotoEdit}
+                />
+              )}
 
-            {activeTab === 'only_cutting' && (
-              <OnlyCutting
-                currentUser={currentUser}
-                role={currentUser?.role}
-                onNavigateToDesign={(lotNo) => {
-                  setPrefilledLotNo(lotNo);
-                  setActiveTab('design');
-                }}
-                onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
-                onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
-                onNavigateToBonePO={(lotNo) => handleRedirectToZipPO(lotNo, 'bone')}
-                onNavigateToMaterialIssue={(lotNo) => {
-                  setPrefilledLotNo(lotNo);
-                  setActiveTab('material_issue');
-                }}
-                onNavigateToStockAccessories={(lotNo) => {
-                  setPrefilledLotNo(lotNo);
-                  setActiveTab('material_verification');
-                }}
-                onRedirectToTab={handleRedirectToTab}
-              />
-            )}
+              {activeTab === 'reports_history' && (
+                <ReportsHistoryView
+                  pos={pos}
+                  designs={designs}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                />
+              )}
 
-            {activeTab === 'settings' && currentUser?.role === 'Admin' && (
-              <SettingsView
-                vendors={vendors}
-                onAddVendor={handleAddVendor}
-                onDeleteVendor={handleDeleteVendor}
-                currencySymbol={currencySymbol}
-                setCurrencySymbol={setCurrencySymbol}
-                defaultTax={defaultTax}
-                setDefaultTax={setDefaultTax}
-                onResetDatabase={handleResetDatabase}
-                accessoriesList={accessoriesList}
-                onAddAccessory={handleAddAccessory}
-                onDeleteAccessory={handleDeleteAccessory}
-                designersList={designersList}
-                onAddDesigner={handleAddDesigner}
-                onDeleteDesigner={handleDeleteDesigner}
-                materials={materials}
-                onAddMaterial={handleAddMaterial}
-                onDeleteMaterial={handleDeleteMaterial}
-                onUpdateMaterial={handleUpdateMaterial}
-                racks={racks}
-                setRacks={setRacks}
-                halls={halls}
-                setHalls={setHalls}
-                allowMaterialPhotoEdit={allowMaterialPhotoEdit}
-                onToggleAllowMaterialPhotoEdit={handleToggleAllowMaterialPhotoEdit}
-                allowWarehouseAddRack={allowWarehouseAddRack}
-                onToggleAllowWarehouseAddRack={handleToggleAllowWarehouseAddRack}
-              />
-            )}
+              {activeTab === 'only_cutting' && (
+                <OnlyCutting
+                  currentUser={currentUser}
+                  role={currentUser?.role}
+                  onNavigateToDesign={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('design');
+                  }}
+                  onNavigateToZipPO={(lotNo) => handleRedirectToZipPO(lotNo, 'zip')}
+                  onNavigateToDoriPO={(lotNo) => handleRedirectToZipPO(lotNo, 'dori')}
+                  onNavigateToBonePO={(lotNo) => handleRedirectToZipPO(lotNo, 'bone')}
+                  onNavigateToMaterialIssue={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('material_issue');
+                  }}
+                  onNavigateToStockAccessories={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('material_verification');
+                  }}
+                  onRedirectToTab={handleRedirectToTab}
+                />
+              )}
 
-            {activeTab === 'approval_queue' && currentUser && (
-              <ApprovalQueueView
-                approvalRequests={approvalRequests}
-                onApprove={handleApproveRequest}
-                onReject={handleRejectRequest}
-                materials={materials}
-                designs={designs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-              />
-            )}
+              {activeTab === 'settings' && currentUser?.role === 'Admin' && (
+                <SettingsView
+                  vendors={vendors}
+                  onAddVendor={handleAddVendor}
+                  onDeleteVendor={handleDeleteVendor}
+                  currencySymbol={currencySymbol}
+                  setCurrencySymbol={setCurrencySymbol}
+                  defaultTax={defaultTax}
+                  setDefaultTax={setDefaultTax}
+                  onResetDatabase={handleResetDatabase}
+                  accessoriesList={accessoriesList}
+                  onAddAccessory={handleAddAccessory}
+                  onDeleteAccessory={handleDeleteAccessory}
+                  designersList={designersList}
+                  onAddDesigner={handleAddDesigner}
+                  onDeleteDesigner={handleDeleteDesigner}
+                  materials={materials}
+                  onAddMaterial={handleAddMaterial}
+                  onDeleteMaterial={handleDeleteMaterial}
+                  onUpdateMaterial={handleUpdateMaterial}
+                  racks={racks}
+                  setRacks={setRacks}
+                  halls={halls}
+                  setHalls={setHalls}
+                  allowMaterialPhotoEdit={allowMaterialPhotoEdit}
+                  onToggleAllowMaterialPhotoEdit={handleToggleAllowMaterialPhotoEdit}
+                  allowWarehouseAddRack={allowWarehouseAddRack}
+                  onToggleAllowWarehouseAddRack={handleToggleAllowWarehouseAddRack}
+                />
+              )}
 
-            {activeTab === 'history' && currentUser && (
-              <HistoryView
-                designs={designs}
-                currencySymbol={currencySymbol}
-                currentUser={currentUser}
-              />
-            )}
+              {activeTab === 'approval_queue' && currentUser && (
+                <ApprovalQueueView
+                  approvalRequests={approvalRequests}
+                  onApprove={handleApproveRequest}
+                  onReject={handleRejectRequest}
+                  materials={materials}
+                  designs={designs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                />
+              )}
 
-            {activeTab === 'scanner_logs' && currentUser && (
-              <ScannerLogsView currencySymbol={currencySymbol} />
-            )}
+              {activeTab === 'history' && currentUser && (
+                <HistoryView
+                  designs={designs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                />
+              )}
 
-            {activeTab === 'rgp' && currentUser && (
-              <FabricRgpForm
-                onSubmit={(payload) => console.log('RGP submitted:', payload)}
-                onBack={() => setActiveTab('dashboard')}
-                prefilledRgpData={prefilledRgpData}
-                setPrefilledRgpData={setPrefilledRgpData}
-                currentUser={currentUser}
-              />
-            )}
+              {activeTab === 'scanner_logs' && currentUser && (
+                <ScannerLogsView currencySymbol={currencySymbol} />
+              )}
 
-            {activeTab === 'weight_capture' && currentUser && (
-              <WeightCapture racks={racks} currentUser={currentUser} />
-            )}
+              {activeTab === 'rgp' && currentUser && (
+                <FabricRgpForm
+                  onSubmit={(payload) => console.log('RGP submitted:', payload)}
+                  onBack={() => setActiveTab('dashboard')}
+                  prefilledRgpData={prefilledRgpData}
+                  setPrefilledRgpData={setPrefilledRgpData}
+                  currentUser={currentUser}
+                />
+              )}
 
-            {activeTab === 'manually_weight_capture' && currentUser && (
-              <ManuallyWeightCapture racks={racks} currentUser={currentUser} />
-            )}
+              {activeTab === 'weight_capture' && currentUser && (
+                <WeightCapture racks={racks} currentUser={currentUser} onNavigate={setActiveTab} />
+              )}
 
-            {activeTab === 'material_transfer' && currentUser && (
-              <MaterialTransferView
-                currentUser={currentUser}
-                racks={racks}
-                halls={halls}
-                materials={materials}
-              />
-            )}
+              {activeTab === 'manually_weight_capture' && currentUser && (
+                <ManuallyWeightCapture racks={racks} currentUser={currentUser} onNavigate={setActiveTab} />
+              )}
 
-            {activeTab === 'warehouse_locations' && (
-              <WarehouseLocationView
-                racks={racks}
-                materials={materials}
-                halls={halls}
-                onNavigate={setActiveTab}
-                currentUser={currentUser}
-                allowWarehouseAddRack={allowWarehouseAddRack}
-              />
-            )}
+              {activeTab === 'material_transfer' && currentUser && (
+                <MaterialTransferView
+                  currentUser={currentUser}
+                  racks={racks}
+                  halls={halls}
+                  materials={materials}
+                />
+              )}
 
-            {activeTab === 'po_verification' && (
-              <POVerificationView currencySymbol={currencySymbol} currentUser={currentUser} />
-            )}
-          </Suspense>
+              {activeTab === 'warehouse_locations' && (
+                <WarehouseLocationView
+                  racks={racks}
+                  materials={materials}
+                  halls={halls}
+                  onNavigate={setActiveTab}
+                  currentUser={currentUser}
+                  allowWarehouseAddRack={allowWarehouseAddRack}
+                />
+              )}
+
+              {activeTab === 'po_verification' && (
+                <POVerificationView currencySymbol={currencySymbol} currentUser={currentUser} />
+              )}
+            </Suspense>
           </ErrorBoundary>
         </div>
       </main>
