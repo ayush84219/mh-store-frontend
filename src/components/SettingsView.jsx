@@ -310,6 +310,7 @@ export default function SettingsView({
   const [editingMaterial, setEditingMaterial] = useState(null);
   const [isAddingMaterial, setIsAddingMaterial] = useState(false);
   const [matSearchQuery, setMatSearchQuery] = useState('');
+  const [matItemCode, setMatItemCode] = useState('');
   const [matName, setMatName] = useState('');
   const [matCategory, setMatCategory] = useState('FABRICS');
   const [matStock, setMatStock] = useState('');
@@ -342,6 +343,7 @@ export default function SettingsView({
     }
     const updated = {
       ...editingMaterial,
+      itemCode: matItemCode ? matItemCode.trim() : (editingMaterial.itemCode || editingMaterial.id),
       name: matName.trim(),
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
@@ -368,6 +370,7 @@ export default function SettingsView({
     const newId = `M${Math.floor(1000 + Math.random() * 9000)}`;
     const newMat = {
       id: newId,
+      itemCode: matItemCode ? matItemCode.trim() : newId,
       name: matName.trim(),
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
@@ -384,6 +387,7 @@ export default function SettingsView({
       onAddMaterial(newMat);
     }
     setIsAddingMaterial(false);
+    setMatItemCode('');
     setMatName('');
     setMatCategory('FABRICS');
     setMatStock('');
@@ -398,10 +402,13 @@ export default function SettingsView({
   // Filter materials: only show present materials (stock > 0)
   const filteredMaterials = (materials || []).filter(m => {
     if (Number(m.stock) <= 0) return false;
-    const q = matSearchQuery.toLowerCase();
+    const q = matSearchQuery.toLowerCase().trim();
+    if (!q) return true;
     return (
       (m.name || '').toLowerCase().includes(q) ||
       (m.id || '').toLowerCase().includes(q) ||
+      (m.itemCode || '').toLowerCase().includes(q) ||
+      (m.item_code || '').toLowerCase().includes(q) ||
       (m.category || '').toLowerCase().includes(q) ||
       (m.color || '').toLowerCase().includes(q) ||
       (m.location || '').toLowerCase().includes(q)
@@ -1392,18 +1399,18 @@ export default function SettingsView({
           <table className="custom-table">
             <thead>
               <tr>
-                <th>ID</th>
+                <th style={{ width: '85px', minWidth: '80px' }}>ID</th>
+                <th style={{ width: '130px', minWidth: '110px' }}>Item Code</th>
                 <th>Material Name</th>
                 <th>Category</th>
                 <th>Stock Level</th>
-
                 <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                     No raw materials match your search query.
                   </td>
                 </tr>
@@ -1411,6 +1418,23 @@ export default function SettingsView({
                 filteredMaterials.map(m => (
                   <tr key={m.id}>
                     <td style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '12px' }}>{m.id}</td>
+                    <td>
+                      <span className="badge" style={{
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        color: '#2563eb',
+                        border: '1px solid rgba(59, 130, 246, 0.25)',
+                        fontFamily: 'monospace',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        {m.itemCode || m.item_code || m.id}
+                      </span>
+                    </td>
                     <td>
                       <strong style={{ display: 'block', fontSize: '14px' }}>{m.name}</strong>
                       {m.color && m.color !== 'Default' && (
@@ -1445,6 +1469,7 @@ export default function SettingsView({
                           className="btn btn-secondary btn-sm"
                           onClick={() => {
                             setEditingMaterial(m);
+                            setMatItemCode(m.itemCode || m.item_code || m.id || '');
                             setMatName(m.name || '');
                             setMatCategory(m.category || 'FABRICS');
                             setMatStock(m.stock !== undefined ? m.stock : '');
@@ -1499,7 +1524,19 @@ export default function SettingsView({
 
               <div className="form-grid">
                 <div className="form-group">
-                  <label className="form-label">Material Name</label>
+                  <label className="form-label">Item Code (Master Code)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={matItemCode}
+                    onChange={(e) => setMatItemCode(e.target.value)}
+                    placeholder="e.g. ST00001"
+                    style={{ fontFamily: 'monospace', fontWeight: '700' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Material Name <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
                     type="text"
                     className="form-input"
@@ -1508,7 +1545,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
@@ -1528,9 +1567,7 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Stock Quantity</label>
                   <input
@@ -1542,7 +1579,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Unit of Measure</label>
                   <input
@@ -1560,9 +1599,7 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Unit Cost Price ({currencySymbol})</label>
                   <input
@@ -1574,7 +1611,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Critical Reorder Threshold (Min Qty)</label>
                   <input
@@ -1585,9 +1624,7 @@ export default function SettingsView({
                     required
                   />
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Color / Style Reference Description</label>
                   <input
@@ -1598,7 +1635,9 @@ export default function SettingsView({
                     placeholder="e.g. Bleached Dark Blue, Matte Gold"
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Location Reference Description</label>
                   <input
@@ -1660,7 +1699,19 @@ export default function SettingsView({
 
               <div className="form-grid">
                 <div className="form-group">
-                  <label className="form-label">Material Name</label>
+                  <label className="form-label">Item Code (Master Code)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. ST00001 (or auto-generated)"
+                    value={matItemCode}
+                    onChange={(e) => setMatItemCode(e.target.value)}
+                    style={{ fontFamily: 'monospace', fontWeight: '700' }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Material Name <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
                     type="text"
                     className="form-input"
@@ -1670,7 +1721,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
                   <input
@@ -1690,9 +1743,7 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Stock Quantity</label>
                   <input
@@ -1705,7 +1756,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Unit of Measure</label>
                   <input
@@ -1723,9 +1776,7 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Unit Cost Price ({currencySymbol})</label>
                   <input
@@ -1738,7 +1789,9 @@ export default function SettingsView({
                     required
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Critical Reorder Threshold (Min Qty)</label>
                   <input
@@ -1750,9 +1803,7 @@ export default function SettingsView({
                     required
                   />
                 </div>
-              </div>
 
-              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Color / Style Reference Description</label>
                   <input
@@ -1763,7 +1814,9 @@ export default function SettingsView({
                     onChange={(e) => setMatColor(e.target.value)}
                   />
                 </div>
+              </div>
 
+              <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Location Reference Description</label>
                   <input
@@ -1788,7 +1841,7 @@ export default function SettingsView({
                   type="submit"
                   className="btn btn-primary"
                 >
-                  Catalog Material
+                  Add Material
                 </button>
               </div>
             </form>

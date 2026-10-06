@@ -353,6 +353,8 @@ export default function App() {
   }, []);
 
   const settingsHydratedRef = useRef(false);
+  const lastSyncedHallsRef = useRef('');
+  const lastSyncedRacksRef = useRef('');
 
   // Warehouse Halls/Zones configuration state
   const [halls, setHalls] = useState(() => {
@@ -367,8 +369,10 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('warehouse_halls', JSON.stringify(halls));
-    if (settingsHydratedRef.current) {
+    const currentStr = JSON.stringify(halls);
+    localStorage.setItem('warehouse_halls', currentStr);
+    if (settingsHydratedRef.current && currentStr !== lastSyncedHallsRef.current) {
+      lastSyncedHallsRef.current = currentStr;
       fetch(`${getBackendUrl()}/api/settings/warehouse_halls`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -399,8 +403,10 @@ export default function App() {
   });
 
   useEffect(() => {
-    localStorage.setItem('warehouse_racks', JSON.stringify(racks));
-    if (settingsHydratedRef.current) {
+    const currentStr = JSON.stringify(racks);
+    localStorage.setItem('warehouse_racks', currentStr);
+    if (settingsHydratedRef.current && currentStr !== lastSyncedRacksRef.current) {
+      lastSyncedRacksRef.current = currentStr;
       fetch(`${getBackendUrl()}/api/settings/warehouse_racks`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -899,10 +905,14 @@ export default function App() {
             const cleaned = data.designersList.filter(d => !['sarah connor', 'michael scott'].includes(String(d).toLowerCase().trim()));
             setDesignersList(cleaned.length > 0 ? (cleaned.includes('Admin') ? cleaned : ['Admin', ...cleaned]) : ['Admin']);
           }
-          if (data.warehouseHalls && data.warehouseHalls.length > 0)
+          if (data.warehouseHalls && data.warehouseHalls.length > 0) {
+            lastSyncedHallsRef.current = JSON.stringify(data.warehouseHalls);
             setHalls(data.warehouseHalls);
-          if (data.warehouseRacks && data.warehouseRacks.length > 0)
+          }
+          if (data.warehouseRacks && data.warehouseRacks.length > 0) {
+            lastSyncedRacksRef.current = JSON.stringify(data.warehouseRacks);
             setRacks(data.warehouseRacks);
+          }
           if (data.allowMaterialPhotoEdit !== undefined)
             setAllowMaterialPhotoEdit(Boolean(data.allowMaterialPhotoEdit));
           if (data.allowWarehouseAddRack !== undefined) {

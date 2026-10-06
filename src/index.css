@@ -1689,16 +1689,26 @@ body {
   gap: 24px;
 }
 
+.split-view-material-issue {
+  display: grid;
+  grid-template-columns: 270px 1fr;
+  gap: 16px;
+}
+
 .split-view > *,
-.split-view-asymmetric > * {
+.split-view-asymmetric > *,
+.split-view-material-issue > * {
   min-width: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 768px) {
   .split-view {
     grid-template-columns: 1fr;
   }
   .split-view-asymmetric {
+    grid-template-columns: 1fr;
+  }
+  .split-view-material-issue {
     grid-template-columns: 1fr;
   }
 }

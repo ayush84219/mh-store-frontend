@@ -190,53 +190,52 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         <span style={{ 
           whiteSpace: 'nowrap', 
           overflow: 'hidden', 
-          textOverflow: 'ellipsis',
+          textOverflow: 'ellipsis', 
           paddingRight: '6px',
           display: 'flex',
           alignItems: 'center',
-          gap: '6px'
+          gap: '5px'
         }}>
           {selectedMaterial ? (
             <>
               <span style={{
                 fontFamily: 'monospace',
-                fontWeight: '700',
+                fontWeight: '800',
                 fontSize: '11px',
-                backgroundColor: '#f1f5f9',
-                color: '#0f172a',
-                border: '1px solid #e2e8f0',
+                backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                color: '#2563eb',
+                border: '1px solid rgba(37, 99, 235, 0.25)',
                 padding: '1px 5px',
                 borderRadius: '4px',
                 flexShrink: 0
               }}>
                 {selectedMaterial.itemCode || selectedMaterial.id}
               </span>
-              <span style={{ fontWeight: '600', color: '#0f172a' }}>
+              <span style={{ fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {selectedMaterial.name}
               </span>
               {selectedMaterial.color && selectedMaterial.color !== 'Default' && (
-                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                <span style={{ fontSize: '10.5px', color: '#64748b', flexShrink: 0 }}>
                   ({selectedMaterial.color})
                 </span>
               )}
               {selectedMaterial.stock !== undefined && (
-                <span style={{ fontSize: '11px', color: '#334155', fontWeight: '700' }}>
+                <span style={{ fontSize: '10.5px', color: '#475569', fontWeight: '700', flexShrink: 0 }}>
                   • {selectedMaterial.stock} {selectedMaterial.unit || 'Pcs'}
                 </span>
               )}
               {selectedMaterial.location && (
                 <span style={{
-                  fontSize: '10px',
-                  fontWeight: '600',
+                  fontSize: '9.5px',
+                  fontWeight: '700',
                   color: '#0284c7',
                   backgroundColor: 'rgba(2,132,199,0.08)',
                   border: '1px solid rgba(2,132,199,0.2)',
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  flexShrink: 0,
-                  letterSpacing: '0.01em'
+                  padding: '1px 4px',
+                  borderRadius: '3px',
+                  flexShrink: 0
                 }}>
-                  📍 {selectedMaterial.location.split(',')[0].trim()}
+                  📍 {selectedMaterial.location.includes(' - ') ? selectedMaterial.location.split(' - ').slice(1).join(' - ').replace(/\(\d+\s*pkts?\)/i, '').trim() : selectedMaterial.location.replace(/\(\d+\s*pkts?\)/i, '').trim()}
                 </span>
               )}
             </>
@@ -543,6 +542,7 @@ export default function MaterialIssueView({
   const [selectedDesignId, setSelectedDesignId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [showLogs, setShowLogs] = useState(false);
+  const [showCalcGuide, setShowCalcGuide] = useState(false);
   const [showRgpModal, setShowRgpModal] = useState(false);
   const [rgpVendorId, setRgpVendorId] = useState('');
   const [rgpNotes, setRgpNotes] = useState('Sent for job work/finishing.');
@@ -1688,782 +1688,766 @@ export default function MaterialIssueView({
             </div>
           )}
 
-      <div className="split-view split-view-asymmetric">
-        {/* Left Side: Manufacturing Batch Selector */}
-        <div className="panel" style={{ height: 'fit-content' }}>
-          <div className="panel-header">
-            <h3 className="panel-title">
-              <ClipboardList size={18} className="text-accent" />
-              Start Production Batch
-            </h3>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            {formError && (
-              <div style={{
-                color: 'var(--danger)',
-                fontSize: '13px',
-                fontWeight: '600',
-                marginBottom: '16px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}>
-                <AlertTriangle size={16} />
-                <span>{formError}</span>
-              </div>
-            )}
-
-            {/* Setup Inputs Stack */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-              marginBottom: '20px'
-            }}>
-              {/* Search & Select Approved Lot */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Search & Select Approved Lot</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="🔍 Type Lot ID, Brand, or Category to filter & select..."
-                    value={
-                      isFocused
-                        ? searchQuery
-                        : (selectedDesign
-                          ? `Lot ${selectedDesign.id} — ${selectedDesign.brand || 'No Brand'} (${selectedDesign.category})`
-                          : ''
-                        )
-                    }
-                    onFocus={() => {
-                      setIsFocused(true);
-                      setIsOpen(true);
-                      setSearchQuery('');
-                    }}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    style={{ paddingRight: '32px' }}
-                  />
-
-                  {/* Custom dropdown caret indicator */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      right: '12px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      cursor: 'pointer',
-                      color: 'var(--text-muted)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      fontSize: '10px',
-                      pointerEvents: 'none'
-                    }}
-                  >
-                    ▼
-                  </div>
-
-                  {isOpen && (
-                    <>
-                      {/* Transparent Click-Outside Overlay */}
-                      <div
-                        style={{
-                          position: 'fixed',
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          bottom: 0,
-                          zIndex: 40,
-                          background: 'transparent'
-                        }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsOpen(false);
-                          setIsFocused(false);
-                        }}
-                      />
-
-                      {/* Scrollable floating dropdown menu list */}
-                      <div className="custom-dropdown-menu">
-                        {filteredDesigns.length === 0 ? (
-                          <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>
-                            No matching lots found
-                          </div>
-                        ) : (
-                          filteredDesigns.map(design => {
-                            const lotStatus = getLotIssueStatus(design);
-                            const isSelectionDisabled = lotStatus === 'completed';
-                            const isSelected = String(design.id) === String(selectedDesignId);
-
-                            return (
-                              <div
-                                key={design.id}
-                                onClick={() => {
-                                  if (!isSelectionDisabled) {
-                                    setSelectedDesignId(design.id);
-                                    setIsOpen(false);
-                                    setIsFocused(false);
-                                    setSearchQuery('');
-                                  }
-                                }}
-                                style={{
-                                  padding: '10px 14px',
-                                  fontSize: '13px',
-                                  cursor: isSelectionDisabled ? 'not-allowed' : 'pointer',
-                                  opacity: isSelectionDisabled ? 0.5 : 1,
-                                  backgroundColor: isSelected
-                                    ? 'var(--accent-color)'
-                                    : 'transparent',
-                                  color: isSelected ? '#ffffff' : 'var(--text-main)',
-                                  display: 'flex',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  borderBottom: '1px solid var(--border-color)',
-                                  transition: 'background-color 0.15s ease'
-                                }}
-                                onMouseEnter={(e) => {
-                                  if (!isSelectionDisabled && !isSelected) {
-                                    e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
-                                  }
-                                }}
-                                onMouseLeave={(e) => {
-                                  if (!isSelectionDisabled && !isSelected) {
-                                    e.currentTarget.style.backgroundColor = 'transparent';
-                                  }
-                                }}
-                              >
-                                <div>
-                                  <strong>Lot {design.id}</strong>
-                                  <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.8 }}>
-                                    ({design.category}) &mdash; {design.brand || 'No Brand'}
-                                  </span>
-                                </div>
-                                <>
-                                  {lotStatus === 'completed' && (
-                                    <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                      Already Issued
-                                    </span>
-                                  )}
-                                  {lotStatus === 'in_process' && (
-                                    <span className="status-badge pending" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--warning-light)', color: 'var(--warning)' }}>
-                                      In Process
-                                    </span>
-                                  )}
-                                  {lotStatus === 'ready' && (
-                                    <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px' }}>
-                                      Ready
-                                    </span>
-                                  )}
-                                </>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Garment Pieces to Manufacture */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Garment Pieces to Manufacture</label>
-                <input
-                  type="number"
-                  className="form-input"
-                  min="1"
-                  placeholder={isLoadingPieces ? "Fetching..." : "e.g. 500"}
-                  value={isLoadingPieces ? "" : pieces}
-                  onChange={(e) => setPieces(Math.max(1, Number(e.target.value)))}
-                  disabled={isSelectedDesignAlreadyIssued || isLoadingPieces}
-                  required
-                />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
-                  {isLoadingPieces
-                    ? "Retrieving pieces count from cutting logs..."
-                    : "Scales required BOM quantities automatically."
-                  }
-                </span>
-              </div>
-
-              {/* Person Name (Issuer) */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>Person Name (Issuer)</span>
-                  <span style={{ color: 'var(--danger)' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. John Doe"
-                  value={personName}
-                  onChange={(e) => setPersonName(e.target.value)}
-                  disabled={isSelectedDesignAlreadyIssued}
-                  required
-                />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
-                  Records the name of the person issuing the raw materials.
-                </span>
-              </div>
-
-              {/* Received Name (Receiver Person) */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <span>Received Name (Receiver Person)</span>
-                  <span style={{ color: 'var(--danger)' }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Masterji / Tailor / Line Incharge"
-                  value={receiverName}
-                  onChange={(e) => setReceiverName(e.target.value)}
-                  disabled={isSelectedDesignAlreadyIssued}
-                  required
-                />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '4px' }}>
-                  Records the name of the person receiving the materials.
-                </span>
-              </div>
-
-              {/* Receiver Department / Line */}
-              <div className="form-group" style={{ margin: 0 }}>
-                <label className="form-label">Receiver Department / Line</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Cutting / Stitching / Line 1"
-                  value={receiverDept}
-                  onChange={(e) => setReceiverDept(e.target.value)}
-                  disabled={isSelectedDesignAlreadyIssued}
-                />
-              </div>
-            </div>
-
-
-
-            {/* Warning alerts placed cleanly below inputs */}
-            {isSelectedDesignAlreadyIssued && (
-              <div style={{
-                color: 'var(--danger)',
-                fontSize: '13px',
-                fontWeight: '600',
-                marginBottom: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 12px',
-                backgroundColor: 'var(--danger-light)',
-                borderRadius: '6px',
-                border: '1px solid rgba(239, 68, 68, 0.2)'
-              }}>
-                <AlertTriangle size={16} />
-                <span>Materials already issued for Lot {selectedDesignId}. First-time issue is completed. For additional materials, please use the &quot;Extra Material Issue&quot; tab.</span>
-              </div>
-            )}
-
-            {selectedDesign && bomMappings.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '20px' }}>
-                <button
-                  type="submit"
-                  className="btn"
-                  style={{
-                    width: '100%', display: 'flex', justifyContent: 'center', gap: '8px',
-                    padding: '12px 20px', fontWeight: '700', fontSize: '14px',
-                    borderRadius: 'var(--border-radius-sm)', cursor: 'pointer', border: 'none',
-                    backgroundColor: 'var(--accent-color)',
-                    color: '#fff', transition: 'opacity 0.2s',
-                    opacity: (hasShortage || isSelectedDesignAlreadyIssued) ? 0.5 : 1
-                  }}
-                  disabled={hasShortage || isSelectedDesignAlreadyIssued}
-                  onMouseEnter={e => { if (!hasShortage && !isSelectedDesignAlreadyIssued) e.currentTarget.style.opacity = '0.88'; }}
-                  onMouseLeave={e => e.currentTarget.style.opacity = (hasShortage || isSelectedDesignAlreadyIssued) ? '0.5' : '1'}
-                >
-                  <Layers size={16} />
-                  <span>Issue Materials for Batch</span>
-                </button>
-              </div>
-            )}
-          </form>
+      {/* ── TOP SECTION: MANUFACTURING BATCH SETUP CARD ────────────────────── */}
+      <div className="panel" style={{ marginBottom: '20px', padding: '18px 22px' }}>
+        <div className="panel-header" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border-color)' }}>
+          <h3 className="panel-title" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+            <ClipboardList size={19} className="text-accent" />
+            <span>Start Production Batch Setup</span>
+          </h3>
         </div>
 
-        {/* Right Side: Materials Calculation Checklist */}
-        <div className="panel" style={{ minHeight: '320px', minWidth: 0, overflow: 'hidden' }}>
-          <div className="panel-header">
-            <h3 className="panel-title">
-              <Layers size={18} className="text-accent" />
-              Calculated Material Requirements
-            </h3>
-          </div>
-
-          {!selectedDesign ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>
-              <HelpCircle size={48} strokeWidth={1} style={{ marginBottom: '12px' }} />
-              <p style={{ fontSize: '14px', fontWeight: '500' }}>Select an approved design lot on the left to analyze production material needs.</p>
-            </div>
-          ) : isLoadingPieces ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>
-              <div className="spinner-loader" style={{
-                border: '4px solid rgba(0, 0, 0, 0.1)',
-                width: '36px',
-                height: '36px',
-                borderRadius: '50%',
-                borderLeftColor: 'var(--accent-color)',
-                animation: 'spin 1.2s linear infinite',
-                marginBottom: '16px'
-              }} />
-              <p style={{ fontSize: '14px', fontWeight: '500' }}>Analyzing production specifications & cutting reports...</p>
-            </div>
-          ) : (
-            <div>
-              <div style={{ marginBottom: '16px', padding: '12px 16px', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
-                  <span><strong>Garment Item:</strong> {selectedDesign.category}</span>
-                  <span><strong>Primary Fabric:</strong> {selectedDesign.fabricType}</span>
-                </div>
-              </div>
-
-
-
-              {/* Informative Tip Box explaining calculations */}
-              <div style={{
-                marginBottom: '14px',
-                padding: '12px 16px',
-                backgroundColor: 'var(--accent-light)',
-                borderRadius: '8px',
-                borderLeft: '4px solid var(--accent-color)',
-                fontSize: '12px',
-                lineHeight: '1.5',
-                color: 'var(--text-main)'
-              }}>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                  <HelpCircle size={16} style={{ color: 'var(--accent-color)', marginTop: '2px', flexShrink: 0 }} />
-                  <div>
-                    <strong>Calculation Guide:</strong>
-                    <ul style={{ margin: '4px 0 0 16px', paddingLeft: '0' }}>
-                      <li><strong>Total Needed</strong> = Garment Pieces &times; Qty/Piece. Feel free to edit either field; the other will recalculate automatically!</li>
-                      <li><strong>Current Stock</strong> is the available raw material stock in your catalog.</li>
-                      <li><strong>After Issue</strong> is your remaining inventory balance (<code>Current Stock &minus; Total Needed</code>). If it is negative, a shortage is flagged in red.</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-
-              {/* Barcode Quick-Scan & Mapping Box */}
-              <div style={{
-                marginBottom: '16px',
-                padding: '14px 16px',
-                background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
-                borderRadius: '10px',
-                border: '1.5px solid #93c5fd',
-                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.08)'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <div style={{
-                      backgroundColor: '#2563eb',
-                      color: '#ffffff',
-                      padding: '7px',
-                      borderRadius: '8px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.3)'
-                    }}>
-                      <Scan size={18} />
-                    </div>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '800', color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>⚡ Barcode Material Scanner &amp; Auto-Mapping</span>
-                        <span style={{ fontSize: '10px', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', fontWeight: '700' }}>
-                          Physical Gun / Keyboard
-                        </span>
-                      </h4>
-                      <p style={{ margin: '2px 0 0 0', fontSize: '11.5px', color: '#475569' }}>
-                        {scanTargetIdx !== null && bomMappings[scanTargetIdx] ? (
-                          <span style={{ color: '#2563eb', fontWeight: '800' }}>
-                            🎯 Target Focused: Scanning will map directly to &quot;{bomMappings[scanTargetIdx].bomItemName}&quot;
-                          </span>
-                        ) : (
-                          <span>Scan any material barcode (e.g. <code>MT1001</code>, <code>1001-A01</code>) to auto-map into BOM component rows.</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Cart / Ready Status Badge */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '5px 10px',
-                      backgroundColor: '#ffffff',
-                      borderRadius: '8px',
-                      border: '1px solid #cbd5e1',
-                      fontSize: '12px',
-                      fontWeight: '700',
-                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
-                    }}>
-                      <ShoppingCart size={15} style={{ color: '#2563eb' }} />
-                      <span>Issue Cart:</span>
-                      <span style={{
-                        backgroundColor: computedItems.filter(i => i.issued && i.materialId).length === computedItems.filter(i => i.issued).length && computedItems.length > 0 ? '#10b981' : '#f59e0b',
-                        color: '#ffffff',
-                        padding: '2px 8px',
-                        borderRadius: '12px',
-                        fontSize: '11px',
-                        fontWeight: '800'
-                      }}>
-                        {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Mapped
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <form onSubmit={handleBarcodeScan} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <div style={{ position: 'relative', flex: 1 }}>
-                    <Barcode size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-                    <input
-                      ref={barcodeInputRef}
-                      type="text"
-                      className="form-input"
-                      placeholder={
-                        scanTargetIdx !== null && bomMappings[scanTargetIdx]
-                          ? `Scan barcode for: ${bomMappings[scanTargetIdx].bomItemName}...`
-                          : "Scan material barcode / type ID (e.g. MT1001, 1002, 1001-A01) and press Enter..."
-                      }
-                      value={barcodeInput}
-                      onChange={(e) => setBarcodeInput(e.target.value)}
-                      style={{
-                        paddingLeft: '38px',
-                        height: '42px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        borderColor: scanTargetIdx !== null ? '#2563eb' : '#93c5fd',
-                        backgroundColor: '#ffffff',
-                        boxShadow: scanTargetIdx !== null ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : 'none'
-                      }}
-                      disabled={!selectedDesign}
-                    />
-                    {barcodeInput && (
-                      <button
-                        type="button"
-                        onClick={() => setBarcodeInput('')}
-                        style={{
-                          position: 'absolute',
-                          right: '10px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: '#94a3b8'
-                        }}
-                      >
-                        <X size={16} />
-                      </button>
-                    )}
-                  </div>
-
-                  <button
-                    type="submit"
-                    className="btn btn-primary"
-                    style={{
-                      height: '42px',
-                      padding: '0 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      fontWeight: '700',
-                      fontSize: '13px',
-                      whiteSpace: 'nowrap'
-                    }}
-                    disabled={!selectedDesign || !barcodeInput.trim()}
-                  >
-                    <Scan size={16} />
-                    <span>Map Material</span>
-                  </button>
-
-                  {scanTargetIdx !== null && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => setScanTargetIdx(null)}
-                      style={{ height: '42px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
-                    >
-                      Clear Target
-                    </button>
-                  )}
-                </form>
-
-                {/* Scan Feedback Alert */}
-                {scanNotice && (
-                  <div style={{
-                    marginTop: '10px',
-                    padding: '8px 12px',
-                    borderRadius: '6px',
-                    fontSize: '12.5px',
-                    fontWeight: '600',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: scanNotice.type === 'success' ? '#ecfdf5' : '#fef2f2',
-                    color: scanNotice.type === 'success' ? '#065f46' : '#991b1b',
-                    border: `1px solid ${scanNotice.type === 'success' ? '#a7f3d0' : '#fecaca'}`
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      {scanNotice.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
-                      <span>{scanNotice.text}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setScanNotice(null)}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="custom-table-container" style={{ overflowX: 'auto', minHeight: '280px', width: '100%', WebkitOverflowScrolling: 'touch', paddingBottom: '8px' }}>
-                <table className="custom-table" style={{ fontSize: '13px', width: '100%', minWidth: '780px' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ width: '36px', textAlign: 'center', padding: '10px 8px' }}>
-                        <input
-                          type="checkbox"
-                          checked={computedItems.length > 0 && computedItems.filter(item => !item.alreadyIssued).every(item => item.issued)}
-                          onChange={(e) => {
-                            const allChecked = e.target.checked;
-                            const updated = bomMappings.map(m => {
-                              if (m.alreadyIssued) return m;
-                              return { ...m, issued: allChecked };
-                            });
-                            setBomMappings(updated);
-                          }}
-                          style={{ cursor: 'pointer', width: '15px', height: '15px' }}
-                          title="Select / Deselect All Components"
-                        />
-                      </th>
-                      <th style={{ width: '140px', padding: '10px 8px' }}>BOM Component</th>
-                      <th style={{ minWidth: '240px', maxWidth: '300px', padding: '10px 8px' }}>Inventory Item Map</th>
-
-                      <th style={{ minWidth: '100px', padding: '10px 8px' }}>Description</th>
-                      <th style={{ textAlign: 'center', width: '110px', padding: '10px 8px' }}>Total Needed</th>
-                      <th style={{ textAlign: 'center', width: '95px', padding: '10px 8px' }}>Current Stock</th>
-                      <th style={{ textAlign: 'center', width: '110px', padding: '10px 8px' }}>After Issue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {computedItems.map((item, idx) => {
-                      const afterIssue = item.issued
-                        ? Math.round((item.currentStock - item.totalRequired) * 100) / 100
-                        : item.currentStock;
-                      const isShortage = item.issued && afterIssue < 0;
-                      const isTargeted = scanTargetIdx === idx;
-
-                      return (
-                        <tr key={idx} style={{
-                          opacity: item.issued && !item.alreadyIssued ? 1 : 0.6,
-                          backgroundColor: isTargeted
-                            ? 'rgba(37, 99, 235, 0.08)'
-                            : (item.issued && !item.alreadyIssued)
-                            ? 'transparent'
-                            : 'var(--bg-primary)',
-                          outline: isTargeted ? '2px solid #2563eb' : 'none',
-                          transition: 'opacity 0.2s, background-color 0.2s',
-                          color: item.alreadyIssued ? 'var(--text-muted)' : 'inherit'
-                        }}>
-                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
-                            <input
-                              type="checkbox"
-                              checked={!!item.issued}
-                              onChange={(e) => handleMappingChange(idx, 'issued', e.target.checked)}
-                              disabled={item.alreadyIssued}
-                              style={{ cursor: item.alreadyIssued ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
-                            />
-                          </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              <strong style={{
-                                textDecoration: (item.alreadyIssued || !item.issued) ? 'line-through' : 'none',
-                                color: (item.alreadyIssued || !item.issued) ? 'var(--text-muted)' : 'inherit'
-                              }}>
-                                {item.bomItemName}
-                              </strong>
-                              {item.alreadyIssued && (
-                                <div style={{ marginTop: '2px' }}>
-                                  <span className="status-badge verified" style={{ fontSize: '9px', padding: '1px 4px', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'inline-block' }}>
-                                    Issued
-                                  </span>
-                                </div>
-                              )}
-                              {isTargeted && (
-                                <div style={{ marginTop: '2px' }}>
-                                  <span style={{ fontSize: '10px', padding: '1px 5px', backgroundColor: '#dbeafe', color: '#1d4ed8', borderRadius: '4px', fontWeight: '700' }}>
-                                    🎯 Scanning Target
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                          <td style={{ padding: '10px 8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <div style={{ flex: 1 }}>
-                                <SearchableMaterialSelect
-                                  materials={materials}
-                                  value={item.materialId}
-                                  onChange={(val) => handleMappingChange(idx, 'materialId', val)}
-                                  disabled={!item.issued || item.alreadyIssued}
-                                  hasError={!item.materialId && item.issued && !item.alreadyIssued}
-                                  brandHint={selectedDesign?.brand || ''}
-                                />
-                              </div>
-                              {!item.alreadyIssued && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setScanTargetIdx(isTargeted ? null : idx);
-                                    if (!isTargeted && barcodeInputRef.current) {
-                                      barcodeInputRef.current.focus();
-                                    }
-                                  }}
-                                  className="btn"
-                                  style={{
-                                    padding: '5px 8px',
-                                    fontSize: '11px',
-                                    fontWeight: '700',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                    backgroundColor: isTargeted ? '#2563eb' : '#f1f5f9',
-                                    color: isTargeted ? '#ffffff' : '#334155',
-                                    border: isTargeted ? '1px solid #1d4ed8' : '1px solid #cbd5e1',
-                                    borderRadius: '6px',
-                                    cursor: 'pointer',
-                                    flexShrink: 0
-                                  }}
-                                  title="Scan material barcode specifically for this BOM component"
-                                >
-                                  <Scan size={12} />
-                                  <span>{isTargeted ? 'Active' : 'Scan'}</span>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-
-                          <td style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '10px 8px' }}>
-                            {item.bomItemDetail || '—'}
-                          </td>
-                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}>
-                              <input
-                                type="number"
-                                step="any"
-                                min="0"
-                                className="form-input"
-                                style={{ height: '30px', width: '75px', padding: '4px', textAlign: 'center', display: 'inline-block', fontSize: '12px', fontWeight: 'bold' }}
-                                value={item.totalRequired}
-                                onChange={(e) => handleMappingChange(idx, 'totalRequired', e.target.value)}
-                                disabled={!item.issued || item.alreadyIssued}
-                              />
-                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.unit}</span>
-                            </div>
-                          </td>
-                          <td style={{ textAlign: 'center', fontWeight: '500', color: (item.issued && !item.alreadyIssued) ? 'inherit' : 'var(--text-muted)', padding: '10px 8px' }}>
-                            {item.currentStock} {item.unit}
-                          </td>
-                          <td style={{ textAlign: 'center', padding: '10px 8px' }}>
-                            {item.alreadyIssued ? (
-                              <span className="status-badge verified" style={{ backgroundColor: 'var(--success-light)', color: 'var(--success)', fontWeight: 'bold' }}>
-                                Already Issued
-                              </span>
-                            ) : item.issued ? (
-                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '4px', verticalAlign: 'middle' }}>
-                                <span
-                                  className={`status-badge ${isShortage ? 'rejected' : 'verified'}`}
-                                  style={{
-                                    display: 'inline-flex',
-                                    gap: '4px',
-                                    alignItems: 'center',
-                                    fontWeight: 'bold'
-                                  }}
-                                >
-                                  {isShortage
-                                    ? `${afterIssue} ${item.unit} (Short)`
-                                    : `${afterIssue} ${item.unit}`
-                                  }
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="status-badge" style={{ backgroundColor: 'var(--border-color)', color: 'var(--text-muted)', fontWeight: 'bold' }}>
-                                Skipped
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Bottom Quick Issue Cart Action Bar */}
-              <div style={{
-                marginTop: '16px',
-                padding: '14px 18px',
-                backgroundColor: 'var(--bg-primary)',
-                borderRadius: '10px',
-                border: '1.5px solid var(--border-color)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '12px'
-              }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <ShoppingCart size={18} style={{ color: '#2563eb' }} />
-                    <strong style={{ fontSize: '14px' }}>
-                      Ready to Issue: {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Materials Mapped
-                    </strong>
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Production batch of <strong>{pieces} garment pieces</strong> &bull; Issuer: <strong>{personName || 'Store'}</strong> &bull; Receiver: <strong>{receiverName || 'Not Assigned'}</strong>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={(e) => handleSubmit(e)}
-                  className="btn"
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '11px 22px',
-                    fontWeight: '800',
-                    fontSize: '14px',
-                    borderRadius: '8px',
-                    cursor: (hasShortage || isSelectedDesignAlreadyIssued) ? 'not-allowed' : 'pointer',
-                    border: 'none',
-                    backgroundColor: (hasShortage || isSelectedDesignAlreadyIssued) ? '#94a3b8' : '#2563eb',
-                    color: '#ffffff',
-                    boxShadow: (hasShortage || isSelectedDesignAlreadyIssued) ? 'none' : '0 4px 12px rgba(37, 99, 235, 0.3)'
-                  }}
-                  disabled={hasShortage || isSelectedDesignAlreadyIssued}
-                >
-                  <Send size={16} />
-                  <span>Issue Materials for Batch ({pieces} Pcs)</span>
-                </button>
-              </div>
-
+        <form onSubmit={handleSubmit}>
+          {formError && (
+            <div style={{
+              color: 'var(--danger)',
+              fontSize: '13px',
+              fontWeight: '600',
+              marginBottom: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              backgroundColor: 'var(--danger-light)',
+              borderRadius: '6px',
+              border: '1px solid rgba(239, 68, 68, 0.2)'
+            }}>
+              <AlertTriangle size={16} />
+              <span>{formError}</span>
             </div>
           )}
+
+          {/* Setup Inputs Horizontal Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: '14px',
+            alignItems: 'start'
+          }}>
+            {/* Search & Select Approved Lot */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                Search &amp; Select Approved Lot
+              </label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="🔍 Type Lot ID, Brand, Category..."
+                  value={
+                    isFocused
+                      ? searchQuery
+                      : (selectedDesign
+                        ? `Lot ${selectedDesign.id} — ${selectedDesign.brand || 'No Brand'} (${selectedDesign.category})`
+                        : ''
+                      )
+                  }
+                  onFocus={() => {
+                    setIsFocused(true);
+                    setIsOpen(true);
+                    setSearchQuery('');
+                  }}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{ paddingRight: '32px', height: '38px', fontSize: '13px' }}
+                />
+
+                {/* Custom dropdown caret indicator */}
+                <div
+                  style={{
+                    position: 'absolute',
+                    right: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: '10px',
+                    pointerEvents: 'none'
+                  }}
+                >
+                  ▼
+                </div>
+
+                {isOpen && (
+                  <>
+                    {/* Transparent Click-Outside Overlay */}
+                    <div
+                      style={{
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        zIndex: 40,
+                        background: 'transparent'
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsOpen(false);
+                        setIsFocused(false);
+                      }}
+                    />
+
+                    {/* Scrollable floating dropdown menu list */}
+                    <div className="custom-dropdown-menu" style={{ maxHeight: '280px' }}>
+                      {filteredDesigns.length === 0 ? (
+                        <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>
+                          No matching lots found
+                        </div>
+                      ) : (
+                        filteredDesigns.map(design => {
+                          const lotStatus = getLotIssueStatus(design);
+                          const isSelectionDisabled = lotStatus === 'completed';
+                          const isSelected = String(design.id) === String(selectedDesignId);
+
+                          return (
+                            <div
+                              key={design.id}
+                              onClick={() => {
+                                if (!isSelectionDisabled) {
+                                  setSelectedDesignId(design.id);
+                                  setIsOpen(false);
+                                  setIsFocused(false);
+                                  setSearchQuery('');
+                                }
+                              }}
+                              style={{
+                                padding: '10px 14px',
+                                fontSize: '13px',
+                                cursor: isSelectionDisabled ? 'not-allowed' : 'pointer',
+                                opacity: isSelectionDisabled ? 0.5 : 1,
+                                backgroundColor: isSelected
+                                  ? 'var(--accent-color)'
+                                  : 'transparent',
+                                color: isSelected ? '#ffffff' : 'var(--text-main)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                borderBottom: '1px solid var(--border-color)',
+                                transition: 'background-color 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelectionDisabled && !isSelected) {
+                                  e.currentTarget.style.backgroundColor = 'var(--bg-primary)';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelectionDisabled && !isSelected) {
+                                  e.currentTarget.style.backgroundColor = 'transparent';
+                                }
+                              }}
+                            >
+                              <div>
+                                <strong>Lot {design.id}</strong>
+                                <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.8 }}>
+                                  ({design.category}) &mdash; {design.brand || 'No Brand'}
+                                </span>
+                              </div>
+                              <>
+                                {lotStatus === 'completed' && (
+                                  <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                    Already Issued
+                                  </span>
+                                )}
+                                {lotStatus === 'in_process' && (
+                                  <span className="status-badge pending" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--warning-light)', color: 'var(--warning)' }}>
+                                    In Process
+                                  </span>
+                                )}
+                                {lotStatus === 'ready' && (
+                                  <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px' }}>
+                                    Ready
+                                  </span>
+                                )}
+                              </>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Garment Pieces to Manufacture */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                Garment Pieces to Manufacture
+              </label>
+              <input
+                type="number"
+                className="form-input"
+                min="1"
+                placeholder={isLoadingPieces ? "Fetching..." : "e.g. 500"}
+                value={isLoadingPieces ? "" : pieces}
+                onChange={(e) => setPieces(Math.max(1, Number(e.target.value)))}
+                disabled={isSelectedDesignAlreadyIssued || isLoadingPieces}
+                style={{ height: '38px', fontSize: '13px' }}
+                required
+              />
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '3px' }}>
+                {isLoadingPieces ? "Retrieving cutting logs..." : "Scales BOM quantities automatically."}
+              </span>
+            </div>
+
+            {/* Person Name (Issuer) */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                <span>Person Name (Issuer)</span>
+                <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. John Doe"
+                value={personName}
+                onChange={(e) => setPersonName(e.target.value)}
+                disabled={isSelectedDesignAlreadyIssued}
+                style={{ height: '38px', fontSize: '13px' }}
+                required
+              />
+            </div>
+
+            {/* Received Name (Receiver Person) */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                <span>Received Name (Receiver)</span>
+                <span style={{ color: 'var(--danger)' }}>*</span>
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Masterji / Tailor / Line Incharge"
+                value={receiverName}
+                onChange={(e) => setReceiverName(e.target.value)}
+                disabled={isSelectedDesignAlreadyIssued}
+                style={{ height: '38px', fontSize: '13px' }}
+                required
+              />
+            </div>
+
+            {/* Receiver Department / Line */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                Receiver Department / Line
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Cutting / Stitching / Line 1"
+                value={receiverDept}
+                onChange={(e) => setReceiverDept(e.target.value)}
+                disabled={isSelectedDesignAlreadyIssued}
+                style={{ height: '38px', fontSize: '13px' }}
+              />
+            </div>
+          </div>
+
+          {/* Warning alerts placed cleanly below inputs */}
+          {isSelectedDesignAlreadyIssued && (
+            <div style={{
+              color: 'var(--danger)',
+              fontSize: '13px',
+              fontWeight: '600',
+              marginTop: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '8px 12px',
+              backgroundColor: 'var(--danger-light)',
+              borderRadius: '6px',
+              border: '1px solid rgba(239, 68, 68, 0.2)'
+            }}>
+              <AlertTriangle size={16} />
+              <span>Materials already issued for Lot {selectedDesignId}. First-time issue is completed. For additional materials, please use the &quot;Extra Material Issue&quot; tab.</span>
+            </div>
+          )}
+        </form>
+      </div>
+
+      {/* ── MAIN FULL-WIDTH SECTION: CALCULATED MATERIAL REQUIREMENTS ──────── */}
+      <div className="panel" style={{ minHeight: '320px', minWidth: 0, padding: '20px 24px', marginBottom: '24px' }}>
+        <div className="panel-header" style={{ marginBottom: '16px' }}>
+          <h3 className="panel-title" style={{ fontSize: '16px' }}>
+            <Layers size={19} className="text-accent" />
+            Calculated Material Requirements
+          </h3>
         </div>
+
+        {!selectedDesign ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>
+            <HelpCircle size={48} strokeWidth={1} style={{ marginBottom: '12px' }} />
+            <p style={{ fontSize: '14px', fontWeight: '500' }}>Select an approved design lot in the batch setup above to analyze production material needs.</p>
+          </div>
+        ) : isLoadingPieces ? (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>
+            <div className="spinner-loader" style={{
+              border: '4px solid rgba(0, 0, 0, 0.1)',
+              width: '36px',
+              height: '36px',
+              borderRadius: '50%',
+              borderLeftColor: 'var(--accent-color)',
+              animation: 'spin 1.2s linear infinite',
+              marginBottom: '16px'
+            }} />
+            <p style={{ fontSize: '14px', fontWeight: '500' }}>Analyzing production specifications & cutting reports...</p>
+          </div>
+        ) : (
+          <div>
+            {/* Garment Item & Primary Fabric Bar (Matching Image 1) */}
+            <div style={{ marginBottom: '16px', padding: '12px 18px', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                <span><strong>Garment Item:</strong> {selectedDesign.category}</span>
+                <span><strong>Primary Fabric:</strong> {selectedDesign.fabricType || 'N/A'}</span>
+                {selectedDesign.brand && (
+                  <span><strong>Brand:</strong> {selectedDesign.brand}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Informative Tip Box explaining calculations (Matching Image 1) */}
+            <div style={{
+              marginBottom: '16px',
+              padding: '12px 18px',
+              backgroundColor: 'var(--accent-light)',
+              borderRadius: '8px',
+              borderLeft: '4px solid var(--accent-color)',
+              fontSize: '12.5px',
+              lineHeight: '1.6',
+              color: 'var(--text-main)'
+            }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                <HelpCircle size={18} style={{ color: 'var(--accent-color)', marginTop: '2px', flexShrink: 0 }} />
+                <div>
+                  <strong>Calculation Guide:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', paddingLeft: '0' }}>
+                    <li><strong>Total Needed</strong> = Garment Pieces &times; Qty/Piece. Feel free to edit either field; the other will recalculate automatically!</li>
+                    <li><strong>Current Stock</strong> is the available raw material stock in your catalog.</li>
+                    <li><strong>After Issue</strong> is your remaining inventory balance (<code>Current Stock &minus; Total Needed</code>). If it is negative, a shortage is flagged in red.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            {/* Barcode Quick-Scan & Mapping Box (New Feature with Full Width) */}
+            <div style={{
+              marginBottom: '18px',
+              padding: '14px 18px',
+              background: 'linear-gradient(135deg, #f0fdf4 0%, #e0f2fe 100%)',
+              borderRadius: '10px',
+              border: '1.5px solid #93c5fd',
+              boxShadow: '0 2px 8px rgba(37, 99, 235, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px', marginBottom: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    backgroundColor: '#2563eb',
+                    color: '#ffffff',
+                    padding: '7px',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 4px rgba(37, 99, 235, 0.3)'
+                  }}>
+                    <Scan size={18} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>⚡ Barcode Material Scanner &amp; Auto-Mapping</span>
+                      <span style={{ fontSize: '10px', backgroundColor: '#dbeafe', color: '#1d4ed8', padding: '2px 6px', borderRadius: '4px', textTransform: 'uppercase', fontWeight: '700' }}>
+                        Physical Gun / Keyboard
+                      </span>
+                    </h4>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#475569' }}>
+                      {scanTargetIdx !== null && bomMappings[scanTargetIdx] ? (
+                        <span style={{ color: '#2563eb', fontWeight: '800' }}>
+                          🎯 Target Focused: Scanning will map directly to &quot;{bomMappings[scanTargetIdx].bomItemName}&quot;
+                        </span>
+                      ) : (
+                        <span>Scan any material barcode (e.g. <code>MT1001</code>, <code>1001-A01</code>) to auto-map into BOM component rows.</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cart / Ready Status Badge */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '6px 12px',
+                    backgroundColor: '#ffffff',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '12.5px',
+                    fontWeight: '700',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                  }}>
+                    <ShoppingCart size={16} style={{ color: '#2563eb' }} />
+                    <span>Issue Cart:</span>
+                    <span style={{
+                      backgroundColor: computedItems.filter(i => i.issued && i.materialId).length === computedItems.filter(i => i.issued).length && computedItems.length > 0 ? '#10b981' : '#f59e0b',
+                      color: '#ffffff',
+                      padding: '2px 9px',
+                      borderRadius: '12px',
+                      fontSize: '11.5px',
+                      fontWeight: '800'
+                    }}>
+                      {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Mapped
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleBarcodeScan} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: 1 }}>
+                  <Barcode size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                  <input
+                    ref={barcodeInputRef}
+                    type="text"
+                    className="form-input"
+                    placeholder={
+                      scanTargetIdx !== null && bomMappings[scanTargetIdx]
+                        ? `Scan barcode for: ${bomMappings[scanTargetIdx].bomItemName}...`
+                        : "Scan material barcode / type ID (e.g. MT1001, 1002, 1001-A01) and press Enter..."
+                    }
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    style={{
+                      paddingLeft: '38px',
+                      height: '42px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      borderColor: scanTargetIdx !== null ? '#2563eb' : '#93c5fd',
+                      backgroundColor: '#ffffff',
+                      boxShadow: scanTargetIdx !== null ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : 'none'
+                    }}
+                    disabled={!selectedDesign}
+                  />
+                  {barcodeInput && (
+                    <button
+                      type="button"
+                      onClick={() => setBarcodeInput('')}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#94a3b8'
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  style={{
+                    height: '42px',
+                    padding: '0 18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontWeight: '700',
+                    fontSize: '13px',
+                    whiteSpace: 'nowrap'
+                  }}
+                  disabled={!selectedDesign || !barcodeInput.trim()}
+                >
+                  <Scan size={16} />
+                  <span>Map Material</span>
+                </button>
+
+                {scanTargetIdx !== null && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setScanTargetIdx(null)}
+                    style={{ height: '42px', padding: '0 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                  >
+                    Clear Target
+                  </button>
+                )}
+              </form>
+
+              {/* Scan Feedback Alert */}
+              {scanNotice && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: '600',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  backgroundColor: scanNotice.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                  color: scanNotice.type === 'success' ? '#065f46' : '#991b1b',
+                  border: `1px solid ${scanNotice.type === 'success' ? '#a7f3d0' : '#fecaca'}`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {scanNotice.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
+                    <span>{scanNotice.text}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setScanNotice(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: 0 }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Full-Width Spacious BOM Component & Inventory Item Map Table (Matching Image 1) */}
+            <div className="custom-table-container" style={{ width: '100%', paddingBottom: '6px' }}>
+              <table className="custom-table" style={{ fontSize: '13.5px', width: '100%', tableLayout: 'auto' }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '38px', textAlign: 'center', padding: '12px 8px' }}>
+                      <input
+                        type="checkbox"
+                        checked={computedItems.length > 0 && computedItems.filter(item => !item.alreadyIssued).every(item => item.issued)}
+                        onChange={(e) => {
+                          const allChecked = e.target.checked;
+                          const updated = bomMappings.map(m => {
+                            if (m.alreadyIssued) return m;
+                            return { ...m, issued: allChecked };
+                          });
+                          setBomMappings(updated);
+                        }}
+                        style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                        title="Select / Deselect All Components"
+                      />
+                    </th>
+                    <th style={{ width: '180px', padding: '12px 10px', fontSize: '13px' }}>BOM Component</th>
+                    <th style={{ minWidth: '320px', padding: '12px 10px', fontSize: '13px' }}>Inventory Item Map</th>
+                    <th style={{ minWidth: '160px', padding: '12px 10px', fontSize: '13px' }}>Description</th>
+                    <th style={{ textAlign: 'center', width: '130px', padding: '12px 10px', fontSize: '13px' }}>Total Needed</th>
+                    <th style={{ textAlign: 'center', width: '120px', padding: '12px 10px', fontSize: '13px' }}>Current Stock</th>
+                    <th style={{ textAlign: 'center', width: '140px', padding: '12px 10px', fontSize: '13px' }}>After Issue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {computedItems.map((item, idx) => {
+                    const afterIssue = item.issued
+                      ? Math.round((item.currentStock - item.totalRequired) * 100) / 100
+                      : item.currentStock;
+                    const isShortage = item.issued && afterIssue < 0;
+                    const isTargeted = scanTargetIdx === idx;
+
+                    return (
+                      <tr key={idx} style={{
+                        opacity: item.issued && !item.alreadyIssued ? 1 : 0.6,
+                        backgroundColor: isTargeted
+                          ? 'rgba(37, 99, 235, 0.08)'
+                          : (item.issued && !item.alreadyIssued)
+                          ? 'transparent'
+                          : 'var(--bg-primary)',
+                        outline: isTargeted ? '2px solid #2563eb' : 'none',
+                        transition: 'opacity 0.2s, background-color 0.2s',
+                        color: item.alreadyIssued ? 'var(--text-muted)' : 'inherit'
+                      }}>
+                        <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!item.issued}
+                            onChange={(e) => handleMappingChange(idx, 'issued', e.target.checked)}
+                            disabled={item.alreadyIssued}
+                            style={{ cursor: item.alreadyIssued ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
+                          />
+                        </td>
+                        <td style={{ padding: '12px 10px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <strong style={{
+                              fontSize: '13.5px',
+                              textDecoration: (item.alreadyIssued || !item.issued) ? 'line-through' : 'none',
+                              color: (item.alreadyIssued || !item.issued) ? 'var(--text-muted)' : 'inherit'
+                            }}>
+                              {item.bomItemName}
+                            </strong>
+                            {item.alreadyIssued && (
+                              <div style={{ marginTop: '3px' }}>
+                                <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'inline-block' }}>
+                                  Issued
+                                </span>
+                              </div>
+                            )}
+                            {isTargeted && (
+                              <div style={{ marginTop: '3px' }}>
+                                <span style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: '#dbeafe', color: '#1d4ed8', borderRadius: '4px', fontWeight: '700' }}>
+                                  🎯 Scanning Target
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '12px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ flex: 1 }}>
+                              <SearchableMaterialSelect
+                                materials={materials}
+                                value={item.materialId}
+                                onChange={(val) => handleMappingChange(idx, 'materialId', val)}
+                                disabled={!item.issued || item.alreadyIssued}
+                                hasError={!item.materialId && item.issued && !item.alreadyIssued}
+                                brandHint={selectedDesign?.brand || ''}
+                              />
+                            </div>
+                            {!item.alreadyIssued && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setScanTargetIdx(isTargeted ? null : idx);
+                                  if (!isTargeted && barcodeInputRef.current) {
+                                    barcodeInputRef.current.focus();
+                                  }
+                                }}
+                                className="btn"
+                                style={{
+                                  padding: '6px 10px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '700',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  backgroundColor: isTargeted ? '#2563eb' : '#f1f5f9',
+                                  color: isTargeted ? '#ffffff' : '#334155',
+                                  border: isTargeted ? '1px solid #1d4ed8' : '1px solid #cbd5e1',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  flexShrink: 0
+                                }}
+                                title="Scan material barcode specifically for this BOM component"
+                              >
+                                <Scan size={13} />
+                                <span>{isTargeted ? 'Active' : 'Scan'}</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+
+                        <td style={{ color: 'var(--text-muted)', fontSize: '13px', padding: '12px 10px' }}>
+                          {item.bomItemDetail || '—'}
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '12px 10px' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', justifyContent: 'center' }}>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              className="form-input"
+                              style={{ height: '32px', width: '75px', padding: '4px', textAlign: 'center', display: 'inline-block', fontSize: '13px', fontWeight: 'bold' }}
+                              value={item.totalRequired}
+                              onChange={(e) => handleMappingChange(idx, 'totalRequired', e.target.value)}
+                              disabled={!item.issued || item.alreadyIssued}
+                            />
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{item.unit}</span>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: '600', color: (item.issued && !item.alreadyIssued) ? 'inherit' : 'var(--text-muted)', padding: '12px 10px', fontSize: '13px' }}>
+                          {item.currentStock} {item.unit}
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '12px 10px' }}>
+                          {item.alreadyIssued ? (
+                            <span className="status-badge verified" style={{ backgroundColor: 'var(--success-light)', color: 'var(--success)', fontWeight: 'bold', fontSize: '12px', padding: '3px 8px' }}>
+                              Already Issued
+                            </span>
+                          ) : item.issued ? (
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px', verticalAlign: 'middle' }}>
+                              <span
+                                className={`status-badge ${isShortage ? 'rejected' : 'verified'}`}
+                                style={{
+                                  display: 'inline-flex',
+                                  gap: '4px',
+                                  alignItems: 'center',
+                                  fontWeight: 'bold',
+                                  fontSize: '12px',
+                                  padding: '3px 8px'
+                                }}
+                              >
+                                {isShortage
+                                  ? `${afterIssue} ${item.unit} (Short)`
+                                  : `${afterIssue} ${item.unit}`
+                                }
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="status-badge" style={{ backgroundColor: 'var(--border-color)', color: 'var(--text-muted)', fontWeight: 'bold', fontSize: '12px', padding: '3px 8px' }}>
+                              Skipped
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Bottom Quick Issue Cart Action Bar */}
+            <div style={{
+              marginTop: '20px',
+              padding: '16px 20px',
+              backgroundColor: 'var(--bg-primary)',
+              borderRadius: '10px',
+              border: '1.5px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '14px'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ShoppingCart size={20} style={{ color: '#2563eb' }} />
+                  <strong style={{ fontSize: '15px' }}>
+                    Ready to Issue: {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Materials Mapped
+                  </strong>
+                </div>
+                <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                  Production batch of <strong>{pieces} garment pieces</strong> &bull; Issuer: <strong>{personName || 'Store'}</strong> &bull; Receiver: <strong>{receiverName || 'Not Assigned'}</strong> &bull; Dept: <strong>{receiverDept || 'Cutting'}</strong>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={(e) => handleSubmit(e)}
+                className="btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '12px 24px',
+                  fontWeight: '800',
+                  fontSize: '14px',
+                  borderRadius: '8px',
+                  cursor: (hasShortage || isSelectedDesignAlreadyIssued) ? 'not-allowed' : 'pointer',
+                  border: 'none',
+                  backgroundColor: (hasShortage || isSelectedDesignAlreadyIssued) ? '#94a3b8' : '#2563eb',
+                  color: '#ffffff',
+                  boxShadow: (hasShortage || isSelectedDesignAlreadyIssued) ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.35)',
+                  transition: 'background-color 0.2s, transform 0.1s'
+                }}
+                disabled={hasShortage || isSelectedDesignAlreadyIssued}
+              >
+                <Send size={17} />
+                <span>Issue Materials for Batch ({pieces} Pcs)</span>
+              </button>
+            </div>
+
+          </div>
+        )}
       </div>
 
       {/* Toggle button for Material Issue Logs Section */}

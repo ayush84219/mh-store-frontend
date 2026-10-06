@@ -146,11 +146,11 @@ function generateNextPoNumber(existingPoNumbers) {
   if (Array.isArray(existingPoNumbers)) {
     existingPoNumbers.forEach(poStr => {
       if (poStr) {
-        const match = poStr.match(/\d+/);
+        const match = String(poStr).match(/PO-?(\d+)/i) || String(poStr).match(/\d+/);
         if (match) {
-          const num = parseInt(match[0], 10);
-          // Only consider numbers in the 11xxx series range
-          if (num >= 11000 && num < 20000) {
+          const num = parseInt(match[1] || match[0], 10);
+          // Strictly consider numbers in the 11000 series range (11000 to 11999)
+          if (num >= 11000 && num < 12000) {
             parsedNumbers.push(num);
           }
         }
