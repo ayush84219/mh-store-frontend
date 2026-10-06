@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, Layers, X,
-  Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table
+  Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
+  ShieldCheck, Lock, ExternalLink, Ruler
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
+import SmartSelectWithManual from './SmartSelectWithManual';
 
 export default function ElasticIssueView({
   currencySymbol = '₹',
@@ -24,8 +26,14 @@ export default function ElasticIssueView({
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
 
+  // BOM & Design Verification States
+  const [designs, setDesigns] = useState([]);
+  const [bomStatus, setBomStatus] = useState('idle'); // 'idle' | 'approved' | 'pending' | 'not_created' | 'rejected'
+  const [bomDesign, setBomDesign] = useState(null);
+  const [loadingDesigns, setLoadingDesigns] = useState(false);
+
   // Step 1.5: Automatic Size to Meter Backend Calculation State & Switch Mode
-  const [issuePcs, setIssuePcs] = useState(600);
+  const [issuePcs, setIssuePcs] = useState(0);
   const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'both'
   const [elasticSizeInput, setElasticSizeInput] = useState('50');
   const [elasticUnit, setElasticUnit] = useState('inch'); // 'inch' or 'cm'
@@ -34,9 +42,9 @@ export default function ElasticIssueView({
   const [calcResult, setCalcResult] = useState({
     elasticPerPcMtr: 1.27,
     tapePerPcMtr: 0.62,
-    totalElasticMtr: 762,
-    totalTapeMtr: 372,
-    recommendedRolls: 31,
+    totalElasticMtr: 0,
+    totalTapeMtr: 0,
+    recommendedRolls: 0,
     elasticFormula: '50 Inch × 0.0254 = 1.27 m',
     tapeFormula: '62 CM / 100 = 0.62 m',
     formulaExplanation: '50 Inch × 0.0254 = 1.27 m | 62 CM / 100 = 0.62 m'
@@ -44,8 +52,8 @@ export default function ElasticIssueView({
   const [calculating, setCalculating] = useState(false);
 
   // Step 2: Elastic & Tape Issue Details
-  const [rollCount, setRollCount] = useState(31);
-  const [tapeRollCount, setTapeRollCount] = useState(15);
+  const [rollCount, setRollCount] = useState(0);
+  const [tapeRollCount, setTapeRollCount] = useState(0);
   const [elasticWidth, setElasticWidth] = useState('1 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
   const [tapeWidth, setTapeWidth] = useState('0.5 Inch (Standard)');
@@ -77,6 +85,29 @@ export default function ElasticIssueView({
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Fetch designs to verify BOM existence and approval status
+  const fetchDesigns = async () => {
+    try {
+      setLoadingDesigns(true);
+      const res = await fetch(`${getBackendUrl()}/api/designs`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDesigns(data);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch designs in ElasticIssueView:', e);
+    } finally {
+      setLoadingDesigns(false);
+    }
+  };
+
+  // Computed: List of all designs with Approved BOMs
+  const approvedDesignsList = useMemo(() => {
+    return (designs || []).filter(d => String(d.status || '').toLowerCase().trim() === 'approved');
+  }, [designs]);
+
   // Fetch next Issue Slip Number from backend
   const fetchNextIssueSlipNo = async () => {
     try {
@@ -99,6 +130,7 @@ export default function ElasticIssueView({
   useEffect(() => {
     fetchNextIssueSlipNo();
     loadIssueHistory();
+    fetchDesigns();
   }, []);
 
   // Auto-search lot with debounce as user types
@@ -302,16 +334,61 @@ export default function ElasticIssueView({
     }
   };
 
+  // Verify BOM existence and approval status for a specific lot
+  const verifyBOMStatus = async (lotQuery) => {
+    try {
+      let currentDesigns = designs;
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/designs`);
+        if (res.ok) {
+          const fresh = await res.json();
+          if (Array.isArray(fresh)) {
+            setDesigns(fresh);
+            currentDesigns = fresh;
+          }
+        }
+      } catch (_) {}
+
+      const cleanQ = String(lotQuery || '').trim().toLowerCase();
+      const matched = (currentDesigns || []).find(d => 
+        String(d.id || '').trim().toLowerCase() === cleanQ ||
+        String(d.lot_no || '').trim().toLowerCase() === cleanQ
+      );
+
+      if (!matched) {
+        setBomStatus('not_created');
+        setBomDesign(null);
+      } else {
+        setBomDesign(matched);
+        const st = String(matched.status || '').trim().toLowerCase();
+        if (st === 'approved') {
+          setBomStatus('approved');
+        } else if (st === 'rejected') {
+          setBomStatus('rejected');
+        } else {
+          setBomStatus('pending');
+        }
+      }
+    } catch (e) {
+      console.warn('Error verifying BOM status:', e);
+    }
+  };
+
   // Search Lot Details
   const handleSearchLot = async (targetLot = null) => {
     const lotToQuery = (targetLot || searchLotInput || '').trim();
     if (!lotToQuery) {
       setLotError('Please enter a Lot Number to search.');
+      setBomStatus('idle');
+      setBomDesign(null);
       return;
     }
 
     setSearchingLot(true);
     setLotError('');
+
+    // Check BOM status in parallel
+    verifyBOMStatus(lotToQuery);
 
     try {
       const cleanLot = encodeURIComponent(lotToQuery);
@@ -343,20 +420,12 @@ export default function ElasticIssueView({
         return updated.slice(0, 6);
       });
 
-      showToast(`Lot ${data.lotNo || lotToQuery} details loaded successfully.`);
+      showToast(`Lot ${data.lotNo || lotToQuery} details loaded.`);
     } catch (err) {
       console.warn('Lot search warning:', err);
       setLotError(err.message || 'Lot details not found in Google Sheets / Cutting Matrix.');
-      setLotDetails({
-        lotNo: lotToQuery,
-        style: 'Standard Garment',
-        brand: 'Mohit Hosiery',
-        garmentType: 'Pants / Tracksuit',
-        fabric: 'Cotton / Poly',
-        quantity: 600,
-        shade: 'Default'
-      });
-      setIssuePcs(600);
+      setLotDetails(null);
+      setIssuePcs(0);
     } finally {
       setSearchingLot(false);
     }
@@ -756,10 +825,41 @@ export default function ElasticIssueView({
     return doc;
   };
 
+  // Navigation helpers to BOM Creation & Approval Queue
+  const handleCreateBOM = (targetLot = null) => {
+    const lot = targetLot || lotDetails?.lotNo || searchLotInput.trim();
+    if (lot) {
+      setPrefilledLotNo(lot);
+    }
+    if (typeof onNavigate === 'function') {
+      onNavigate('design');
+    }
+  };
+
+  const handleViewApprovalQueue = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('approval_queue');
+    }
+  };
+
   // ── Generate Professional Original Issue Bill / PO ─────────────────────────────
   const generateElasticIssueBill = async () => {
     if (!lotDetails && !searchLotInput) {
       showToast('Please enter or search a Lot Number first.', 'error');
+      return;
+    }
+
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED
+    if (bomStatus !== 'approved') {
+      if (bomStatus === 'not_created') {
+        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Please create BOM in Design View first.', 'error');
+      } else if (bomStatus === 'pending') {
+        showToast('Workflow Blocked: BOM is Pending Approval! It must be approved by Admin in the Approval Queue before issuing Elastic.', 'error');
+      } else if (bomStatus === 'rejected') {
+        showToast('Workflow Blocked: BOM was rejected by Admin! Please revise and get the BOM approved first.', 'error');
+      } else {
+        showToast('Workflow Blocked: BOM must be created and Approved before Elastic materials can be issued.', 'error');
+      }
       return;
     }
 
@@ -1094,9 +1194,52 @@ export default function ElasticIssueView({
               </button>
             </div>
 
+            {/* Approved BOM Lots Quick Selector */}
+            {approvedDesignsList.length > 0 && (
+              <div style={{
+                marginTop: '12px',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                background: 'rgba(5, 150, 105, 0.06)',
+                border: '1px solid rgba(5, 150, 105, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap'
+              }}>
+                <span style={{ fontSize: '11.5px', color: '#047857', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <ShieldCheck size={14} /> Ready to Issue (Approved BOM Lots):
+                </span>
+                {approvedDesignsList.slice(0, 8).map(d => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => { setSearchLotInput(d.id); handleSearchLot(d.id); }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #86efac',
+                      background: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#059669' : '#ffffff',
+                      color: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#ffffff' : '#047857',
+                      fontSize: '11px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}
+                  >
+                    <span>LOT #{d.id}</span>
+                    <span style={{ opacity: 0.8, fontSize: '10px' }}>({d.style || 'Garment'})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Recent suggestions */}
             {recentLots.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>Recent:</span>
                 {recentLots.map(l => (
                   <button
@@ -1134,7 +1277,7 @@ export default function ElasticIssueView({
             {/* LOT DETAILS DISPLAY CARD */}
             {lotDetails && (
               <div style={{
-                marginTop: '18px',
+                marginTop: '16px',
                 padding: '16px 20px',
                 borderRadius: '12px',
                 background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
@@ -1187,8 +1330,181 @@ export default function ElasticIssueView({
               </div>
             )}
 
-            {/* BACKEND CALCULATION & CONVERSION CARD */}
-            <div style={{
+            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY) */}
+            {(lotDetails || searchLotInput.trim().length >= 3) && (
+              <div style={{
+                marginTop: '14px',
+                padding: '16px 20px',
+                borderRadius: '12px',
+                border: bomStatus === 'approved'
+                  ? '1.5px solid #86efac'
+                  : bomStatus === 'pending'
+                    ? '1.5px solid #fcd34d'
+                    : '1.5px solid #fca5a5',
+                background: bomStatus === 'approved'
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'
+                  : bomStatus === 'pending'
+                    ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+                    : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {bomStatus === 'approved' ? (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)' }}>
+                        <ShieldCheck size={20} />
+                      </div>
+                    ) : bomStatus === 'pending' ? (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#d97706', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)' }}>
+                        <AlertTriangle size={20} />
+                      </div>
+                    ) : (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)' }}>
+                        <Lock size={20} />
+                      </div>
+                    )}
+
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h4 style={{
+                          margin: 0,
+                          fontSize: '14px',
+                          fontWeight: '800',
+                          color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
+                        }}>
+                          {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
+                          {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
+                          {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
+                          {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
+                          {bomStatus === 'idle' && 'Verifying BOM Status...'}
+                        </h4>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: '800',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
+                          color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
+                        }}>
+                          {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                        </span>
+                      </div>
+
+                      <p style={{
+                        margin: '3px 0 0 0',
+                        fontSize: '12px',
+                        color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
+                        fontWeight: '600',
+                        lineHeight: '1.4'
+                      }}>
+                        {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Elastic materials.`}
+                        {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Elastic materials can only be issued after approval.`}
+                        {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
+                        {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
+                        {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {bomStatus === 'not_created' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
+                      </button>
+                    )}
+
+                    {bomStatus === 'pending' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleViewApprovalQueue}
+                          style={{
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                            color: '#ffffff',
+                            fontSize: '12.5px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <ExternalLink size={15} /> Go to Approval Queue
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #f59e0b',
+                            background: '#ffffff',
+                            color: '#b45309',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          View/Edit BOM
+                        </button>
+                      </>
+                    )}
+
+                    {bomStatus === 'rejected' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: '#dc2626',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        Revise BOM in Design View
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* BACKEND CALCULATION & STEP 2 (ONLY SHOWN AFTER LOT IS ENTERED & BOM APPROVED) */}
+            {lotDetails && bomStatus === 'approved' && (
+              <>
+                {/* BACKEND CALCULATION & CONVERSION CARD */}
+                <div style={{
               marginTop: '18px',
               padding: '18px 20px',
               borderRadius: '14px',
@@ -1321,10 +1637,10 @@ export default function ElasticIssueView({
                         ELASTIC SIZE INPUT
                       </span>
                       <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Formula: {elasticUnit === 'cm' ? '÷ 100' : '× 0.0254'}
+                        Formula: {String(elasticUnit).toLowerCase() === 'cm' ? '÷ 100' : String(elasticUnit).toLowerCase() === 'mtr' ? '× 1' : String(elasticUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
                       </span>
                     </label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
                       <input
                         type="number"
                         step="any"
@@ -1333,23 +1649,28 @@ export default function ElasticIssueView({
                         onChange={(e) => setElasticSizeInput(e.target.value)}
                         placeholder="e.g. 50"
                         style={{
-                          flex: 1, padding: '10px 14px', borderRadius: '8px',
+                          width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
                           border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
                           color: '#0f172a', background: '#ffffff', outline: 'none'
                         }}
                       />
-                      <select
+                      <SmartSelectWithManual
                         value={elasticUnit}
-                        onChange={(e) => setElasticUnit(e.target.value)}
-                        style={{
-                          padding: '10px 14px', borderRadius: '8px',
-                          border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: '800',
-                          background: '#ffffff', color: '#0f172a', cursor: 'pointer'
-                        }}
-                      >
-                        <option value="inch">Inch</option>
-                        <option value="cm">CM</option>
-                      </select>
+                        onChange={setElasticUnit}
+                        options={[
+                          { label: 'Inch (×0.0254)', value: 'inch' },
+                          { label: 'CM (÷100)', value: 'cm' },
+                          { label: 'Mtr (×1)', value: 'mtr' },
+                          { label: 'Yard (×0.9144)', value: 'yard' },
+                          { label: 'MM (÷1000)', value: 'mm' }
+                        ]}
+                        placeholder="Unit"
+                        manualPlaceholder="e.g. inch"
+                        manualLabel="+ Manual Unit"
+                        unitMode={true}
+                        icon="ruler"
+                        theme="emerald"
+                      />
                     </div>
 
                     {/* Elastic Presets */}
@@ -1396,10 +1717,10 @@ export default function ElasticIssueView({
                         TAPE SIZE INPUT
                       </span>
                       <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Formula: {tapeUnit === 'cm' ? '÷ 100' : '× 0.0254'}
+                        Formula: {String(tapeUnit).toLowerCase() === 'cm' ? '÷ 100' : String(tapeUnit).toLowerCase() === 'mtr' ? '× 1' : String(tapeUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
                       </span>
                     </label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
                       <input
                         type="number"
                         step="any"
@@ -1408,23 +1729,28 @@ export default function ElasticIssueView({
                         onChange={(e) => setTapeSizeInput(e.target.value)}
                         placeholder="e.g. 62"
                         style={{
-                          flex: 1, padding: '10px 14px', borderRadius: '8px',
+                          width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
                           border: '1.5px solid #3b82f6', fontSize: '16px', fontWeight: '800',
                           color: '#0f172a', background: '#ffffff', outline: 'none'
                         }}
                       />
-                      <select
+                      <SmartSelectWithManual
                         value={tapeUnit}
-                        onChange={(e) => setTapeUnit(e.target.value)}
-                        style={{
-                          padding: '10px 14px', borderRadius: '8px',
-                          border: '1.5px solid #cbd5e1', fontSize: '13px', fontWeight: '800',
-                          background: '#ffffff', color: '#0f172a', cursor: 'pointer'
-                        }}
-                      >
-                        <option value="cm">CM</option>
-                        <option value="inch">Inch</option>
-                      </select>
+                        onChange={setTapeUnit}
+                        options={[
+                          { label: 'CM (÷100)', value: 'cm' },
+                          { label: 'Inch (×0.0254)', value: 'inch' },
+                          { label: 'Mtr (×1)', value: 'mtr' },
+                          { label: 'Yard (×0.9144)', value: 'yard' },
+                          { label: 'MM (÷1000)', value: 'mm' }
+                        ]}
+                        placeholder="Unit"
+                        manualPlaceholder="e.g. cm"
+                        manualLabel="+ Manual Unit"
+                        unitMode={true}
+                        icon="ruler"
+                        theme="blue"
+                      />
                     </div>
 
                     {/* Tape Presets */}
@@ -1656,19 +1982,19 @@ export default function ElasticIssueView({
                 {/* ISSUER NAME */}
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <User size={14} color="#059669" />
                     <span>Issuer Name (Store Staff / Prepared By):</span>
                   </label>
-                  <input
-                    type="text"
+                  <SmartSelectWithManual
                     value={issuerName}
-                    onChange={(e) => setIssuerName(e.target.value)}
-                    placeholder="Enter store staff name..."
-                    autoComplete="off"
-                    style={{
-                      width: '100%', padding: '9px 12px', borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                    }}
+                    onChange={setIssuerName}
+                    options={['PARAS', 'RASHMI', 'STORE STAFF', 'ADMIN', 'STORE INCHARGE']}
+                    placeholder="Select Issuer or + Manual Entry"
+                    manualPlaceholder="Type custom issuer name..."
+                    manualLabel="+ Manual Entry (Store Staff)"
+                    localStorageKey="elastic_issuer_names"
+                    icon="user"
+                    theme="emerald"
                   />
                 </div>
 
@@ -1678,36 +2004,35 @@ export default function ElasticIssueView({
                     <Scissors size={14} color="#059669" />
                     <span>Receiver Name (Cutting Master / Received By):</span>
                   </label>
-                  <input
-                    type="text"
+                  <SmartSelectWithManual
                     value={receiverName}
-                    onChange={(e) => setReceiverName(e.target.value)}
-                    placeholder="Enter cutting master name..."
-                    autoComplete="off"
-                    style={{
-                      width: '100%', padding: '9px 12px', borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                    }}
+                    onChange={setReceiverName}
+                    options={['JAYBIR', 'ROHIT', 'MONU', 'CUTTING MASTER', 'SEWING MASTER']}
+                    placeholder="Select Receiver or + Manual Entry"
+                    manualPlaceholder="Type custom receiver name..."
+                    manualLabel="+ Manual Entry (Cutting Master)"
+                    localStorageKey="elastic_receiver_names"
+                    icon="scissors"
+                    theme="emerald"
                   />
                 </div>
 
                 {/* SUPERVISOR NAME */}
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                    <ShieldCheck size={14} color="#059669" />
                     <span>Supervisor / Floor Incharge Name:</span>
                   </label>
-                  <input
-                    type="text"
+                  <SmartSelectWithManual
                     value={supervisorName}
-                    onChange={(e) => setSupervisorName(e.target.value)}
-                    placeholder="e.g. ROHIT / MONU..."
-                    autoComplete="off"
-                    style={{
-                      width: '100%', padding: '9px 12px', borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                    }}
+                    onChange={setSupervisorName}
+                    options={['ROHIT / MONU', 'MOHIT SIR', 'MANISH', 'FLOOR SUPERVISOR', 'STORE INCHARGE']}
+                    placeholder="Select Supervisor or + Manual Entry"
+                    manualPlaceholder="Type custom supervisor name..."
+                    manualLabel="+ Manual Entry (Supervisor)"
+                    localStorageKey="elastic_supervisor_names"
+                    icon="shield"
+                    theme="emerald"
                   />
                 </div>
 
@@ -1907,36 +2232,95 @@ export default function ElasticIssueView({
             </div>
 
             {/* ACTION: GENERATE BILL BUTTON */}
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '13px', color: '#64748b' }}>
-                Total Requirement: <strong style={{ color: '#059669' }}>{calcResult.totalElasticMtr} Mtr</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong>
+                {bomStatus === 'approved' ? (
+                  <span>
+                    Total Requirement: <strong style={{ color: '#059669' }}>{calcResult.totalElasticMtr} Mtr</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
+                  </span>
+                ) : (
+                  <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Lock size={15} /> Original Issue Bill / PO generation locked until BOM is created & approved
+                  </span>
+                )}
               </div>
 
               <button
                 type="button"
                 onClick={generateElasticIssueBill}
-                disabled={generating}
+                disabled={generating || bomStatus !== 'approved'}
+                title={bomStatus !== 'approved' ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
                 style={{
                   padding: '12px 32px',
                   borderRadius: '12px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                  background: bomStatus === 'approved'
+                    ? 'linear-gradient(135deg, #059669 0%, #047857 100%)'
+                    : '#94a3b8',
                   color: '#ffffff',
                   fontSize: '15px',
                   fontWeight: '800',
-                  cursor: generating ? 'wait' : 'pointer',
-                  boxShadow: '0 6px 18px rgba(5, 150, 105, 0.4)',
+                  cursor: (generating || bomStatus !== 'approved') ? 'not-allowed' : 'pointer',
+                  boxShadow: bomStatus === 'approved' ? '0 6px 18px rgba(5, 150, 105, 0.4)' : 'none',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px'
+                  gap: '10px',
+                  opacity: bomStatus === 'approved' ? 1 : 0.7
                 }}
               >
-                {generating ? <RefreshCw size={18} className="animate-spin" /> : <Printer size={18} />}
-                <span>{generating ? 'Generating Original Bill...' : 'Generate Original Issue Bill / PO'}</span>
+                {generating ? (
+                  <RefreshCw size={18} className="animate-spin" />
+                ) : bomStatus === 'approved' ? (
+                  <Printer size={18} />
+                ) : (
+                  <Lock size={18} />
+                )}
+                <span>
+                  {generating
+                    ? 'Generating Original Bill...'
+                    : 'Generate Original Issue Bill / PO'}
+                </span>
               </button>
             </div>
+          </>
+        )}
+      </div>
+
+      {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET) */}
+      {!lotDetails && (
+        <div className="panel" style={{
+          padding: '36px 24px',
+          borderRadius: '16px',
+          background: 'var(--bg-card, #ffffff)',
+          border: '1.5px dashed #cbd5e1',
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '10px'
+        }}>
+          <div style={{
+            width: '46px',
+            height: '46px',
+            borderRadius: '12px',
+            background: '#f0fdf4',
+            color: '#059669',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}>
+            <Search size={22} />
           </div>
-        </>
+          <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+            Enter or Select a Lot Number Above
+          </h3>
+          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-muted, #64748b)', fontWeight: '500', maxWidth: '440px' }}>
+            Search a Lot Number above or click an Approved Lot to verify BOM approval and open the Elastic / Tape calculation and issue form.
+          </p>
+        </div>
+      )}
+    </>
       ) : (
         /* HISTORY TAB */
         <div className="panel" style={{

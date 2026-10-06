@@ -399,27 +399,50 @@ export default function FastSearchModal({ isOpen, onClose, onNavigate, initialQu
                       </div>
 
                       <div>
-                        <div style={{ fontWeight: '600', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {item.name || item.id}
-                          {item.itemType && (
-                            <span style={{
-                              fontSize: '10px',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              background: 'var(--bg-secondary, #f1f5f9)',
-                              color: 'var(--text-muted, #64748b)',
-                              textTransform: 'uppercase',
-                              fontWeight: '700'
-                            }}>
-                              {item.itemType}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', display: 'flex', gap: '12px', marginTop: '2px' }}>
-                          <span>SKU: <strong>{item.id}</strong></span>
-                          {item.category && <span>Category: <strong>{item.category}</strong></span>}
-                          {item.location && <span>Location: <strong>{item.location}</strong></span>}
-                        </div>
+                        {(() => {
+                          const itemStCode = item.itemCode || item.stCode || item.item_code || item.st_code || (String(item.id || '').toUpperCase().startsWith('MT') ? String(item.id).toUpperCase().replace(/^MT/, 'ST') : '');
+                          return (
+                            <>
+                              <div style={{ fontWeight: '600', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span>{item.name || item.id}</span>
+                                {itemStCode && (
+                                  <span style={{
+                                    fontSize: '10.5px',
+                                    padding: '1px 7px',
+                                    borderRadius: '4px',
+                                    background: '#eff6ff',
+                                    color: '#1d4ed8',
+                                    border: '1px solid #bfdbfe',
+                                    fontWeight: '700'
+                                  }}>
+                                    ST: {itemStCode}
+                                  </span>
+                                )}
+                                {item.itemType && (
+                                  <span style={{
+                                    fontSize: '10px',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    background: 'var(--bg-secondary, #f1f5f9)',
+                                    color: 'var(--text-muted, #64748b)',
+                                    textTransform: 'uppercase',
+                                    fontWeight: '700'
+                                  }}>
+                                    {item.itemType}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', display: 'flex', flexWrap: 'wrap', gap: '12px', marginTop: '3px' }}>
+                                {itemStCode && (
+                                  <span>ST Code (Item Code): <strong style={{ color: '#004b87' }}>{itemStCode}</strong></span>
+                                )}
+                                <span>SKU: <strong>{item.id}</strong></span>
+                                {item.category && <span>Category: <strong>{item.category}</strong></span>}
+                                {item.location && <span>Location: <strong>{item.location}</strong></span>}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 

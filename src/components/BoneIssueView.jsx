@@ -2,10 +2,11 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
-  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors
+  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
+import SmartSelectWithManual from './SmartSelectWithManual';
 
 export default function BoneIssueView({
   currencySymbol = '₹',
@@ -25,7 +26,7 @@ export default function BoneIssueView({
   const [recentLots, setRecentLots] = useState([]);
 
   // Step 2: Simple Issue Details (Cutting Pcs & Editable Issue Pcs)
-  const [issuePcs, setIssuePcs] = useState(600);
+  const [issuePcs, setIssuePcs] = useState(0);
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
@@ -48,12 +49,41 @@ export default function BoneIssueView({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
 
+  // BOM & Design Verification States
+  const [designs, setDesigns] = useState([]);
+  const [bomStatus, setBomStatus] = useState('idle'); // 'idle' | 'checking' | 'approved' | 'pending' | 'not_created'
+  const [bomDesign, setBomDesign] = useState(null);
+  const [loadingDesigns, setLoadingDesigns] = useState(false);
+
   const searchInputRef = useRef(null);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Fetch designs to verify BOM existence and approval status
+  const fetchDesigns = async () => {
+    try {
+      setLoadingDesigns(true);
+      const res = await fetch(`${getBackendUrl()}/api/designs`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setDesigns(data);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch designs in BoneIssueView:', e);
+    } finally {
+      setLoadingDesigns(false);
+    }
+  };
+
+  // Computed: List of all designs with Approved BOMs
+  const approvedDesignsList = useMemo(() => {
+    return (designs || []).filter(d => String(d.status || '').toLowerCase().trim() === 'approved');
+  }, [designs]);
 
   // Fetch next Issue Slip Number from backend
   const fetchNextIssueSlipNo = async () => {
@@ -77,6 +107,7 @@ export default function BoneIssueView({
   useEffect(() => {
     fetchNextIssueSlipNo();
     loadIssueHistory();
+    fetchDesigns();
   }, []);
 
   // Auto-search lot with debounce as user types
@@ -229,16 +260,61 @@ export default function BoneIssueView({
     }
   };
 
+  // Verify BOM existence and approval status for a specific lot
+  const verifyBOMStatus = async (lotQuery) => {
+    try {
+      let currentDesigns = designs;
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/designs`);
+        if (res.ok) {
+          const fresh = await res.json();
+          if (Array.isArray(fresh)) {
+            setDesigns(fresh);
+            currentDesigns = fresh;
+          }
+        }
+      } catch (_) {}
+
+      const cleanQ = String(lotQuery || '').trim().toLowerCase();
+      const matched = (currentDesigns || []).find(d => 
+        String(d.id || '').trim().toLowerCase() === cleanQ ||
+        String(d.lot_no || '').trim().toLowerCase() === cleanQ
+      );
+
+      if (!matched) {
+        setBomStatus('not_created');
+        setBomDesign(null);
+      } else {
+        setBomDesign(matched);
+        const st = String(matched.status || '').trim().toLowerCase();
+        if (st === 'approved') {
+          setBomStatus('approved');
+        } else if (st === 'rejected') {
+          setBomStatus('rejected');
+        } else {
+          setBomStatus('pending');
+        }
+      }
+    } catch (e) {
+      console.warn('Error verifying BOM status:', e);
+    }
+  };
+
   // Search Lot Details
   const handleSearchLot = async (targetLot = null) => {
     const lotToQuery = (targetLot || searchLotInput || '').trim();
     if (!lotToQuery) {
       setLotError('Please enter a Lot Number to search.');
+      setBomStatus('idle');
+      setBomDesign(null);
       return;
     }
 
     setSearchingLot(true);
     setLotError('');
+
+    // Check BOM status in parallel
+    verifyBOMStatus(lotToQuery);
 
     try {
       const cleanLot = encodeURIComponent(lotToQuery);
@@ -269,20 +345,12 @@ export default function BoneIssueView({
         return updated.slice(0, 6);
       });
 
-      showToast(`Lot ${data.lotNo || lotToQuery} details loaded successfully.`);
+      showToast(`Lot ${data.lotNo || lotToQuery} details loaded.`);
     } catch (err) {
       console.warn('Lot search warning:', err);
       setLotError(err.message || 'Lot details not found in Google Sheets / Cutting Matrix.');
-      setLotDetails({
-        lotNo: lotToQuery,
-        style: 'Standard Garment',
-        brand: 'Mohit Hosiery',
-        garmentType: 'Pants / Tracksuit',
-        fabric: 'Cotton / Poly',
-        quantity: 600,
-        shade: 'Default'
-      });
-      setIssuePcs(600);
+      setLotDetails(null);
+      setIssuePcs(0);
     } finally {
       setSearchingLot(false);
     }
@@ -588,10 +656,41 @@ export default function BoneIssueView({
   };
 
 
+  // Navigation helpers to BOM Creation & Approval Queue
+  const handleCreateBOM = (targetLot = null) => {
+    const lot = targetLot || lotDetails?.lotNo || searchLotInput.trim();
+    if (lot) {
+      setPrefilledLotNo(lot);
+    }
+    if (typeof onNavigate === 'function') {
+      onNavigate('design');
+    }
+  };
+
+  const handleViewApprovalQueue = () => {
+    if (typeof onNavigate === 'function') {
+      onNavigate('approval_queue');
+    }
+  };
+
   // ── Generate Professional Bone Issue Voucher ─────────────────────────────
   const generateBoneIssueBill = async () => {
     if (!lotDetails && !searchLotInput) {
       showToast('Please enter or search a Lot Number first.', 'error');
+      return;
+    }
+
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED
+    if (bomStatus !== 'approved') {
+      if (bomStatus === 'not_created') {
+        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Please create BOM in Design View first.', 'error');
+      } else if (bomStatus === 'pending') {
+        showToast('Workflow Blocked: BOM is Pending Approval! It must be approved by Admin in the Approval Queue before issuing Bone pocketing.', 'error');
+      } else if (bomStatus === 'rejected') {
+        showToast('Workflow Blocked: BOM was rejected by Admin! Please revise and get the BOM approved first.', 'error');
+      } else {
+        showToast('Workflow Blocked: BOM must be created and Approved before Bone pocketing can be issued.', 'error');
+      }
       return;
     }
 
@@ -908,9 +1007,52 @@ export default function BoneIssueView({
               </button>
             </div>
 
+            {/* Approved BOM Lots Quick Selector */}
+            {approvedDesignsList.length > 0 && (
+              <div style={{
+                marginTop: '12px',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                background: 'rgba(22, 163, 74, 0.06)',
+                border: '1px solid rgba(22, 163, 74, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap'
+              }}>
+                <span style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <ShieldCheck size={14} /> Ready to Issue (Approved BOM Lots):
+                </span>
+                {approvedDesignsList.slice(0, 8).map(d => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => { setSearchLotInput(d.id); handleSearchLot(d.id); }}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1px solid #86efac',
+                      background: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#16a34a' : '#ffffff',
+                      color: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#ffffff' : '#166534',
+                      fontSize: '11px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}
+                  >
+                    <span>LOT #{d.id}</span>
+                    <span style={{ opacity: 0.8, fontSize: '10px' }}>({d.style || 'Garment'})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {/* Recent suggestions */}
             {recentLots.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>Recent:</span>
                 {recentLots.map(l => (
                   <button
@@ -948,7 +1090,7 @@ export default function BoneIssueView({
             {/* LOT DETAILS DISPLAY CARD */}
             {lotDetails && (
               <div style={{
-                marginTop: '18px',
+                marginTop: '16px',
                 padding: '16px 20px',
                 borderRadius: '12px',
                 background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
@@ -1000,270 +1142,485 @@ export default function BoneIssueView({
                 </div>
               </div>
             )}
+
+            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY) */}
+            {(lotDetails || searchLotInput.trim().length >= 3) && (
+              <div style={{
+                marginTop: '14px',
+                padding: '16px 20px',
+                borderRadius: '12px',
+                border: bomStatus === 'approved'
+                  ? '1.5px solid #86efac'
+                  : bomStatus === 'pending'
+                    ? '1.5px solid #fcd34d'
+                    : '1.5px solid #fca5a5',
+                background: bomStatus === 'approved'
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'
+                  : bomStatus === 'pending'
+                    ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+                    : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    {bomStatus === 'approved' ? (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)' }}>
+                        <ShieldCheck size={20} />
+                      </div>
+                    ) : bomStatus === 'pending' ? (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#d97706', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)' }}>
+                        <AlertTriangle size={20} />
+                      </div>
+                    ) : (
+                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)' }}>
+                        <Lock size={20} />
+                      </div>
+                    )}
+
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h4 style={{
+                          margin: 0,
+                          fontSize: '14px',
+                          fontWeight: '800',
+                          color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
+                        }}>
+                          {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
+                          {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
+                          {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
+                          {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
+                          {bomStatus === 'idle' && 'Verifying BOM Status...'}
+                        </h4>
+                        <span style={{
+                          fontSize: '10.5px',
+                          fontWeight: '800',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
+                          color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
+                        }}>
+                          {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                        </span>
+                      </div>
+
+                      <p style={{
+                        margin: '3px 0 0 0',
+                        fontSize: '12px',
+                        color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
+                        fontWeight: '600',
+                        lineHeight: '1.4'
+                      }}>
+                        {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Bone pocketing.`}
+                        {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Bone materials can only be issued after approval.`}
+                        {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
+                        {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
+                        {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {bomStatus === 'not_created' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
+                      </button>
+                    )}
+
+                    {bomStatus === 'pending' && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleViewApprovalQueue}
+                          style={{
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                            color: '#ffffff',
+                            fontSize: '12.5px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <ExternalLink size={15} /> Go to Approval Queue
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #f59e0b',
+                            background: '#ffffff',
+                            color: '#b45309',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          View/Edit BOM
+                        </button>
+                      </>
+                    )}
+
+                    {bomStatus === 'rejected' && (
+                      <button
+                        type="button"
+                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        style={{
+                          padding: '8px 16px',
+                          borderRadius: '8px',
+                          border: 'none',
+                          background: '#dc2626',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        Revise BOM in Design View
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* STEP 2: SIMPLE INTERNAL ISSUE DETAILS (NORMAL ROLL QUANTITY ONLY) */}
-          <div className="panel" style={{
-            padding: '22px 24px',
-            borderRadius: '16px',
-            background: 'var(--bg-card, #ffffff)',
-            border: '1px solid var(--border-color, #dbeafe)',
-            boxShadow: 'var(--shadow-card)'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
-              <span style={{
-                width: '26px', height: '26px', borderRadius: '50%',
-                background: '#0284c7', color: '#ffffff', display: 'flex',
-                alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
-              }}>2</span>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                Issue Details (Quantity of Rolls & Issuer / Receiver)
-              </h3>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
-              
-              {/* LEFT COLUMN: ISSUER & RECEIVER NAMES (STAFF DETAILS) */}
-              <div style={{
-                padding: '18px 20px',
-                borderRadius: '12px',
-                background: '#f8fafc',
-                border: '1.5px solid #e2e8f0',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}>
-                {/* ISSUER NAME */}
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <User size={15} color="#0284c7" />
-                    <span>Issuer Name (Store Staff):</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={issuerName}
-                    onChange={(e) => setIssuerName(e.target.value)}
-                    placeholder="Enter issuer name..."
-                    autoComplete="off"
-                    style={{
-                      width: '100%', padding: '9px 12px', borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                {/* RECEIVER NAME */}
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <Scissors size={15} color="#0284c7" />
-                    <span>Receiver Name (Cutting Master):</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={receiverName}
-                    onChange={(e) => setReceiverName(e.target.value)}
-                    placeholder="Enter receiver name..."
-                    autoComplete="off"
-                    style={{
-                      width: '100%', padding: '9px 12px', borderRadius: '8px',
-                      border: '1.5px solid #cbd5e1', background: '#ffffff',
-                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                {/* Issue Date & Remarks */}
-                <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '10px' }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
-                      ISSUE DATE
-                    </span>
-                    <input
-                      type="date"
-                      value={issueDate}
-                      onChange={(e) => setIssueDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '7px 8px', borderRadius: '8px',
-                        border: '1px solid #cbd5e1', background: '#ffffff',
-                        fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
-                      REMARKS / INSTRUCTIONS
-                    </span>
-                    <input
-                      type="text"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="e.g. Bone rolls for pocketing..."
-                      style={{
-                        width: '100%', padding: '7px 10px', borderRadius: '8px',
-                        border: '1px solid #cbd5e1', background: '#ffffff',
-                        fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                </div>
-
+          {/* STEP 2: SIMPLE INTERNAL ISSUE DETAILS (ONLY SHOWN AFTER LOT IS ENTERED & BOM APPROVED) */}
+          {lotDetails && bomStatus === 'approved' && (
+            <div className="panel" style={{
+              padding: '22px 24px',
+              borderRadius: '16px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1px solid var(--border-color, #dbeafe)',
+              boxShadow: 'var(--shadow-card)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
+                <span style={{
+                  width: '26px', height: '26px', borderRadius: '50%',
+                  background: '#0284c7', color: '#ffffff', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                }}>2</span>
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                  Issue Details (Quantity of Rolls & Issuer / Receiver)
+                </h3>
               </div>
 
-              {/* RIGHT COLUMN: QUANTITY DETAILS (CUTTING PCS & EDITABLE ISSUE PCS) */}
-              <div style={{
-                padding: '18px 20px',
-                borderRadius: '12px',
-                background: '#f8fafc',
-                border: '1.5px solid #e2e8f0',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}>
-                <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                  <Layers size={16} color="#0284c7" />
-                  <span>Quantity & Issue Pcs Details:</span>
-                </div>
-
-                {/* Cutting Pcs Matrix Reference Badge */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+                
+                {/* LEFT COLUMN: ISSUER & RECEIVER NAMES (STAFF DETAILS) */}
                 <div style={{
-                  padding: '10px 14px',
-                  borderRadius: '8px',
-                  background: '#f0f9ff',
-                  border: '1px solid #bae6fd',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                      Cutting Pcs (Lot Matrix)
-                    </span>
-                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                      Lot #{lotDetails?.lotNo || searchLotInput || '—'}
-                    </span>
-                  </div>
-                  <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
-                    {lotDetails?.quantity || 600} Pcs
-                  </strong>
-                </div>
-
-                {/* Editable Issue Pcs Input */}
-                <div>
-                  <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Scissors size={15} color="#0284c7" />
-                      <span>Issue Pcs (Editable):</span>
-                    </span>
-                    <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                      Direct Pcs Entry
-                    </span>
-                  </label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="number"
-                      min="1"
-                      value={issuePcs}
-                      onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                      placeholder="e.g. 600"
-                      style={{
-                        flex: 1,
-                        padding: '10px 14px',
-                        borderRadius: '8px',
-                        border: '2px solid #0284c7',
-                        background: '#ffffff',
-                        fontSize: '18px',
-                        fontWeight: '800',
-                        color: '#0f172a',
-                        outline: 'none',
-                        boxShadow: '0 2px 6px rgba(2, 132, 199, 0.12)'
-                      }}
-                    />
-                    <span style={{ fontSize: '14px', fontWeight: '800', color: '#475569' }}>
-                      Pcs
-                    </span>
-                  </div>
-                </div>
-
-                {/* Quick Presets for Issue Pcs */}
-                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {lotDetails?.quantity && (
-                    <button
-                      key="same-cut"
-                      type="button"
-                      onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: '6px',
-                        border: issuePcs === parseInt(lotDetails.quantity, 10) ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                        background: issuePcs === parseInt(lotDetails.quantity, 10) ? '#e0f2fe' : '#ffffff',
-                        color: issuePcs === parseInt(lotDetails.quantity, 10) ? '#0284c7' : '#334155',
-                        fontSize: '11.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Same as Cutting ({lotDetails.quantity} Pcs)
-                    </button>
-                  )}
-                  {[500, 600, 800, 1000, 1200].filter(v => v !== parseInt(lotDetails?.quantity, 10)).map(cnt => (
-                    <button
-                      key={cnt}
-                      type="button"
-                      onClick={() => setIssuePcs(cnt)}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: '6px',
-                        border: issuePcs === cnt ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                        background: issuePcs === cnt ? '#e0f2fe' : '#ffffff',
-                        color: issuePcs === cnt ? '#0284c7' : '#334155',
-                        fontSize: '11.5px',
-                        fontWeight: '700',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {cnt} Pcs
-                    </button>
-                  ))}
-                </div>
-
-                <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#0369a1', background: '#e0f2fe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginTop: '4px' }}>
-                  Issue Summary: <strong>{issuePcs} Pcs</strong> of Bone Pocketing for LOT #{lotDetails?.lotNo || searchLotInput || '—'}
-                </div>
-              </div>
-
-            </div>
-
-            {/* ACTION: GENERATE BILL BUTTON */}
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px' }}>
-              <div style={{ fontSize: '13px', color: '#64748b' }}>
-                Issuing <strong>{issuePcs} Pcs</strong> of Bone Pocketing to <strong>{receiverName || 'Cutting Master'}</strong>
-              </div>
-
-              <button
-                type="button"
-                onClick={generateBoneIssueBill}
-                disabled={generating}
-                style={{
-                  padding: '12px 32px',
+                  padding: '18px 20px',
                   borderRadius: '12px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                  color: '#ffffff',
-                  fontSize: '15px',
-                  fontWeight: '800',
-                  cursor: generating ? 'wait' : 'pointer',
-                  boxShadow: '0 6px 18px rgba(2, 132, 199, 0.4)',
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px'
-                }}
-              >
-                {generating ? <RefreshCw size={18} className="spin" /> : <Printer size={18} />}
-                <span>{generating ? 'Generating Issue Slip...' : 'Generate Bone Issue Bill'}</span>
-              </button>
+                  flexDirection: 'column',
+                  gap: '14px'
+                }}>
+                  {/* ISSUER NAME */}
+                  <div>
+                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <User size={15} color="#0284c7" />
+                      <span>Issuer Name (Store Staff):</span>
+                    </label>
+                    <SmartSelectWithManual
+                      value={issuerName}
+                      onChange={setIssuerName}
+                      options={['PARAS', 'RASHMI', 'STORE INCHARGE', 'ADMIN', 'STORE DISPATCH']}
+                      placeholder="Select Issuer or + Manual Entry"
+                      manualPlaceholder="Type custom store staff name..."
+                      manualLabel="+ Manual Entry (Store Staff)"
+                      localStorageKey="bone_issuer_names"
+                      icon="user"
+                      theme="blue"
+                    />
+                  </div>
+
+                  {/* RECEIVER NAME */}
+                  <div>
+                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <Scissors size={15} color="#0284c7" />
+                      <span>Receiver Name (Cutting Master):</span>
+                    </label>
+                    <SmartSelectWithManual
+                      value={receiverName}
+                      onChange={setReceiverName}
+                      options={['JAYBIR', 'ROHIT', 'MONU', 'CUTTING MASTER', 'SEWING INCHARGE']}
+                      placeholder="Select Receiver or + Manual Entry"
+                      manualPlaceholder="Type custom receiver name..."
+                      manualLabel="+ Manual Entry (Cutting Master)"
+                      localStorageKey="bone_receiver_names"
+                      icon="scissors"
+                      theme="blue"
+                    />
+                  </div>
+
+                  {/* Issue Date & Remarks */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '10px' }}>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                        ISSUE DATE
+                      </span>
+                      <input
+                        type="date"
+                        value={issueDate}
+                        onChange={(e) => setIssueDate(e.target.value)}
+                        style={{
+                          width: '100%', padding: '7px 8px', borderRadius: '8px',
+                          border: '1px solid #cbd5e1', background: '#ffffff',
+                          fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                        REMARKS / INSTRUCTIONS
+                      </span>
+                      <input
+                        type="text"
+                        value={remarks}
+                        onChange={(e) => setRemarks(e.target.value)}
+                        placeholder="e.g. Bone rolls for pocketing..."
+                        style={{
+                          width: '100%', padding: '7px 10px', borderRadius: '8px',
+                          border: '1px solid #cbd5e1', background: '#ffffff',
+                          fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* RIGHT COLUMN: QUANTITY DETAILS (CUTTING PCS & EDITABLE ISSUE PCS) */}
+                <div style={{
+                  padding: '18px 20px',
+                  borderRadius: '12px',
+                  background: '#f8fafc',
+                  border: '1.5px solid #e2e8f0',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '14px'
+                }}>
+                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                    <Layers size={16} color="#0284c7" />
+                    <span>Quantity & Issue Pcs Details:</span>
+                  </div>
+
+                  {/* Cutting Pcs Matrix Reference Badge */}
+                  <div style={{
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    background: '#f0f9ff',
+                    border: '1px solid #bae6fd',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                        Cutting Pcs (Lot Matrix)
+                      </span>
+                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        Lot #{lotDetails?.lotNo || searchLotInput || '—'}
+                      </span>
+                    </div>
+                    <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
+                      {lotDetails?.quantity || 0} Pcs
+                    </strong>
+                  </div>
+
+                  {/* Editable Issue Pcs Input */}
+                  <div>
+                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Scissors size={15} color="#0284c7" />
+                        <span>Issue Pcs (Editable):</span>
+                      </span>
+                      <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                        Direct Pcs Entry
+                      </span>
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="number"
+                        min="1"
+                        value={issuePcs || ''}
+                        onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        placeholder="e.g. 600"
+                        style={{
+                          flex: 1,
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '2px solid #0284c7',
+                          background: '#ffffff',
+                          fontSize: '18px',
+                          fontWeight: '800',
+                          color: '#0f172a',
+                          outline: 'none',
+                          boxShadow: '0 2px 6px rgba(2, 132, 199, 0.12)'
+                        }}
+                      />
+                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#475569' }}>
+                        Pcs
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Quick Presets for Issue Pcs */}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {lotDetails?.quantity && (
+                      <button
+                        key="same-cut"
+                        type="button"
+                        onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '6px',
+                          border: issuePcs === parseInt(lotDetails.quantity, 10) ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          background: issuePcs === parseInt(lotDetails.quantity, 10) ? '#e0f2fe' : '#ffffff',
+                          color: issuePcs === parseInt(lotDetails.quantity, 10) ? '#0284c7' : '#334155',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Same as Cutting ({lotDetails.quantity} Pcs)
+                      </button>
+                    )}
+                    {[500, 600, 800, 1000, 1200].filter(v => v !== parseInt(lotDetails?.quantity, 10)).map(cnt => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setIssuePcs(cnt)}
+                        style={{
+                          padding: '5px 10px',
+                          borderRadius: '6px',
+                          border: issuePcs === cnt ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          background: issuePcs === cnt ? '#e0f2fe' : '#ffffff',
+                          color: issuePcs === cnt ? '#0284c7' : '#334155',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {cnt} Pcs
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#0369a1', background: '#e0f2fe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginTop: '4px' }}>
+                    Issue Summary: <strong>{issuePcs} Pcs</strong> of Bone Pocketing for LOT #{lotDetails?.lotNo || searchLotInput || '—'}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* ACTION: GENERATE BILL BUTTON */}
+              <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '13px', color: '#64748b' }}>
+                  <span>
+                    Issuing <strong>{issuePcs} Pcs</strong> of Bone Pocketing to <strong>{receiverName || 'Cutting Master'}</strong> (BOM Approved ✓)
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={generateBoneIssueBill}
+                  disabled={generating}
+                  style={{
+                    padding: '12px 32px',
+                    borderRadius: '12px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    fontSize: '15px',
+                    fontWeight: '800',
+                    cursor: generating ? 'wait' : 'pointer',
+                    boxShadow: '0 6px 18px rgba(2, 132, 199, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}
+                >
+                  {generating ? (
+                    <RefreshCw size={18} className="animate-spin" />
+                  ) : (
+                    <Printer size={18} />
+                  )}
+                  <span>
+                    {generating
+                      ? 'Generating Issue Slip...'
+                      : 'Generate Bone Issue Bill'}
+                  </span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET) */}
+          {!lotDetails && (
+            <div className="panel" style={{
+              padding: '36px 24px',
+              borderRadius: '16px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1.5px dashed #cbd5e1',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px'
+            }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '12px',
+                background: '#f0f9ff',
+                color: '#0284c7',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Search size={22} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                Enter or Select a Lot Number Above
+              </h3>
+              <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-muted, #64748b)', fontWeight: '500', maxWidth: '440px' }}>
+                Search a Lot Number above or click an Approved Lot to verify BOM approval and open the Bone Pocketing issue form.
+              </p>
+            </div>
+          )}
         </>
       ) : (
         /* HISTORY TAB */

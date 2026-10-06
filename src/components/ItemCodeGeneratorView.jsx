@@ -1480,31 +1480,6 @@ export default function ItemCodeGeneratorView() {
                           <Pencil size={12} color="#2563eb" />
                           <span>Edit</span>
                         </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            setShowMappingModal(true);
-                            setMappingSearchQuery(ic.item_code);
-                            fetchMappings();
-                          }}
-                          style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title="Map / Edit MT Code"
-                        >
-                          <Link2 size={12} color="#059669" />
-                          <span>Map</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => handleDeleteItemCode(ic.id, ic.item_code)}
-                          style={{ padding: '4px 6px', borderRadius: '6px', color: 'var(--danger)' }}
-                          title="Delete Item Code"
-                        >
-                          <Trash2 size={14} />
-                        </button>
                       </div>
                     </td>
                   </tr>

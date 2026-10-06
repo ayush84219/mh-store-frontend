@@ -2,6 +2,7 @@ import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect } from "react";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import SmartSelectWithManual from "./SmartSelectWithManual";
 
 // MUST be your deployed /exec URL
 const WEB_APP_URL =
@@ -91,7 +92,10 @@ const RGP_TYPES = ["Fabric", "Tools", "Machine", "Sample", "Other"];
 // Prepared By & Authorized By Options
 const PREPARED_BY_OPTIONS = [
   "RASHMI",
-
+  "PARAS",
+  "STORE STAFF",
+  "ADMIN",
+  "DISPATCH INCHARGE"
 ];
 
 const AUTHORIZED_BY_OPTIONS = [
@@ -99,7 +103,8 @@ const AUTHORIZED_BY_OPTIONS = [
   "EA",
   "VARUN SIR",
   "SAHIL CA",
-
+  "STORE MANAGER",
+  "ADMIN"
 ];
 
 // Enhanced RGP PDF Generator - With Prepared By & Authorized By
@@ -1726,22 +1731,42 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         <div style={styles.formGrid}>
           <div style={styles.formGroup}>
             <label style={styles.label}>Prepared By <span style={styles.requiredStar}>*</span></label>
-            <select value={isPreparedByCustom ? "custom" : form.preparedBy} onChange={handlePreparedByChange} style={errors.preparedBy ? styles.inputError : styles.input}>
-              <option value="">Select Preparer</option>
-              {PREPARED_BY_OPTIONS.map((option, idx) => (<option key={idx} value={option}>{option}</option>))}
-              <option value="custom">+ Manual Entry</option>
-            </select>
-            {isPreparedByCustom && (<input type="text" placeholder="Name & designation" value={preparedByCustomValue} onChange={(e) => { setPreparedByCustomValue(e.target.value); update("preparedBy", e.target.value); }} style={{ ...styles.input, marginTop: '8px' }} />)}
+            <SmartSelectWithManual
+              value={form.preparedBy}
+              onChange={(val) => {
+                update("preparedBy", val);
+                setIsPreparedByCustom(false);
+                setPreparedByCustomValue("");
+              }}
+              options={PREPARED_BY_OPTIONS}
+              placeholder="Select Preparer or + Manual Entry"
+              manualPlaceholder="Type name & designation..."
+              manualLabel="+ Manual Entry (Preparer)"
+              localStorageKey="rgp_prepared_by_options"
+              icon="user"
+              theme="blue"
+              required={true}
+            />
             {errors.preparedBy && <span style={styles.errorText}>{errors.preparedBy}</span>}
           </div>
           <div style={styles.formGroup}>
             <label style={styles.label}>Authorized By <span style={styles.requiredStar}>*</span></label>
-            <select value={isAuthorizedByCustom ? "custom" : form.authorizedBy} onChange={handleAuthorizedByChange} style={errors.authorizedBy ? styles.inputError : styles.input}>
-              <option value="">Select Authorizer</option>
-              {AUTHORIZED_BY_OPTIONS.map((option, idx) => (<option key={idx} value={option}>{option}</option>))}
-              <option value="custom">+ Manual Entry</option>
-            </select>
-            {isAuthorizedByCustom && (<input type="text" placeholder="Name & designation" value={authorizedByCustomValue} onChange={(e) => { setAuthorizedByCustomValue(e.target.value); update("authorizedBy", e.target.value); }} style={{ ...styles.input, marginTop: '8px' }} />)}
+            <SmartSelectWithManual
+              value={form.authorizedBy}
+              onChange={(val) => {
+                update("authorizedBy", val);
+                setIsAuthorizedByCustom(false);
+                setAuthorizedByCustomValue("");
+              }}
+              options={AUTHORIZED_BY_OPTIONS}
+              placeholder="Select Authorizer or + Manual Entry"
+              manualPlaceholder="Type name & designation..."
+              manualLabel="+ Manual Entry (Authorizer)"
+              localStorageKey="rgp_authorized_by_options"
+              icon="shield"
+              theme="blue"
+              required={true}
+            />
             {errors.authorizedBy && <span style={styles.errorText}>{errors.authorizedBy}</span>}
           </div>
         </div>

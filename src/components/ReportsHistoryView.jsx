@@ -199,6 +199,15 @@ export default function ReportsHistoryView({
   const [masterSort, setMasterSort] = useState('latest');
   const [selectedMasterRecordForModal, setSelectedMasterRecordForModal] = useState(null);
   const [masterLoading, setMasterLoading] = useState(false);
+  const [copiedDocNo, setCopiedDocNo] = useState(null);
+
+  const handleCopyDoc = (e, text) => {
+    e.stopPropagation();
+    if (!text) return;
+    navigator.clipboard?.writeText(String(text).trim());
+    setCopiedDocNo(text);
+    setTimeout(() => setCopiedDocNo(null), 2000);
+  };
 
   // Audit states
   const [designHistory, setDesignHistory] = useState([]);
@@ -2865,41 +2874,39 @@ export default function ReportsHistoryView({
           {/* Filter Bar with Search, Module, Department, Status, Date Pickers */}
           <div style={{
             display: 'flex',
-            gap: '10px',
+            gap: '8px',
             alignItems: 'center',
             flexWrap: 'wrap',
-            padding: '14px 16px',
-            backgroundColor: 'var(--bg-secondary)',
-            borderRadius: '12px',
-            border: '1px solid var(--border-color)',
-            boxShadow: 'var(--shadow-sm)'
+            padding: '10px 14px',
+            backgroundColor: '#ffffff',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1'
           }}>
             {/* Search Input */}
             <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '180px' }}>
-              <Search size={15} style={{
+              <Search size={14} style={{
                 position: 'absolute',
-                left: '12px',
+                left: '10px',
                 top: '50%',
                 transform: 'translateY(-50%)',
-                color: 'var(--text-muted)'
+                color: '#94a3b8'
               }} />
               <input
                 type="text"
-                placeholder="Search anything..."
+                placeholder="Search Item Code (STxxxxx), Name, Brand, Doc No, Vendor..."
                 value={masterSearch}
                 onChange={(e) => setMasterSearch(e.target.value)}
                 style={{
-                  paddingLeft: '36px',
-                  paddingRight: masterSearch ? '30px' : '12px',
-                  height: '38px',
-                  fontSize: '13px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary, #ffffff)',
-                  color: 'var(--text-main)',
+                  paddingLeft: '32px',
+                  paddingRight: masterSearch ? '28px' : '10px',
+                  height: '34px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
                   width: '100%',
-                  outline: 'none',
-                  transition: 'border-color 0.2s'
+                  outline: 'none'
                 }}
               />
               {masterSearch && (
@@ -2908,17 +2915,17 @@ export default function ReportsHistoryView({
                   onClick={() => setMasterSearch('')}
                   style={{
                     position: 'absolute',
-                    right: '10px',
+                    right: '8px',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     background: 'none',
                     border: 'none',
-                    color: 'var(--text-muted)',
+                    color: '#94a3b8',
                     cursor: 'pointer',
                     padding: '2px'
                   }}
                 >
-                  <X size={14} />
+                  <X size={13} />
                 </button>
               )}
             </div>
@@ -2928,20 +2935,20 @@ export default function ReportsHistoryView({
               value={masterModuleFilter}
               onChange={(e) => setMasterModuleFilter(e.target.value)}
               style={{
-                height: '38px',
-                fontSize: '13px',
+                height: '34px',
+                fontSize: '12px',
                 fontWeight: '600',
-                padding: '0 28px 0 12px',
-                borderRadius: '8px',
-                border: '1.5px solid var(--border-color)',
-                background: 'var(--bg-primary, #ffffff)',
-                color: 'var(--text-main)',
+                padding: '0 24px 0 10px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#0f172a',
                 cursor: 'pointer',
                 outline: 'none',
-                minWidth: '170px'
+                minWidth: '160px'
               }}
             >
-              <option value="all">📦 All Modules &amp; Categories</option>
+              <option value="all">📦 All Modules &amp; Categories (8)</option>
               <option value="rgp_closed">🔴 Closed RGP Only</option>
               <option value="rgp">🚚 All RGP Passes</option>
               <option value="rgp_intransit">🟡 In-Transit RGP Only</option>
@@ -2963,17 +2970,17 @@ export default function ReportsHistoryView({
               value={masterDeptFilter}
               onChange={(e) => setMasterDeptFilter(e.target.value)}
               style={{
-                height: '38px',
-                fontSize: '13px',
+                height: '34px',
+                fontSize: '12px',
                 fontWeight: '600',
-                padding: '0 28px 0 12px',
-                borderRadius: '8px',
-                border: '1.5px solid var(--border-color)',
-                background: 'var(--bg-primary, #ffffff)',
-                color: 'var(--text-main)',
+                padding: '0 24px 0 10px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#0f172a',
                 cursor: 'pointer',
                 outline: 'none',
-                minWidth: '150px'
+                minWidth: '140px'
               }}
             >
               <option value="all">🏢 All Departments</option>
@@ -2996,17 +3003,17 @@ export default function ReportsHistoryView({
               value={masterStatusFilter}
               onChange={(e) => setMasterStatusFilter(e.target.value)}
               style={{
-                height: '38px',
-                fontSize: '13px',
+                height: '34px',
+                fontSize: '12px',
                 fontWeight: '600',
-                padding: '0 28px 0 12px',
-                borderRadius: '8px',
-                border: '1.5px solid var(--border-color)',
-                background: 'var(--bg-primary, #ffffff)',
-                color: 'var(--text-main)',
+                padding: '0 24px 0 10px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#ffffff',
+                color: '#0f172a',
                 cursor: 'pointer',
                 outline: 'none',
-                minWidth: '135px'
+                minWidth: '130px'
               }}
             >
               <option value="all">⚙️ All Statuses</option>
@@ -3024,30 +3031,30 @@ export default function ReportsHistoryView({
                 value={masterDateFrom}
                 onChange={(e) => setMasterDateFrom(e.target.value)}
                 style={{
-                  height: '38px',
-                  fontSize: '12.5px',
-                  padding: '0 10px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary, #ffffff)',
-                  color: 'var(--text-main)',
+                  height: '34px',
+                  fontSize: '12px',
+                  padding: '0 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
                   outline: 'none'
                 }}
                 title="From Date"
               />
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>to</span>
+              <span style={{ fontSize: '11px', color: '#64748b' }}>to</span>
               <input
                 type="date"
                 value={masterDateTo}
                 onChange={(e) => setMasterDateTo(e.target.value)}
                 style={{
-                  height: '38px',
-                  fontSize: '12.5px',
-                  padding: '0 10px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary, #ffffff)',
-                  color: 'var(--text-main)',
+                  height: '34px',
+                  fontSize: '12px',
+                  padding: '0 8px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
                   outline: 'none'
                 }}
                 title="To Date"
@@ -3062,10 +3069,11 @@ export default function ReportsHistoryView({
                 style={{
                   padding: '4px 8px',
                   fontSize: '11px',
-                  borderRadius: '5px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-muted)',
+                  fontWeight: '600',
+                  borderRadius: '4px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
                   cursor: 'pointer'
                 }}
               >
@@ -3077,10 +3085,11 @@ export default function ReportsHistoryView({
                 style={{
                   padding: '4px 8px',
                   fontSize: '11px',
-                  borderRadius: '5px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-muted)',
+                  fontWeight: '600',
+                  borderRadius: '4px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
                   cursor: 'pointer'
                 }}
               >
@@ -3092,10 +3101,11 @@ export default function ReportsHistoryView({
                 style={{
                   padding: '4px 8px',
                   fontSize: '11px',
-                  borderRadius: '5px',
-                  border: '1px solid var(--border-color)',
-                  background: 'var(--bg-primary)',
-                  color: 'var(--text-muted)',
+                  fontWeight: '600',
+                  borderRadius: '4px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
                   cursor: 'pointer'
                 }}
               >
@@ -3108,9 +3118,9 @@ export default function ReportsHistoryView({
                   style={{
                     padding: '4px 8px',
                     fontSize: '11px',
-                    borderRadius: '5px',
+                    borderRadius: '4px',
                     border: 'none',
-                    background: 'rgba(239, 68, 68, 0.1)',
+                    background: '#fee2e2',
                     color: '#ef4444',
                     cursor: 'pointer',
                     fontWeight: '700'
@@ -3123,229 +3133,274 @@ export default function ReportsHistoryView({
           </div>
 
           {/* Master Data Table */}
-          <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            borderRadius: '12px',
-            border: '1px solid var(--border-color)',
-            boxShadow: 'var(--shadow-sm)',
-            overflow: 'hidden'
-          }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '13px',
-                textAlign: 'left'
-              }}>
-                <thead>
-                  <tr style={{
-                    backgroundColor: '#004b87',
-                    color: '#ffffff',
-                    fontSize: '12px',
-                    fontWeight: '800',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.4px',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    <th style={{ padding: '13px 14px', width: '130px' }}>RGP / DOC NO</th>
-                    <th style={{ padding: '13px 14px', width: '115px' }}>MATERIAL OUT DATE</th>
-                    <th style={{ padding: '13px 14px', width: '120px' }}>RGP TYPE</th>
-                    <th style={{ padding: '13px 14px', width: '110px' }}>DEPARTMENT</th>
-                    <th style={{ padding: '13px 14px', width: '140px' }}>VENDOR / PARTY</th>
-                    <th style={{ padding: '13px 14px', width: '120px' }}>PURPOSE</th>
-                    <th style={{ padding: '13px 14px', minWidth: '220px' }}>ITEM DESCRIPTION</th>
-                    <th style={{ padding: '13px 14px', width: '110px', textAlign: 'right' }}>QUANTITY SENT</th>
-                    <th style={{ padding: '13px 14px', width: '70px', textAlign: 'center' }}>UOM</th>
-                    <th style={{ padding: '13px 14px', width: '130px', textAlign: 'center' }}>EXP / STATUS</th>
-                    <th style={{ padding: '13px 14px', width: '90px', textAlign: 'center' }}>ACTIONS</th>
+          <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#ffffff' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: '#1e3a8a', color: '#ffffff' }}>
+                  <th style={{ padding: '10px 8px', width: '35px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>#</th>
+                  <th style={{ padding: '10px 10px', width: '125px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP / DOC NO</th>
+                  <th style={{ padding: '10px 10px', width: '125px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>MATERIAL OUT DATE</th>
+                  <th style={{ padding: '10px 10px', width: '110px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP TYPE</th>
+                  <th style={{ padding: '10px 10px', width: '100px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>DEPARTMENT</th>
+                  <th style={{ padding: '10px 10px', width: '135px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>VENDOR / PARTY</th>
+                  <th style={{ padding: '10px 10px', width: '125px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>PURPOSE</th>
+                  <th style={{ padding: '10px 12px', minWidth: '200px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>ITEM DESCRIPTION</th>
+                  <th style={{ padding: '10px 12px', width: '105px', textAlign: 'right', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>QUANTITY SENT</th>
+                  <th style={{ padding: '10px 8px', width: '55px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>UOM</th>
+                  <th style={{ padding: '10px 10px', width: '130px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>EXP / STATUS</th>
+                  <th style={{ padding: '10px 10px', width: '85px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMasterRecords.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} style={{ padding: '36px 20px', textAlign: 'center', color: '#64748b' }}>
+                      <AlertCircle size={32} style={{ margin: '0 auto 8px auto', opacity: 0.3 }} />
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#0f172a' }}>No matching operational records found</div>
+                      <div style={{ fontSize: '12px', marginTop: '2px' }}>Try adjusting your search keywords, department filter, module filter or date range.</div>
+                      <button
+                        type="button"
+                        onClick={handleResetMasterFilters}
+                        style={{
+                          marginTop: '12px',
+                          padding: '4px 12px',
+                          borderRadius: '4px',
+                          background: '#0284c7',
+                          color: '#ffffff',
+                          border: 'none',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Reset All Filters
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredMasterRecords.length === 0 ? (
-                    <tr>
-                      <td colSpan={11} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                          <AlertCircle size={32} color="#94a3b8" />
-                          <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>No matching operational records found</strong>
-                          <p style={{ margin: 0, fontSize: '13px' }}>Try adjusting your search keywords, department filter, module filter or date range.</p>
-                          <button
-                            type="button"
-                            onClick={handleResetMasterFilters}
-                            className="btn btn-secondary btn-sm"
-                            style={{ marginTop: '8px' }}
-                          >
-                            Reset All Filters
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredMasterRecords.map((r, idx) => {
-                      const isEven = idx % 2 === 0;
-                      const isClosed = String(r.status).toLowerCase().includes('returned') || String(r.status).toLowerCase().includes('closed');
-                      const isOverdue = String(r.status).toLowerCase().includes('overdue');
-                      const isInTransit = String(r.status).toLowerCase().includes('transit') || String(r.status).toLowerCase().includes('open');
-                      const isScanner = r.moduleType === 'scanner';
-                      const hasLinkedScans = r.scans && r.scans.length > 0;
+                ) : (
+                  filteredMasterRecords.map((r, idx) => {
+                    const isClosed = String(r.status).toLowerCase().includes('returned') || String(r.status).toLowerCase().includes('closed');
+                    const isOverdue = String(r.status).toLowerCase().includes('overdue');
+                    const isInTransit = String(r.status).toLowerCase().includes('transit') || String(r.status).toLowerCase().includes('open');
+                    const isScanner = r.moduleType === 'scanner';
+                    const hasLinkedScans = r.scans && r.scans.length > 0;
 
-                      return (
-                        <tr
-                          key={r.id || idx}
-                          style={{
-                            borderBottom: '1px solid var(--border-color)',
-                            backgroundColor: isEven ? 'var(--bg-secondary)' : 'var(--bg-primary, #f8fafc)',
-                            transition: 'background-color 0.15s'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(0, 75, 135, 0.04)'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isEven ? 'var(--bg-secondary)' : 'var(--bg-primary, #f8fafc)'}
-                        >
-                          {/* Doc / RGP No */}
-                          <td style={{ padding: '12px 14px', fontWeight: '800' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              <span style={{ color: '#004b87', fontSize: '13px' }}>{r.docNo}</span>
+                    return (
+                      <tr
+                        key={r.id || idx}
+                        style={{
+                          borderBottom: '1px solid #e2e8f0',
+                          background: idx % 2 === 1 ? '#f8fafc' : '#ffffff',
+                          transition: 'background 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = '#eff6ff'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = idx % 2 === 1 ? '#f8fafc' : '#ffffff'}
+                      >
+                        {/* Row Number */}
+                        <td style={{ padding: '8px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '700', fontSize: '12px' }}>
+                          {idx + 1}
+                        </td>
+
+                        {/* Doc / RGP No */}
+                        <td style={{ padding: '8px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span style={{
+                              color: '#2563eb',
+                              fontWeight: '700',
+                              fontSize: '12px',
+                              letterSpacing: '0.2px'
+                            }}>
+                              {r.docNo}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={(e) => handleCopyDoc(e, r.docNo)}
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                color: copiedDocNo === r.docNo ? '#16a34a' : '#94a3b8'
+                              }}
+                              title="Copy Doc Number"
+                            >
+                              {copiedDocNo === r.docNo ? <Check size={11} /> : <Copy size={11} />}
+                            </button>
+                          </div>
+                          {r.moduleLabel && (
+                            <div style={{ marginTop: '2px' }}>
                               <span style={{
-                                fontSize: '9.5px',
-                                fontWeight: '800',
-                                width: 'fit-content',
-                                padding: '1px 5px',
+                                display: 'inline-block',
+                                padding: '1px 6px',
                                 borderRadius: '4px',
-                                backgroundColor: `${r.badgeColor}18`,
-                                color: r.badgeColor
+                                background: `${r.badgeColor || '#2563eb'}14`,
+                                color: r.badgeColor || '#2563eb',
+                                fontSize: '9.5px',
+                                fontWeight: '700',
+                                border: `1px solid ${r.badgeColor || '#2563eb'}30`
                               }}>
                                 {r.moduleLabel}
                               </span>
                             </div>
-                          </td>
+                          )}
+                        </td>
 
-                          {/* Material Out Date */}
-                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
-                            {formatDateTime(r.date) || r.date || '—'}
-                          </td>
+                        {/* Material Out Date */}
+                        <td style={{ padding: '8px 10px', fontSize: '11.5px', color: '#334155', whiteSpace: 'nowrap' }}>
+                          {formatDateTime(r.date) || r.date || '—'}
+                        </td>
 
-                          {/* RGP Type */}
-                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)', fontWeight: '600' }}>
+                        {/* RGP Type */}
+                        <td style={{ padding: '8px 10px' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '1px 8px',
+                            borderRadius: '4px',
+                            background: '#f1f5f9',
+                            color: '#475569',
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            border: '1px solid #e2e8f0'
+                          }}>
                             {r.type}
-                          </td>
+                          </span>
+                        </td>
 
-                          {/* Department */}
-                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-muted)' }}>
-                            {r.department || 'Store'}
-                          </td>
+                        {/* Department */}
+                        <td style={{ padding: '8px 10px', fontSize: '12px', color: '#475569', fontWeight: '600' }}>
+                          {r.department || 'Store'}
+                        </td>
 
-                          {/* Vendor / Party */}
-                          <td style={{ padding: '12px 14px', fontSize: '12.5px', fontWeight: '700', color: 'var(--text-main)' }}>
+                        {/* Vendor / Party */}
+                        <td style={{ padding: '8px 10px' }}>
+                          <div style={{ color: '#0f172a', fontWeight: '700', fontSize: '12px', textTransform: 'uppercase' }}>
                             {r.vendor || '—'}
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* Purpose */}
-                          <td style={{ padding: '12px 14px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                            {r.purpose || '—'}
-                          </td>
+                        {/* Purpose */}
+                        <td style={{ padding: '8px 10px', fontSize: '11.5px', color: '#64748b' }}>
+                          {r.purpose || '—'}
+                        </td>
 
-                          {/* Item Description */}
-                          <td style={{ padding: '12px 14px', fontSize: '12.5px', color: 'var(--text-main)' }}>
-                            {r.items && r.items.length > 1 ? (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedMasterRecordForModal(r)}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  padding: 0,
-                                  color: '#004b87',
-                                  fontWeight: '700',
-                                  textDecoration: 'underline',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                              >
-                                <span>{r.itemDescription}</span>
-                                <ArrowUpRight size={12} />
-                              </button>
-                            ) : (
-                              <span>{r.itemDescription}</span>
-                            )}
-                          </td>
-
-                          {/* Quantity Sent */}
-                          <td style={{ padding: '12px 14px', fontSize: '13.5px', fontWeight: '800', textAlign: 'right', color: 'var(--text-main)' }}>
-                            {Number(r.quantity || 0).toLocaleString()}
-                          </td>
-
-                          {/* UOM */}
-                          <td style={{ padding: '12px 14px', fontSize: '11.5px', fontWeight: '700', textAlign: 'center', color: 'var(--text-muted)' }}>
-                            {r.uom || 'PCS'}
-                          </td>
-
-                          {/* Status & Expected Date / Scanner Verification */}
-                          <td style={{ padding: '12px 14px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                              <span style={{
-                                padding: '2px 8px',
-                                borderRadius: '12px',
-                                fontSize: '11px',
-                                fontWeight: '800',
-                                backgroundColor: isScanner
-                                  ? `${r.badgeColor}18`
-                                  : isClosed 
-                                    ? 'rgba(16, 185, 129, 0.12)' 
-                                    : isOverdue 
-                                      ? 'rgba(239, 68, 68, 0.12)' 
-                                      : 'rgba(245, 158, 11, 0.12)',
-                                color: isScanner ? r.badgeColor : (isClosed ? '#10b981' : isOverdue ? '#ef4444' : '#f59e0b'),
-                                border: `1px solid ${isScanner ? `${r.badgeColor}35` : (isClosed ? 'rgba(16, 185, 129, 0.25)' : isOverdue ? 'rgba(239, 68, 68, 0.25)' : 'rgba(245, 158, 11, 0.25)')}`
-                              }}>
-                                {r.status}
-                              </span>
-
-                              {/* Linked Gate Scanner Badge */}
-                              {!isScanner && hasLinkedScans && (
-                                <span style={{
-                                  fontSize: '9.5px',
-                                  fontWeight: '700',
-                                  color: '#06b6d4',
-                                  backgroundColor: 'rgba(6, 182, 212, 0.1)',
-                                  padding: '1px 5px',
-                                  borderRadius: '4px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '3px'
-                                }}>
-                                  <QrCode size={9} />
-                                  <span>{r.scans.length} Scan{r.scans.length > 1 ? 's' : ''} Logged</span>
-                                </span>
-                              )}
-
-                              {r.expectedReturnDate && (
-                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                  Exp: {formatDateTime(r.expectedReturnDate)}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Actions */}
-                          <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                        {/* Item Description */}
+                        <td style={{ padding: '8px 12px', fontWeight: '800', color: '#0f172a', fontSize: '12px', textTransform: 'uppercase' }}>
+                          {r.items && r.items.length > 1 ? (
                             <button
                               type="button"
                               onClick={() => setSelectedMasterRecordForModal(r)}
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '4px 8px', height: '28px', fontSize: '11.5px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                              title="View complete record details and verification logs"
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                color: '#2563eb',
+                                fontWeight: '800',
+                                fontSize: '12px',
+                                textTransform: 'uppercase',
+                                textDecoration: 'underline',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
                             >
-                              <Eye size={13} />
-                              <span>View</span>
+                              <span>{r.itemDescription}</span>
+                              <ArrowUpRight size={11} />
                             </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          ) : (
+                            <span>{r.itemDescription}</span>
+                          )}
+                        </td>
+
+                        {/* Quantity Sent */}
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: '800', color: '#0f172a', fontSize: '12.5px' }}>
+                          {Number(r.quantity || 0).toLocaleString()}
+                        </td>
+
+                        {/* UOM */}
+                        <td style={{ padding: '8px', textAlign: 'center', color: '#475569', fontWeight: '600', fontSize: '11.5px' }}>
+                          {r.uom || 'PCS'}
+                        </td>
+
+                        {/* Status / Exp */}
+                        <td style={{ padding: '8px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              background: isScanner
+                                ? `${r.badgeColor}18`
+                                : isClosed 
+                                  ? '#dcfce7' 
+                                  : isOverdue 
+                                    ? '#fee2e2' 
+                                    : '#fef3c7',
+                              color: isScanner ? r.badgeColor : (isClosed ? '#15803d' : isOverdue ? '#b91c1c' : '#b45309'),
+                              border: `1px solid ${isScanner ? `${r.badgeColor}35` : (isClosed ? '#bbf7d0' : isOverdue ? '#fecaca' : '#fde68a')}`
+                            }}>
+                              {r.status}
+                            </span>
+
+                            {/* Linked Gate Scanner Badge */}
+                            {!isScanner && hasLinkedScans && (
+                              <span style={{
+                                fontSize: '9.5px',
+                                fontWeight: '700',
+                                color: '#0284c7',
+                                background: '#f0f9ff',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                border: '1px solid #bae6fd',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}>
+                                <QrCode size={9} />
+                                <span>{r.scans.length} Scan{r.scans.length > 1 ? 's' : ''}</span>
+                              </span>
+                            )}
+
+                            {r.expectedReturnDate && (
+                              <span style={{ fontSize: '10px', color: '#64748b' }}>
+                                Exp: {formatDateTime(r.expectedReturnDate)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMasterRecordForModal(r)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              background: '#0284c7',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="View complete record details and verification logs"
+                          >
+                            <Eye size={11} />
+                            <span>View</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
 
           {/* Master Record Details Modal */}
@@ -3844,29 +3899,39 @@ export default function ReportsHistoryView({
           <div className="print-hide" style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '10px',
+            gap: '8px',
             flexWrap: 'wrap',
-            backgroundColor: 'var(--bg-secondary)',
-            padding: '12px 16px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color)'
+            backgroundColor: '#ffffff',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1'
           }}>
             {/* Search Input */}
             <div style={{ position: 'relative', flex: '1 1 240px' }}>
-              <Search size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
               <input
                 type="text"
                 placeholder="Search Lot #, Style, Brand, Material, Vendor, RGP, PO..."
-                className="form-input"
                 value={lotSearch}
                 onChange={(e) => setLotSearch(e.target.value)}
-                style={{ width: '100%', paddingLeft: '34px', height: '36px', fontSize: '12.5px' }}
+                style={{
+                  width: '100%',
+                  paddingLeft: '32px',
+                  paddingRight: lotSearch ? '28px' : '10px',
+                  height: '34px',
+                  fontSize: '12px',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  outline: 'none'
+                }}
               />
               {lotSearch && (
                 <button
                   type="button"
                   onClick={() => setLotSearch('')}
-                  style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                  style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
                 >
                   <X size={13} />
                 </button>
@@ -3874,12 +3939,23 @@ export default function ReportsHistoryView({
             </div>
 
             {/* Status Filter */}
-            <div style={{ minWidth: '170px' }}>
+            <div style={{ minWidth: '160px' }}>
               <select
-                className="form-select"
                 value={lotStatusFilter}
                 onChange={(e) => setLotStatusFilter(e.target.value)}
-                style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+                style={{
+                  width: '100%',
+                  height: '34px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  padding: '0 20px 0 10px',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
               >
                 <option value="all">All Process Statuses</option>
                 <option value="complete">✓ Complete (All Processes Over)</option>
@@ -3894,12 +3970,23 @@ export default function ReportsHistoryView({
 
             {/* Brand Filter */}
             {uniqueLotBrands.length > 0 && (
-              <div style={{ minWidth: '140px' }}>
+              <div style={{ minWidth: '135px' }}>
                 <select
-                  className="form-select"
                   value={lotBrandFilter}
                   onChange={(e) => setLotBrandFilter(e.target.value)}
-                  style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+                  style={{
+                    width: '100%',
+                    height: '34px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#0f172a',
+                    padding: '0 20px 0 10px',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
                 >
                   <option value="all">All Brands / Clients</option>
                   {uniqueLotBrands.map(b => (
@@ -3910,12 +3997,23 @@ export default function ReportsHistoryView({
             )}
 
             {/* Sort Selector */}
-            <div style={{ minWidth: '160px' }}>
+            <div style={{ minWidth: '150px' }}>
               <select
-                className="form-select"
                 value={lotSort}
                 onChange={(e) => setLotSort(e.target.value)}
-                style={{ width: '100%', height: '36px', fontSize: '12px', fontWeight: '600' }}
+                style={{
+                  width: '100%',
+                  height: '34px',
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  padding: '0 20px 0 10px',
+                  outline: 'none',
+                  cursor: 'pointer'
+                }}
               >
                 <option value="lot_desc">Lot No (Highest First)</option>
                 <option value="lot_asc">Lot No (Lowest First)</option>
@@ -3927,357 +4025,378 @@ export default function ReportsHistoryView({
           </div>
 
           {/* Master Multi-Column One-Line Operations Table */}
-          <div style={{
-            backgroundColor: 'var(--bg-secondary)',
-            borderRadius: '12px',
-            border: '1px solid var(--border-color)',
-            overflow: 'hidden',
-            boxShadow: 'var(--shadow-sm)'
-          }}>
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', minWidth: '1500px' }}>
-                <thead>
-                  <tr style={{
-                    backgroundColor: 'var(--bg-primary)',
-                    borderBottom: '2px solid var(--border-color)',
-                    color: 'var(--text-muted)',
-                    fontSize: '10.5px',
-                    fontWeight: '800',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.4px',
-                    whiteSpace: 'nowrap'
-                  }}>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', width: '35px' }}>#</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>LOT NO. &amp; STYLE</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', width: '90px' }}>TARGET PCS</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '190px' }}>RGP (TAGS &amp; LABELS)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '190px' }}>RGP (DORI / DRAWSTRING)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>RGP (ZIP &amp; TRIMS)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>DORI PO ORDERS</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>ZIP PO ORDERS</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>GENERAL PO &amp; EXTRAS</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '130px' }}>VENDORS / PARTIES</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '170px' }}>GATE ENTRY (GATE IN)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '170px' }}>MATERIAL IN (STORE)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '160px' }}>MATERIAL OUT (DISPATCH)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'center', minWidth: '140px' }}>PROCESS STATUS</th>
-                    <th className="print-hide" style={{ padding: '10px 12px', textAlign: 'right', minWidth: '110px' }}>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLotWiseList.map((lot, idx) => {
-                    const isCompleted = lot.isCompleted;
+          <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#ffffff' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', minWidth: '1500px', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ background: '#1e3a8a', color: '#ffffff' }}>
+                  <th style={{ padding: '10px 8px', width: '35px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>#</th>
+                  <th style={{ padding: '10px 10px', minWidth: '160px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>LOT NO. &amp; STYLE</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', width: '90px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>TARGET PCS</th>
+                  <th style={{ padding: '10px 10px', minWidth: '190px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP (TAGS &amp; LABELS)</th>
+                  <th style={{ padding: '10px 10px', minWidth: '190px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP (DORI / DRAWSTRING)</th>
+                  <th style={{ padding: '10px 10px', minWidth: '160px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP (ZIP &amp; TRIMS)</th>
+                  <th style={{ padding: '10px 10px', minWidth: '150px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>DORI PO ORDERS</th>
+                  <th style={{ padding: '10px 10px', minWidth: '150px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>ZIP PO ORDERS</th>
+                  <th style={{ padding: '10px 10px', minWidth: '150px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>GENERAL PO &amp; EXTRAS</th>
+                  <th style={{ padding: '10px 10px', minWidth: '130px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>VENDORS / PARTIES</th>
+                  <th style={{ padding: '10px 10px', minWidth: '170px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>GATE ENTRY (GATE IN)</th>
+                  <th style={{ padding: '10px 10px', minWidth: '170px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>MATERIAL IN (STORE)</th>
+                  <th style={{ padding: '10px 10px', minWidth: '160px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>MATERIAL OUT (DISPATCH)</th>
+                  <th style={{ padding: '10px 10px', textAlign: 'center', minWidth: '140px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>PROCESS STATUS</th>
+                  <th className="print-hide" style={{ padding: '10px 10px', textAlign: 'right', minWidth: '110px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLotWiseList.map((lot, idx) => {
+                  const isCompleted = lot.isCompleted;
 
-                    let statusBadgeBg = 'rgba(59, 130, 246, 0.12)';
-                    let statusBadgeColor = '#2563eb';
-                    let statusBadgeBorder = 'rgba(59, 130, 246, 0.25)';
+                  let statusBadgeBg = '#fef3c7';
+                  let statusBadgeColor = '#b45309';
+                  let statusBadgeBorder = '#fde68a';
 
-                    if (isCompleted) {
-                      statusBadgeBg = 'rgba(16, 185, 129, 0.15)';
-                      statusBadgeColor = '#059669';
-                      statusBadgeBorder = 'rgba(16, 185, 129, 0.35)';
-                    } else if (String(lot.processStatus).toLowerCase().includes('overdue')) {
-                      statusBadgeBg = 'rgba(239, 68, 68, 0.15)';
-                      statusBadgeColor = '#dc2626';
-                      statusBadgeBorder = 'rgba(239, 68, 68, 0.35)';
-                    } else if (String(lot.processStatus).toLowerCase().includes('pending rgp')) {
-                      statusBadgeBg = 'rgba(168, 85, 247, 0.15)';
-                      statusBadgeColor = '#7c3aed';
-                      statusBadgeBorder = 'rgba(168, 85, 247, 0.3)';
-                    } else if (String(lot.processStatus).toLowerCase().includes('pending gate')) {
-                      statusBadgeBg = 'rgba(245, 158, 11, 0.15)';
-                      statusBadgeColor = '#d97706';
-                      statusBadgeBorder = 'rgba(245, 158, 11, 0.3)';
-                    }
+                  if (isCompleted) {
+                    statusBadgeBg = '#dcfce7';
+                    statusBadgeColor = '#15803d';
+                    statusBadgeBorder = '#bbf7d0';
+                  } else if (String(lot.processStatus).toLowerCase().includes('overdue')) {
+                    statusBadgeBg = '#fee2e2';
+                    statusBadgeColor = '#b91c1c';
+                    statusBadgeBorder = '#fecaca';
+                  } else if (String(lot.processStatus).toLowerCase().includes('pending rgp')) {
+                    statusBadgeBg = '#f3e8ff';
+                    statusBadgeColor = '#7e22ce';
+                    statusBadgeBorder = '#e9d5ff';
+                  } else if (String(lot.processStatus).toLowerCase().includes('pending gate')) {
+                    statusBadgeBg = '#fef3c7';
+                    statusBadgeColor = '#b45309';
+                    statusBadgeBorder = '#fde68a';
+                  }
 
-                    return (
-                      <tr
-                        key={lot.lotNo}
-                        style={{
-                          borderBottom: '1px solid var(--border-color)',
-                          backgroundColor: idx % 2 === 1 ? 'rgba(0, 0, 0, 0.015)' : 'transparent',
-                          transition: 'background-color 0.15s'
-                        }}
-                      >
-                        {/* 1. Serial # */}
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontWeight: '600' }}>
-                          {idx + 1}
-                        </td>
+                  return (
+                    <tr
+                      key={lot.lotNo}
+                      style={{
+                        borderBottom: '1px solid #e2e8f0',
+                        background: idx % 2 === 1 ? '#f8fafc' : '#ffffff',
+                        transition: 'background 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#eff6ff'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = idx % 2 === 1 ? '#f8fafc' : '#ffffff'}
+                    >
+                      {/* 1. Serial # */}
+                      <td style={{ padding: '8px 10px', textAlign: 'center', color: '#0f172a', fontWeight: '700', fontSize: '12px' }}>
+                        {idx + 1}
+                      </td>
 
-                        {/* 2. Lot No & Style & Brand */}
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ fontWeight: '800', fontSize: '13.5px', color: '#7c3aed' }}>
-                              #{lot.lotNo}
-                            </span>
-                            {lot.isRecreated && (
-                              <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 4px', borderRadius: '3px', backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706' }}>
-                                RUN-V
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ fontWeight: '700', color: 'var(--text-main)', marginTop: '2px', fontSize: '12px' }}>
-                            {lot.style || 'Custom Design'}
-                          </div>
-                          <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
-                            {lot.brand && <span>{lot.brand} &bull; </span>}
-                            <span>{lot.fabricType || 'Fabric'}</span>
-                          </div>
-                        </td>
-
-                        {/* 3. Target Cutting Pcs */}
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <span style={{ fontWeight: '800', fontSize: '13.5px', color: 'var(--text-main)' }}>
-                            {Number(lot.targetPieces || 0).toLocaleString()}
+                      {/* 2. Lot No & Style & Brand */}
+                      <td style={{ padding: '8px 10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ fontWeight: '700', fontSize: '12px', color: '#2563eb', letterSpacing: '0.2px' }}>
+                            #{lot.lotNo}
                           </span>
-                          <span style={{ fontSize: '9.5px', color: 'var(--text-muted)', display: 'block' }}>PCS</span>
-                        </td>
-
-                        {/* 4. RGP (Tags & Labels) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.rgpTagList && lot.rgpTagList.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {lot.rgpTagList.map((t, tI) => (
-                                <div key={tI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(124, 58, 237, 0.06)', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <strong style={{ color: '#7c3aed', fontSize: '11px' }}>{t.rgpNo}</strong>
-                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: t.status === 'Returned' ? '#10b981' : '#7c3aed' }}>{t.status}</span>
-                                  </div>
-                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
-                                    {t.itemDesc} &bull; <strong>{t.qty} {t.uom}</strong>
-                                  </div>
-                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                    Party: {t.vendor} {t.purpose && `(${t.purpose})`}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                          <button
+                            type="button"
+                            onClick={(e) => handleCopyDoc(e, lot.lotNo)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: '2px',
+                              color: copiedDocNo === lot.lotNo ? '#16a34a' : '#94a3b8'
+                            }}
+                            title="Copy Lot Number"
+                          >
+                            {copiedDocNo === lot.lotNo ? <Check size={11} /> : <Copy size={11} />}
+                          </button>
+                          {lot.isRecreated && (
+                            <span style={{ fontSize: '9px', fontWeight: '800', padding: '1px 4px', borderRadius: '3px', backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' }}>
+                              RUN-V
+                            </span>
                           )}
-                        </td>
+                        </div>
+                        <div style={{ fontWeight: '800', color: '#0f172a', marginTop: '2px', fontSize: '12px', textTransform: 'uppercase' }}>
+                          {lot.style || 'Custom Design'}
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: '#64748b', textTransform: 'uppercase' }}>
+                          {lot.brand && <span>{lot.brand} &bull; </span>}
+                          <span>{lot.fabricType || 'Fabric'}</span>
+                        </div>
+                      </td>
 
-                        {/* 5. RGP (Dori / Drawstring) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.rgpDoriList && lot.rgpDoriList.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {lot.rgpDoriList.map((d, dI) => (
-                                <div key={dI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(245, 158, 11, 0.06)', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <strong style={{ color: '#d97706', fontSize: '11px' }}>{d.rgpNo}</strong>
-                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: d.status === 'Returned' ? '#10b981' : '#d97706' }}>{d.status}</span>
-                                  </div>
-                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
-                                    {d.itemDesc} &bull; <strong>{d.qty} {d.uom}</strong>
-                                  </div>
-                                  <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                    Party: {d.vendor} {d.purpose && `(${d.purpose})`}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
-                          )}
-                        </td>
+                      {/* 3. Target Cutting Pcs */}
+                      <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                        <span style={{ fontWeight: '800', fontSize: '12.5px', color: '#0f172a' }}>
+                          {Number(lot.targetPieces || 0).toLocaleString()}
+                        </span>
+                        <span style={{ fontSize: '9.5px', color: '#64748b', display: 'block' }}>PCS</span>
+                      </td>
 
-                        {/* 6. RGP (Zip & Other Trims) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.rgpZipList && lot.rgpZipList.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {lot.rgpZipList.map((z, zI) => (
-                                <div key={zI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'rgba(236, 72, 153, 0.06)', border: '1px solid rgba(236, 72, 153, 0.2)' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <strong style={{ color: '#db2777', fontSize: '11px' }}>{z.rgpNo}</strong>
-                                    <span style={{ fontSize: '9.5px', fontWeight: '800', color: z.status === 'Returned' ? '#10b981' : '#db2777' }}>{z.status}</span>
-                                  </div>
-                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
-                                    {z.itemDesc} &bull; <strong>{z.qty} {z.uom}</strong>
-                                  </div>
+                      {/* 4. RGP (Tags & Labels) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.rgpTagList && lot.rgpTagList.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.rgpTagList.map((t, tI) => (
+                              <div key={tI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <strong style={{ color: '#2563eb', fontSize: '11px' }}>{t.rgpNo}</strong>
+                                  <span style={{ fontSize: '9.5px', fontWeight: '800', color: t.status === 'Returned' ? '#16a34a' : '#2563eb' }}>{t.status}</span>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
-                          )}
-                        </td>
-
-                        {/* 7. Dori PO Orders */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.dooriOrders && lot.dooriOrders.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {lot.dooriOrders.map((d, dI) => (
-                                <div key={dI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
-                                  <strong style={{ color: '#d97706', fontSize: '11px' }}>PO #{d.po_number || d.Lot_Number}</strong>
-                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
-                                    <strong>{d.Total_Pieces} pcs</strong> &bull; {d.Garment_Type || d.Style || 'Dori'}
-                                  </div>
+                                <div style={{ fontSize: '10.5px', color: '#0f172a', marginTop: '1px', textTransform: 'uppercase' }}>
+                                  {t.itemDesc} &bull; <strong>{t.qty} {t.uom}</strong>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
-                          )}
-                        </td>
-
-                        {/* 8. Zip PO Orders */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.zipOrders && lot.zipOrders.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {lot.zipOrders.map((z, zI) => (
-                                <div key={zI} style={{ padding: '4px 6px', borderRadius: '5px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
-                                  <strong style={{ color: '#db2777', fontSize: '11px' }}>PO #{z.po_number || z.Lot_Number}</strong>
-                                  <div style={{ fontSize: '10.5px', color: 'var(--text-main)', marginTop: '1px' }}>
-                                    <strong>{z.Total_Pieces_CH || z.Total_Pieces} pcs</strong> &bull; {z.Teeth_Color || 'Teeth'}
-                                  </div>
+                                <div style={{ fontSize: '9.5px', color: '#64748b' }}>
+                                  {t.vendor} {t.purpose && `(${t.purpose})`}
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
-                          )}
-                        </td>
-
-                        {/* 9. General PO & Extras */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.pos?.length > 0 || lot.extraIssues?.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              {(lot.pos || []).map((p, pI) => (
-                                <div key={pI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)', fontSize: '10.5px' }}>
-                                  <strong style={{ color: '#2563eb' }}>PO #{p.poNumber}</strong> &bull; ₹{Number(p.total || 0).toLocaleString()}
-                                </div>
-                              ))}
-                              {(lot.extraIssues || []).map((ex, exI) => (
-                                <div key={exI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', fontSize: '10.5px', color: '#dc2626' }}>
-                                  <strong>Extra #{ex.voucher_id || ex.voucherId || ex.id}</strong> ({ex.reason || 'Extra'})
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '11px' }}>—</span>
-                          )}
-                        </td>
-
-                        {/* 10. Vendors / Parties */}
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-main)' }}>
-                            {(lot.vendors || []).join(', ') || 'Internal Store'}
+                              </div>
+                            ))}
                           </div>
-                        </td>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
 
-                        {/* 11. Gate Entry (Gate In) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.gateInScans && lot.gateInScans.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              {lot.gateInScans.map((sc, scI) => (
-                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(16, 185, 129, 0.08)', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
-                                  <strong style={{ color: '#059669' }}>✓ Gate In: {sc.quantity || 0} pcs</strong>
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                                    {sc.person_name || 'Guard'} &bull; {sc.supplier_name || 'Party'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
-                                  </div>
+                      {/* 5. RGP (Dori / Drawstring) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.rgpDoriList && lot.rgpDoriList.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.rgpDoriList.map((d, dI) => (
+                              <div key={dI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <strong style={{ color: '#d97706', fontSize: '11px' }}>{d.rgpNo}</strong>
+                                  <span style={{ fontSize: '9.5px', fontWeight: '800', color: d.status === 'Returned' ? '#16a34a' : '#d97706' }}>{d.status}</span>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate In Scan</span>
-                          )}
-                        </td>
-
-                        {/* 12. Material In (Store Received) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.materialInScans && lot.materialInScans.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              {lot.materialInScans.map((sc, scI) => (
-                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.2)' }}>
-                                  <strong style={{ color: '#2563eb' }}>✓ Inward: {sc.quantity || 0} pcs</strong> ({sc.material_name || 'Goods'})
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                                    {sc.person_name || 'Verifier'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
-                                  </div>
+                                <div style={{ fontSize: '10.5px', color: '#0f172a', marginTop: '1px', textTransform: 'uppercase' }}>
+                                  {d.itemDesc} &bull; <strong>{d.qty} {d.uom}</strong>
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>Pending Inward</span>
-                          )}
-                        </td>
-
-                        {/* 13. Material Out (Gate Dispatch) */}
-                        <td style={{ padding: '10px 12px' }}>
-                          {(lot.materialOutScans && lot.materialOutScans.length > 0) ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                              {lot.materialOutScans.map((sc, scI) => (
-                                <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: 'rgba(168, 85, 247, 0.08)', border: '1px solid rgba(168, 85, 247, 0.2)' }}>
-                                  <strong style={{ color: '#7c3aed' }}>Gate Out: {sc.quantity || 0} pcs</strong>
-                                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>
-                                    {sc.person_name || 'Guard'} &bull; {formatDateTime(sc.scanned_at || sc.timestamp)}
-                                  </div>
+                                <div style={{ fontSize: '9.5px', color: '#64748b' }}>
+                                  {d.vendor} {d.purpose && `(${d.purpose})`}
                                 </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate Out</span>
-                          )}
-                        </td>
-
-                        {/* 14. Process Status */}
-                        <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                          <div style={{
-                            display: 'inline-block',
-                            padding: '4px 10px',
-                            borderRadius: '20px',
-                            backgroundColor: statusBadgeBg,
-                            color: statusBadgeColor,
-                            border: `1px solid ${statusBadgeBorder}`,
-                            fontSize: '10.5px',
-                            fontWeight: '800',
-                            letterSpacing: '-0.1px',
-                            whiteSpace: 'nowrap'
-                          }}>
-                            {isCompleted ? '✓ COMPLETE (All Over)' : lot.processStatus}
+                              </div>
+                            ))}
                           </div>
-                        </td>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
 
-                        {/* 15. Actions */}
-                        <td className="print-hide" style={{ padding: '10px 12px', textAlign: 'right' }}>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px' }}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedLotForModal(lot)}
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '3px 7px', fontSize: '11px', height: '26px' }}
-                              title="Inspect Full Lot Operations Dossier"
-                            >
-                              <Eye size={11} />
-                              <span>View</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadLotPDF(lot)}
-                              className="btn btn-secondary btn-sm"
-                              style={{ padding: '3px 7px', fontSize: '11px', height: '26px', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
-                              title="Download Lot Audit PDF"
-                            >
-                              <Download size={11} />
-                              <span>PDF</span>
-                            </button>
+                      {/* 6. RGP (Zip & Other Trims) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.rgpZipList && lot.rgpZipList.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.rgpZipList.map((z, zI) => (
+                              <div key={zI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <strong style={{ color: '#db2777', fontSize: '11px' }}>{z.rgpNo}</strong>
+                                  <span style={{ fontSize: '9.5px', fontWeight: '800', color: z.status === 'Returned' ? '#16a34a' : '#db2777' }}>{z.status}</span>
+                                </div>
+                                <div style={{ fontSize: '10.5px', color: '#0f172a', marginTop: '1px', textTransform: 'uppercase' }}>
+                                  {z.itemDesc} &bull; <strong>{z.qty} {z.uom}</strong>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
 
-                  {filteredLotWiseList.length === 0 && (
-                    <tr>
-                      <td colSpan={15} style={{ padding: '48px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        <Layers size={36} style={{ margin: '0 auto 12px auto', opacity: 0.4, display: 'block' }} />
-                        <h4 style={{ margin: 0, fontSize: '15px', color: 'var(--text-main)' }}>No Manufacturing Lots Found</h4>
-                        <p style={{ margin: '4px 0 0 0', fontSize: '12.5px' }}>Try adjusting search filters, brand selection, or process status.</p>
+                      {/* 7. Dori PO Orders */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.dooriOrders && lot.dooriOrders.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.dooriOrders.map((d, dI) => (
+                              <div key={dI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                                <strong style={{ color: '#d97706', fontSize: '11px' }}>PO #{d.po_number || d.Lot_Number}</strong>
+                                <div style={{ fontSize: '10.5px', color: '#0f172a', marginTop: '1px', textTransform: 'uppercase' }}>
+                                  <strong>{d.Total_Pieces} pcs</strong> &bull; {d.Garment_Type || d.Style || 'Dori'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* 8. Zip PO Orders */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.zipOrders && lot.zipOrders.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.zipOrders.map((z, zI) => (
+                              <div key={zI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0' }}>
+                                <strong style={{ color: '#db2777', fontSize: '11px' }}>PO #{z.po_number || z.Lot_Number}</strong>
+                                <div style={{ fontSize: '10.5px', color: '#0f172a', marginTop: '1px', textTransform: 'uppercase' }}>
+                                  <strong>{z.Total_Pieces_CH || z.Total_Pieces} pcs</strong> &bull; {z.Teeth_Color || 'Teeth'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* 9. General PO & Extras */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.pos?.length > 0 || lot.extraIssues?.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {(lot.pos || []).map((p, pI) => (
+                              <div key={pI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f1f5f9', border: '1px solid #e2e8f0', fontSize: '10.5px' }}>
+                                <strong style={{ color: '#2563eb' }}>PO #{p.poNumber}</strong> &bull; ₹{Number(p.total || 0).toLocaleString()}
+                              </div>
+                            ))}
+                            {(lot.extraIssues || []).map((ex, exI) => (
+                              <div key={exI} style={{ padding: '3px 6px', borderRadius: '4px', backgroundColor: '#fee2e2', border: '1px solid #fecaca', fontSize: '10.5px', color: '#dc2626' }}>
+                                <strong>Extra #{ex.voucher_id || ex.voucherId || ex.id}</strong> ({ex.reason || 'Extra'})
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontStyle: 'italic', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+
+                      {/* 10. Vendors / Parties */}
+                      <td style={{ padding: '8px 10px' }}>
+                        <div style={{ fontSize: '11px', fontWeight: '700', color: '#0f172a', textTransform: 'uppercase' }}>
+                          {(lot.vendors || []).join(', ') || 'Internal Store'}
+                        </div>
+                      </td>
+
+                      {/* 11. Gate Entry (Gate In) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.gateInScans && lot.gateInScans.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.gateInScans.map((sc, scI) => (
+                              <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: '#dcfce7', border: '1px solid #bbf7d0' }}>
+                                <strong style={{ color: '#15803d' }}>✓ Gate In: {sc.quantity || 0} pcs</strong>
+                                <div style={{ color: '#64748b', fontSize: '9.5px' }}>
+                                  {sc.person_name || 'Guard'} &bull; {sc.supplier_name || 'Party'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate In Scan</span>
+                        )}
+                      </td>
+
+                      {/* 12. Material In (Store Received) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.materialInScans && lot.materialInScans.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.materialInScans.map((sc, scI) => (
+                              <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: '#e0f2fe', border: '1px solid #bae6fd' }}>
+                                <strong style={{ color: '#0284c7' }}>✓ Inward: {sc.quantity || 0} pcs</strong> ({sc.material_name || 'Goods'})
+                                <div style={{ color: '#64748b', fontSize: '9.5px' }}>
+                                  {sc.person_name || 'Verifier'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '10.5px', fontStyle: 'italic' }}>Pending Inward</span>
+                        )}
+                      </td>
+
+                      {/* 13. Material Out (Gate Dispatch) */}
+                      <td style={{ padding: '8px 10px' }}>
+                        {(lot.materialOutScans && lot.materialOutScans.length > 0) ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {lot.materialOutScans.map((sc, scI) => (
+                              <div key={scI} style={{ fontSize: '10.5px', padding: '3px 6px', borderRadius: '4px', backgroundColor: '#f3e8ff', border: '1px solid #e9d5ff' }}>
+                                <strong style={{ color: '#7e22ce' }}>Gate Out: {sc.quantity || 0} pcs</strong>
+                                <div style={{ color: '#64748b', fontSize: '9.5px' }}>
+                                  {sc.person_name || 'Guard'}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: '#94a3b8', fontSize: '10.5px', fontStyle: 'italic' }}>No Gate Out</span>
+                        )}
+                      </td>
+
+                      {/* 14. Process Status */}
+                      <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                        <div style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          backgroundColor: statusBadgeBg,
+                          color: statusBadgeColor,
+                          border: `1px solid ${statusBadgeBorder}`,
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {isCompleted ? '✓ COMPLETE (All Over)' : lot.processStatus}
+                        </div>
+                      </td>
+
+                      {/* 15. Actions */}
+                      <td className="print-hide" style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLotForModal(lot)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              background: '#0284c7',
+                              color: '#ffffff',
+                              border: 'none',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Inspect Full Lot Operations Dossier"
+                          >
+                            <Eye size={11} />
+                            <span>View</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadLotPDF(lot)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              background: '#fee2e2',
+                              color: '#dc2626',
+                              border: '1px solid #fecaca',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '3px'
+                            }}
+                            title="Download Lot Audit PDF"
+                          >
+                            <Download size={11} />
+                            <span>PDF</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+
+                {filteredLotWiseList.length === 0 && (
+                  <tr>
+                    <td colSpan={15} style={{ padding: '36px 16px', textAlign: 'center', color: '#64748b' }}>
+                      <Layers size={32} style={{ margin: '0 auto 8px auto', opacity: 0.3, display: 'block' }} />
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#0f172a' }}>No Manufacturing Lots Found</div>
+                      <div style={{ fontSize: '12px', marginTop: '2px' }}>Try adjusting search filters, brand selection, or process status.</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
             {/* Print Signature Authority Section for Physical Printing */}
             <div className="print-only" style={{
@@ -4300,7 +4419,6 @@ export default function ReportsHistoryView({
                 <strong style={{ fontSize: '11px' }}>Factory Manager / Plant Head</strong>
               </div>
             </div>
-          </div>
 
           {/* Single Lot Dossier & Print View Modal */}
           {selectedLotForModal && (
@@ -7015,33 +7133,32 @@ export default function ReportsHistoryView({
             </div>
           ) : rgpViewMode === 'table' ? (
             /* Table View */
-            <div className="panel" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border-color)', borderRadius: '12px' }}>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      <th style={{ padding: '12px 16px', width: '30px' }}></th>
-                      <th style={{ padding: '12px 16px' }}>RGP Pass &amp; Type</th>
-                      <th style={{ padding: '12px 16px' }}>Dates &amp; Status</th>
-                      <th style={{ padding: '12px 16px' }}>Vendor &amp; Purpose</th>
-                      <th style={{ padding: '12px 16px' }}>Dispatched Goods</th>
-                      <th style={{ padding: '12px 16px' }}>Vehicle / Auth</th>
-                      <th style={{ padding: '12px 16px' }}>Gate QR Scans</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right' }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredRgpList.map((rgp) => {
-                      const isExpanded = expandedRgpIds.has(rgp.id || rgp.rgpNo);
-                      return (
-                        <React.Fragment key={rgp.id || rgp.rgpNo}>
-                          <tr
-                            style={{
-                              borderBottom: isExpanded ? 'none' : '1px solid var(--border-color)',
-                              backgroundColor: isExpanded ? 'rgba(99, 102, 241, 0.02)' : 'transparent',
-                              transition: 'background-color 0.15s'
-                            }}
-                          >
+            <div style={{ overflowX: 'auto', border: '1px solid #cbd5e1', borderRadius: '8px', background: '#ffffff' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ background: '#1e3a8a', color: '#ffffff' }}>
+                    <th style={{ padding: '10px 8px', width: '30px', textAlign: 'center', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}></th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>RGP PASS &amp; TYPE</th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>DATES &amp; STATUS</th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>VENDOR &amp; PURPOSE</th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>DISPATCHED GOODS</th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>VEHICLE / AUTH</th>
+                    <th style={{ padding: '10px 12px', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>GATE QR SCANS</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '800', color: '#ffffff', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRgpList.map((rgp, idx) => {
+                    const isExpanded = expandedRgpIds.has(rgp.id || rgp.rgpNo);
+                    return (
+                      <React.Fragment key={rgp.id || rgp.rgpNo}>
+                        <tr
+                          style={{
+                            borderBottom: isExpanded ? 'none' : '1px solid #e2e8f0',
+                            background: isExpanded ? '#eff6ff' : (idx % 2 === 1 ? '#f8fafc' : '#ffffff'),
+                            transition: 'background 0.15s ease'
+                          }}
+                        >
                             {/* Expand Toggle */}
                             <td style={{ padding: '12px 8px 12px 16px' }}>
                               <button
@@ -7376,7 +7493,6 @@ export default function ReportsHistoryView({
                   </tbody>
                 </table>
               </div>
-            </div>
           ) : (
             /* Cards View */
             <div style={{

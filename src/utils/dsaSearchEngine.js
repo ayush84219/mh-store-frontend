@@ -87,6 +87,12 @@ export class ClientDSASearchEngine {
       const fields = [
         item.name,
         item.id,
+        item.itemCode,
+        item.stCode,
+        item.item_code,
+        item.st_code,
+        item.mt_code,
+        item.materialCode,
         item.category,
         item.location,
         item.color,

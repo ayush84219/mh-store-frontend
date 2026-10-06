@@ -102,21 +102,49 @@ body.dark-theme {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color, #cbd5e1) transparent;
 }
 
-html,
+html {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 body {
   height: 100%;
   margin: 0;
   padding: 0;
-}
-
-body {
   font-family: var(--font-family-body);
   background-color: var(--bg-primary);
   color: var(--text-main);
-  height: 100vh;
   overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* Universal Cross-Browser WebKit Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color, #cbd5e1);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted, #94a3b8);
 }
 
 /* Layout Grid */
@@ -825,33 +853,48 @@ body {
 .custom-table-container {
   width: 100%;
   overflow-x: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background-color: #ffffff;
 }
 
 .custom-table {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+  font-size: 12px;
 }
 
 .custom-table th {
-  padding: 14px 18px;
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--accent-hover, #0369a1);
-  border-bottom: 2px solid var(--border-color);
-  background-color: #f0f7ff;
+  padding: 10px 12px;
+  font-weight: 800;
+  font-size: 11px;
+  color: #ffffff;
+  background-color: #1e3a8a;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  border-bottom: 1px solid #cbd5e1;
+  white-space: nowrap;
 }
 
 .custom-table td {
-  padding: 14px 18px;
-  font-size: 14px;
-  border-bottom: 1px solid var(--border-color);
-  color: var(--text-main);
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  color: var(--text-main, #0f172a);
   vertical-align: middle;
 }
 
+.custom-table tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
+.custom-table tbody tr:nth-child(odd) {
+  background-color: #ffffff;
+}
+
 .custom-table tbody tr:hover {
-  background-color: #f0f7ff;
+  background-color: #eff6ff !important;
 }
 
 /* Badges */

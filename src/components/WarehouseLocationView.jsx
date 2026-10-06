@@ -69,7 +69,16 @@ export default function WarehouseLocationView({
 
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [dbLocations, setDbLocations] = useState([]);
+  const [dbLocations, setDbLocations] = useState(() => {
+    try {
+      const cached = localStorage.getItem('gpdms_cached_warehouse_locations');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return [];
+  });
   const [dbMaterials, setDbMaterials] = useState(() => (Array.isArray(materials) ? materials : []));
   const [captures, setCaptures] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +129,9 @@ export default function WarehouseLocationView({
         const lData = await locRes.json();
         const list = Array.isArray(lData) ? lData : (lData.data || []);
         setDbLocations(list);
+        try {
+          localStorage.setItem('gpdms_cached_warehouse_locations', JSON.stringify(list));
+        } catch (_) {}
       }
       if (capRes && capRes.ok) {
         const cData = await capRes.json();
@@ -193,6 +205,11 @@ export default function WarehouseLocationView({
    * HIGH-PERFORMANCE PRE-INDEXED RESOLUTION FOR LARGE DATASETS
    */
   const locations = useMemo(() => {
+    // If locations from DB are still loading and we have no cached locations, wait for live data
+    if (loading && dbLocations.length === 0) {
+      return [];
+    }
+
     const rawMaterialsList = (dbMaterials && dbMaterials.length > 0) ? dbMaterials : materials;
     const activeMaterials = (rawMaterialsList || []).filter(m => Number(m.stock) > 0);
 
@@ -236,7 +253,7 @@ export default function WarehouseLocationView({
       }
     });
 
-    // 3. Add active storage locations referenced by materials
+    // 3. Add active storage locations referenced by materials only if not already present
     (activeMaterials || []).forEach(m => {
       const locStr = String(m.location || '').trim();
       if (!locStr || locStr === 'N/A' || locStr === 'null') return;
@@ -246,11 +263,18 @@ export default function WarehouseLocationView({
         const codeKey = normalizeSlotCode(clean);
         if (!codeKey) return;
 
+        // Check if any existing slot already covers this (e.g. "Main Store - RACK 1" covers "RACK 1")
+        const alreadyExists = Array.from(slotMap.values()).some(s => isLocMatch(s.code, clean));
+        if (alreadyExists) return;
+
         if (!slotMap.has(codeKey)) {
           let wh = 'Main Store';
-          const whMatch = clean.match(/(hall\s*\d+|warehouse\s*\w+|store\w*)/i);
-          if (whMatch) {
-            wh = whMatch[1];
+          if (/hall\s*(\d+)/i.test(clean)) {
+            wh = clean.match(/hall\s*(\d+)/i)[0];
+          } else if (/warehouse\s*(\w+)/i.test(clean)) {
+            wh = clean.match(/warehouse\s*(\w+)/i)[0];
+          } else {
+            wh = 'Main Store';
           }
           slotMap.set(codeKey, {
             id: codeKey.toLowerCase().replace(/\s+/g, '-'),

@@ -43,7 +43,6 @@ const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationV
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
-const MaterialQuickUpdateView = lazy(() => import('./components/MaterialQuickUpdateView'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -66,7 +65,6 @@ const hasTabAccess = (tabName, role) => {
       'dashboard',
       'design',
       'material_verification',
-      'material_update',
       'rgp',
       'zip_po',
       'dori_po',
@@ -100,7 +98,6 @@ const hasTabAccess = (tabName, role) => {
       'dashboard',
       'design',
       'material_verification',
-      'material_update',
       'rgp',
       'zip_po',
       'dori_po',
@@ -122,7 +119,6 @@ const hasTabAccess = (tabName, role) => {
   if (panel === 'store') {
     return [
       'dashboard',
-      'material_update',
       'weight_capture',
       'manually_weight_capture',
       'material_issue',
@@ -153,7 +149,6 @@ const TAB_ROUTES = {
   dashboard: '/dashboard',
   design: '/design',
   material_verification: '/material-verification',
-  material_update: '/material-update',
   material_issue: '/material-issue',
   barcode_material_issue: '/barcode-material-issue',
   extra_material_issue: '/extra-material-issue',
@@ -708,6 +703,24 @@ export default function App() {
       clearInterval(pollInterval);
       document.removeEventListener('visibilitychange', onVisibility);
     };
+  }, []);
+
+  // Pre-fetch warehouse locations on app launch to eliminate view flicker
+  useEffect(() => {
+    const fetchWarehouseLocations = async () => {
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/warehouse-locations`);
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.data || []);
+          if (list.length > 0) {
+            localStorage.setItem('gpdms_cached_warehouse_locations', JSON.stringify(list));
+            setRacks(list);
+          }
+        }
+      } catch (_) {}
+    };
+    fetchWarehouseLocations();
   }, []);
 
   const playNotificationSound = () => {
@@ -2020,9 +2033,6 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                       <span className="sidebar-text">Stock Accessories</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
-                      <span className="sidebar-text">Material Quick Update</span>
-                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                       <span className="sidebar-text">Material Detail</span>
                     </li>
@@ -2062,7 +2072,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_update', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2089,9 +2099,6 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                       <span className="sidebar-text">Manual Material Add</span>
-                    </li>
-                    <li className={`sidebar-subitem ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
-                      <span className="sidebar-text">Material Quick Update</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                       <span className="sidebar-text">Material Issue</span>
@@ -2150,10 +2157,6 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'material_verification' ? 'active' : ''}`} onClick={() => handleTabClick('material_verification')} title="Stock Accessories">
                   <CheckSquare size={18} />
                   <span className="sidebar-text">Stock Accessories</span>
-                </li>
-                <li className={`sidebar-item ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
-                  <Boxes size={18} />
-                  <span className="sidebar-text">Material Quick Update</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'material_details' ? 'active' : ''}`} onClick={() => handleTabClick('material_details')} title="Material Detail">
                   <Layers size={18} />
@@ -2230,10 +2233,6 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'manually_weight_capture' ? 'active' : ''}`} onClick={() => handleTabClick('manually_weight_capture')} title="Manual Material Add">
                   <Layers size={18} />
                   <span className="sidebar-text">Manual Material Add</span>
-                </li>
-                <li className={`sidebar-item ${activeTab === 'material_update' ? 'active' : ''}`} onClick={() => handleTabClick('material_update')} title="Material Quick Update">
-                  <Boxes size={18} />
-                  <span className="sidebar-text">Material Quick Update</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('material_issue')} title="Material Issue">
                   <ClipboardList size={18} />
@@ -2395,7 +2394,6 @@ export default function App() {
                 {activeTab === 'dashboard' && 'Dashboard Overview'}
                 {activeTab === 'design' && 'Below of Material'}
                 {activeTab === 'material_verification' && 'Stock Accessories'}
-                {activeTab === 'material_update' && 'Quick Material Inward & Details Update'}
                 {activeTab === 'rgp' && 'Returnable Gate Pass'}
                 {activeTab === 'zip_po' && 'Zip Purcharge Orders'}
                 {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
@@ -2455,6 +2453,8 @@ export default function App() {
                 fontWeight: '700'
               }}>Ctrl K</kbd>
             </button>
+
+
 
             {/* Notification Bell Icon */}
             <div style={{ position: 'relative' }}>
@@ -2719,15 +2719,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'material_update' && (
-                <MaterialQuickUpdateView
-                  materials={materials}
-                  racks={racks}
-                  onUpdateMaterial={handleUpdateMaterial}
-                  currentUser={currentUser}
-                  currencySymbol={currencySymbol}
-                />
-              )}
+
 
               {activeTab === 'material_issue' && (
                 <MaterialIssueView
@@ -3327,6 +3319,8 @@ export default function App() {
           setActiveTab(tab);
         }}
       />
+
+
     </div>
   );
 }

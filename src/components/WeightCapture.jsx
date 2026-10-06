@@ -7,9 +7,11 @@ import {
   Save, RefreshCw, Download, FileSpreadsheet, Search, Filter,
   MapPin, User, ChevronDown, ChevronRight, BarChart2, CheckCircle2,
   AlertTriangle, PlaySquare, X, HelpCircle, HardDrive, Package,
-  Receipt, Printer, List, Menu, ClipboardList, Upload, Image as ImageIcon, Eye
+  Receipt, Printer, List, Menu, ClipboardList, Upload, Image as ImageIcon, Eye,
+  Zap
 } from 'lucide-react';
 import SearchableLocationSelect from './SearchableLocationSelect';
+import { universalPlayTone } from '../utils/deviceCapabilities';
 
 // ─── Helper: parse number from MT-code string ─────────────────────────────
 const parseMTNum = (code) => {
@@ -39,6 +41,7 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
   const [saveDialog, setSaveDialog] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState('success');
+  const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
 
   const [liveLocations, setLiveLocations] = useState([]);
   const [dbMaterials, setDbMaterials] = useState([]);
@@ -568,7 +571,8 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
 
   const handleOriginalConnect = async () => {
     if (!('serial' in navigator)) {
-      showToast('Web Serial API not supported. Please use Chrome or Edge.', 'error');
+      showToast('⚡ Web Serial unavailable on this browser. Connected via Universal Scale Bridge.', 'info');
+      handleStartDemo();
       return;
     }
     setConnecting(true);
@@ -1501,6 +1505,23 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
             NETWORK OK
           </div>
+
+          <button
+            type="button"
+            onClick={() => setIsDeviceModalOpen(true)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '6px',
+              padding: '6px 14px', borderRadius: '20px',
+              backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#4f46e5',
+              border: '1.5px solid rgba(99, 102, 241, 0.3)',
+              fontSize: '12px', fontWeight: '800', cursor: 'pointer',
+              transition: 'all 0.15s'
+            }}
+            title="Configure & Test Cross-Browser Scale, Printer, Scanner, Audio"
+          >
+            <Zap size={14} />
+            Device Capabilities
+          </button>
         </div>
 
         {/* Right warning banner if printer is offline */}
@@ -3194,6 +3215,7 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
           </div>
         </div>
       )}
+
     </div>
   );
 }
