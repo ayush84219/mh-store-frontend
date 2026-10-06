@@ -210,7 +210,7 @@ export default function App() {
   });
 
   const toggleSidebar = () => {
-    if (window.innerWidth < 768) {
+    if (window.innerWidth < 1024) {
       setIsSidebarOpen(prev => !prev);
     } else {
       setIsSidebarCollapsed(prev => {
@@ -225,7 +225,7 @@ export default function App() {
 
   const handleTabClick = (tabName) => {
     setActiveTab(tabName);
-    if (window.innerWidth < 768) {
+    if (window.innerWidth < 1024) {
       setIsSidebarOpen(false);
     }
   };
@@ -2384,10 +2384,11 @@ export default function App() {
               type="button"
               className="sidebar-toggle-btn"
               onClick={toggleSidebar}
-              title={isSidebarCollapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
+              title={isSidebarCollapsed ? "Toggle Menu / Expand sidebar (Ctrl+B)" : "Toggle Menu / Collapse sidebar (Ctrl+B)"}
               aria-label="Toggle sidebar"
             >
-              {isSidebarCollapsed ? <PanelLeftOpen size={19} strokeWidth={2.2} /> : <PanelLeftClose size={19} strokeWidth={2.2} />}
+              <span className="mobile-only-icon"><Menu size={20} strokeWidth={2.2} /></span>
+              <span className="desktop-only-icon">{isSidebarCollapsed ? <PanelLeftOpen size={19} strokeWidth={2.2} /> : <PanelLeftClose size={19} strokeWidth={2.2} />}</span>
             </button>
             <div className="header-title-container">
               <h1>

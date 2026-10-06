@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import { useState, useEffect } from 'react';
-import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink } from 'lucide-react';
+import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3 } from 'lucide-react';
 
 import { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES } from '../utils/designHelpers';
 export { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES };
@@ -1474,47 +1474,148 @@ export default function DesignView({
             <>
               {/* 1. INTERACTIVE SCREEN-ONLY VERSION */}
               <div className="panel animate-scale techspec-panel screen-only-element">
-                <div className="panel-header">
-                  <h3 className="panel-title">
-                    <Layers3 size={18} className="text-accent" />
-                    Fashion Customization
-                  </h3>
-                  {/* Prominent Lot No badge & Print action */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {selectedDesign.status !== 'Approved' && (
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-sm print-hide"
-                        onClick={() => handleEditDraft(selectedDesign)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                      >
-                        <span>Edit Design</span>
-                      </button>
-                    )}
+                <div className="panel-header fashion-customization-header" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                  paddingBottom: '16px',
+                  borderBottom: '1px solid var(--border-color)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                    <h3 className="panel-title" style={{
+                      margin: 0,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontFamily: 'var(--font-family-title)',
+                      fontSize: '18px',
+                      fontWeight: '700',
+                      color: 'var(--text-main)',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      <Layers3 size={20} className="text-accent" />
+                      <span>Fashion Customization</span>
+                    </h3>
+                  </div>
+
+                  {/* Prominent Lot No badge & Print / Edit actions */}
+                  <div className="fashion-header-actions" style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    flexWrap: 'wrap'
+                  }}>
+                    {/* Edit Design Option in identical stacked 2-line style */}
                     <button
                       type="button"
-                      className="btn btn-secondary btn-sm print-hide"
+                      className="fashion-print-btn fashion-edit-btn print-hide"
+                      onClick={() => handleEditDraft(selectedDesign)}
+                      title="Edit Design Specification"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '6px 14px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--accent-color, #0284c7)',
+                        backgroundColor: 'var(--accent-light, #e0f2fe)',
+                        color: 'var(--accent-color, #0284c7)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        boxShadow: '0 1px 3px rgba(2, 132, 199, 0.1)'
+                      }}
+                    >
+                      <Edit3 size={16} strokeWidth={2.2} color="var(--accent-color, #0284c7)" />
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
+                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Edit</span>
+                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Design</span>
+                      </div>
+                    </button>
+
+                    {/* Exact Print PDF Button with stacked Print / PDF text */}
+                    <button
+                      type="button"
+                      className="fashion-print-btn print-hide"
                       onClick={() => {
                         setPrintingDesign(selectedDesign);
                         document.body.classList.add('print-techpack-mode');
                         window.print();
                       }}
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      title="Print Tech Pack PDF"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        padding: '6px 14px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--accent-color, #0284c7)',
+                        backgroundColor: 'var(--accent-light, #e0f2fe)',
+                        color: 'var(--accent-color, #0284c7)',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                        boxShadow: '0 1px 3px rgba(2, 132, 199, 0.1)'
+                      }}
                     >
-                      <Printer size={14} />
-                      <span>Print PDF</span>
+                      <Printer size={16} strokeWidth={2.2} color="var(--accent-color, #0284c7)" />
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
+                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Print</span>
+                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>PDF</span>
+                      </div>
                     </button>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: '600' }}>LOT NO</span>
-                      <span style={{
-                        fontFamily: 'var(--font-family-title)',
-                        fontSize: '20px',
+                    {/* Prominent LOT NO Badge matching reference image */}
+                    <div className="lot-no-badge-group" style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '2px 4px',
+                      userSelect: 'none'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        lineHeight: 1.05,
+                        fontSize: '11px',
                         fontWeight: '800',
-                        color: 'var(--accent-color)',
+                        color: 'var(--text-muted, #64748b)',
                         letterSpacing: '0.04em'
-                      }}>{selectedDesign.id}</span>
+                      }}>
+                        <span>LOT</span>
+                        <span>NO</span>
+                      </div>
+                      <span style={{
+                        fontFamily: 'var(--font-family-title, "Inter", sans-serif)',
+                        fontSize: '26px',
+                        fontWeight: '800',
+                        color: 'var(--accent-color, #0284c7)',
+                        letterSpacing: '0.02em',
+                        lineHeight: 1
+                      }}>
+                        {selectedDesign.id}
+                      </span>
                     </div>
+
+                    {/* Mobile Close Button */}
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm mobile-only-inline"
+                      onClick={() => setSelectedDesignId(null)}
+                      title="Close Details Panel"
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '12.5px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        borderRadius: '8px'
+                      }}
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
                   </div>
                 </div>
 

@@ -607,7 +607,9 @@ export default function OnlyCutting({
           borderBottom: '1px solid var(--border-color)',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '8px'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Table size={18} className="text-accent" />
@@ -633,7 +635,7 @@ export default function OnlyCutting({
             <button className="btn btn-secondary btn-sm" onClick={fetchLots}>Retry</button>
           </div>
         ) : paginatedLots.length > 0 ? (
-          <div style={{ overflowX: 'auto', maxHeight: 'calc(100vh - 350px)', overflowY: 'auto' }}>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%', maxHeight: 'calc(100vh - 350px)', overflowY: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left', border: '1px solid var(--border-color)' }}>
               <thead>
                 <tr style={{
