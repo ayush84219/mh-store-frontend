@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { getBackendUrl } from '../utils/api';
 import { 
   TrendingUp, FileText, Calendar, DollarSign, Download, Printer, ClipboardList, 
@@ -3404,32 +3405,47 @@ export default function ReportsHistoryView({
           </div>
 
           {/* Master Record Details Modal */}
-          {selectedMasterRecordForModal && (
-            <div style={{
-              position: 'fixed',
-              inset: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.65)',
-              backdropFilter: 'blur(3px)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 9999,
-              padding: '20px'
-            }}>
-              <div className="animate-scale" style={{
-                backgroundColor: 'var(--bg-secondary)',
-                borderRadius: '16px',
-                border: '1px solid var(--border-color)',
-                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)',
-                width: '100%',
-                maxWidth: '850px',
-                maxHeight: '90vh',
-                overflowY: 'auto',
-                padding: '24px',
+          {selectedMasterRecordForModal && createPortal(
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100vw',
+                height: '100vh',
+                backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                backdropFilter: 'blur(4px)',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '18px'
-              }}>
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 999999,
+                padding: '16px',
+                boxSizing: 'border-box',
+                overflowY: 'auto'
+              }}
+              onClick={() => setSelectedMasterRecordForModal(null)}
+            >
+              <div
+                className="animate-scale"
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border-color)',
+                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
+                  width: '100%',
+                  maxWidth: '850px',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  padding: '24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '18px',
+                  margin: 'auto'
+                }}
+              >
                 {/* Modal Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -3640,7 +3656,8 @@ export default function ReportsHistoryView({
                   </div>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}
@@ -4421,7 +4438,7 @@ export default function ReportsHistoryView({
             </div>
 
           {/* Single Lot Dossier & Print View Modal */}
-          {selectedLotForModal && (
+          {selectedLotForModal && createPortal(
             <div
               style={{
                 position: 'fixed',
@@ -4429,17 +4446,22 @@ export default function ReportsHistoryView({
                 left: 0,
                 right: 0,
                 bottom: 0,
+                width: '100vw',
+                height: '100vh',
                 backgroundColor: 'rgba(0, 0, 0, 0.65)',
                 backdropFilter: 'blur(4px)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                zIndex: 9999,
-                padding: '20px'
+                zIndex: 999999,
+                padding: '16px',
+                boxSizing: 'border-box',
+                overflowY: 'auto'
               }}
               onClick={() => setSelectedLotForModal(null)}
             >
               <div
+                className="animate-scale"
                 style={{
                   backgroundColor: 'var(--bg-secondary)',
                   borderRadius: '14px',
@@ -4452,7 +4474,8 @@ export default function ReportsHistoryView({
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '18px',
-                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.3)'
+                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
+                  margin: 'auto'
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
@@ -4724,7 +4747,8 @@ export default function ReportsHistoryView({
                   </div>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}
@@ -7645,35 +7669,47 @@ export default function ReportsHistoryView({
           )}
 
           {/* Quick Details Modal Dialog */}
-          {selectedRgpForModal && (
-            <div style={{
-              position: 'fixed',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.55)',
-              backdropFilter: 'blur(3px)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 9999,
-              padding: '20px'
-            }}>
-              <div style={{
-                backgroundColor: 'var(--bg-secondary)',
-                borderRadius: '16px',
-                border: '1px solid var(--border-color)',
-                width: '100%',
-                maxWidth: '720px',
-                maxHeight: '90vh',
-                overflowY: 'auto',
-                padding: '24px',
-                boxShadow: 'var(--shadow-lg)',
+          {selectedRgpForModal && createPortal(
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100vw',
+                height: '100vh',
+                backgroundColor: 'rgba(0, 0, 0, 0.55)',
+                backdropFilter: 'blur(3px)',
                 display: 'flex',
-                flexDirection: 'column',
-                gap: '20px'
-              }}>
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 999999,
+                padding: '16px',
+                boxSizing: 'border-box',
+                overflowY: 'auto'
+              }}
+              onClick={() => setSelectedRgpForModal(null)}
+            >
+              <div
+                className="animate-scale"
+                style={{
+                  backgroundColor: 'var(--bg-secondary)',
+                  borderRadius: '16px',
+                  border: '1px solid var(--border-color)',
+                  width: '100%',
+                  maxWidth: '720px',
+                  maxHeight: '90vh',
+                  overflowY: 'auto',
+                  padding: '24px',
+                  boxShadow: 'var(--shadow-lg)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '20px',
+                  margin: 'auto'
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 {/* Modal Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-color)', paddingBottom: '14px' }}>
                   <div>
@@ -7840,7 +7876,8 @@ export default function ReportsHistoryView({
                   </div>
                 </div>
               </div>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}

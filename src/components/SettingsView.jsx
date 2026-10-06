@@ -108,26 +108,71 @@ export default function SettingsView({
     fetchLiveLocations();
   }, []);
 
+  const canonicalizeLocation = (rawStr, defaultWarehouse = 'Main Store') => {
+    if (!rawStr) return '';
+    let str = String(rawStr).trim();
+    if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return '';
+
+    str = str.replace(/\(\d+\s*pkts?\)/gi, '').trim();
+
+    let warehouse = defaultWarehouse || 'Main Store';
+    if (/^([a-z0-9\s]+?)\s*[-–]\s*/i.test(str)) {
+      const parts = str.split(/[-–]/);
+      const potentialWh = parts[0].trim();
+      if (potentialWh) {
+        warehouse = potentialWh;
+      }
+    }
+
+    let remainder = str;
+    let prev = '';
+    while (prev !== remainder) {
+      prev = remainder;
+      remainder = remainder
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .trim();
+    }
+
+    let rackPart = remainder || '1';
+    if (/^\d+$/i.test(rackPart)) {
+      rackPart = `RACK ${rackPart}`;
+    } else if (!rackPart.toLowerCase().startsWith('rack') && !rackPart.toLowerCase().startsWith('hall') && !rackPart.toLowerCase().startsWith('shelf') && !rackPart.toLowerCase().startsWith('bin')) {
+      rackPart = `RACK ${rackPart}`;
+    }
+
+    return `${warehouse} - ${rackPart}`;
+  };
+
   // Compute all available locations combining DB & state
   const allLocationsList = useMemo(() => {
     const map = new Map();
     (dbLocations || []).forEach(loc => {
-      const id = loc.id || loc.code;
-      const wh = loc.warehouse || (String(loc.code || '').includes(' - ') ? loc.code.split(' - ')[0].trim() : 'Main Store');
-      const code = String(loc.code || '').trim();
+      const clean = canonicalizeLocation(loc.code || loc.id, loc.warehouse);
+      if (!clean) return;
+      const wh = clean.includes(' - ') ? clean.split(' - ')[0].trim() : (loc.warehouse || 'Main Store');
+      const key = clean.toUpperCase();
       const cap = Number(loc.capacity) || 20;
-      map.set(id, { id, code, warehouse: wh, capacity: cap, source: 'db' });
+      map.set(key, { id: loc.id || key.toLowerCase().replace(/\s+/g, '-'), code: clean, warehouse: wh, capacity: cap, source: 'db' });
     });
     (racks || []).forEach(r => {
-      const wh = r.warehouse || 'Main Store';
-      const rawCode = String(r.code || r.name || '').trim();
-      const code = r.warehouse && rawCode.includes(r.warehouse) ? rawCode : `${wh} - Rack ${rawCode.replace(/^rack\s*/i, '')}`;
-      const id = r.id || code;
-      if (!map.has(id)) {
-        map.set(id, { id, code, warehouse: wh, capacity: Number(r.capacity) || 20, source: 'racks' });
+      const clean = canonicalizeLocation(r.code || r.name, r.warehouse);
+      if (!clean) return;
+      const wh = clean.includes(' - ') ? clean.split(' - ')[0].trim() : (r.warehouse || 'Main Store');
+      const key = clean.toUpperCase();
+      if (!map.has(key)) {
+        map.set(key, { id: r.id || key.toLowerCase().replace(/\s+/g, '-'), code: clean, warehouse: wh, capacity: Number(r.capacity) || 20, source: 'racks' });
       }
     });
-    return Array.from(map.values());
+    const list = Array.from(map.values());
+    list.sort((a, b) => {
+      const whComp = String(a.warehouse || '').localeCompare(String(b.warehouse || ''), undefined, { numeric: true, sensitivity: 'base' });
+      if (whComp !== 0) return whComp;
+      return String(a.code || '').localeCompare(String(b.code || ''), undefined, { numeric: true, sensitivity: 'base' });
+    });
+    return list;
   }, [dbLocations, racks]);
 
   const uniqueWarehouses = useMemo(() => {
@@ -136,7 +181,7 @@ export default function SettingsView({
       const w = (l.warehouse || '').trim();
       if (w) s.add(w);
     });
-    return Array.from(s).sort();
+    return Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
   }, [allLocationsList]);
 
   useEffect(() => {

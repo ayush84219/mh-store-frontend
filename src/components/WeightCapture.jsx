@@ -71,16 +71,54 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
   // Compute dynamic slot options from the racks configuration, live locations, and materials
   const generatedLocations = useMemo(() => {
     const slotMap = new Map();
+    const canonicalizeLocation = (rawStr, defaultWarehouse = 'Main Store') => {
+      if (!rawStr) return '';
+      let str = String(rawStr).trim();
+      if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return '';
+
+      str = str.replace(/\(\d+\s*pkts?\)/gi, '').trim();
+
+      let warehouse = defaultWarehouse || 'Main Store';
+      if (/^([a-z0-9\s]+?)\s*[-–]\s*/i.test(str)) {
+        const parts = str.split(/[-–]/);
+        const potentialWh = parts[0].trim();
+        if (potentialWh) {
+          warehouse = potentialWh;
+        }
+      }
+
+      let remainder = str;
+      let prev = '';
+      while (prev !== remainder) {
+        prev = remainder;
+        remainder = remainder
+          .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+          .replace(/^rack\s*[-–]?\s*/i, '')
+          .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+          .replace(/^rack\s*[-–]?\s*/i, '')
+          .trim();
+      }
+
+      let rackPart = remainder || '1';
+      if (/^\d+$/i.test(rackPart)) {
+        rackPart = `RACK ${rackPart}`;
+      } else if (!rackPart.toLowerCase().startsWith('rack') && !rackPart.toLowerCase().startsWith('hall') && !rackPart.toLowerCase().startsWith('shelf') && !rackPart.toLowerCase().startsWith('bin')) {
+        rackPart = `RACK ${rackPart}`;
+      }
+
+      return `${warehouse} - ${rackPart}`;
+    };
+
     const addSlot = (rawCode, wh) => {
-      const codeStr = String(rawCode || '').trim();
-      if (!codeStr || codeStr === 'N/A' || codeStr === 'null') return;
-      const warehouse = wh || (codeStr.includes(' - ') ? codeStr.split(' - ')[0].trim() : 'Main Store');
-      const displayLabel = codeStr.includes(' - ') ? codeStr : `${warehouse} - ${codeStr.toLowerCase().startsWith('rack') ? codeStr : `Rack ${codeStr}`}`;
-      if (!slotMap.has(displayLabel)) {
-        slotMap.set(displayLabel, {
+      const displayLabel = canonicalizeLocation(rawCode, wh);
+      if (!displayLabel) return;
+      const key = displayLabel.toUpperCase();
+      const warehouse = displayLabel.includes(' - ') ? displayLabel.split(' - ')[0].trim() : (wh || 'Main Store');
+      if (!slotMap.has(key)) {
+        slotMap.set(key, {
           code: displayLabel,
           label: displayLabel,
-          rawCode: codeStr,
+          rawCode: rawCode,
           warehouse
         });
       }
@@ -100,7 +138,14 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
       ['Main Store - Rack 1', 'Main Store - Rack 2', 'Main Store - Rack 3', 'Main Store - Rack 4', 'Main Store - Rack 5', 'Hall 1 - Rack 1', 'Hall 1 - Rack 2', 'Hall 2 - Rack 1'].forEach(loc => addSlot(loc));
     }
 
-    return Array.from(slotMap.values());
+    const list = Array.from(slotMap.values());
+    list.sort((a, b) => {
+      const whComp = String(a.warehouse || '').localeCompare(String(b.warehouse || ''), undefined, { numeric: true, sensitivity: 'base' });
+      if (whComp !== 0) return whComp;
+      return String(a.label || a.code).localeCompare(String(b.label || b.code), undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    return list;
   }, [racks, liveLocations, dbMaterials]);
   const [now, setNow] = useState(new Date());
   const [page, setPage] = useState(0);

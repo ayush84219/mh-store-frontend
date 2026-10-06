@@ -199,6 +199,47 @@ export default function WarehouseLocationView({
     return false;
   };
 
+  const canonicalizeLocation = (rawStr, defaultWarehouse = 'Main Store') => {
+    if (!rawStr) return '';
+    let str = String(rawStr).trim();
+    if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return '';
+
+    str = str.replace(/\(\d+\s*pkts?\)/gi, '').trim();
+
+    let warehouse = defaultWarehouse || 'Main Store';
+    if (/^([a-z0-9\s]+?)\s*[-–]\s*/i.test(str)) {
+      const parts = str.split(/[-–]/);
+      const potentialWh = parts[0].trim();
+      if (potentialWh) {
+        warehouse = potentialWh;
+      }
+    }
+
+    let remainder = str;
+    let prev = '';
+    while (prev !== remainder) {
+      prev = remainder;
+      remainder = remainder
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .trim();
+    }
+
+    let rackPart = remainder || '1';
+    if (/^\d+$/i.test(rackPart)) {
+      rackPart = `RACK ${rackPart}`;
+    } else if (!rackPart.toLowerCase().startsWith('rack') && !rackPart.toLowerCase().startsWith('hall') && !rackPart.toLowerCase().startsWith('shelf') && !rackPart.toLowerCase().startsWith('bin')) {
+      rackPart = `RACK ${rackPart}`;
+    }
+
+    return `${warehouse} - ${rackPart}`;
+  };
+
+  const normalizeSlotCode = (rawStr) => {
+    return canonicalizeLocation(rawStr);
+  };
 
   /**
    * Construct locations array strictly from manually configured / DB entries
@@ -213,41 +254,43 @@ export default function WarehouseLocationView({
     const rawMaterialsList = (dbMaterials && dbMaterials.length > 0) ? dbMaterials : materials;
     const activeMaterials = (rawMaterialsList || []).filter(m => Number(m.stock) > 0);
 
-    const normalizeSlotCode = (rawCode) => {
-      const trimmed = String(rawCode || '').trim();
-      if (!trimmed || trimmed === 'N/A' || trimmed === 'null') return null;
-      return trimmed.toUpperCase();
-    };
-
     const slotMap = new Map();
 
     // 1. Add official locations from warehouse_locations DB table
     dbLocations.forEach(d => {
       const rawCode = String(d.code || d.id || '').trim();
-      const codeKey = normalizeSlotCode(rawCode);
-      if (!codeKey) return;
+      const cleanDisplay = canonicalizeLocation(rawCode, d.warehouse);
+      if (!cleanDisplay) return;
+      const codeKey = cleanDisplay.toUpperCase();
+      const shortRack = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ').slice(1).join(' - ') : cleanDisplay;
+      const wh = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ')[0].trim() : (d.warehouse || 'Main Store');
 
-      slotMap.set(codeKey, {
-        id: d.id,
-        code: d.code || codeKey,
-        rack: d.code || codeKey,
-        warehouse: d.warehouse || 'Main Store',
-        capacity: Number(d.capacity) || 20
-      });
+      if (!slotMap.has(codeKey)) {
+        slotMap.set(codeKey, {
+          id: d.id,
+          code: cleanDisplay,
+          rack: shortRack,
+          warehouse: wh,
+          capacity: Number(d.capacity) || 20
+        });
+      }
     });
 
     // 2. Add configured racks from settings if not already in DB
     (racks || []).forEach(r => {
-      const fullDisplay = r.code && String(r.code).includes('-') ? r.code : `${r.warehouse || 'Main Store'} - ${r.name || `Rack ${r.code}`}`;
-      const codeKey = normalizeSlotCode(fullDisplay);
-      if (!codeKey) return;
+      const rawCode = String(r.code || r.name || '').trim();
+      const cleanDisplay = canonicalizeLocation(rawCode, r.warehouse);
+      if (!cleanDisplay) return;
+      const codeKey = cleanDisplay.toUpperCase();
+      const shortRack = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ').slice(1).join(' - ') : cleanDisplay;
+      const wh = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ')[0].trim() : (r.warehouse || 'Main Store');
 
       if (!slotMap.has(codeKey)) {
         slotMap.set(codeKey, {
-          id: r.id,
-          code: fullDisplay,
-          rack: r.name || `Rack ${r.code || ''}`,
-          warehouse: r.warehouse || 'Main Store',
+          id: r.id || codeKey.toLowerCase().replace(/\s+/g, '-'),
+          code: cleanDisplay,
+          rack: shortRack,
+          warehouse: wh,
           capacity: Number(r.capacity) || 20
         });
       }
@@ -259,27 +302,18 @@ export default function WarehouseLocationView({
       if (!locStr || locStr === 'N/A' || locStr === 'null') return;
       const parts = locStr.split(',');
       parts.forEach(p => {
-        const clean = p.replace(/\(\d+\s*pkts?\)/i, '').trim();
-        const codeKey = normalizeSlotCode(clean);
-        if (!codeKey) return;
-
-        // Check if any existing slot already covers this (e.g. "Main Store - RACK 1" covers "RACK 1")
-        const alreadyExists = Array.from(slotMap.values()).some(s => isLocMatch(s.code, clean));
-        if (alreadyExists) return;
+        const cleanRaw = p.replace(/\(\d+\s*pkts?\)/i, '').trim();
+        const cleanDisplay = canonicalizeLocation(cleanRaw, 'Main Store');
+        if (!cleanDisplay) return;
+        const codeKey = cleanDisplay.toUpperCase();
+        const shortRack = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ').slice(1).join(' - ') : cleanDisplay;
+        const wh = cleanDisplay.includes(' - ') ? cleanDisplay.split(' - ')[0].trim() : 'Main Store';
 
         if (!slotMap.has(codeKey)) {
-          let wh = 'Main Store';
-          if (/hall\s*(\d+)/i.test(clean)) {
-            wh = clean.match(/hall\s*(\d+)/i)[0];
-          } else if (/warehouse\s*(\w+)/i.test(clean)) {
-            wh = clean.match(/warehouse\s*(\w+)/i)[0];
-          } else {
-            wh = 'Main Store';
-          }
           slotMap.set(codeKey, {
             id: codeKey.toLowerCase().replace(/\s+/g, '-'),
-            code: clean,
-            rack: clean,
+            code: cleanDisplay,
+            rack: shortRack,
             warehouse: wh,
             capacity: 20
           });
@@ -446,8 +480,8 @@ export default function WarehouseLocationView({
     });
 
     return result.sort((a, b) =>
-      (a.warehouse || '').localeCompare(b.warehouse || '') ||
-      (a.code || '').localeCompare(b.code || '', undefined, { numeric: true })
+      (a.warehouse || '').localeCompare(b.warehouse || '', undefined, { numeric: true, sensitivity: 'base' }) ||
+      (a.code || '').localeCompare(b.code || '', undefined, { numeric: true, sensitivity: 'base' })
     );
   }, [racks, dbLocations, dbMaterials, materials, captures]);
 

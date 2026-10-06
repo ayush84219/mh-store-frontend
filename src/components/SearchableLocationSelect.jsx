@@ -20,6 +20,53 @@ export default function SearchableLocationSelect({
   const containerRef = useRef(null);
   const searchInputRef = useRef(null);
 
+  // Helper for natural ascending sorting (e.g., Rack 1, Rack 2, ... Rack 10, ... Rack 100)
+  const naturalCompare = (aStr, bStr) => {
+    return String(aStr || '').localeCompare(String(bStr || ''), undefined, {
+      numeric: true,
+      sensitivity: 'base'
+    });
+  };
+
+  // Canonicalize location helper to eliminate corrupted duplicate strings
+  const canonicalizeLocation = (rawStr, defaultWarehouse = 'Main Store') => {
+    if (!rawStr) return '';
+    let str = String(rawStr).trim();
+    if (!str || str.toLowerCase() === 'n/a' || str.toLowerCase() === 'null') return '';
+
+    str = str.replace(/\(\d+\s*pkts?\)/gi, '').trim();
+
+    let warehouse = defaultWarehouse || 'Main Store';
+    if (/^([a-z0-9\s]+?)\s*[-–]\s*/i.test(str)) {
+      const parts = str.split(/[-–]/);
+      const potentialWh = parts[0].trim();
+      if (potentialWh) {
+        warehouse = potentialWh;
+      }
+    }
+
+    let remainder = str;
+    let prev = '';
+    while (prev !== remainder) {
+      prev = remainder;
+      remainder = remainder
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .replace(new RegExp(`^${warehouse}\\s*[-–]?\\s*`, 'i'), '')
+        .replace(/^rack\s*[-–]?\s*/i, '')
+        .trim();
+    }
+
+    let rackPart = remainder || '1';
+    if (/^\d+$/i.test(rackPart)) {
+      rackPart = `RACK ${rackPart}`;
+    } else if (!rackPart.toLowerCase().startsWith('rack') && !rackPart.toLowerCase().startsWith('hall') && !rackPart.toLowerCase().startsWith('shelf') && !rackPart.toLowerCase().startsWith('bin')) {
+      rackPart = `RACK ${rackPart}`;
+    }
+
+    return `${warehouse} - ${rackPart}`;
+  };
+
   // Normalize locations array to standard objects { code, label, warehouse }
   const normalizedLocations = useMemo(() => {
     const list = [];
@@ -27,32 +74,28 @@ export default function SearchableLocationSelect({
 
     (locations || []).forEach(loc => {
       if (!loc) return;
-      let code = '';
-      let label = '';
-      let warehouse = 'General';
+      const raw = typeof loc === 'string' ? loc : (loc.code || loc.label || '');
+      const defaultWh = (typeof loc === 'object' && loc.warehouse) ? loc.warehouse : 'Main Store';
+      const clean = canonicalizeLocation(raw, defaultWh);
+      if (!clean) return;
 
-      if (typeof loc === 'string') {
-        code = loc.trim();
-        label = loc.trim();
-        if (code.includes(' - ')) {
-          warehouse = code.split(' - ')[0].trim();
-        } else if (code.toLowerCase().includes('hall')) {
-          const match = code.match(/hall\s*\d+/i);
-          if (match) warehouse = match[0];
-        }
-      } else if (typeof loc === 'object') {
-        code = String(loc.code || loc.label || '').trim();
-        label = String(loc.label || loc.code || '').trim();
-        warehouse = loc.warehouse || (label.includes(' - ') ? label.split(' - ')[0].trim() : 'General');
-      }
+      const wh = clean.includes(' - ') ? clean.split(' - ')[0].trim() : defaultWh;
+      const key = clean.toUpperCase();
 
-      if (code && !seen.has(code)) {
-        seen.add(code);
-        list.push({ code, label, warehouse });
+      if (!seen.has(key)) {
+        seen.add(key);
+        list.push({ code: clean, label: clean, warehouse: wh });
       }
     });
 
-    // If current value is set but not in list, add it as a preserved entry
+    // Natural alphanumeric ascending sort: 1, 2, 3... 10... 100
+    list.sort((a, b) => {
+      const whCompare = naturalCompare(a.warehouse, b.warehouse);
+      if (whCompare !== 0) return whCompare;
+      return naturalCompare(a.label || a.code, b.label || b.code);
+    });
+
+    // If current value is set but not in list, add it as a preserved entry at the top
     if (value && !seen.has(String(value).trim())) {
       const customVal = String(value).trim();
       list.unshift({
@@ -65,13 +108,13 @@ export default function SearchableLocationSelect({
     return list;
   }, [locations, value]);
 
-  // Extract unique warehouses for filter tabs
+  // Extract unique warehouses for filter tabs (sorted naturally)
   const warehouseList = useMemo(() => {
     const set = new Set();
     normalizedLocations.forEach(l => {
       if (l.warehouse && l.warehouse !== 'Current') set.add(l.warehouse);
     });
-    return Array.from(set);
+    return Array.from(set).sort((a, b) => naturalCompare(a, b));
   }, [normalizedLocations]);
 
   // Filter locations based on search query and warehouse tab
