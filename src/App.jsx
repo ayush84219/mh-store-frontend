@@ -181,7 +181,18 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   acc[path] = tab;
   acc[path.replace(/-/g, '_')] = tab;
   return acc;
-}, { '/': 'dashboard', '/material-detail': 'material_details', '/material_detail': 'material_details', '/bone-po': 'bone_issue', '/bone_po': 'bone_issue', '/elastic-po': 'elastic_issue', '/elastic_po': 'elastic_issue' });
+}, {
+  '/': 'dashboard',
+  '/material-detail': 'material_details',
+  '/material_detail': 'material_details',
+  '/bone-po': 'bone_issue',
+  '/bone_po': 'bone_issue',
+  '/elastic-po': 'elastic_issue',
+  '/elastic_po': 'elastic_issue',
+  '/reports/daily-fabric-issue': 'reports_history',
+  '/reports/daily-report': 'reports_history',
+  '/daily-fabric-issue': 'reports_history'
+});
 
 export default function App() {
   const navigate = useNavigate();

@@ -191,7 +191,7 @@ async function fetchGarmentZipConfig(signal) {
     };
 
     try {
-        const url = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv&gid=1273734245';
+        const url = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv&gid=1273734245';
         const res = await fetch(url, { signal });
         if (!res.ok) {
             throw new Error(`Failed to fetch garment zip config: ${res.status}`);
@@ -226,7 +226,7 @@ async function fetchGarmentZipConfig(signal) {
 }
 
 async function fetchZipQualityData(signal) {
-    const url = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv';
+    const url = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv';
     const res = await fetch(url, { signal });
     if (!res.ok) {
         throw new Error(`Failed to fetch zip quality data sheet: ${res.status}`);
@@ -301,10 +301,10 @@ async function fetchLotMatrixViaSheetsApi(lotNo, signal) {
         console.warn('Failed to fetch from local database, trying Google Sheet fallback:', dbErr.message);
     }
 
-    // Fallback: Fetch from ZipPurchaseOrders sheet (gid=1773429271) in spreadsheet 1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0
+    // Fallback: Fetch from ZipPurchaseOrders sheet (gid=1773429271) in spreadsheet 16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo
     try {
         console.log('Searching in ZipPurchaseOrders Google Sheet fallback for lot:', searchKey);
-        const sheetUrl = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv&gid=1773429271';
+        const sheetUrl = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv&gid=1773429271';
         const resSheet = await fetch(sheetUrl, { signal });
         if (!resSheet.ok) {
             throw new Error(`Failed to access Google Sheet fallback: ${resSheet.status}`);
@@ -471,7 +471,7 @@ function findLotInIndex(indexData, lotNo) {
 async function fetchExistingPurchaseOrders(lotNumber, signal) {
     try {
         console.log('🔍 Checking existing purchase orders for lot:', lotNumber);
-        const url = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv&gid=1773429271';
+        const url = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv&gid=1773429271';
         const response = await fetch(url, { signal });
         if (!response.ok) {
             throw new Error(`Failed to fetch purchase orders: ${response.status}`);
@@ -578,7 +578,7 @@ async function fetchFromCuttingUsingIndex(lotInfo, signal) {
 async function fetchPendingZipCount(signal) {
     try {
         console.log('🔍 Fetching pending Zip data from Google Sheets...');
-        const url = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv&gid=1773429271';
+        const url = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv&gid=1773429271';
 
         console.log('📡 Fetching from URL:', url);
         const response = await fetch(url, { signal });

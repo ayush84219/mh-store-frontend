@@ -40,7 +40,7 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
   useEffect(() => {
     const loadZipData = async () => {
       try {
-        const url = 'https://docs.google.com/spreadsheets/d/1sakbedDFEKimbF73mBsFU7OuCei4UqQt9PvXcpq6SB0/export?format=csv';
+        const url = 'https://docs.google.com/spreadsheets/d/16mifNw0WMIlnZ1XRHsuH_8kVUm_6Y1O3uVsoM-Hjppo/export?format=csv';
         const res = await fetch(url);
         if (res.ok) {
           const text = await res.text();

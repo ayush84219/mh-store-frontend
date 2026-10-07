@@ -6,7 +6,7 @@ import {
   Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
   Scissors, AlertCircle, AlertTriangle, ExternalLink, RefreshCw, BarChart3, Activity, 
   PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package,
-  QrCode, ShieldCheck, CheckCircle, Check, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock
+  QrCode, ShieldCheck, CheckCircle, Check, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock, Sparkles, Filter
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -14,6 +14,7 @@ import { PDFDownloadLink } from '@react-pdf/renderer';
 import { PDFDocument } from './PDFDocument';
 import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
 import ItemCodeReportView from './ItemCodeReportView';
+import DailyActivityAnalyticsReport from './DailyActivityAnalyticsReport';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '—';
@@ -187,7 +188,7 @@ export default function ReportsHistoryView({
       transition: 'all 0.2s'
     }
   };
-  const [activeReportTab, setActiveReportTab] = useState('master_operations_report'); // 'master_operations_report', 'daily_weekly_calendar', 'rgp_reports', 'material_ledger', 'designer_audits', 'store_audits'
+  const [activeReportTab, setActiveReportTab] = useState('daily_activity_analytics'); // 'daily_activity_analytics', 'master_operations_report', 'daily_weekly_calendar', 'lot_wise_report', 'item_code_report', 'rgp_reports', 'material_ledger'
   const [selectedLotId, setSelectedLotId] = useState('');
   
   // Master Operations & Logistics (RGP, Dori, Zip, PO, Extra Pieces, Scanner) states
@@ -271,6 +272,16 @@ export default function ReportsHistoryView({
   const [lotSort, setLotSort] = useState('lot_desc');
   const [selectedLotForModal, setSelectedLotForModal] = useState(null);
   const [expandedLotIds, setExpandedLotIds] = useState(new Set());
+
+  // Analytics & Graphs Tab Filters
+  const [analyticsDateFilter, setAnalyticsDateFilter] = useState('all'); // 'all', 'today', 'yesterday', '7d', '30d', 'this_month', 'custom'
+  const [analyticsStartDate, setAnalyticsStartDate] = useState('');
+  const [analyticsEndDate, setAnalyticsEndDate] = useState('');
+  const [analyticsTypeFilter, setAnalyticsTypeFilter] = useState('all'); // 'all', 'issue', 'extra_issue', 'return', 'transfer', 'weight', 'scan'
+  const [analyticsOperatorFilter, setAnalyticsOperatorFilter] = useState('all');
+  const [analyticsSearchQuery, setAnalyticsSearchQuery] = useState('');
+  const [analyticsTrendRange, setAnalyticsTrendRange] = useState('7d'); // '7d', '14d', '30d'
+  const [showAnalyticsRecords, setShowAnalyticsRecords] = useState(false);
 
   // Fetch lot-wise consolidated summary from backend
   const fetchLotWiseData = async () => {
@@ -2399,6 +2410,28 @@ export default function ReportsHistoryView({
         flexWrap: 'wrap',
         gap: '4px'
       }}>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('daily_activity_analytics')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'daily_activity_analytics' ? '#2563eb' : 'transparent',
+            color: activeReportTab === 'daily_activity_analytics' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: activeReportTab === 'daily_activity_analytics' ? '0 2px 4px rgba(37,99,235,0.2)' : 'none'
+          }}
+        >
+          <Sparkles size={14} />
+          <span>(1) Daily Analytics (1st Report)</span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveReportTab('master_operations_report')}
@@ -4753,6 +4786,24 @@ export default function ReportsHistoryView({
         </div>
       )}
 
+      {activeReportTab === 'daily_activity_analytics' && (
+        <DailyActivityAnalyticsReport
+          designs={designs}
+          issueLogs={allIssueLogs}
+          extraMaterialIssues={extraMaterialIssues}
+          weightCaptures={weightCaptures}
+          pos={pos}
+          zipOrders={zipOrders}
+          dooriOrders={dooriOrders}
+          designHistory={designHistory}
+          currencySymbol={currencySymbol}
+          onSelectLot={(lotId) => {
+            setSelectedLotId(lotId);
+            setActiveReportTab('material_ledger');
+          }}
+        />
+      )}
+
       {activeReportTab === 'daily_weekly_calendar' && (
         <DailyWeeklyCalendarReport
           issueLogs={allIssueLogs}
@@ -6437,148 +6488,669 @@ export default function ReportsHistoryView({
       {/* ANALYTICS & GRAPHS TAB                                        */}
       {/* ============================================================ */}
       {activeReportTab === 'analytics_charts' && (() => {
-        // --- Compute analytics from all store audits ---
+        // --- Fetch all raw store audits ---
         const allAudits = getStoreAudits();
-        const totalIssues = allAudits.filter(a => a.id.startsWith('IS-')).length;
-        const totalExtra = allAudits.filter(a => a.id.startsWith('EX-')).length;
-        const totalReturns = allAudits.filter(a => a.id.startsWith('RT-')).length;
-        const totalTransfers = allAudits.filter(a => a.id.startsWith('TR-')).length;
-        const totalWeight = allAudits.filter(a => a.id.startsWith('WC-')).length;
-        const totalScans = allAudits.filter(a => a.id.startsWith('SC-')).length;
+
+        // Extract unique operator names for filter dropdown
+        const uniqueOperators = Array.from(
+          new Set(allAudits.map(a => (a.operator || '').trim()).filter(Boolean))
+        ).sort((a, b) => a.localeCompare(b));
+
+        // --- Apply reactive filters ---
+        const filteredAudits = allAudits.filter(item => {
+          // 1. Date filter
+          if (analyticsDateFilter !== 'all') {
+            const d = parseToDateObject(item.date);
+            if (d && !isNaN(d.getTime()) && d.getTime() > 0) {
+              const now = new Date();
+              const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+              const itemStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+              if (analyticsDateFilter === 'today') {
+                if (itemStart !== todayStart) return false;
+              } else if (analyticsDateFilter === 'yesterday') {
+                const yestStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+                if (itemStart !== yestStart) return false;
+              } else if (analyticsDateFilter === '7d') {
+                const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6).getTime();
+                if (itemStart < weekAgo || itemStart > todayStart) return false;
+              } else if (analyticsDateFilter === '30d') {
+                const monthAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29).getTime();
+                if (itemStart < monthAgo || itemStart > todayStart) return false;
+              } else if (analyticsDateFilter === 'this_month') {
+                if (d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) return false;
+              } else if (analyticsDateFilter === 'custom') {
+                if (analyticsStartDate) {
+                  const s = parseToDateObject(analyticsStartDate);
+                  if (s && !isNaN(s.getTime())) {
+                    const sStart = new Date(s.getFullYear(), s.getMonth(), s.getDate()).getTime();
+                    if (itemStart < sStart) return false;
+                  }
+                }
+                if (analyticsEndDate) {
+                  const e = parseToDateObject(analyticsEndDate);
+                  if (e && !isNaN(e.getTime())) {
+                    const eStart = new Date(e.getFullYear(), e.getMonth(), e.getDate()).getTime();
+                    if (itemStart > eStart) return false;
+                  }
+                }
+              }
+            }
+          }
+
+          // 2. Operation Type Filter
+          if (analyticsTypeFilter !== 'all') {
+            if (analyticsTypeFilter === 'issue' && !(item.id.startsWith('IS-') || item.tag === 'issue')) return false;
+            if (analyticsTypeFilter === 'extra_issue' && !(item.id.startsWith('EX-') || item.tag === 'extra_issue')) return false;
+            if (analyticsTypeFilter === 'return' && !(item.id.startsWith('RT-') || item.tag === 'return')) return false;
+            if (analyticsTypeFilter === 'transfer' && !(item.id.startsWith('TR-') || item.tag === 'transfer')) return false;
+            if (analyticsTypeFilter === 'weight' && !(item.id.startsWith('WC-') || item.tag === 'weight')) return false;
+            if (analyticsTypeFilter === 'scan' && !(item.id.startsWith('SC-') || item.tag === 'scan')) return false;
+          }
+
+          // 3. Operator Filter
+          if (analyticsOperatorFilter !== 'all') {
+            if ((item.operator || '').trim().toLowerCase() !== analyticsOperatorFilter.trim().toLowerCase()) {
+              return false;
+            }
+          }
+
+          // 4. Search Query Filter
+          if (analyticsSearchQuery.trim()) {
+            const q = analyticsSearchQuery.toLowerCase().trim();
+            const matchId = (item.id || '').toLowerCase().includes(q);
+            const matchType = (item.type || '').toLowerCase().includes(q);
+            const matchDetails = (item.details || '').toLowerCase().includes(q);
+            const matchOp = (item.operator || '').toLowerCase().includes(q);
+            const matchDate = (item.date || '').toLowerCase().includes(q);
+            if (!matchId && !matchType && !matchDetails && !matchOp && !matchDate) return false;
+          }
+
+          return true;
+        });
+
+        // --- Recalculate KPI counts based on filtered results ---
+        const totalIssues = filteredAudits.filter(a => a.id.startsWith('IS-') || a.tag === 'issue').length;
+        const totalExtra = filteredAudits.filter(a => a.id.startsWith('EX-') || a.tag === 'extra_issue').length;
+        const totalReturns = filteredAudits.filter(a => a.id.startsWith('RT-') || a.tag === 'return').length;
+        const totalTransfers = filteredAudits.filter(a => a.id.startsWith('TR-') || a.tag === 'transfer').length;
+        const totalWeight = filteredAudits.filter(a => a.id.startsWith('WC-') || a.tag === 'weight').length;
+        const totalScans = filteredAudits.filter(a => a.id.startsWith('SC-') || a.tag === 'scan').length;
+        const totalFiltered = filteredAudits.length;
         const totalAll = allAudits.length || 1;
+
+        // Check if any filter is actively applied
+        const hasActiveFilters = analyticsDateFilter !== 'all' || 
+          analyticsTypeFilter !== 'all' || 
+          analyticsOperatorFilter !== 'all' || 
+          analyticsSearchQuery.trim() !== '' ||
+          Boolean(analyticsStartDate) ||
+          Boolean(analyticsEndDate);
+
+        const resetAllAnalyticsFilters = () => {
+          setAnalyticsDateFilter('all');
+          setAnalyticsStartDate('');
+          setAnalyticsEndDate('');
+          setAnalyticsTypeFilter('all');
+          setAnalyticsOperatorFilter('all');
+          setAnalyticsSearchQuery('');
+        };
 
         // --- Operation breakdown donut data ---
         const donutData = [
-          { label: 'Material Issue', count: totalIssues, color: '#0284c7' },
-          { label: 'Extra Requisition', count: totalExtra, color: '#f59e0b' },
-          { label: 'Returns', count: totalReturns, color: '#8b5cf6' },
-          { label: 'Transfers', count: totalTransfers, color: '#3b82f6' },
-          { label: 'Weight Capture', count: totalWeight, color: '#10b981' },
-          { label: 'Scans', count: totalScans, color: '#06b6d4' },
+          { key: 'issue', label: 'Material Issue', count: totalIssues, color: '#0284c7' },
+          { key: 'extra_issue', label: 'Extra Requisition', count: totalExtra, color: '#f59e0b' },
+          { key: 'return', label: 'Returns', count: totalReturns, color: '#8b5cf6' },
+          { key: 'transfer', label: 'Transfers', count: totalTransfers, color: '#3b82f6' },
+          { key: 'weight', label: 'Weight Capture', count: totalWeight, color: '#10b981' },
+          { key: 'scan', label: 'Scans', count: totalScans, color: '#06b6d4' },
         ].filter(d => d.count > 0);
 
         // --- SVG Donut chart helpers ---
-        const donutTotal = donutData.reduce((s, d) => s + d.count, 0) || 1;
+        const donutTotal = donutData.reduce((s, d) => s + d.count, 0) || 0;
         const donutR = 70, donutCx = 90, donutCy = 90, strokeWidth = 28;
         let cumAngle = -90;
         const donutSegments = donutData.map(d => {
-          const pct = d.count / donutTotal;
+          const pct = donutTotal > 0 ? d.count / donutTotal : 0;
           const startAngle = cumAngle;
           const sweep = pct * 360;
           cumAngle += sweep;
           const toRad = deg => (deg * Math.PI) / 180;
+          const isFull = donutData.length === 1 || sweep >= 359.9;
           const x1 = donutCx + donutR * Math.cos(toRad(startAngle));
           const y1 = donutCy + donutR * Math.sin(toRad(startAngle));
           const x2 = donutCx + donutR * Math.cos(toRad(startAngle + sweep));
           const y2 = donutCy + donutR * Math.sin(toRad(startAngle + sweep));
           const largeArc = sweep > 180 ? 1 : 0;
-          const pathD = `M ${x1} ${y1} A ${donutR} ${donutR} 0 ${largeArc} 1 ${x2} ${y2}`;
-          return { ...d, pct, pathD, sweep };
+          const pathD = isFull ? '' : `M ${x1} ${y1} A ${donutR} ${donutR} 0 ${largeArc} 1 ${x2} ${y2}`;
+          return { ...d, pct, pathD, sweep, isFull };
         });
 
-        // --- 7-day daily operation trend bar chart ---
-        const last7 = [];
-        for (let i = 6; i >= 0; i--) {
-          const d = new Date();
-          d.setDate(d.getDate() - i);
-          last7.push({ label: d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit' }), date: d.toDateString(), count: 0 });
+        // --- Operation Trend Chart Buckets ---
+        let trendDaysCount = 7;
+        if (analyticsTrendRange === '30d' || analyticsDateFilter === '30d' || analyticsDateFilter === 'this_month') {
+          trendDaysCount = 30;
+        } else if (analyticsTrendRange === '14d') {
+          trendDaysCount = 14;
         }
-        allAudits.forEach(a => {
-          const d = new Date(a.date || '');
-          const ds = d.toDateString();
-          const slot = last7.find(s => s.date === ds);
-          if (slot) slot.count++;
-        });
-        const barMax = Math.max(...last7.map(d => d.count), 1);
-        const BAR_H = 120;
-        const BAR_W = 30;
-        const BAR_GAP = 14;
-        const svgBarW = last7.length * (BAR_W + BAR_GAP) + 20;
 
-        // --- Top 5 lots by issue count ---
-        const lotCountMap = {};
-        (fetchedIssueLogs || []).forEach(l => {
-          const k = String(l.lotId || 'Unknown');
-          lotCountMap[k] = (lotCountMap[k] || 0) + 1;
+        const trendBuckets = [];
+        if (analyticsDateFilter === 'custom' && analyticsStartDate && analyticsEndDate) {
+          const sObj = parseToDateObject(analyticsStartDate);
+          const eObj = parseToDateObject(analyticsEndDate);
+          if (!isNaN(sObj.getTime()) && !isNaN(eObj.getTime()) && eObj >= sObj) {
+            const diffDays = Math.min(Math.max(Math.round((eObj.getTime() - sObj.getTime()) / (1000 * 60 * 60 * 24)) + 1, 1), 31);
+            for (let i = 0; i < diffDays; i++) {
+              const cur = new Date(sObj);
+              cur.setDate(cur.getDate() + i);
+              trendBuckets.push({
+                label: cur.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit' }),
+                dateStr: cur.toDateString(),
+                fullDate: cur.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+                count: 0
+              });
+            }
+          }
+        }
+
+        if (trendBuckets.length === 0) {
+          for (let i = trendDaysCount - 1; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            trendBuckets.push({
+              label: d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit' }),
+              dateStr: d.toDateString(),
+              fullDate: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+              count: 0
+            });
+          }
+        }
+
+        filteredAudits.forEach(a => {
+          const d = parseToDateObject(a.date);
+          if (d && !isNaN(d.getTime())) {
+            const ds = d.toDateString();
+            const slot = trendBuckets.find(s => s.dateStr === ds);
+            if (slot) slot.count++;
+          }
         });
+
+        const barMax = Math.max(...trendBuckets.map(d => d.count), 1);
+        const BAR_H = 120;
+        const BAR_W = trendBuckets.length > 20 ? 18 : (trendBuckets.length > 10 ? 24 : 32);
+        const BAR_GAP = trendBuckets.length > 20 ? 6 : 12;
+        const svgBarW = Math.max(trendBuckets.length * (BAR_W + BAR_GAP) + 30, 360);
+
+        // --- Top 5 Lots from filtered records ---
+        const lotCountMap = {};
+        filteredAudits.forEach(a => {
+          if (a.id.startsWith('IS-') || a.tag === 'issue' || a.id.startsWith('EX-') || a.tag === 'extra_issue') {
+            const match = (a.details || '').match(/Lot\s*#?([A-Za-z0-9_-]+)/i);
+            const lotId = match ? match[1] : null;
+            if (lotId) {
+              lotCountMap[lotId] = (lotCountMap[lotId] || 0) + 1;
+            }
+          }
+        });
+        if (Object.keys(lotCountMap).length === 0 && (analyticsTypeFilter === 'all' || analyticsTypeFilter === 'issue')) {
+          (fetchedIssueLogs || []).forEach(l => {
+            const k = String(l.lotId || '');
+            if (k && k !== 'null' && k !== 'undefined' && k !== 'Unknown') {
+              lotCountMap[k] = (lotCountMap[k] || 0) + 1;
+            }
+          });
+        }
         const topLots = Object.entries(lotCountMap)
           .sort((a, b) => b[1] - a[1])
           .slice(0, 5);
         const topLotsMax = topLots.length > 0 ? topLots[0][1] : 1;
 
-        // --- PO vs Design count trend ---
         const totalDesigns = designs.length;
         const totalPOs = pos.length;
 
         return (
-          <div className="animate-fade">
-            {/* KPI Cards Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '24px' }}>
-              {[
-                { label: 'Total Operations', value: totalAll, icon: <Activity size={20} />, color: '#0284c7', bg: '#e0f2fe' },
-                { label: 'Issues', value: totalIssues, icon: <PackageCheck size={20} />, color: '#0369a1', bg: '#dbeafe' },
-                { label: 'Extra Requisitions', value: totalExtra, icon: <Package size={20} />, color: '#d97706', bg: '#fef3c7' },
-                { label: 'Returns', value: totalReturns, icon: <RotateCcw size={20} />, color: '#7c3aed', bg: '#ede9fe' },
-                { label: 'Transfers', value: totalTransfers, icon: <ArrowRightLeft size={20} />, color: '#2563eb', bg: '#eff6ff' },
-                { label: 'Weight Captures', value: totalWeight, icon: <Gauge size={20} />, color: '#059669', bg: '#d1fae5' },
-              ].map((kpi, i) => (
-                <div key={i} className="analytics-kpi-card animate-slide-up" style={{ animationDelay: `${i * 0.06}s` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-                    <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: kpi.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: kpi.color }}>
-                      {kpi.icon}
-                    </div>
-                    <span style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>{kpi.value}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{kpi.label}</div>
-                  <div style={{ marginTop: '10px', height: '3px', borderRadius: '2px', background: `linear-gradient(90deg, ${kpi.color}, ${kpi.bg})`, width: `${Math.round((kpi.value / totalAll) * 100)}%`, minWidth: '10%' }} />
+          <div className="animate-fade" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Header & Filter Control Bar */}
+            <div style={{
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '18px 22px',
+              borderRadius: '14px',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-sm)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <BarChart3 size={22} color="var(--accent-color)" />
+                    <span>Analytics &amp; Graphs Dashboard</span>
+                  </h3>
+                  <p style={{ margin: '4px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                    Real-time operational visualizations with dynamic multi-dimensional filters.
+                  </p>
                 </div>
-              ))}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{
+                    padding: '6px 14px',
+                    borderRadius: '20px',
+                    backgroundColor: 'rgba(2, 132, 199, 0.08)',
+                    border: '1px solid rgba(2, 132, 199, 0.2)',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    color: '#0284c7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <Activity size={14} />
+                    <span>Showing {totalFiltered} of {allAudits.length} Operations ({allAudits.length > 0 ? Math.round((totalFiltered / allAudits.length) * 100) : 0}%)</span>
+                  </div>
+
+                  {hasActiveFilters && (
+                    <button
+                      type="button"
+                      onClick={resetAllAnalyticsFilters}
+                      className="btn btn-secondary btn-sm"
+                      style={{
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#ef4444',
+                        borderColor: '#fca5a5',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px'
+                      }}
+                      title="Reset all filters"
+                    >
+                      <RotateCcw size={13} />
+                      <span>Reset Filters</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Filter Controls Row */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+                paddingTop: '12px',
+                borderTop: '1px solid var(--border-color)'
+              }}>
+                {/* 1. Date Range Preset Select */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '150px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Calendar size={12} />
+                    <span>Timeframe</span>
+                  </label>
+                  <select
+                    value={analyticsDateFilter}
+                    onChange={(e) => setAnalyticsDateFilter(e.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="all">All Time</option>
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
+                    <option value="this_month">This Month</option>
+                    <option value="custom">Custom Date Range</option>
+                  </select>
+                </div>
+
+                {/* Custom Date Pickers */}
+                {analyticsDateFilter === 'custom' && (
+                  <>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>From Date</label>
+                      <input
+                        type="date"
+                        value={analyticsStartDate}
+                        onChange={(e) => setAnalyticsStartDate(e.target.value)}
+                        style={{
+                          height: '36px',
+                          fontSize: '12.5px',
+                          padding: '0 10px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-main)'
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>To Date</label>
+                      <input
+                        type="date"
+                        value={analyticsEndDate}
+                        onChange={(e) => setAnalyticsEndDate(e.target.value)}
+                        style={{
+                          height: '36px',
+                          fontSize: '12.5px',
+                          padding: '0 10px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          background: 'var(--bg-secondary)',
+                          color: 'var(--text-main)'
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {/* 2. Operation Type Filter */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '170px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Package size={12} />
+                    <span>Operation Type</span>
+                  </label>
+                  <select
+                    value={analyticsTypeFilter}
+                    onChange={(e) => setAnalyticsTypeFilter(e.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="all">All Operations ({allAudits.length})</option>
+                    <option value="issue">Material Issues &amp; Re-Issues ({allAudits.filter(a => a.id.startsWith('IS-') || a.tag === 'issue').length})</option>
+                    <option value="extra_issue">Extra Requisitions ({allAudits.filter(a => a.id.startsWith('EX-') || a.tag === 'extra_issue').length})</option>
+                    <option value="return">Material Returns ({allAudits.filter(a => a.id.startsWith('RT-') || a.tag === 'return').length})</option>
+                    <option value="transfer">Stock Transfers ({allAudits.filter(a => a.id.startsWith('TR-') || a.tag === 'transfer').length})</option>
+                    <option value="weight">Weight Captures ({allAudits.filter(a => a.id.startsWith('WC-') || a.tag === 'weight').length})</option>
+                    <option value="scan">Gate &amp; Scanner Events ({allAudits.filter(a => a.id.startsWith('SC-') || a.tag === 'scan').length})</option>
+                  </select>
+                </div>
+
+                {/* 3. Operator / Incharge Filter */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '170px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Users size={12} />
+                    <span>Incharge / Operator</span>
+                  </label>
+                  <select
+                    value={analyticsOperatorFilter}
+                    onChange={(e) => setAnalyticsOperatorFilter(e.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="all">All Incharges &amp; Staff ({uniqueOperators.length})</option>
+                    {uniqueOperators.map(op => {
+                      const count = allAudits.filter(a => (a.operator || '').trim().toLowerCase() === op.toLowerCase()).length;
+                      return (
+                        <option key={op} value={op}>
+                          {op} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* 4. Search Filter */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: '1 1 200px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <Search size={12} />
+                    <span>Search Details / Lot / Item</span>
+                  </label>
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <Search size={14} style={{ position: 'absolute', left: '10px', top: '11px', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+                    <input
+                      type="text"
+                      value={analyticsSearchQuery}
+                      onChange={(e) => setAnalyticsSearchQuery(e.target.value)}
+                      placeholder="Filter by Lot #, material, voucher, person..."
+                      style={{
+                        ...styles.input,
+                        paddingLeft: '32px',
+                        paddingRight: analyticsSearchQuery ? '30px' : '10px'
+                      }}
+                    />
+                    {analyticsSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setAnalyticsSearchQuery('')}
+                        style={{
+                          position: 'absolute',
+                          right: '8px',
+                          top: '9px',
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: '2px'
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Filter Badges */}
+              {hasActiveFilters && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', paddingTop: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)' }}>Active Filters:</span>
+                  {analyticsDateFilter !== 'all' && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '3px 9px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(2, 132, 199, 0.1)',
+                      color: '#0284c7',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      Period: {analyticsDateFilter === 'custom' ? `${analyticsStartDate || 'start'} to ${analyticsEndDate || 'end'}` : analyticsDateFilter}
+                      <X size={11} style={{ cursor: 'pointer' }} onClick={() => { setAnalyticsDateFilter('all'); setAnalyticsStartDate(''); setAnalyticsEndDate(''); }} />
+                    </span>
+                  )}
+                  {analyticsTypeFilter !== 'all' && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '3px 9px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                      color: '#7c3aed',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      Type: {analyticsTypeFilter}
+                      <X size={11} style={{ cursor: 'pointer' }} onClick={() => setAnalyticsTypeFilter('all')} />
+                    </span>
+                  )}
+                  {analyticsOperatorFilter !== 'all' && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '3px 9px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                      color: '#059669',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      Operator: {analyticsOperatorFilter}
+                      <X size={11} style={{ cursor: 'pointer' }} onClick={() => setAnalyticsOperatorFilter('all')} />
+                    </span>
+                  )}
+                  {analyticsSearchQuery && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '3px 9px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                      color: '#d97706',
+                      fontSize: '11px',
+                      fontWeight: '600'
+                    }}>
+                      Search: &ldquo;{analyticsSearchQuery}&rdquo;
+                      <X size={11} style={{ cursor: 'pointer' }} onClick={() => setAnalyticsSearchQuery('')} />
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* KPI Cards Row (Clickable to filter by category) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px' }}>
+              {[
+                { key: 'all', label: 'Total Operations', value: totalFiltered, icon: <Activity size={20} />, color: '#0284c7', bg: '#e0f2fe' },
+                { key: 'issue', label: 'Issues', value: totalIssues, icon: <PackageCheck size={20} />, color: '#0369a1', bg: '#dbeafe' },
+                { key: 'extra_issue', label: 'Extra Requisitions', value: totalExtra, icon: <Package size={20} />, color: '#d97706', bg: '#fef3c7' },
+                { key: 'return', label: 'Returns', value: totalReturns, icon: <RotateCcw size={20} />, color: '#7c3aed', bg: '#ede9fe' },
+                { key: 'transfer', label: 'Transfers', value: totalTransfers, icon: <ArrowRightLeft size={20} />, color: '#2563eb', bg: '#eff6ff' },
+                { key: 'weight', label: 'Weight Captures', value: totalWeight, icon: <Gauge size={20} />, color: '#059669', bg: '#d1fae5' },
+              ].map((kpi, i) => {
+                const isSelected = (analyticsTypeFilter === kpi.key) || (kpi.key === 'all' && analyticsTypeFilter === 'all');
+                return (
+                  <div
+                    key={i}
+                    onClick={() => setAnalyticsTypeFilter(analyticsTypeFilter === kpi.key ? 'all' : kpi.key)}
+                    className="analytics-kpi-card animate-slide-up"
+                    style={{
+                      animationDelay: `${i * 0.05}s`,
+                      cursor: 'pointer',
+                      border: isSelected ? `2px solid ${kpi.color}` : '1px solid var(--border-color)',
+                      boxShadow: isSelected ? `0 4px 14px ${kpi.color}30` : 'var(--shadow-sm)',
+                      transform: isSelected ? 'scale(1.02)' : 'none',
+                      transition: 'all 0.2s ease'
+                    }}
+                    title={`Click to filter by ${kpi.label}`}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                      <div style={{ width: '38px', height: '38px', borderRadius: '10px', background: kpi.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: kpi.color }}>
+                        {kpi.icon}
+                      </div>
+                      <span style={{ fontSize: '22px', fontWeight: '800', color: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>
+                        {kpi.value}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        {kpi.label}
+                      </span>
+                      {isSelected && (
+                        <span style={{ fontSize: '10px', fontWeight: '700', color: kpi.color, backgroundColor: kpi.bg, padding: '1px 6px', borderRadius: '4px' }}>
+                          Active
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: '10px', height: '3px', borderRadius: '2px', background: `linear-gradient(90deg, ${kpi.color}, ${kpi.bg})`, width: `${totalFiltered > 0 ? Math.round((kpi.value / Math.max(totalFiltered, 1)) * 100) : 10}%`, minWidth: '10%' }} />
+                  </div>
+                );
+              })}
             </div>
 
             {/* Charts Row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1.9fr)', gap: '20px', marginBottom: '24px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.1fr) minmax(0, 1.9fr)', gap: '20px' }}>
 
-              {/* Donut Chart */}
+              {/* Donut Chart - Operation Breakdown */}
               <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.1s' }}>
-                <div style={{ marginBottom: '16px' }}>
-                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <BarChart3 size={16} color="var(--accent-color)" />
-                    Operation Breakdown
-                  </h3>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Distribution of all store operations</p>
+                <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <BarChart3 size={16} color="var(--accent-color)" />
+                      Operation Breakdown
+                    </h3>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                      Distribution of filtered operations
+                    </p>
+                  </div>
+                  {donutTotal > 0 && (
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--accent-color)', backgroundColor: 'rgba(2, 132, 199, 0.08)', padding: '3px 8px', borderRadius: '6px' }}>
+                      {donutTotal} Operations
+                    </span>
+                  )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '18px', flexWrap: 'wrap', justifyContent: 'center' }}>
                   {donutData.length === 0 ? (
-                    <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', width: '100%', fontSize: '13px' }}>No data yet</div>
+                    <div style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--text-muted)', width: '100%', fontSize: '13px' }}>
+                      <AlertCircle size={28} style={{ margin: '0 auto 8px auto', opacity: 0.5 }} />
+                      <p style={{ margin: 0, fontWeight: '600' }}>No operations matching selected filters</p>
+                      <button
+                        type="button"
+                        onClick={resetAllAnalyticsFilters}
+                        style={{ marginTop: '10px', fontSize: '12px', color: 'var(--accent-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                      >
+                        Reset filters to view all data
+                      </button>
+                    </div>
                   ) : (
                     <>
                       <svg width="180" height="180" viewBox="0 0 180 180" style={{ flexShrink: 0, overflow: 'visible' }}>
                         {donutSegments.map((seg, i) => (
-                          <path
-                            key={i}
-                            d={seg.pathD}
-                            fill="none"
-                            stroke={seg.color}
-                            strokeWidth={strokeWidth}
-                            strokeLinecap="round"
-                            className="donut-slice-path"
-                            style={{ filter: `drop-shadow(0 2px 4px ${seg.color}40)` }}
-                          />
+                          seg.isFull ? (
+                            <circle
+                              key={i}
+                              cx={donutCx}
+                              cy={donutCy}
+                              r={donutR}
+                              fill="none"
+                              stroke={seg.color}
+                              strokeWidth={strokeWidth}
+                              className="donut-slice-path"
+                              style={{ filter: `drop-shadow(0 2px 4px ${seg.color}40)`, cursor: 'pointer' }}
+                              onClick={() => setAnalyticsTypeFilter(analyticsTypeFilter === seg.key ? 'all' : seg.key)}
+                            />
+                          ) : (
+                            <path
+                              key={i}
+                              d={seg.pathD}
+                              fill="none"
+                              stroke={seg.color}
+                              strokeWidth={strokeWidth}
+                              strokeLinecap="round"
+                              className="donut-slice-path"
+                              style={{ filter: `drop-shadow(0 2px 4px ${seg.color}40)`, cursor: 'pointer' }}
+                              onClick={() => setAnalyticsTypeFilter(analyticsTypeFilter === seg.key ? 'all' : seg.key)}
+                            />
+                          )
                         ))}
                         <text x={donutCx} y={donutCy - 8} textAnchor="middle" style={{ fontSize: '22px', fontWeight: '800', fill: 'var(--text-main)', fontFamily: 'var(--font-family-title)' }}>
                           {donutTotal}
                         </text>
                         <text x={donutCx} y={donutCy + 12} textAnchor="middle" style={{ fontSize: '10px', fill: 'var(--text-muted)', fontFamily: 'var(--font-family-body)' }}>
-                          Total
+                          {analyticsTypeFilter !== 'all' ? 'Filtered' : 'Total'}
                         </text>
                       </svg>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', flex: 1, minWidth: '100px' }}>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1, minWidth: '120px' }}>
                         {donutSegments.map((seg, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                          <div
+                            key={i}
+                            onClick={() => setAnalyticsTypeFilter(analyticsTypeFilter === seg.key ? 'all' : seg.key)}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              cursor: 'pointer',
+                              padding: '4px 6px',
+                              borderRadius: '6px',
+                              backgroundColor: analyticsTypeFilter === seg.key ? `${seg.color}15` : 'transparent',
+                              transition: 'background 0.15s'
+                            }}
+                            title={`Filter by ${seg.label}`}
+                          >
                             <div style={{ width: '10px', height: '10px', borderRadius: '3px', background: seg.color, flexShrink: 0 }} />
                             <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-main)' }}>{seg.label}</div>
-                              <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{seg.count} ({Math.round(seg.pct * 100)}%)</div>
+                              <div style={{ fontSize: '11.5px', fontWeight: '600', color: 'var(--text-main)' }}>{seg.label}</div>
+                              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{seg.count} ({Math.round(seg.pct * 100)}%)</div>
                             </div>
                           </div>
                         ))}
@@ -6588,21 +7160,54 @@ export default function ReportsHistoryView({
                 </div>
               </div>
 
-              {/* 7-Day Bar Chart */}
+              {/* Bar Chart - Operation Trend */}
               <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.15s' }}>
-                <div style={{ marginBottom: '16px' }}>
-                  <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Activity size={16} color="var(--accent-color)" />
-                    7-Day Operation Trend
-                  </h3>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Daily operation count for the last 7 days</p>
+                <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Activity size={16} color="var(--accent-color)" />
+                      Operation Trend
+                    </h3>
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                      Timeline activity distribution ({trendBuckets.length} days)
+                    </p>
+                  </div>
+
+                  {/* Trend Scale Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', backgroundColor: 'var(--bg-primary)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                    {[
+                      { id: '7d', label: '7 Days' },
+                      { id: '14d', label: '14 Days' },
+                      { id: '30d', label: '30 Days' },
+                    ].map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setAnalyticsTrendRange(tab.id)}
+                        style={{
+                          padding: '3px 8px',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          border: 'none',
+                          borderRadius: '5px',
+                          cursor: 'pointer',
+                          backgroundColor: analyticsTrendRange === tab.id ? 'var(--accent-color)' : 'transparent',
+                          color: analyticsTrendRange === tab.id ? '#ffffff' : 'var(--text-muted)',
+                          transition: 'all 0.15s'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
                 <div style={{ overflowX: 'auto', paddingBottom: '8px' }}>
                   <svg width={svgBarW} height={BAR_H + 50} viewBox={`0 0 ${svgBarW} ${BAR_H + 50}`} style={{ minWidth: '320px', width: '100%' }}>
                     <defs>
-                      <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient id="analyticsBarGrad" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#0284c7" stopOpacity="1" />
-                        <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.7" />
+                        <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.75" />
                       </linearGradient>
                     </defs>
                     {/* Grid lines */}
@@ -6610,7 +7215,7 @@ export default function ReportsHistoryView({
                       const y = BAR_H - pct * BAR_H + 8;
                       return (
                         <g key={i}>
-                          <line x1="10" y1={y} x2={svgBarW - 10} y2={y} stroke="var(--border-color)" strokeWidth="1" strokeDasharray="4,4" />
+                          <line x1="12" y1={y} x2={svgBarW - 12} y2={y} stroke="var(--border-color)" strokeWidth="1" strokeDasharray="4,4" />
                           <text x="6" y={y + 4} style={{ fontSize: '9px', fill: 'var(--text-muted)' }} textAnchor="middle">
                             {Math.round(pct * barMax)}
                           </text>
@@ -6618,35 +7223,35 @@ export default function ReportsHistoryView({
                       );
                     })}
                     {/* Bars */}
-                    {last7.map((day, i) => {
+                    {trendBuckets.map((day, i) => {
                       const bh = barMax > 0 ? (day.count / barMax) * BAR_H : 0;
-                      const x = 18 + i * (BAR_W + BAR_GAP);
+                      const x = 20 + i * (BAR_W + BAR_GAP);
                       const y = BAR_H - bh + 8;
                       return (
                         <g key={i}>
-                          {/* Background bar */}
+                          {/* Background slot */}
                           <rect x={x} y={8} width={BAR_W} height={BAR_H} rx="5" fill="#f0f7ff" />
                           {/* Value bar */}
                           {bh > 0 && (
                             <rect
                               x={x} y={y} width={BAR_W} height={bh} rx="5"
-                              fill="url(#barGrad)"
+                              fill="url(#analyticsBarGrad)"
                               className="bar-column-rect"
                               style={{ filter: 'drop-shadow(0 2px 6px rgba(2,132,199,0.25))' }}
                             />
                           )}
                           {/* Count label */}
                           {day.count > 0 && (
-                            <text x={x + BAR_W / 2} y={y - 4} textAnchor="middle" style={{ fontSize: '9px', fontWeight: '700', fill: '#0284c7' }}>
+                            <text x={x + BAR_W / 2} y={y - 4} textAnchor="middle" style={{ fontSize: '9.5px', fontWeight: '700', fill: '#0284c7' }}>
                               {day.count}
                             </text>
                           )}
                           {/* Day label */}
-                          <text x={x + BAR_W / 2} y={BAR_H + 26} textAnchor="middle" style={{ fontSize: '9px', fill: 'var(--text-muted)' }}>
+                          <text x={x + BAR_W / 2} y={BAR_H + 26} textAnchor="middle" style={{ fontSize: '9px', fill: 'var(--text-muted)', fontWeight: '600' }}>
                             {day.label.split(' ')[0]}
                           </text>
                           <text x={x + BAR_W / 2} y={BAR_H + 38} textAnchor="middle" style={{ fontSize: '8px', fill: 'var(--text-muted)' }}>
-                            {day.label.split(' ')[1]}
+                            {day.label.split(' ')[1] || day.fullDate}
                           </text>
                         </g>
                       );
@@ -6656,7 +7261,7 @@ export default function ReportsHistoryView({
               </div>
             </div>
 
-            {/* Bottom Row */}
+            {/* Bottom Row - Top Lots & Portfolio Overview */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' }}>
 
               {/* Top 5 Lots */}
@@ -6664,24 +7269,33 @@ export default function ReportsHistoryView({
                 <div style={{ marginBottom: '16px' }}>
                   <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <PackageCheck size={16} color="var(--accent-color)" />
-                    Top Lots by Issues
+                    Top Lots by Operations
                   </h3>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Most active production lots</p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                    Most active production lots within filtered operations
+                  </p>
                 </div>
                 {topLots.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px' }}>No issue data yet</div>
+                  <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                    No issue or extra requisition data in current filter
+                  </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     {topLots.map(([lotId, count], i) => {
                       const pct = Math.round((count / topLotsMax) * 100);
                       const colors = ['#0284c7', '#0369a1', '#38bdf8', '#7dd3fc', '#bae6fd'];
                       return (
-                        <div key={lotId}>
+                        <div
+                          key={lotId}
+                          onClick={() => setAnalyticsSearchQuery(lotId)}
+                          style={{ cursor: 'pointer' }}
+                          title={`Click to search Lot ${lotId}`}
+                        >
                           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
                             <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main)' }}>
                               <span style={{ color: 'var(--text-muted)', marginRight: '6px' }}>#{i + 1}</span>Lot {lotId}
                             </span>
-                            <span style={{ fontSize: '12px', fontWeight: '800', color: colors[i] }}>{count} issues</span>
+                            <span style={{ fontSize: '12px', fontWeight: '800', color: colors[i] }}>{count} ops</span>
                           </div>
                           <div style={{ height: '8px', borderRadius: '4px', background: '#e0f2fe', overflow: 'hidden' }}>
                             <div style={{
@@ -6700,31 +7314,39 @@ export default function ReportsHistoryView({
                 )}
               </div>
 
-              {/* Operation Summary Table */}
+              {/* Portfolio Overview */}
               <div className="chart-card-wrapper animate-slide-up" style={{ animationDelay: '0.25s' }}>
                 <div style={{ marginBottom: '16px' }}>
                   <h3 style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-main)', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <TrendingUp size={16} color="var(--accent-color)" />
-                    Portfolio Overview
+                    Portfolio Activity Distribution
                   </h3>
-                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>Summary across all modules</p>
+                  <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px' }}>
+                    Operational breakdown of filtered actions
+                  </p>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '11px' }}>
                   {[
-                    { label: 'Total Design Lots', value: totalDesigns, color: '#0284c7', pct: 100 },
-                    { label: 'Purchase Orders', value: totalPOs, color: '#7c3aed', pct: totalDesigns > 0 ? Math.round((totalPOs / Math.max(totalDesigns, 1)) * 100) : 0 },
-                    { label: 'Issue Transactions', value: totalIssues, color: '#059669', pct: totalAll > 0 ? Math.round((totalIssues / totalAll) * 100) : 0 },
-                    { label: 'Store Scan Events', value: totalScans, color: '#06b6d4', pct: totalAll > 0 ? Math.round((totalScans / totalAll) * 100) : 0 },
-                    { label: 'Weight Captures', value: totalWeight, color: '#f59e0b', pct: totalAll > 0 ? Math.round((totalWeight / totalAll) * 100) : 0 },
+                    { key: 'issue', label: 'Material Issues & Re-Issues', value: totalIssues, color: '#0284c7', pct: totalFiltered > 0 ? Math.round((totalIssues / totalFiltered) * 100) : 0 },
+                    { key: 'extra_issue', label: 'Extra Requisitions', value: totalExtra, color: '#f59e0b', pct: totalFiltered > 0 ? Math.round((totalExtra / totalFiltered) * 100) : 0 },
+                    { key: 'return', label: 'Material Returns', value: totalReturns, color: '#8b5cf6', pct: totalFiltered > 0 ? Math.round((totalReturns / totalFiltered) * 100) : 0 },
+                    { key: 'transfer', label: 'Stock Transfers', value: totalTransfers, color: '#2563eb', pct: totalFiltered > 0 ? Math.round((totalTransfers / totalFiltered) * 100) : 0 },
+                    { key: 'weight', label: 'Weight Captures', value: totalWeight, color: '#059669', pct: totalFiltered > 0 ? Math.round((totalWeight / totalFiltered) * 100) : 0 },
+                    { key: 'scan', label: 'Gate & Scanner Events', value: totalScans, color: '#06b6d4', pct: totalFiltered > 0 ? Math.round((totalScans / totalFiltered) * 100) : 0 },
                   ].map((row, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: `${row.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                        <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: row.color }} />
+                    <div
+                      key={i}
+                      onClick={() => setAnalyticsTypeFilter(analyticsTypeFilter === row.key ? 'all' : row.key)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}
+                      title={`Filter by ${row.label}`}
+                    >
+                      <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${row.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <div style={{ width: '9px', height: '9px', borderRadius: '50%', background: row.color }} />
                       </div>
                       <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                           <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main)' }}>{row.label}</span>
-                          <span style={{ fontSize: '12px', fontWeight: '800', color: row.color }}>{row.value}</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: row.color }}>{row.value} ({row.pct}%)</span>
                         </div>
                         <div style={{ height: '5px', borderRadius: '3px', background: '#f0f7ff' }}>
                           <div style={{
@@ -6734,7 +7356,7 @@ export default function ReportsHistoryView({
                             background: row.color,
                             animation: 'barGrowRight 0.6s cubic-bezier(0.4, 0, 0.2, 1) both',
                             animationDelay: `${i * 0.08}s`,
-                            opacity: 0.8
+                            opacity: 0.85
                           }} />
                         </div>
                       </div>
@@ -6742,6 +7364,102 @@ export default function ReportsHistoryView({
                   ))}
                 </div>
               </div>
+            </div>
+
+            {/* Toggleable Matching Records Explorer */}
+            <div style={{ marginTop: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAnalyticsRecords(!showAnalyticsRecords)}
+                  className="btn btn-secondary btn-sm"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontWeight: '700',
+                    fontSize: '12.5px',
+                    borderRadius: '8px',
+                    padding: '8px 16px'
+                  }}
+                >
+                  <Eye size={14} />
+                  <span>{showAnalyticsRecords ? 'Hide Matching Records' : `View Filtered Records (${filteredAudits.length})`}</span>
+                  {showAnalyticsRecords ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              </div>
+
+              {showAnalyticsRecords && (
+                <div className="chart-card-wrapper animate-slide-up" style={{ padding: '0', overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-main)' }}>
+                      Detailed Log Stream ({filteredAudits.length} records matching current filters)
+                    </span>
+                  </div>
+                  {filteredAudits.length === 0 ? (
+                    <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                      No records match the current filter selection.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: '420px', overflowY: 'auto' }}>
+                      <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+                        <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-primary)', zIndex: 1, borderBottom: '1px solid var(--border-color)' }}>
+                          <tr>
+                            <th style={{ padding: '10px 14px', fontWeight: '700' }}>ID / Type</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '700' }}>Date &amp; Time</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '700' }}>Details / Material Summary</th>
+                            <th style={{ padding: '10px 14px', fontWeight: '700' }}>Incharge / Operator</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredAudits.slice(0, 50).map((audit, idx) => (
+                            <tr key={audit.id || idx} style={{ borderBottom: '1px solid var(--border-color)' }} className="table-row-hover">
+                              <td style={{ padding: '10px 14px' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '2px 7px',
+                                  borderRadius: '5px',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  backgroundColor: audit.id.startsWith('IS-') ? '#e0f2fe' :
+                                    audit.id.startsWith('EX-') ? '#fef3c7' :
+                                    audit.id.startsWith('RT-') ? '#ede9fe' :
+                                    audit.id.startsWith('TR-') ? '#eff6ff' :
+                                    audit.id.startsWith('WC-') ? '#d1fae5' : '#f1f5f9',
+                                  color: audit.id.startsWith('IS-') ? '#0284c7' :
+                                    audit.id.startsWith('EX-') ? '#d97706' :
+                                    audit.id.startsWith('RT-') ? '#7c3aed' :
+                                    audit.id.startsWith('TR-') ? '#2563eb' :
+                                    audit.id.startsWith('WC-') ? '#059669' : '#475569'
+                                }}>
+                                  {audit.type}
+                                </span>
+                                <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                  #{audit.id}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+                                {formatDateTime(audit.date)}
+                              </td>
+                              <td style={{ padding: '10px 14px', maxWidth: '360px', wordBreak: 'break-word', color: 'var(--text-main)' }}>
+                                {audit.details}
+                              </td>
+                              <td style={{ padding: '10px 14px', color: 'var(--text-main)', fontWeight: '600' }}>
+                                {audit.operator || '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {filteredAudits.length > 50 && (
+                        <div style={{ padding: '10px', textAlign: 'center', fontSize: '11.5px', color: 'var(--text-muted)', background: 'var(--bg-primary)' }}>
+                          Showing first 50 records. Use filters to narrow down results.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         );

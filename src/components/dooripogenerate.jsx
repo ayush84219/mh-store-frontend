@@ -190,7 +190,7 @@ async function fetchGarmentZipConfig(signal) {
     };
 
     try {
-        const url = 'https://docs.google.com/spreadsheets/d/1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0/export?format=csv&gid=227674623';
+        const url = 'https://docs.google.com/spreadsheets/d/1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k/export?format=csv&gid=227674623';
         const res = await fetch(url, { signal });
         if (!res.ok) {
             throw new Error(`Failed to fetch garment dori config: ${res.status}`);
@@ -225,7 +225,7 @@ async function fetchGarmentZipConfig(signal) {
 }
 
 async function fetchZipQualityData(signal) {
-    const url = 'https://docs.google.com/spreadsheets/d/1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0/export?format=csv';
+    const url = 'https://docs.google.com/spreadsheets/d/1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k/export?format=csv';
     const res = await fetch(url, { signal });
     if (!res.ok) {
         throw new Error(`Failed to fetch zip quality data sheet: ${res.status}`);
@@ -300,10 +300,10 @@ async function fetchLotMatrixViaSheetsApi(lotNo, signal) {
         console.warn('Failed to fetch from local database, trying Google Sheet fallback:', dbErr.message);
     }
 
-    // Fallback: Fetch from DoriPurchaseOrders sheet (gid=1832763531) in spreadsheet 1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0
+    // Fallback: Fetch from DoriPurchaseOrders sheet (gid=1832763531) in spreadsheet 1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k
     try {
         console.log('Searching in DoriPurchaseOrders Google Sheet fallback for lot:', searchKey);
-        const sheetUrl = 'https://docs.google.com/spreadsheets/d/1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0/export?format=csv&gid=1832763531';
+        const sheetUrl = 'https://docs.google.com/spreadsheets/d/1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k/export?format=csv&gid=1832763531';
         const resSheet = await fetch(sheetUrl, { signal });
         if (!resSheet.ok) {
             throw new Error(`Failed to access Google Sheet fallback: ${resSheet.status}`);
@@ -470,7 +470,7 @@ function findLotInIndex(indexData, lotNo) {
 async function fetchExistingPurchaseOrders(lotNumber, signal) {
     try {
         console.log('🔍 Checking existing purchase orders for lot:', lotNumber);
-        const url = 'https://docs.google.com/spreadsheets/d/1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0/export?format=csv&gid=1832763531';
+        const url = 'https://docs.google.com/spreadsheets/d/1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k/export?format=csv&gid=1832763531';
         const response = await fetch(url, { signal });
         if (!response.ok) {
             throw new Error(`Failed to fetch purchase orders: ${response.status}`);
@@ -577,7 +577,7 @@ async function fetchFromCuttingUsingIndex(lotInfo, signal) {
 async function fetchPendingZipCount(signal) {
     try {
         console.log('🔍 Fetching pending Dori data from Google Sheets...');
-        const url = 'https://docs.google.com/spreadsheets/d/1DuK41wsFe-YlCYzAYkBXdfq6GV8G6IZAGrJJfyWQYX0/export?format=csv&gid=1832763531';
+        const url = 'https://docs.google.com/spreadsheets/d/1LjwZqU26F0xwL1tEyps8txsM1qS8LLUuE-sy_4CQK6k/export?format=csv&gid=1832763531';
 
         console.log('📡 Fetching from URL:', url);
         const response = await fetch(url, { signal });
@@ -1086,11 +1086,11 @@ const generateSimpleQR = async (lotNumber) => {
     try {
         // Fetch server local IP address dynamically
         let localSystemUrl = `${window.location.origin}/`;
-        const isLocalHostOrIP = 
-            window.location.hostname === 'localhost' || 
-            window.location.hostname === '127.0.0.1' || 
-            window.location.hostname.startsWith('192.168.') || 
-            window.location.hostname.startsWith('10.') || 
+        const isLocalHostOrIP =
+            window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1' ||
+            window.location.hostname.startsWith('192.168.') ||
+            window.location.hostname.startsWith('10.') ||
             window.location.hostname.startsWith('172.');
 
         if (isLocalHostOrIP) {
@@ -1833,10 +1833,10 @@ export const generateIssuePdf = async (matrix, {
         totalZipCost: totalZipCost
     };
 };
-export default function DoriOrder({ 
-    prefilledLotNo = '', 
-    setPrefilledLotNo = () => { }, 
-    viewMode = 'dashboard', 
+export default function DoriOrder({
+    prefilledLotNo = '',
+    setPrefilledLotNo = () => { },
+    viewMode = 'dashboard',
     setViewMode = () => { },
     activeSubTab = 'dori',
     setActiveSubTab = () => { },
@@ -1844,7 +1844,7 @@ export default function DoriOrder({
 } = {}) {
     if (viewMode === 'dashboard') {
         return (
-            <DoriDashboard 
+            <DoriDashboard
                 onCompileNewPO={() => setViewMode('generator')}
                 activeSubTab={activeSubTab}
                 setActiveSubTab={setActiveSubTab}
@@ -1998,7 +1998,7 @@ export default function DoriOrder({
             const designRes = await fetch(`${getBackendUrl()}/api/designs`, { signal: ctrl.signal });
             if (!designRes.ok) throw new Error('Failed to verify design status.');
             const designsList = await designRes.json();
-            const matchingDesign = designsList.find(d => 
+            const matchingDesign = designsList.find(d =>
                 String(d.id).toLowerCase() === normalizedLot.toLowerCase() ||
                 String(d.name).toLowerCase() === normalizedLot.toLowerCase() ||
                 (d.lotNo2 && String(d.lotNo2).toLowerCase() === normalizedLot.toLowerCase())
@@ -4231,10 +4231,10 @@ export default function DoriOrder({
     );
 }
 
-export function DoriDashboard({ 
+export function DoriDashboard({
     onCompileNewPO,
     activeSubTab = 'dori',
-    setActiveSubTab = () => {},
+    setActiveSubTab = () => { },
     tabs = []
 }) {
     const [poList, setPoList] = useState([]);
