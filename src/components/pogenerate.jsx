@@ -4486,37 +4486,85 @@ export function ZipDashboard({
 
     const downloadPDF = () => {
         const doc = new jsPDF('l', 'mm', 'a4');
+
+        // Document Header (Clean Black & White Print Form)
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(16);
-        doc.text(`Zip Purchase Orders Report`, 14, 15);
-        doc.setFontSize(10);
+        doc.setFontSize(15);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`Zip Purchase Orders Report`, 14, 14);
+
+        doc.setFontSize(9);
         doc.setFont('helvetica', 'normal');
-        doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB')}`, 14, 20);
+        doc.setTextColor(60, 60, 60);
+        doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB')}  |  Total Orders: ${filteredPOs.length}`, 14, 20);
 
         const tableData = filteredPOs.map((po, index) => [
             index + 1,
-            po.lotNumber,
-            `V${po.version}`,
-            po.garmentType,
-            po.style,
-            po.pieces,
-            `₹${po.cost.toLocaleString('en-IN')}`,
-            po.issueDateStr,
-            po.supervisor,
-            po.placements,
+            po.lotNumber || '—',
+            `V${po.version || 1}`,
+            po.garmentType || '—',
+            po.style || '—',
+            po.pieces || 0,
+            `Rs. ${Number(po.cost || 0).toLocaleString('en-IN')}`,
+            po.issueDateStr || '—',
+            po.supervisor || '—',
+            po.placements || '—',
             po.gateDone ? 'Done' : 'Pending',
             po.matDone ? 'Received' : 'Pending',
             po.supDone ? 'Entered' : 'Pending',
-            po.agingText
+            po.agingText || '—'
         ]);
 
         autoTable(doc, {
             head: [['SR.', 'LOT', 'VER.', 'GARMENT', 'STYLE', 'QTY', 'COST', 'DATE', 'SUPERVISOR', 'PLACEMENTS', 'GATE', 'RECEIVE', 'SUPPLIER', 'AGING']],
             body: tableData,
-            startY: 25,
-            theme: 'striped',
-            styles: { fontSize: 7.5 },
-            headStyles: { fillColor: [124, 58, 237] }
+            startY: 24,
+            theme: 'grid',
+            styles: {
+                font: 'helvetica',
+                fontSize: 7.5,
+                textColor: [0, 0, 0],
+                lineColor: [0, 0, 0],
+                lineWidth: 0.35,
+                cellPadding: 2.8,
+                valign: 'middle'
+            },
+            headStyles: {
+                fillColor: [240, 240, 240],
+                textColor: [0, 0, 0],
+                fontStyle: 'bold',
+                fontSize: 8,
+                lineColor: [0, 0, 0],
+                lineWidth: 0.5,
+                halign: 'center'
+            },
+            alternateRowStyles: {
+                fillColor: [255, 255, 255]
+            },
+            columnStyles: {
+                0: { cellWidth: 10, halign: 'center' }, // SR.
+                1: { cellWidth: 18, halign: 'center', fontStyle: 'bold' }, // LOT
+                2: { cellWidth: 12, halign: 'center' }, // VER.
+                3: { cellWidth: 24, halign: 'left' }, // GARMENT
+                4: { halign: 'left' }, // STYLE
+                5: { cellWidth: 14, halign: 'center' }, // QTY
+                6: { cellWidth: 20, halign: 'right' }, // COST
+                7: { cellWidth: 20, halign: 'center' }, // DATE
+                8: { cellWidth: 22, halign: 'left' }, // SUPERVISOR
+                9: { cellWidth: 22, halign: 'left' }, // PLACEMENTS
+                10: { cellWidth: 16, halign: 'center' }, // GATE
+                11: { cellWidth: 16, halign: 'center' }, // RECEIVE
+                12: { cellWidth: 16, halign: 'center' }, // SUPPLIER
+                13: { cellWidth: 16, halign: 'center' }, // AGING
+            },
+            didDrawPage: function (data) {
+                const pageNum = data.pageNumber;
+                const totalPages = doc.internal.getNumberOfPages();
+                doc.setFontSize(8);
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(100, 100, 100);
+                doc.text(`Page ${pageNum} of ${totalPages}`, doc.internal.pageSize.width - 25, doc.internal.pageSize.height - 8);
+            }
         });
 
         doc.save(`Zip_POs_Report.pdf`);

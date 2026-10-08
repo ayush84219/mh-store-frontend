@@ -628,7 +628,7 @@ export default function ExtraMaterialIssueView({
   // Issue Confirmation Modal State (shows summary & confirmation before final dispatch)
   const [confirmIssueModal, setConfirmIssueModal] = useState(null);
 
-  // Calculate extra issue percentage and 5% threshold compliance
+  // Calculate extra issue percentage and 1% threshold compliance
   const getComponentExtraPercentage = (item) => {
     if (!item) return { baseQty: 0, extraQty: 0, percentage: 0, exceedsLimit: false, maxAllowedQty: 0, excessQty: 0 };
     const extraQty = parseFloat(item.extraQty) || 0;
@@ -637,8 +637,8 @@ export default function ExtraMaterialIssueView({
       : ((Number(pieces) || Number(selectedDesign?.quantity) || 100) * (Number(item.qtyPerPiece) || 1));
     
     const percentage = baseQty > 0 ? (extraQty / baseQty) * 100 : (extraQty > 0 ? 100 : 0);
-    const maxAllowedQty = Math.round((baseQty * 0.05) * 100) / 100;
-    const exceedsLimit = percentage > 5.0;
+    const maxAllowedQty = Math.round((baseQty * 0.01) * 100) / 100;
+    const exceedsLimit = percentage > 1.0;
 
     return {
       baseQty: Math.round(baseQty * 100) / 100,
@@ -1031,7 +1031,7 @@ export default function ExtraMaterialIssueView({
       receiverDept: rDept,
       exceedsLimit: true,
       extraPercentage: maxExceededPct,
-      reason: `Extra Material Requisition Exceeds 5% Limit: ${exceededSummary}`,
+      reason: `Extra Material Requisition Exceeds 1% Limit: ${exceededSummary}`,
       requesterName: currentUser?.name || pName || 'Store Staff',
       requesterRole: currentUser?.role || 'Store'
     };
@@ -2620,14 +2620,16 @@ export default function ExtraMaterialIssueView({
                     maxWidth: '100%',
                     borderRadius: '10px',
                     border: '1px solid #cbd5e1',
-                    overflow: 'hidden',
+                    overflowX: 'auto',
+                    overflowY: 'visible',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    WebkitOverflowScrolling: 'touch'
                   }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: '#ffffff' }}>
+                    <table style={{ width: '100%', minWidth: '1080px', borderCollapse: 'collapse', fontSize: '12px', backgroundColor: '#ffffff' }}>
                       <thead>
                         <tr style={{ backgroundColor: '#1e293b', color: '#ffffff', textAlign: 'left' }}>
-                          <th style={{ width: '32px', padding: '11px 6px', textAlign: 'center' }}>
+                          <th style={{ width: '36px', minWidth: '36px', padding: '11px 6px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
                               checked={displayedBomMappings.length > 0 && displayedBomMappings.every(m => m.selectedForExtra)}
@@ -2640,13 +2642,13 @@ export default function ExtraMaterialIssueView({
                               title="Select All"
                             />
                           </th>
-                          <th style={{ width: '140px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>BOM Component</th>
-                          <th style={{ minWidth: '220px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Assigned Inventory Item Map</th>
-                          <th style={{ width: '80px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Stock</th>
-                          <th style={{ width: '85px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Prev Issued</th>
-                          <th style={{ width: '140px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Extra Qty</th>
-                          <th style={{ width: '140px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Reason / Remarks</th>
-                          <th style={{ width: '80px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Action</th>
+                          <th style={{ width: '160px', minWidth: '160px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>BOM Component</th>
+                          <th style={{ minWidth: '280px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Assigned Inventory Item Map</th>
+                          <th style={{ width: '90px', minWidth: '90px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Stock</th>
+                          <th style={{ width: '100px', minWidth: '100px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Prev Issued</th>
+                          <th style={{ width: '150px', minWidth: '150px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Extra Qty</th>
+                          <th style={{ width: '180px', minWidth: '180px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Reason / Remarks</th>
+                          <th style={{ width: '90px', minWidth: '90px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4821,13 +4823,13 @@ export default function ExtraMaterialIssueView({
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    Extra Issue Exceeds 5% Limit
+                    Extra Issue Exceeds 1% Limit
                     <span style={{ fontSize: '11px', fontWeight: '800', backgroundColor: '#dc2626', color: '#ffffff', padding: '2px 8px', borderRadius: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                       Admin Approval Required
                     </span>
                   </h3>
                   <p style={{ margin: '3px 0 0 0', fontSize: '13px', color: '#b91c1c', fontWeight: '500' }}>
-                    Requisition exceeds the standard 5.0% threshold limit. Approval request will be sent to Admin.
+                    Requisition exceeds the standard 1.0% threshold limit. Approval request will be sent to Admin.
                   </p>
                 </div>
               </div>
@@ -4865,7 +4867,7 @@ export default function ExtraMaterialIssueView({
               }}>
                 <AlertTriangle size={22} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
                 <div style={{ fontSize: '13px', color: '#92400e', lineHeight: '1.55' }}>
-                  <strong>5% Limit Exceeded:</strong> You are issuing extra material of <strong>+{Math.max(...extraApprovalModal.items.map(i => i.percentage))}%</strong>, which exceeds the allowable <strong>5% threshold limit</strong>. Direct material issue has been withheld. An <strong>Approval Request</strong> will be submitted to the <strong>Admin</strong>. Material will be issued and inventory deducted only after the <strong>Admin approves</strong> this request.
+                  <strong>1% Limit Exceeded:</strong> You are issuing extra material of <strong>+{Math.max(...extraApprovalModal.items.map(i => i.percentage))}%</strong>, which exceeds the allowable <strong>1% threshold limit</strong>. Direct material issue has been withheld. An <strong>Approval Request</strong> will be submitted to the <strong>Admin</strong>. Material will be issued and inventory deducted only after the <strong>Admin approves</strong> this request.
                 </div>
               </div>
 
@@ -4898,7 +4900,7 @@ export default function ExtraMaterialIssueView({
                 </div>
               </div>
 
-              {/* Components Exceeding 5% Table */}
+              {/* Components Exceeding 1% Table */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <h4 style={{ margin: 0, fontSize: '13.5px', fontWeight: '700', color: '#1e293b' }}>
@@ -4918,7 +4920,7 @@ export default function ExtraMaterialIssueView({
                         <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700', color: '#475569' }}>Base Req.</th>
                         <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '800', color: '#dc2626', backgroundColor: 'rgba(239, 68, 68, 0.08)' }}>Extra Qty</th>
                         <th style={{ padding: '8px 10px', textAlign: 'center', fontWeight: '800', color: '#dc2626' }}>Issue %</th>
-                        <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700', color: '#059669' }}>5% Limit Qty</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '700', color: '#059669' }}>1% Limit Qty</th>
                         <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '800', color: '#b91c1c' }}>Excess Qty</th>
                         <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>Reason</th>
                       </tr>
@@ -5146,8 +5148,8 @@ export default function ExtraMaterialIssueView({
                   </span>
                 </div>
 
-                <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflowX: 'auto' }}>
+                  <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse', fontSize: '12px' }}>
                     <thead>
                       <tr style={{ backgroundColor: '#f1f5f9', borderBottom: '1.5px solid #cbd5e1' }}>
                         <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: '700', color: '#475569' }}>BOM Component</th>
@@ -5199,7 +5201,7 @@ export default function ExtraMaterialIssueView({
               }}>
                 <CheckCircle2 size={15} style={{ flexShrink: 0, color: '#16a34a' }} />
                 <span>
-                  All items are within standard allowable limits (&le; 5.0%). On confirmation, inventory stock will be deducted immediately, saved to database, and an issue receipt voucher will be generated.
+                  All items are within standard allowable limits (&le; 1.0%). On confirmation, inventory stock will be deducted immediately, saved to database, and an issue receipt voucher will be generated.
                 </span>
               </div>
             </div>

@@ -1808,11 +1808,20 @@ export default function ReportsHistoryView({
     if (!rgp) return;
     try {
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const isManual = Boolean(
+        rgp.isManual === true ||
+        rgp.rgpMode === 'manual' ||
+        rgp.mode === 'manual' ||
+        (rgp.entries && rgp.entries.length > 0 && rgp.entries.some(e => {
+          const lot = String(e.lotNo || "").trim().toUpperCase();
+          return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
+        }))
+      );
       // Header banner
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(18);
       doc.setTextColor(30, 41, 59);
-      doc.text('RETURNABLE GATE PASS (RGP)', 40, 45);
+      doc.text(isManual ? 'RETURNABLE GATE PASS (RGP) - MANUAL' : 'RETURNABLE GATE PASS (RGP)', 40, 45);
 
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');

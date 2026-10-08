@@ -1487,7 +1487,7 @@ export default function ApprovalQueueView({
                       <span className={`card-pill-tag ${priorityInfo.colorClass}`}>{priorityInfo.text}</span>
                       {req.exceedsLimit && (
                         <span className="card-pill-tag priority-high" style={{ backgroundColor: '#fee2e2', color: '#dc2626', borderColor: '#fca5a5', fontWeight: '700' }}>
-                          Exceeds 5% Limit (+{req.extraPercentage || '>5'}%)
+                          Exceeds 1% Limit (+{req.extraPercentage || '>1'}%)
                         </span>
                       )}
                     </div>
@@ -1654,7 +1654,7 @@ export default function ApprovalQueueView({
                       </h5>
                       {req.exceedsLimit && (
                         <span style={{ fontSize: '11px', fontWeight: '800', backgroundColor: '#fee2e2', color: '#dc2626', padding: '2px 8px', borderRadius: '10px' }}>
-                          Admin Approval Required (&gt;5% Excess)
+                          Admin Approval Required (&gt;1% Excess)
                         </span>
                       )}
                     </div>
@@ -1673,7 +1673,7 @@ export default function ApprovalQueueView({
                         </thead>
                         <tbody>
                           {req.items.map((item, idx) => {
-                            const isOver = item.exceedsLimit || (item.issuePercentage && item.issuePercentage > 5);
+                            const isOver = item.exceedsLimit || (item.issuePercentage && item.issuePercentage > 1);
                             return (
                               <tr key={idx}>
                                 <td style={{ fontWeight: '600', color: 'var(--text-main)' }}>{item.bomItemName}</td>
@@ -1697,7 +1697,7 @@ export default function ApprovalQueueView({
                                         backgroundColor: isOver ? '#fee2e2' : '#dcfce7',
                                         color: isOver ? '#dc2626' : '#16a34a'
                                       }}>
-                                        +{item.issuePercentage}% {isOver ? '(>5%)' : ''}
+                                        +{item.issuePercentage}% {isOver ? '(>1%)' : ''}
                                       </span>
                                     ) : '-'}
                                   </td>

@@ -3,8 +3,51 @@ import {
   RotateCcw, Search, Package, AlertTriangle, CheckCircle,
   Plus, Trash2, X, Layers, Info, Zap, Clock,
   ChevronDown, ChevronUp, Hash, Tag, User, Calendar, Box,
-  TrendingDown, FileText, BarChart3, ArrowLeft
+  TrendingDown, FileText, BarChart3, ArrowLeft, Barcode
 } from 'lucide-react';
+
+// Helper to extract strictly active BOM components where status is 'Yes'
+export const getActiveBomItems = (design) => {
+  if (!design) return [];
+  const items = [];
+  const seen = new Set();
+
+  if (Array.isArray(design.bom)) {
+    design.bom.forEach(b => {
+      const isYes = String(b.status || '').trim().toLowerCase() === 'yes' || b.status === true || b.isRequired === true;
+      if (isYes && b.name && !seen.has(b.name.toLowerCase().trim())) {
+        seen.add(b.name.toLowerCase().trim());
+        items.push({
+          name: b.name,
+          detail: b.detail || b.description || (b.quantity ? `Qty: ${b.quantity}` : ''),
+          materialId: b.materialId || '',
+          status: 'Yes'
+        });
+      }
+    });
+  }
+
+  // Also check direct flags on design object if not in bom
+  const checkDirectFlag = (flagVal, name, detail) => {
+    if (String(flagVal || '').trim().toLowerCase() === 'yes') {
+      const key = name.toLowerCase().trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        items.push({ name, detail: detail || `${name} required`, status: 'Yes', materialId: '' });
+      }
+    }
+  };
+
+  checkDirectFlag(design.zip, 'Zip', design.zipDetail || 'Zip required');
+  checkDirectFlag(design.fullBaju, 'Full Baju', 'Full Baju required');
+  checkDirectFlag(design.label, 'Label', 'Label required');
+  checkDirectFlag(design.tag, 'Tag', 'Tag required');
+  checkDirectFlag(design.dori, 'Dori', 'Dori required');
+  checkDirectFlag(design.sticker, 'Sticker', 'Sticker required');
+  checkDirectFlag(design.collar, 'Collar', 'Collar required');
+
+  return items;
+};
 
 function SearchableMaterialSelect({ materials, value, onChange, placeholder = "— Select Material —" }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -202,6 +245,30 @@ export default function ReturnMaterialView({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef(null);
 
+  // ── Barcode Scanner State & Handlers ─────────────────────────────────────
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [barcodeScanFeedback, setBarcodeScanFeedback] = useState(null); // { type: 'success'|'error', msg: '' }
+  const [highlightedRowIndex, setHighlightedRowIndex] = useState(null);
+  const barcodeInputRef = useRef(null);
+
+  // Audio chirp sound for instant scan feedback
+  const playScanChirp = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1600, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.08);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.08);
+    } catch (e) {}
+  };
+
   const fetchLot = useCallback((lotId) => {
     if (!lotId || lotId.trim() === '') {
       setFetchedDesign(null);
@@ -215,7 +282,7 @@ export default function ReturnMaterialView({
     setTimeout(() => {
       const id = lotId.trim();
       const design = designs.find(
-        d => String(d.id) === id || (d.lotNo2 && d.lotNo2.toLowerCase() === id.toLowerCase())
+        d => String(d.id).toLowerCase() === id.toLowerCase() || (d.lotNo2 && d.lotNo2.toLowerCase() === id.toLowerCase())
       );
 
       if (!design) {
@@ -230,39 +297,171 @@ export default function ReturnMaterialView({
         );
         setLotHistory(logsForLot);
 
-        if (logsForLot.length > 0) {
-          const issuedMaterials = [];
-          const seen = new Set();
+        // 1. Gather strictly active BOM components for this lot only
+        const activeBomItems = getActiveBomItems(design);
+
+        const mappedRows = [];
+
+        // Strictly populate from active BOM items only
+        activeBomItems.forEach(b => {
+          const compName = b.name;
+          const key = compName.toLowerCase().trim();
+
+          // Find if this BOM item was issued in previous logs
+          let issuedQty = 0;
+          let matchedMaterialId = b.materialId || '';
+          let unit = 'Pcs';
+
           logsForLot.forEach(log => {
-            if (log.materials) {
-              log.materials.forEach(m => {
-                const key = `${m.bomItemName || 'General'}_${m.name}`;
-                if (!seen.has(key)) {
-                  seen.add(key);
-                  const mat = materials.find(mat => {
-                    const mName = mat.color && mat.color !== 'Default'
-                      ? `${mat.name} (${mat.color})`
-                      : mat.name;
-                    return mName === m.name;
+            log.materials?.forEach(m => {
+              const mBom = (m.bomItemName || '').toLowerCase().trim();
+              const mName = (m.name || '').toLowerCase().trim();
+              if (mBom === key || mName === key || mName.includes(key)) {
+                issuedQty += (Number(m.qty) || 0);
+                if (m.unit) unit = m.unit;
+                if (!matchedMaterialId) {
+                  const foundMat = materials.find(mat => {
+                    const fullName = mat.color && mat.color !== 'Default' ? `${mat.name} (${mat.color})` : mat.name;
+                    return fullName === m.name || String(mat.id) === String(m.materialId);
                   });
-                  issuedMaterials.push({
-                    materialId: mat ? mat.id : '',
-                    bomItemName: m.bomItemName || '',
-                    qty: '',
-                    note: `Issued: ${m.qty} ${m.unit || 'pcs'}`
-                  });
+                  if (foundMat) matchedMaterialId = foundMat.id;
                 }
-              });
-            }
+              }
+            });
           });
-          if (issuedMaterials.length > 0) {
-            setReturnItems(issuedMaterials);
+
+          // If material not yet found, match in inventory by name / category / color
+          if (!matchedMaterialId) {
+            const foundMat = materials.find(mat => {
+              const mName = (mat.name || '').toLowerCase();
+              const mCat = (mat.category || '').toLowerCase();
+              const bLower = compName.toLowerCase();
+              return mName === bLower || mCat === bLower || mName.includes(bLower);
+            });
+            if (foundMat) matchedMaterialId = foundMat.id;
           }
+
+          mappedRows.push({
+            materialId: matchedMaterialId,
+            bomItemName: compName,
+            qty: '',
+            note: issuedQty > 0 ? `Issued: ${issuedQty} ${unit}` : (b.detail ? `BOM Req: ${b.detail}` : '')
+          });
+        });
+
+        if (mappedRows.length > 0) {
+          setReturnItems(mappedRows);
+        } else {
+          setReturnItems([{ materialId: '', bomItemName: '', qty: '', note: '' }]);
         }
       }
       setIsFetching(false);
     }, 300);
   }, [designs, issueLogs, materials]);
+
+  // Process Barcode Scan (Supports scanning Lot # or Material ID / Barcode)
+  const handleBarcodeScanSubmit = (e) => {
+    if (e) e.preventDefault();
+    const raw = barcodeInput.trim();
+    if (!raw) return;
+
+    setBarcodeScanFeedback(null);
+    const upperRaw = raw.toUpperCase();
+
+    // 1. Check if scanned code matches a Lot Number
+    const matchedLot = designs.find(d => {
+      const id = String(d.id || '').toUpperCase();
+      const lot2 = String(d.lotNo2 || '').toUpperCase();
+      return id === upperRaw || lot2 === upperRaw || `LOT #${id}` === upperRaw || `LOT-${id}` === upperRaw;
+    });
+
+    if (matchedLot) {
+      playScanChirp();
+      setLotInput(String(matchedLot.id));
+      fetchLot(String(matchedLot.id));
+      setBarcodeScanFeedback({
+        type: 'success',
+        msg: `✅ Scanned Lot #${matchedLot.id} (${matchedLot.brand || matchedLot.style || 'Design'}). Auto-loaded active BOM items!`
+      });
+      setBarcodeInput('');
+      setTimeout(() => {
+        if (barcodeInputRef.current) barcodeInputRef.current.focus();
+      }, 100);
+      return;
+    }
+
+    // 2. Check if scanned code matches an Inventory Material
+    const matchedMat = materials.find(m => {
+      const itemCode = String(m.itemCode || '').toUpperCase();
+      const id = String(m.id || '').toUpperCase();
+      const code = String(m.materialCode || m.code || '').toUpperCase();
+      const bar = String(m.barcodeId || '').toUpperCase();
+      const name = String(m.name || '').toUpperCase();
+      const category = String(m.category || '').toUpperCase();
+
+      return itemCode === upperRaw || id === upperRaw || code === upperRaw || bar === upperRaw ||
+             name.includes(upperRaw) || category.includes(upperRaw);
+    });
+
+    if (matchedMat) {
+      playScanChirp();
+      let matchedIdx = null;
+
+      setReturnItems(prev => {
+        const next = [...prev];
+        // Check if material is already present in a row
+        const existingIdx = next.findIndex(item => String(item.materialId) === String(matchedMat.id));
+
+        if (existingIdx !== -1) {
+          matchedIdx = existingIdx;
+          const curQty = parseFloat(next[existingIdx].qty) || 0;
+          next[existingIdx] = {
+            ...next[existingIdx],
+            qty: curQty > 0 ? String(curQty + 1) : '1'
+          };
+        } else {
+          // Find first unassigned row
+          const unassignedIdx = next.findIndex(item => !item.materialId || item.materialId === '');
+          if (unassignedIdx !== -1) {
+            matchedIdx = unassignedIdx;
+            next[unassignedIdx] = {
+              ...next[unassignedIdx],
+              materialId: matchedMat.id,
+              bomItemName: next[unassignedIdx].bomItemName || matchedMat.category || matchedMat.name,
+              qty: '1'
+            };
+          } else {
+            // Append new row
+            matchedIdx = next.length;
+            next.push({
+              materialId: matchedMat.id,
+              bomItemName: matchedMat.category || matchedMat.name,
+              qty: '1',
+              note: `Current Stock: ${matchedMat.stock} ${matchedMat.unit || 'pcs'}`
+            });
+          }
+        }
+        return next;
+      });
+
+      setHighlightedRowIndex(matchedIdx);
+      setBarcodeScanFeedback({
+        type: 'success',
+        msg: `✅ Barcode Scanned: Matched "${matchedMat.name}" (Stock: ${matchedMat.stock} ${matchedMat.unit || 'Pcs'}). Row updated for Return.`
+      });
+      setBarcodeInput('');
+      setTimeout(() => {
+        if (barcodeInputRef.current) barcodeInputRef.current.focus();
+      }, 100);
+      return;
+    }
+
+    // If neither Lot nor Material matched
+    setBarcodeScanFeedback({
+      type: 'error',
+      msg: `❌ No Lot or Material found matching barcode/ID "${raw}". Please verify barcode or lot number.`
+    });
+  };
 
   const debounceTimer = useRef(null);
   const handleLotInputChange = (val) => {
@@ -274,7 +473,10 @@ export default function ReturnMaterialView({
   };
 
   const handleAddRow = () => {
-    setReturnItems(prev => [...prev, { materialId: '', bomItemName: '', qty: '', note: '' }]);
+    const currentBomItems = getActiveBomItems(fetchedDesign);
+    const unusedBom = currentBomItems.find(b => !returnItems.some(r => r.bomItemName === b.name));
+    const defaultBomName = unusedBom ? unusedBom.name : (currentBomItems[0]?.name || '');
+    setReturnItems(prev => [...prev, { materialId: '', bomItemName: defaultBomName, qty: '', note: '' }]);
   };
 
   const handleRemoveRow = (index) => {
@@ -361,7 +563,7 @@ export default function ReturnMaterialView({
     return Math.round(total * 100) / 100;
   };
 
-  const bomItems = fetchedDesign?.bom?.filter(b => String(b.status).toLowerCase() === 'yes') || [];
+  const bomItems = getActiveBomItems(fetchedDesign);
   const totalReturnQty = returnItems.reduce((sum, i) => sum + (parseFloat(i.qty) || 0), 0);
   const filledItems = returnItems.filter(i => i.materialId && parseFloat(i.qty) > 0).length;
 
@@ -850,6 +1052,98 @@ export default function ReturnMaterialView({
       {mode === 'lot' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
 
+          {/* ── BARCODE / QR SCANNER CARD ───────────────────────────── */}
+          <div className="RM_Card" style={{ border: '1.5px solid rgba(99, 102, 241, 0.25)', background: 'var(--card-bg)' }}>
+            <div className="RM_CardHeader" style={{ background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.04) 100%)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '36px', height: '36px', borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: '#ffffff', boxShadow: '0 3px 10px rgba(99,102,241,0.3)'
+                  }}>
+                    <Barcode size={18} />
+                  </div>
+                  <div>
+                    <div className="RM_CardHeaderTitle" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      Barcode / QR Scanner
+                      <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', background: 'rgba(16,185,129,0.15)', color: 'var(--success)', fontWeight: '700' }}>
+                        ● LIVE SCANNER READY
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Scan <b>Lot Barcode</b> to auto-load BOM & history, or scan <b>Material Barcode / Item Code</b> to auto-match return item
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: '20px 24px' }}>
+              <form onSubmit={handleBarcodeScanSubmit} style={{ display: 'flex', gap: '12px', alignItems: 'stretch' }}>
+                <div className="RM_SearchBox" style={{ flex: 1 }}>
+                  <Barcode size={18} style={{
+                    position: 'absolute', left: '16px', top: '50%',
+                    transform: 'translateY(-50%)', color: '#6366f1', pointerEvents: 'none', zIndex: 2
+                  }} />
+                  <input
+                    ref={barcodeInputRef}
+                    type="text"
+                    className="RM_SearchInput"
+                    placeholder="Scan Lot barcode or Material barcode (e.g. 62115, MAT-101, BTN-01)..."
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    style={{ paddingLeft: '44px', border: '1.5px solid rgba(99,102,241,0.3)' }}
+                  />
+                  {barcodeInput && (
+                    <button
+                      type="button"
+                      onClick={() => setBarcodeInput('')}
+                      style={{
+                        position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                        background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)'
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="submit"
+                  className="RM_BtnPrimary"
+                  style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', minWidth: '130px' }}
+                >
+                  <Barcode size={16} />
+                  Scan / Enter
+                </button>
+              </form>
+
+              {barcodeScanFeedback && (
+                <div style={{
+                  marginTop: '14px', padding: '12px 16px', borderRadius: '10px',
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  background: barcodeScanFeedback.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                  border: `1px solid ${barcodeScanFeedback.type === 'success' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  color: barcodeScanFeedback.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                  fontSize: '13px', fontWeight: '600', animation: 'fadeIn 0.2s ease'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {barcodeScanFeedback.type === 'success' ? <CheckCircle size={16} /> : <AlertTriangle size={16} />}
+                    <span>{barcodeScanFeedback.msg}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBarcodeScanFeedback(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', padding: '2px' }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* ── SEARCH CARD ────────────────────────────────────────── */}
           <div className="RM_Card">
             <div className="RM_CardHeader" style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.04) 0%, transparent 100%)' }}>
@@ -1029,19 +1323,53 @@ export default function ReturnMaterialView({
                   }}>
                     <Layers size={13} />
                     BOM Components ({bomItems.length})
+                    <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text-muted)', marginLeft: '6px' }}>(Click to jump/highlight in return list)</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {bomItems.map((b, i) => (
-                      <span key={i} style={{
-                        padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
-                        backgroundColor: 'rgba(99,102,241,0.08)', color: '#6366f1',
-                        border: '1px solid rgba(99,102,241,0.18)',
-                        display: 'flex', alignItems: 'center', gap: '5px'
-                      }}>
-                        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1', flexShrink: 0 }} />
-                        {b.name} {b.detail ? `× ${b.detail}` : ''}
-                      </span>
-                    ))}
+                    {bomItems.map((b, i) => {
+                      const rowIndex = returnItems.findIndex(
+                        item => (item.bomItemName || '').toLowerCase().trim() === b.name.toLowerCase().trim()
+                      );
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            if (rowIndex !== -1) {
+                              setHighlightedRowIndex(rowIndex);
+                              setTimeout(() => setHighlightedRowIndex(null), 3000);
+                            } else {
+                              const newIdx = returnItems.length;
+                              setReturnItems(prev => [
+                                ...prev,
+                                {
+                                  materialId: b.materialId || '',
+                                  bomItemName: b.name,
+                                  qty: '',
+                                  note: b.detail ? `BOM Req: ${b.detail}` : ''
+                                }
+                              ]);
+                              setHighlightedRowIndex(newIdx);
+                              setTimeout(() => setHighlightedRowIndex(null), 3000);
+                            }
+                          }}
+                          style={{
+                            padding: '6px 14px', borderRadius: '20px', fontSize: '12px', fontWeight: '600',
+                            backgroundColor: rowIndex !== -1 ? 'rgba(99,102,241,0.12)' : 'rgba(99,102,241,0.06)',
+                            color: '#6366f1',
+                            border: '1px solid rgba(99,102,241,0.22)',
+                            display: 'flex', alignItems: 'center', gap: '6px',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                          }}
+                          title={`Click to focus or add ${b.name} in return table`}
+                        >
+                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6366f1', flexShrink: 0 }} />
+                          {b.name} {b.detail ? `× ${b.detail}` : ''}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1134,9 +1462,18 @@ export default function ReturnMaterialView({
                       <span className="RM_CardHeaderTitle">
                         Materials to Return
                       </span>
+                      {bomItems.length > 0 && (
+                        <span style={{
+                          marginLeft: '10px', fontSize: '11px', fontWeight: '700',
+                          color: '#6366f1', background: 'rgba(99,102,241,0.1)',
+                          padding: '3px 10px', borderRadius: '20px', border: '1px solid rgba(99,102,241,0.2)'
+                        }}>
+                          ● ONLY BOM ITEMS ({bomItems.length})
+                        </span>
+                      )}
                       {filledItems > 0 && (
                         <span style={{
-                          marginLeft: '10px', fontSize: '12px', fontWeight: '600',
+                          marginLeft: '8px', fontSize: '12px', fontWeight: '600',
                           color: 'var(--success)', background: 'rgba(16,185,129,0.12)',
                           padding: '2px 8px', borderRadius: '20px'
                         }}>
@@ -1185,6 +1522,7 @@ export default function ReturnMaterialView({
                         )
                       : 0;
                     const isHovered = hoveredRow === index;
+                    const isHighlighted = highlightedRowIndex === index;
 
                     return (
                       <div
@@ -1197,25 +1535,40 @@ export default function ReturnMaterialView({
                           gap: '12px', alignItems: 'center',
                           padding: '12px 24px',
                           borderBottom: index < returnItems.length - 1 ? '1px solid var(--border-color)' : 'none',
-                          background: isHovered ? 'rgba(99,102,241,0.03)' : 'transparent',
-                          transition: 'background 0.2s'
+                          background: isHighlighted
+                            ? 'rgba(16,185,129,0.12)'
+                            : isHovered
+                              ? 'rgba(99,102,241,0.03)'
+                              : 'transparent',
+                          boxShadow: isHighlighted ? 'inset 0 0 0 1.5px rgba(16,185,129,0.5)' : undefined,
+                          transition: 'background 0.2s, box-shadow 0.2s'
                         }}
                       >
-                        {/* BOM Component */}
+                        {/* BOM Component (Strictly BOM items only) */}
                         <div>
-                          <input
-                            list={`bom-list-${index}`}
-                            type="text"
-                            className="RM_TableInput"
-                            placeholder="Component name..."
-                            value={item.bomItemName || ''}
-                            onChange={(e) => handleItemChange(index, 'bomItemName', e.target.value)}
-                          />
-                          <datalist id={`bom-list-${index}`}>
-                            {bomItems.map((b, bi) => (
-                              <option key={bi} value={b.name} />
-                            ))}
-                          </datalist>
+                          {bomItems.length > 0 ? (
+                            <select
+                              className="RM_TableInput"
+                              value={item.bomItemName || ''}
+                              onChange={(e) => handleItemChange(index, 'bomItemName', e.target.value)}
+                              style={{ cursor: 'pointer', fontWeight: '600' }}
+                            >
+                              <option value="">— Select BOM Component —</option>
+                              {bomItems.map((b, bi) => (
+                                <option key={bi} value={b.name}>
+                                  {b.name} {b.detail ? `(${b.detail})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <input
+                              type="text"
+                              className="RM_TableInput"
+                              placeholder="Component name..."
+                              value={item.bomItemName || ''}
+                              onChange={(e) => handleItemChange(index, 'bomItemName', e.target.value)}
+                            />
+                          )}
                         </div>
 
                         {/* Inventory Material */}

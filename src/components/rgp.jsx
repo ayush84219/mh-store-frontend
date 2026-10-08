@@ -125,6 +125,20 @@ export function generateRgpPDF({ payload, options = {} }) {
   const roundRect = (x, y, w, h, r = 7, style = "S") =>
     doc.roundedRect ? doc.roundedRect(x, y, w, h, r, r, style) : doc.rect(x, y, w, h, style);
 
+  // Check if this RGP pass or its materials were created manually
+  const isManual = Boolean(
+    payload.isManual === true ||
+    payload.rgpMode === "manual" ||
+    payload.mode === "manual" ||
+    payload.isManualCreated === true ||
+    (payload.entries && payload.entries.length > 0 && payload.entries.some(e => {
+      const lot = String(e.lotNo || "").trim().toUpperCase();
+      return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
+    }))
+  );
+
+  const headingText = isManual ? "RETURNABLE GATE PASS (MANUAL)" : "RETURNABLE GATE PASS";
+
   const drawFrame = () => roundRect(16, 16, page.w - 32, page.h - 32, 8, "S");
   let y = page.m;
 
@@ -143,7 +157,7 @@ export function generateRgpPDF({ payload, options = {} }) {
       if (withHeader) {
         setSize(13);
         bold();
-        text("RETURNABLE GATE PASS", page.m, y);
+        text(headingText, page.m, y);
         normal();
         line(page.m, y + 6, page.w - page.m, y + 6);
         y += 18;
@@ -156,7 +170,7 @@ export function generateRgpPDF({ payload, options = {} }) {
   drawFrame();
   setSize(20);
   bold();
-  text("RETURNABLE GATE PASS", page.w / 2, y, { align: "center" });
+  text(headingText, page.w / 2, y, { align: "center" });
   normal();
   line(page.m, y + 6, page.w - page.m, y + 6);
   y += 26;
@@ -1321,7 +1335,14 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     const finalPreparedBy = isPreparedByCustom ? preparedByCustomValue : form.preparedBy;
     const finalAuthorizedBy = isAuthorizedByCustom ? authorizedByCustomValue : form.authorizedBy;
 
+    const isManualMode = rgpMode === "manual" || !selectedBomItem || (form.entries || []).some(e => {
+      const lot = String(e.lotNo || "").trim().toUpperCase();
+      return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
+    });
+
     const payload = {
+      rgpMode: rgpMode,
+      isManual: isManualMode,
       date: form.date,
       vendor: form.vendor,
       rgpType: rgpTypeFinal,
@@ -1338,6 +1359,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         uom: r.uom || "",
         department: r.department || "",
         purpose: r.purpose || "",
+        isManual: !r.lotNo || String(r.lotNo).trim() === '' || String(r.lotNo).toUpperCase() === 'N/A' || isManualMode
       })),
       expectedReturnDate: form.expectedReturnDate,
       vehicleNo: form.vehicleNo,
@@ -3707,6 +3729,11 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         <PreviewModal
           payload={{
             ...form,
+            rgpMode: rgpMode,
+            isManual: rgpMode === "manual" || !selectedBomItem || (form.entries || []).some(e => {
+              const lot = String(e.lotNo || "").trim().toUpperCase();
+              return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
+            }),
             rgpType: rgpMode === "automatic" && selectedBomItem ? selectedBomItem.name : form.rgpType
           }}
           onClose={() => setShowPreview(false)}
