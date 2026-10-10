@@ -798,101 +798,13 @@ export default function MaterialIssueView({
     const lotBrandWords = lotBrandRaw.split(/\s+/).filter(w => w.length > 2);
 
     const initialMappings = requiredBom.map(bomItem => {
-      // Find matching raw material automatically by comparing descriptions
+      // Find matching raw material: strictly use designer's mapped materialId
       const detailLower = (bomItem.detail || '').toLowerCase();
       const nameLower = (bomItem.name || '').toLowerCase();
 
-      // Determine description: use description field, or if empty, check if detail is a text string (not numeric)
-      const descLower = (bomItem.description || '').trim().toLowerCase() ||
-        (!/^\d+(\.\d+)?$/.test(detailLower.trim()) ? detailLower.trim() : '');
-
-      // Load stored materialId from database, or fallback to auto-mapping score
       let matchedMaterialId = bomItem.materialId || "";
-
-      if (!matchedMaterialId) {
-        // Intelligently score each inventory material to find the best match
-        let bestMaterial = null;
-        let highestScore = 0;
-
-        materials.forEach(m => {
-          const mName = m.name.toLowerCase().replace(/[^a-z0-9\s]/g, '');
-          const mCategory = (m.category || '').toLowerCase();
-          const bName = nameLower.replace(/[^a-z0-9\s]/g, '');
-          const bDesc = descLower.replace(/[^a-z0-9\s]/g, '');
-
-          let score = 0;
-
-          // ─── BRAND-AWARE SCORING (highest priority) ───────────────────────
-          // If the lot has a brand (e.g. ADIDAS) and the material name contains
-          // that brand keyword, give a massive bonus so brand-specific materials
-          // always win over generic ones for their matching BOM component type.
-          if (lotBrandWords.length > 0) {
-            const brandMatchInMaterial = lotBrandWords.some(word =>
-              mName.includes(word) || mCategory.includes(word)
-            );
-            if (brandMatchInMaterial) {
-              // Also verify the material is relevant to this BOM component type
-              // (e.g., don't map a "zip" brand item to a "button" BOM row)
-              const componentTypeWords = bName.split(/\s+/).filter(Boolean);
-              const isMaterialRelevantToComponent = componentTypeWords.length === 0 ||
-                componentTypeWords.some(cw => mName.includes(cw) || cw.length <= 2) ||
-                bName.length === 0;
-              if (isMaterialRelevantToComponent || componentTypeWords.every(cw => cw.length <= 2)) {
-                score += 200; // Strong brand-match bonus
-              } else {
-                score += 30; // Mild brand affinity bonus even if component type differs
-              }
-            }
-          }
-
-          // ─── DESCRIPTION MATCH SCORING ────────────────────────────────────
-          if (bDesc) {
-            // Clean alphanumeric matches (ignoring spaces/special chars entirely)
-            const cleanStr = str => str.replace(/\s+/g, '');
-            const mClean = cleanStr(mName);
-            const bDescClean = cleanStr(bDesc);
-
-            if (mClean && bDescClean) {
-              if (mClean === bDescClean) {
-                score += 100; // Perfect match on description
-              } else if (mClean.includes(bDescClean) || bDescClean.includes(mClean)) {
-                score += 80;
-              }
-            }
-
-            // Word-by-word overlap match for description
-            const mWords = mName.split(/\s+/).filter(Boolean);
-            const bDescWords = bDesc.split(/\s+/).filter(Boolean);
-            if (mWords.length > 0 && bDescWords.length > 0) {
-              let matchedDescWords = 0;
-              bDescWords.forEach(w => {
-                if (mName.includes(w)) {
-                  matchedDescWords++;
-                }
-              });
-              if (matchedDescWords > 0) {
-                score += (matchedDescWords / bDescWords.length) * 50;
-              }
-            }
-          }
-
-          // ─── BOM COMPONENT NAME MATCH ─────────────────────────────────────
-          // Base matching on standard BOM item category/name (e.g. "button" or "zip")
-          if (bName && mName.includes(bName)) {
-            score += 10;
-          }
-
-          if (score > highestScore) {
-            highestScore = score;
-            bestMaterial = m;
-          }
-        });
-
-        // Set mapped material if score is significant (>= 15 for desc match, or brand bonus >= 30)
-        if (highestScore >= 15 && bestMaterial) {
-          matchedMaterialId = bestMaterial.id;
-        }
-      }
+      const validMaterial = materials.find(m => String(m.id) === String(matchedMaterialId));
+      const isMapped = !!validMaterial;
 
       // Establish default usage rates based on accessory categories
       let defaultRate = 1.0;
@@ -914,17 +826,18 @@ export default function MaterialIssueView({
       return {
         bomItemName: bomItem.name,
         bomItemDetail: bomItem.description || 'Required',
-        materialId: matchedMaterialId,
+        materialId: isMapped ? matchedMaterialId : '',
         ratePerPiece: defaultRate,
-        issued: !wasAlreadyIssued,
-        alreadyIssued: wasAlreadyIssued
+        issued: isMapped && !wasAlreadyIssued, // ONLY mapped components are eligible for issue!
+        alreadyIssued: wasAlreadyIssued,
+        isMapped: isMapped
       };
     });
 
     setBomMappings(initialMappings);
     setFormError('');
     setFormSuccess('');
-  }, [selectedDesignId, issueMode, selectedDesign]);
+  }, [selectedDesignId, issueMode, selectedDesign, materials]);
 
   const handleMappingChange = (index, field, value) => {
     const updated = [...bomMappings];
@@ -937,6 +850,12 @@ export default function MaterialIssueView({
       updated[index]['ratePerPiece'] = isNaN(parsed) ? 0 : Math.max(0, parsed / currentPieces);
     } else if (field === 'issued') {
       updated[index][field] = !!value;
+    } else if (field === 'materialId') {
+      updated[index][field] = value;
+      updated[index].isMapped = !!materials.find(m => String(m.id) === String(value));
+      if (updated[index].isMapped) {
+        updated[index].issued = true;
+      }
     } else {
       updated[index][field] = value;
     }
@@ -944,7 +863,7 @@ export default function MaterialIssueView({
     setFormError('');
   };
 
-  // Handle Barcode Scan for Material Mapping & Cart
+  // Handle Barcode Scan for Material Mapping & Issue Selection
   const handleBarcodeScan = (e) => {
     if (e) e.preventDefault();
     if (!barcodeInput.trim()) return;
@@ -1003,52 +922,31 @@ export default function MaterialIssueView({
       return;
     }
 
-    // 2. Determine target BOM row to map
-    let targetIndex = scanTargetIdx;
+    // 2. Strictly verify that the scanned material is mapped in this Lot's BOM
+    const matchingRowIdx = bomMappings.findIndex(m => String(m.materialId) === String(matchedMaterial.id));
 
-    if (targetIndex === null || targetIndex === undefined || targetIndex < 0 || targetIndex >= bomMappings.length) {
-      // Find matching row by keyword / category or first unmapped row
-      const matNameNorm = (matchedMaterial.name || '').toLowerCase();
-      const matCatNorm = (matchedMaterial.category || '').toLowerCase();
-
-      // Look for unmapped row matching category or name
-      const smartIdx = bomMappings.findIndex(m => {
-        if (m.alreadyIssued || m.materialId) return false;
-        const bName = (m.bomItemName || '').toLowerCase();
-        const bDetail = (m.bomItemDetail || '').toLowerCase();
-        return matNameNorm.includes(bName) || bName.includes(matCatNorm) ||
-               bDetail.includes(matCatNorm) || matCatNorm.includes(bName);
-      });
-
-      if (smartIdx !== -1) {
-        targetIndex = smartIdx;
-      } else {
-        // Fallback to first unmapped active row
-        const firstUnmapped = bomMappings.findIndex(m => !m.alreadyIssued && !m.materialId);
-        if (firstUnmapped !== -1) {
-          targetIndex = firstUnmapped;
-        } else {
-          // If all mapped, target first row
-          targetIndex = 0;
-        }
-      }
-    }
-
-    // 3. Update bomMappings
-    const updated = [...bomMappings];
-    const targetRow = updated[targetIndex];
-    if (targetRow) {
-      targetRow.materialId = matchedMaterial.id;
-      targetRow.issued = true; // Auto-select row
-      setBomMappings(updated);
-      setFormError('');
-
-      playFeedbackSound('scan');
+    if (matchingRowIdx === -1) {
+      playFeedbackSound('error');
       setScanNotice({
-        type: 'success',
-        text: `✓ Scanned "${matchedMaterial.name}" (${matchedMaterial.id}) → Mapped to BOM Component: "${targetRow.bomItemName}"`
+        type: 'error',
+        text: `❌ Scanned material "${matchedMaterial.name}" (${matchedMaterial.id}) is NOT mapped in the BOM for Lot ${selectedDesign?.id || selectedDesignId}. Only mapped BOM components can be issued!`
       });
+      setBarcodeInput('');
+      return;
     }
+
+    // 3. Mark the verified mapped BOM component as issued / selected
+    const updated = [...bomMappings];
+    const targetRow = updated[matchingRowIdx];
+    targetRow.issued = true;
+    setBomMappings(updated);
+    setFormError('');
+
+    playFeedbackSound('scan');
+    setScanNotice({
+      type: 'success',
+      text: `✓ Scanned & Verified Mapped BOM Component: "${targetRow.bomItemName}" (${matchedMaterial.name} • Stock: ${matchedMaterial.stock} ${matchedMaterial.unit || 'pcs'})`
+    });
 
     // Reset scan input and target
     setBarcodeInput('');
@@ -1207,9 +1105,19 @@ export default function MaterialIssueView({
       setFormError('Please select at least one component to issue.');
       return;
     }
-    const unmappedItem = itemsToIssue.find(item => !item.materialId);
+    const unmappedItem = itemsToIssue.find(item => !item.materialId || !item.isMapped);
     if (unmappedItem) {
-      setFormError(`Please select a valid inventory material mapping for BOM Component: "${unmappedItem.bomItemName}".`);
+      setFormError(`❌ Component "${unmappedItem.bomItemName}" is NOT mapped in the BOM! Only mapped BOM materials can be issued.`);
+      return;
+    }
+
+    // Strictly enforce that each item's materialId matches the designer's BOM mapping for this lot
+    const mismatchedItem = itemsToIssue.find(item => {
+      const origBom = selectedDesign.bom?.find(b => b.name.toLowerCase() === item.bomItemName.toLowerCase());
+      return !origBom || !origBom.materialId || String(origBom.materialId) !== String(item.materialId);
+    });
+    if (mismatchedItem) {
+      setFormError(`❌ Component "${mismatchedItem.bomItemName}" does not match the material mapped in Lot ${selectedDesign.id}'s BOM! Only the exact mapped materials can be issued.`);
       return;
     }
     if (!personName || !personName.trim()) {
@@ -2217,17 +2125,21 @@ export default function MaterialIssueView({
                     <th style={{ width: '38px', textAlign: 'center', padding: '12px 8px' }}>
                       <input
                         type="checkbox"
-                        checked={computedItems.length > 0 && computedItems.filter(item => !item.alreadyIssued).every(item => item.issued)}
+                        checked={
+                          computedItems.length > 0 &&
+                          computedItems.filter(item => !item.alreadyIssued && item.materialId).length > 0 &&
+                          computedItems.filter(item => !item.alreadyIssued && item.materialId).every(item => item.issued)
+                        }
                         onChange={(e) => {
                           const allChecked = e.target.checked;
                           const updated = bomMappings.map(m => {
-                            if (m.alreadyIssued) return m;
+                            if (m.alreadyIssued || !m.materialId) return m;
                             return { ...m, issued: allChecked };
                           });
                           setBomMappings(updated);
                         }}
                         style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        title="Select / Deselect All Components"
+                        title="Select / Deselect All Mapped Components"
                       />
                     </th>
                     <th style={{ width: '180px', padding: '12px 10px', fontSize: '13px' }}>BOM Component</th>
@@ -2245,6 +2157,7 @@ export default function MaterialIssueView({
                       : item.currentStock;
                     const isShortage = item.issued && afterIssue < 0;
                     const isTargeted = scanTargetIdx === idx;
+                    const isMapped = !!item.materialId;
 
                     return (
                       <tr key={idx} style={{
@@ -2261,10 +2174,11 @@ export default function MaterialIssueView({
                         <td style={{ textAlign: 'center', padding: '12px 8px' }}>
                           <input
                             type="checkbox"
-                            checked={!!item.issued}
+                            checked={!!item.issued && isMapped}
                             onChange={(e) => handleMappingChange(idx, 'issued', e.target.checked)}
-                            disabled={item.alreadyIssued}
-                            style={{ cursor: item.alreadyIssued ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
+                            disabled={item.alreadyIssued || !isMapped}
+                            style={{ cursor: (item.alreadyIssued || !isMapped) ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
+                            title={!isMapped ? "Cannot issue unmapped BOM component. Map material first." : (item.alreadyIssued ? "Already issued" : "Select to issue")}
                           />
                         </td>
                         <td style={{ padding: '12px 10px' }}>
@@ -2276,6 +2190,13 @@ export default function MaterialIssueView({
                             }}>
                               {item.bomItemName}
                             </strong>
+                            {!isMapped && !item.alreadyIssued && (
+                              <div style={{ marginTop: '3px' }}>
+                                <span style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: '#fef3c7', color: '#b45309', borderRadius: '4px', fontWeight: '700' }}>
+                                  ⚠️ Unmapped (Excluded)
+                                </span>
+                              </div>
+                            )}
                             {item.alreadyIssued && (
                               <div style={{ marginTop: '3px' }}>
                                 <span className="status-badge verified" style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: 'var(--success-light)', color: 'var(--success)', display: 'inline-block' }}>
@@ -2295,14 +2216,65 @@ export default function MaterialIssueView({
                         <td style={{ padding: '12px 10px' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <div style={{ flex: 1 }}>
-                              <SearchableMaterialSelect
-                                materials={materials}
-                                value={item.materialId}
-                                onChange={(val) => handleMappingChange(idx, 'materialId', val)}
-                                disabled={!item.issued || item.alreadyIssued}
-                                hasError={!item.materialId && item.issued && !item.alreadyIssued}
-                                brandHint={selectedDesign?.brand || ''}
-                              />
+                              {item.isMapped && item.materialId ? (
+                                (() => {
+                                  const mat = materials.find(m => String(m.id) === String(item.materialId));
+                                  return (
+                                    <div style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '8px',
+                                      padding: '5px 10px',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(59, 130, 246, 0.04)',
+                                      border: '1px solid #bfdbfe'
+                                    }}>
+                                      {mat?.imageUrl && (
+                                        <div style={{ width: '26px', height: '26px', borderRadius: '4px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
+                                          <img src={mat.imageUrl} alt={mat.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        </div>
+                                      )}
+                                      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                                        <span style={{ fontWeight: '700', fontSize: '12px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {mat ? (mat.color && mat.color !== 'Default' ? `${mat.name} (${mat.color})` : mat.name) : 'Mapped Material'}
+                                        </span>
+                                        <div style={{ display: 'flex', gap: '5px', fontSize: '10.5px' }}>
+                                          <span style={{ fontFamily: 'monospace', color: '#4338ca', fontWeight: '700' }}>
+                                            🏷️ {mat?.itemCode || mat?.stCode || '—'}
+                                          </span>
+                                          <span style={{ color: '#475569' }}>
+                                            • 📁 {mat?.category || 'Accessory'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span style={{
+                                        fontSize: '10px',
+                                        fontWeight: '700',
+                                        color: '#059669',
+                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                        border: '1px solid rgba(16, 185, 129, 0.25)',
+                                        padding: '2px 6px',
+                                        borderRadius: '4px',
+                                        whiteSpace: 'nowrap'
+                                      }}>
+                                        🔒 BOM Mapped
+                                      </span>
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                <div style={{
+                                  padding: '6px 10px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#fffbeb',
+                                  border: '1px dashed #f59e0b',
+                                  color: '#b45309',
+                                  fontSize: '11px',
+                                  fontWeight: '600'
+                                }}>
+                                  ⚠️ Unmapped in BOM (Excluded from issue)
+                                </div>
+                              )}
                             </div>
                             {!item.alreadyIssued && (
                               <button

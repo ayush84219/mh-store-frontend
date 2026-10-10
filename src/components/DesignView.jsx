@@ -1,9 +1,411 @@
 import { getBackendUrl } from '../utils/api';
-import { useState, useEffect } from 'react';
-import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3 } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3, Zap, CheckCircle, AlertTriangle, ChevronDown } from 'lucide-react';
 
 import { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES } from '../utils/designHelpers';
 export { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES };
+
+export const getSortedMaterialsForBom = (bomItem, materials = []) => {
+  if (!materials || materials.length === 0) return [];
+  const nameLower = (bomItem?.name || '').toLowerCase().trim();
+  const descLower = (bomItem?.description || '').toLowerCase().trim();
+  const detailLower = (bomItem?.detail || '').toLowerCase().trim();
+
+  // Helper score for relevance
+  const scoreMat = (m) => {
+    const mName = (m.name || '').toLowerCase();
+    const mCat = (m.category || '').toLowerCase();
+    const mId = (m.id || '').toLowerCase();
+    const mCode = (m.itemCode || '').toLowerCase();
+
+    let s = 0;
+    if (descLower && (mName.includes(descLower) || descLower.includes(mName))) s += 100;
+    if (nameLower && (mName.includes(nameLower) || mCat.includes(nameLower))) s += 50;
+    if (detailLower && isNaN(Number(detailLower)) && (mName.includes(detailLower) || mCat.includes(detailLower))) s += 30;
+    if (m.stock > 0) s += 10;
+    return s;
+  };
+
+  return [...materials].sort((a, b) => {
+    const scoreA = scoreMat(a);
+    const scoreB = scoreMat(b);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+};
+
+function SearchableBomMaterialSelect({
+  materials = [],
+  value = '',
+  onChange,
+  bomRow,
+  placeholder = "— Select or Search Material —"
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 380, isAbove: false });
+  const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  const matchedMat = materials.find(m => String(m.id) === String(value));
+
+  const updateCoords = () => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const isAbove = spaceBelow < 320 && rect.top > 320;
+      const desiredWidth = Math.min(680, Math.max(rect.width, 480));
+      setCoords({
+        top: isAbove ? rect.top : rect.bottom + 4,
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - desiredWidth - 12)),
+        width: desiredWidth,
+        isAbove
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      const handleReposition = () => updateCoords();
+      window.addEventListener('resize', handleReposition);
+      window.addEventListener('scroll', handleReposition, true);
+      const timer = setTimeout(() => searchInputRef.current?.focus(), 50);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', handleReposition);
+        window.removeEventListener('scroll', handleReposition, true);
+      };
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        containerRef.current && !containerRef.current.contains(event.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+        setSearchQuery('');
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  // Sort & filter materials based on search query
+  const sorted = getSortedMaterialsForBom(bomRow, materials);
+  const q = searchQuery.toLowerCase().trim();
+  const filtered = q
+    ? sorted.filter(m => {
+        const name = (m.name || '').toLowerCase();
+        const cat = (m.category || '').toLowerCase();
+        const code = (m.itemCode || m.stCode || '').toLowerCase();
+        const color = (m.color || '').toLowerCase();
+        return name.includes(q) || cat.includes(q) || code.includes(q) || color.includes(q);
+      })
+    : sorted;
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      {/* Trigger / Select Input Box */}
+      <div
+        onClick={() => {
+          if (!isOpen) {
+            updateCoords();
+            setSearchQuery('');
+          }
+          setIsOpen(!isOpen);
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          cursor: 'pointer',
+          width: '100%',
+          height: '36px',
+          padding: '4px 10px',
+          borderRadius: '6px',
+          border: '1px solid',
+          borderColor: value ? 'var(--accent-color, #0284c7)' : isOpen ? '#6366f1' : '#f59e0b',
+          backgroundColor: value ? 'rgba(59, 130, 246, 0.04)' : isOpen ? '#ffffff' : '#fffbeb',
+          color: matchedMat ? 'var(--text-main, #0f172a)' : 'var(--text-muted, #64748b)',
+          fontSize: '12px',
+          fontWeight: value ? '600' : 'normal',
+          boxShadow: isOpen ? '0 0 0 3px rgba(99, 102, 241, 0.15)' : 'none',
+          boxSizing: 'border-box',
+          gap: '8px'
+        }}
+        title="Click to search or select material"
+      >
+        <span style={{
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          flex: 1,
+          textAlign: 'left'
+        }}>
+          {matchedMat ? (
+            <span>
+              {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' ? `(${matchedMat.color})` : ''} • [Cat: {matchedMat.category || 'General'}] • Code: {matchedMat.itemCode || matchedMat.stCode || '—'} • Stock: {matchedMat.stock} {matchedMat.unit || 'pcs'}
+            </span>
+          ) : (
+            <span style={{ color: '#b45309', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <Search size={13} style={{ color: '#d97706' }} />
+              {placeholder}
+            </span>
+          )}
+        </span>
+        <ChevronDown size={14} style={{
+          color: 'var(--text-muted)',
+          transform: isOpen ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.2s ease',
+          flexShrink: 0
+        }} />
+      </div>
+
+      {/* Floating Dropdown Card with Live Search Bar */}
+      {isOpen && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            ...(coords.isAbove
+              ? { bottom: `${window.innerHeight - coords.top + 4}px` }
+              : { top: `${coords.top}px` }),
+            left: `${coords.left}px`,
+            width: `${coords.width}px`,
+            maxWidth: 'calc(100vw - 20px)',
+            border: '1.5px solid var(--accent-color, #0284c7)',
+            borderRadius: '10px',
+            boxShadow: '0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.1)',
+            backgroundColor: '#ffffff',
+            color: '#0f172a',
+            zIndex: 9999999,
+            padding: '8px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            boxSizing: 'border-box'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Search Input Bar */}
+          <div style={{ position: 'relative', width: '100%' }}>
+            <Search size={14} style={{
+              position: 'absolute',
+              left: '10px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              color: 'var(--accent-color, #0284c7)'
+            }} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Type to search Item Code (ST...), Name, or Category..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                height: '34px',
+                padding: '4px 28px 4px 30px',
+                fontSize: '12.5px',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                outline: 'none',
+                background: '#f8fafc',
+                color: '#0f172a',
+                boxSizing: 'border-box'
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute',
+                  right: '8px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: '#94a3b8'
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {/* Header count info */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+            <span>{filtered.length} inventory items available</span>
+            <span>Click any item to map</span>
+          </div>
+
+          {/* Scrollable Items List */}
+          <div style={{
+            maxHeight: '280px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px'
+          }}>
+            {/* Clear / Unmapped option */}
+            <div
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+                setSearchQuery('');
+              }}
+              style={{
+                padding: '7px 10px',
+                fontSize: '11.5px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                color: '#64748b',
+                fontStyle: 'italic',
+                backgroundColor: !value ? '#f1f5f9' : 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f1f5f9'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = !value ? '#f1f5f9' : 'transparent'}
+            >
+              <X size={12} />
+              <span>— None / Unmapped —</span>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div style={{ padding: '20px 10px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                No materials matching "{searchQuery}"
+              </div>
+            ) : (
+              filtered.map(m => {
+                const isSelected = String(m.id) === String(value);
+                return (
+                  <div
+                    key={m.id}
+                    onClick={() => {
+                      onChange(m.id);
+                      setIsOpen(false);
+                      setSearchQuery('');
+                    }}
+                    style={{
+                      padding: '6px 8px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      backgroundColor: isSelected ? 'rgba(2, 132, 199, 0.08)' : 'transparent',
+                      border: isSelected ? '1px solid rgba(2, 132, 199, 0.25)' : '1px solid transparent',
+                      gap: '8px',
+                      transition: 'background-color 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = '#f8fafc';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                      {/* Photo Thumbnail */}
+                      <div style={{
+                        width: '28px',
+                        height: '28px',
+                        borderRadius: '4px',
+                        overflow: 'hidden',
+                        flexShrink: 0,
+                        backgroundColor: '#f1f5f9',
+                        border: '1px solid #cbd5e1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        {m.imageUrl ? (
+                          <img
+                            src={getCleanImageUrl(m.imageUrl)}
+                            alt={m.name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              if (e.target.parentElement) {
+                                e.target.parentElement.innerHTML = '<span style="font-size:12px;">🧵</span>';
+                              }
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: '12px' }}>🧵</span>
+                        )}
+                      </div>
+
+                      {/* Material Info */}
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ fontWeight: '600', fontSize: '12px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                          <span style={{
+                            padding: '0 4px',
+                            borderRadius: '3px',
+                            backgroundColor: '#eef2ff',
+                            color: '#4338ca',
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            fontFamily: 'monospace'
+                          }}>
+                            🏷️ {m.itemCode || m.stCode || '—'}
+                          </span>
+                          <span style={{
+                            padding: '0 4px',
+                            borderRadius: '3px',
+                            backgroundColor: '#f1f5f9',
+                            color: '#475569',
+                            fontSize: '10.5px',
+                            fontWeight: '500'
+                          }}>
+                            📁 {m.category || 'Accessory'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stock & Selection Indicator */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                      <span style={{
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        backgroundColor: m.stock > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                        color: m.stock > 0 ? '#059669' : '#dc2626',
+                        fontSize: '11px',
+                        fontWeight: '700'
+                      }}>
+                        {m.stock} {m.unit || 'pcs'}
+                      </span>
+                      {isSelected && (
+                        <CheckCircle size={14} style={{ color: 'var(--accent-color, #0284c7)' }} />
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 export const findMatchingMaterialId = (bomItem, materials) => {
   const detailLower = (bomItem.detail || '').toLowerCase();
@@ -413,6 +815,9 @@ export default function DesignView({
   // New design BOM items state
   const [bomItems, setBomItems] = useState(() => createDefaultBomItems(accessoriesList, materials));
 
+  // Image preview modal state
+  const [previewModalData, setPreviewModalData] = useState(null);
+
   const [showAddInline, setShowAddInline] = useState(false);
   const [newInlineName, setNewInlineName] = useState('');
   const [accessoryError, setAccessoryError] = useState('');
@@ -525,17 +930,37 @@ export default function DesignView({
       } else if (value === 'Yes') {
         if (!newItems[index].detail) newItems[index].detail = '1';
         if (!newItems[index].description) newItems[index].description = `${newItems[index].name} required`;
-        newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
+        if (!newItems[index].materialId) {
+          newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
+        }
       }
     } else if (field === 'detail') {
       newItems[index][field] = value.replace(/\D/g, '');
-      newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
+    } else if (field === 'materialId') {
+      newItems[index].materialId = value;
+    } else if (field === 'description') {
+      newItems[index].description = value;
+      // If not yet mapped to any material, attempt auto-match with the new description
+      if (!newItems[index].materialId) {
+        const autoMat = findMatchingMaterialId(newItems[index], materials);
+        if (autoMat) newItems[index].materialId = autoMat;
+      }
     } else {
       newItems[index][field] = value;
-      newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
     }
 
     setBomItems(newItems);
+  };
+
+  const handleAutoMapAll = () => {
+    const updated = bomItems.map(item => {
+      if (item.status === 'Yes' && !item.materialId) {
+        const matchId = findMatchingMaterialId(item, materials);
+        return { ...item, materialId: matchId || '' };
+      }
+      return item;
+    });
+    setBomItems(updated);
   };
 
   const selectedDesign = designs.find(d => d.id === selectedDesignId) || sortedDesigns[0];
@@ -1153,18 +1578,61 @@ export default function DesignView({
             <div style={{ marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
                 <div>
-                  <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '16px', fontWeight: '600' }}>Garment Accessories (BOM) Specifications</h4>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Configure specifications and requirement status for garment accessories.</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '16px', fontWeight: '700', margin: 0 }}>
+                      Garment Accessories (BOM) Specifications & Mapping
+                    </h4>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '3px 10px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      backgroundColor: bomItems.filter(b => b.status === 'Yes' && b.materialId).length === bomItems.filter(b => b.status === 'Yes').length && bomItems.filter(b => b.status === 'Yes').length > 0
+                        ? 'rgba(16, 185, 129, 0.15)'
+                        : 'rgba(245, 158, 11, 0.15)',
+                      color: bomItems.filter(b => b.status === 'Yes' && b.materialId).length === bomItems.filter(b => b.status === 'Yes').length && bomItems.filter(b => b.status === 'Yes').length > 0
+                        ? '#059669'
+                        : '#d97706',
+                      border: '1px solid currentColor'
+                    }}>
+                      ✓ {bomItems.filter(b => b.status === 'Yes' && b.materialId).length} / {bomItems.filter(b => b.status === 'Yes').length} Required Items Mapped
+                    </span>
+                  </div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '12.5px', marginTop: '4px', marginBottom: 0 }}>
+                    Map all required accessories to inventory materials. At scanning/issue time, <strong>only mapped components</strong> will be permitted for issue.
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => setShowAddInline(!showAddInline)}
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-                >
-                  <PlusCircle size={14} />
-                  <span>{showAddInline ? 'Close Form' : 'Add Custom Accessory'}</span>
-                </button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleAutoMapAll}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      borderColor: 'var(--accent-color, #0284c7)',
+                      color: 'var(--accent-color, #0284c7)',
+                      fontWeight: '600'
+                    }}
+                    title="Auto-map all required components to best matching materials from inventory"
+                  >
+                    <Zap size={14} />
+                    <span>Auto-Map All</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setShowAddInline(!showAddInline)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                  >
+                    <PlusCircle size={14} />
+                    <span>{showAddInline ? 'Close Form' : 'Add Custom Accessory'}</span>
+                  </button>
+                </div>
               </div>
 
               {showAddInline && (
@@ -1172,11 +1640,11 @@ export default function DesignView({
                   className="animate-scale"
                   style={{
                     display: 'flex',
+                    flexDirection: 'column',
                     gap: '8px',
-                    alignItems: 'center',
                     padding: '12px',
-                    backgroundColor: 'var(--accent-light)',
-                    border: '1.5px solid var(--accent-color)',
+                    backgroundColor: 'var(--accent-light, #e0f2fe)',
+                    border: '1.5px solid var(--accent-color, #0284c7)',
                     borderRadius: 'var(--border-radius-md)',
                     marginBottom: '16px'
                   }}
@@ -1211,7 +1679,7 @@ export default function DesignView({
                     </button>
                   </div>
                   {accessoryError && (
-                    <div style={{ color: 'var(--danger-color, #f43e5c)', fontSize: '12px', fontWeight: '600', marginTop: '8px', textAlign: 'left', width: '100%' }}>
+                    <div style={{ color: 'var(--danger-color, #f43e5c)', fontSize: '12px', fontWeight: '600', textAlign: 'left', width: '100%' }}>
                       {accessoryError}
                     </div>
                   )}
@@ -1221,9 +1689,9 @@ export default function DesignView({
               {/* Headers for Accessories builder */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '2fr 1.5fr 2fr 3fr 0.5fr',
-                gap: '16px',
-                marginBottom: '12px',
+                gridTemplateColumns: '1.2fr 0.8fr 0.75fr 1.6fr 3.6fr 0.4fr',
+                gap: '12px',
+                marginBottom: '10px',
                 padding: '0 8px',
                 fontSize: '11px',
                 fontWeight: 'bold',
@@ -1235,66 +1703,264 @@ export default function DesignView({
                 <span style={{ textAlign: 'center' }}>Required / Status</span>
                 <span>Qty/Piece</span>
                 <span>Description</span>
+                <span>Mapped Inventory Material (Photo • Code • Cat)</span>
                 <span style={{ textAlign: 'right' }}>Remove</span>
               </div>
 
-              {bomItems.map((bomRow, index) => (
-                <div key={index} className="bom-builder-row animate-fade" style={{ gridTemplateColumns: '2fr 1.5fr 2fr 3fr 0.5fr', gap: '16px', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontWeight: '600', fontSize: '14px', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {bomRow.name}
+              {bomItems.map((bomRow, index) => {
+                const isYes = bomRow.status === 'Yes';
+                const matchedMat = materials.find(m => String(m.id) === String(bomRow.materialId));
+                const sortedMats = isYes ? getSortedMaterialsForBom(bomRow, materials) : [];
+
+                return (
+                  <div
+                    key={index}
+                    className="bom-builder-row animate-fade"
+                    style={{
+                      gridTemplateColumns: '1.2fr 0.8fr 0.75fr 1.6fr 3.6fr 0.4fr',
+                      gap: '12px',
+                      alignItems: 'center',
+                      marginBottom: '10px',
+                      padding: '8px',
+                      borderRadius: '8px',
+                      backgroundColor: isYes
+                        ? (bomRow.materialId ? 'rgba(59, 130, 246, 0.02)' : 'rgba(245, 158, 11, 0.03)')
+                        : 'transparent',
+                      border: isYes
+                        ? (bomRow.materialId ? '1px solid rgba(59, 130, 246, 0.15)' : '1px dashed rgba(245, 158, 11, 0.35)')
+                        : '1px solid transparent'
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', fontSize: '13.5px', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {bomRow.name}
+                    </div>
+
+                    <div>
+                      <select
+                        className="form-input"
+                        value={bomRow.status || 'No'}
+                        onChange={(e) => handleBomChange(index, 'status', e.target.value)}
+                        style={{
+                          textAlign: 'center',
+                          height: '36px',
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          backgroundColor: isYes ? 'rgba(16, 185, 129, 0.08)' : 'var(--bg-secondary)',
+                          color: isYes ? 'var(--success, #10b981)' : 'var(--text-muted)'
+                        }}
+                      >
+                        <option value="No">No</option>
+                        <option value="Yes">Yes</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        disabled={!isYes}
+                        className="form-input"
+                        placeholder={`Qty...`}
+                        value={bomRow.detail || ''}
+                        onChange={(e) => handleBomChange(index, 'detail', e.target.value)}
+                        style={{ height: '36px', fontSize: '13px' }}
+                      />
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        disabled={!isYes}
+                        className="form-input"
+                        placeholder={`Enter description for ${bomRow.name.toLowerCase()}...`}
+                        value={bomRow.description || ''}
+                        onChange={(e) => handleBomChange(index, 'description', e.target.value)}
+                        style={{ height: '36px', fontSize: '13px' }}
+                      />
+                    </div>
+
+                    {/* Mapped Material (Inventory) Column */}
+                    <div>
+                      {!isYes ? (
+                        <div style={{
+                          color: 'var(--text-muted)',
+                          fontSize: '12px',
+                          fontStyle: 'italic',
+                          padding: '6px 10px',
+                          background: 'var(--bg-secondary, #f8fafc)',
+                          borderRadius: '6px',
+                          border: '1px dashed var(--border-color)',
+                          textAlign: 'center'
+                        }}>
+                          — Not Required —
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                            {/* Photo Thumbnail if mapped */}
+                            {matchedMat && (
+                              <div
+                                onClick={() => setPreviewModalData({
+                                  imageUrl: matchedMat.imageUrl,
+                                  name: matchedMat.name,
+                                  itemCode: matchedMat.itemCode || matchedMat.stCode,
+                                  category: matchedMat.category,
+                                  stock: `${matchedMat.stock} ${matchedMat.unit || 'pcs'}`
+                                })}
+                                title="Click to view full photo"
+                                style={{
+                                  width: '36px',
+                                  height: '36px',
+                                  borderRadius: '6px',
+                                  overflow: 'hidden',
+                                  flexShrink: 0,
+                                  cursor: 'pointer',
+                                  border: '1.5px solid #cbd5e1',
+                                  backgroundColor: '#f1f5f9',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+                                  transition: 'transform 0.15s ease'
+                                }}
+                              >
+                                {matchedMat.imageUrl ? (
+                                  <img
+                                    src={getCleanImageUrl(matchedMat.imageUrl)}
+                                    alt={matchedMat.name}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    onError={(e) => {
+                                      e.target.style.display = 'none';
+                                      if (e.target.parentElement) {
+                                        e.target.parentElement.innerHTML = '<span style="font-size:15px;">🧵</span>';
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <span style={{ fontSize: '15px' }}>🧵</span>
+                                )}
+                              </div>
+                            )}
+
+                            <SearchableBomMaterialSelect
+                              materials={materials}
+                              value={bomRow.materialId || ''}
+                              onChange={(val) => handleBomChange(index, 'materialId', val)}
+                              bomRow={bomRow}
+                            />
+
+                            {bomRow.materialId ? (
+                              <button
+                                type="button"
+                                onClick={() => handleBomChange(index, 'materialId', '')}
+                                className="btn btn-secondary btn-sm"
+                                style={{ padding: '4px 8px', height: '36px', color: 'var(--text-muted)' }}
+                                title="Clear mapping"
+                              >
+                                <X size={13} />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const autoId = findMatchingMaterialId(bomRow, materials);
+                                  if (autoId) handleBomChange(index, 'materialId', autoId);
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  padding: '4px 8px',
+                                  height: '36px',
+                                  fontSize: '11px',
+                                  whiteSpace: 'nowrap',
+                                  color: '#059669',
+                                  borderColor: 'rgba(16, 185, 129, 0.3)',
+                                  backgroundColor: 'rgba(16, 185, 129, 0.06)'
+                                }}
+                                title="Auto-match best material"
+                              >
+                                Auto
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Quick details pill with Photo, Item Code & Category */}
+                          {matchedMat ? (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '5px', fontSize: '11px' }}>
+                              {/* Item Code badge (NO MT CODE) */}
+                              <span style={{
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                backgroundColor: '#eef2ff',
+                                color: '#4338ca',
+                                fontWeight: '700',
+                                fontFamily: 'monospace',
+                                border: '1px solid #c7d2fe',
+                                fontSize: '11px'
+                              }}>
+                                🏷️ Code: {matchedMat.itemCode || matchedMat.stCode || '—'}
+                              </span>
+
+                              {/* Category badge */}
+                              <span style={{
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                backgroundColor: '#f1f5f9',
+                                color: '#475569',
+                                fontWeight: '600',
+                                border: '1px solid #e2e8f0',
+                                fontSize: '11px'
+                              }}>
+                                📁 {matchedMat.category || 'Accessory'}
+                              </span>
+
+                              {/* Stock badge */}
+                              <span style={{
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                backgroundColor: matchedMat.stock > 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                                color: matchedMat.stock > 0 ? '#059669' : '#dc2626',
+                                fontWeight: '700',
+                                fontSize: '11px'
+                              }}>
+                                Stock: {matchedMat.stock} {matchedMat.unit || 'pcs'}
+                              </span>
+
+                              <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                                📍 {matchedMat.location || 'Main Store'}
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#d97706', fontStyle: 'italic', fontWeight: '500' }}>
+                              ⚠️ Unmapped: will not be issued at store
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteBOMItem(index)}
+                        className="btn btn-danger btn-sm"
+                        style={{
+                          padding: '6px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          color: 'var(--danger)'
+                        }}
+                        title={`Remove ${bomRow.name} from checklist`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <select
-                      className="form-input"
-                      value={bomRow.status || 'No'}
-                      onChange={(e) => handleBomChange(index, 'status', e.target.value)}
-                      style={{ textAlign: 'center' }}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  </div>
-                  <div>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      className="form-input"
-                      placeholder={`Qty...`}
-                      value={bomRow.detail || ''}
-                      onChange={(e) => handleBomChange(index, 'detail', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder={`Enter description for ${bomRow.name.toLowerCase()}...`}
-                      value={bomRow.description || ''}
-                      onChange={(e) => handleBomChange(index, 'description', e.target.value)}
-                    />
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteBOMItem(index)}
-                      className="btn btn-danger btn-sm"
-                      style={{
-                        padding: '6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.2)',
-                        color: 'var(--danger)'
-                      }}
-                      title={`Remove ${bomRow.name} from checklist`}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
@@ -1853,9 +2519,34 @@ export default function DesignView({
                               <td>{item.description || '—'}</td>
                               <td>
                                 {matchedMat ? (
-                                  <span className="status-badge verified" style={{ fontSize: '12px' }}>
-                                    {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' && `— ${matchedMat.color}`} ({matchedMat.id})
-                                  </span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    {matchedMat.imageUrl && (
+                                      <div
+                                        onClick={() => setPreviewModalData({
+                                          imageUrl: matchedMat.imageUrl,
+                                          name: matchedMat.name,
+                                          itemCode: matchedMat.itemCode || matchedMat.stCode,
+                                          category: matchedMat.category,
+                                          stock: `${matchedMat.stock} ${matchedMat.unit || 'pcs'}`
+                                        })}
+                                        title="Click to view full photo"
+                                        style={{ width: '28px', height: '28px', borderRadius: '4px', overflow: 'hidden', cursor: 'pointer', border: '1px solid #cbd5e1', flexShrink: 0 }}
+                                      >
+                                        <img src={getCleanImageUrl(matchedMat.imageUrl)} alt={matchedMat.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                      </div>
+                                    )}
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
+                                      <span className="status-badge verified" style={{ fontSize: '12px', fontWeight: '600' }}>
+                                        {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' ? `(${matchedMat.color})` : ''}
+                                      </span>
+                                      <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: '#eef2ff', color: '#4338ca', fontSize: '11px', fontWeight: '700', fontFamily: 'monospace' }}>
+                                        🏷️ Code: {matchedMat.itemCode || matchedMat.stCode || '—'}
+                                      </span>
+                                      <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: '#f1f5f9', color: '#475569', fontSize: '11px', fontWeight: '600' }}>
+                                        📁 {matchedMat.category || 'Accessory'}
+                                      </span>
+                                    </div>
+                                  </div>
                                 ) : (
                                   <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontStyle: 'italic' }}>Unmapped</span>
                                 )}
@@ -2034,6 +2725,120 @@ export default function DesignView({
             <div style={{ display: 'flex', flexDirection: 'column', width: '220px' }}>
               <div style={{ borderBottom: '1.5px solid #000000', height: '40px' }}></div>
               <span style={{ fontWeight: '700', textAlign: 'center', marginTop: '6px', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.05em', color: '#000000' }}>Authority Sign</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* ── PHOTO FULL PREVIEW MODAL ────────────────────────────────────────── */}
+      {previewModalData && (
+        <div
+          onClick={() => setPreviewModalData(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.8)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999,
+            padding: '24px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              padding: '22px',
+              maxWidth: '520px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+              position: 'relative'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setPreviewModalData(null)}
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                background: '#f1f5f9',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: '#64748b'
+              }}
+              title="Close"
+            >
+              <X size={18} />
+            </button>
+
+            <div style={{
+              width: '100%',
+              height: '300px',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              backgroundColor: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '14px'
+            }}>
+              {previewModalData.imageUrl ? (
+                <img
+                  src={getCleanImageUrl(previewModalData.imageUrl)}
+                  alt={previewModalData.name || 'Material Photo'}
+                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    if (e.target.parentElement) {
+                      e.target.parentElement.innerHTML = '<span style="font-size:48px;">🧵</span>';
+                    }
+                  }}
+                />
+              ) : (
+                <span style={{ fontSize: '48px' }}>🧵</span>
+              )}
+            </div>
+
+            <h3 style={{ fontSize: '17px', fontWeight: '700', color: '#0f172a', margin: '0 0 10px 0', textAlign: 'center' }}>
+              {previewModalData.name}
+            </h3>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+              {previewModalData.itemCode && (
+                <span style={{ padding: '4px 10px', borderRadius: '6px', backgroundColor: '#eef2ff', color: '#4338ca', fontWeight: '700', fontSize: '13px', fontFamily: 'monospace', border: '1px solid #c7d2fe' }}>
+                  🏷️ Item Code: {previewModalData.itemCode}
+                </span>
+              )}
+              {previewModalData.category && (
+                <span style={{ padding: '4px 10px', borderRadius: '6px', backgroundColor: '#f1f5f9', color: '#475569', fontWeight: '600', fontSize: '13px', border: '1px solid #e2e8f0' }}>
+                  📁 Category: {previewModalData.category}
+                </span>
+              )}
+              {previewModalData.stock && (
+                <span style={{ padding: '4px 10px', borderRadius: '6px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#059669', fontWeight: '700', fontSize: '13px' }}>
+                  Stock: {previewModalData.stock}
+                </span>
+              )}
             </div>
           </div>
         </div>

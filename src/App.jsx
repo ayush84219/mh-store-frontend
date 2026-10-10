@@ -1218,9 +1218,26 @@ export default function App() {
   };
 
   const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '') => {
+    const design = designs.find(d => String(d.id).trim().toLowerCase() === String(lotId).trim().toLowerCase());
+
+    // Strict BOM validation: If design has required BOM components, only deduct & log mapped materials
+    let validatedItems = issuedItems;
+    if (design && Array.isArray(design.bom) && design.bom.some(b => String(b.status).toLowerCase() === 'yes')) {
+      const mappedMaterialIds = new Set(
+        design.bom
+          .filter(b => String(b.status).toLowerCase() === 'yes' && b.materialId)
+          .map(b => String(b.materialId))
+      );
+      validatedItems = issuedItems.filter(item => mappedMaterialIds.has(String(item.materialId)));
+      if (validatedItems.length === 0) {
+        console.warn(`[handleIssueMaterials] Blocked issue: No materials match mapped BOM components for Lot ${lotId}.`);
+        return;
+      }
+    }
+
     // 1. Deduct materials stock counts
     const updatedMaterials = materials.map(m => {
-      const issued = issuedItems.find(item => item.materialId === m.id);
+      const issued = validatedItems.find(item => item.materialId === m.id);
       if (issued) {
         return {
           ...m,
@@ -1231,10 +1248,9 @@ export default function App() {
     });
     setMaterials(updatedMaterials);
     // Sync deducted stock to DB
-    syncMaterialsToDb(updatedMaterials.filter(m => issuedItems.find(i => i.materialId === m.id)));
+    syncMaterialsToDb(updatedMaterials.filter(m => validatedItems.find(i => i.materialId === m.id)));
 
     // 2. Add audit trail log entry
-    const design = designs.find(d => d.id === lotId);
     const newLog = {
       id: `${isReissue ? 'RI' : 'MI'}${Math.floor(1300 + Math.random() * 8000)}`,
       lotId,
@@ -1245,7 +1261,7 @@ export default function App() {
       receiverName: receiverName || '',
       receiverDept: receiverDept || '',
       date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-      materials: issuedItems.map(item => ({
+      materials: validatedItems.map(item => ({
         name: item.materialName,
         bomItemName: item.bomItemName,
         qty: item.totalRequired,

@@ -1774,10 +1774,21 @@ body {
 /* BOM table builder */
 .bom-builder-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr auto;
+  grid-template-columns: 1.4fr 1fr 0.9fr 2fr 2.8fr 0.4fr;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   align-items: center;
+  transition: all 0.2s ease;
+}
+
+@media (max-width: 1024px) {
+  .bom-builder-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+  }
 }
 
 /* Chart SVG custom */

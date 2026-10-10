@@ -250,6 +250,26 @@ export default function BarcodeMaterialIssueView({
     return { material: match || null, packetInfo: packetMatch };
   };
 
+  // Active design and mapped BOM items for selected Lot
+  const activeDesign = useMemo(() => {
+    const targetLot = String(selectedLotId || lotNumber || '').trim();
+    if (!targetLot) return null;
+    return designs.find(d => String(d.id).trim().toLowerCase() === targetLot.toLowerCase());
+  }, [selectedLotId, lotNumber, designs]);
+
+  const mappedBomItems = useMemo(() => {
+    if (!activeDesign || !Array.isArray(activeDesign.bom)) return [];
+    return activeDesign.bom.filter(b => String(b.status).toLowerCase() === 'yes' && b.materialId);
+  }, [activeDesign]);
+
+  const hasRequiredBom = useMemo(() => {
+    return !!(activeDesign && Array.isArray(activeDesign.bom) && activeDesign.bom.some(b => String(b.status).toLowerCase() === 'yes'));
+  }, [activeDesign]);
+
+  const mappedMaterialIdSet = useMemo(() => {
+    return new Set(mappedBomItems.map(b => String(b.materialId)));
+  }, [mappedBomItems]);
+
   // Handle Scan Submit (from USB scanner Enter key or manual input)
   const handleScanSubmit = (e) => {
     if (e) e.preventDefault();
@@ -262,6 +282,15 @@ export default function BarcodeMaterialIssueView({
       if (soundEnabled) playFeedbackSound('error');
       setErrorMessage(`❌ No material found for scanned barcode: "${scanInput}". Please verify or select from the directory.`);
       return;
+    }
+
+    // If target lot has BOM configuration, strictly enforce that only mapped components can be issued
+    if (hasRequiredBom) {
+      if (!mappedMaterialIdSet.has(String(material.id))) {
+        if (soundEnabled) playFeedbackSound('error');
+        setErrorMessage(`❌ Material "${material.name}" (Code: ${material.itemCode || material.id}) is NOT mapped in the BOM for Lot ${lotNumber || selectedLotId}! Only mapped BOM components (${mappedBomItems.length > 0 ? mappedBomItems.map(b => b.name).join(', ') : 'None mapped yet'}) can be issued for this Lot.`);
+        return;
+      }
     }
 
     if (soundEnabled) playFeedbackSound('scan');
@@ -319,6 +348,15 @@ export default function BarcodeMaterialIssueView({
       if (soundEnabled) playFeedbackSound('error');
       setErrorMessage(`Cannot add ${qty} ${mat.unit}. Only ${mat.stock} ${mat.unit} available in stock.`);
       return;
+    }
+
+    // Validate against mapped BOM components if lot is selected
+    if (hasRequiredBom) {
+      if (!mappedMaterialIdSet.has(String(mat.id))) {
+        if (soundEnabled) playFeedbackSound('error');
+        setErrorMessage(`❌ Material "${mat.name}" (Code: ${mat.itemCode || mat.id}) is NOT mapped in the BOM for Lot ${lotNumber || selectedLotId}! Only mapped components can be issued.`);
+        return;
+      }
     }
 
     setIssueCart(prev => {
@@ -399,14 +437,23 @@ export default function BarcodeMaterialIssueView({
       return;
     }
 
+    if (hasRequiredBom) {
+      if (!mappedMaterialIdSet.has(String(selectedMaterial.id))) {
+        if (soundEnabled) playFeedbackSound('error');
+        setErrorMessage(`❌ Material "${selectedMaterial.name}" (Code: ${selectedMaterial.itemCode || selectedMaterial.id}) is NOT mapped in BOM for Lot ${lotNumber || selectedLotId}! Only mapped components can be issued.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setErrorMessage('');
 
     try {
+      const mappedBomRow = mappedBomItems.find(b => String(b.materialId) === String(selectedMaterial.id));
       const issueItem = {
         materialId: selectedMaterial.id,
         materialName: selectedMaterial.name,
-        bomItemName: selectedMaterial.category || 'Accessory',
+        bomItemName: mappedBomRow ? mappedBomRow.name : (selectedMaterial.category || 'Accessory'),
         totalRequired: numIssueQty,
         unit: selectedMaterial.unit || 'Pcs',
         barcode: scannedBarcode || selectedMaterial.itemCode || selectedMaterial.id,
@@ -488,20 +535,32 @@ export default function BarcodeMaterialIssueView({
       return;
     }
 
+    if (hasRequiredBom) {
+      const unmappedCartItem = issueCart.find(item => !mappedMaterialIdSet.has(String(item.material.id)));
+      if (unmappedCartItem) {
+        if (soundEnabled) playFeedbackSound('error');
+        setErrorMessage(`❌ Cart item "${unmappedCartItem.material.name}" is NOT mapped in BOM for Lot ${lotNumber || selectedLotId}! Only mapped components can be issued.`);
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setErrorMessage('');
 
     try {
-      const issuedItems = issueCart.map(item => ({
-        materialId: item.material.id,
-        materialName: item.material.name,
-        bomItemName: item.material.category || 'Accessory',
-        totalRequired: item.qty,
-        unit: item.unit,
-        barcode: item.barcode,
-        initialStock: item.initialStock,
-        remainingStock: item.remainingStock
-      }));
+      const issuedItems = issueCart.map(item => {
+        const mappedBomRow = mappedBomItems.find(b => String(b.materialId) === String(item.material.id));
+        return {
+          materialId: item.material.id,
+          materialName: item.material.name,
+          bomItemName: mappedBomRow ? mappedBomRow.name : (item.material.category || 'Accessory'),
+          totalRequired: item.qty,
+          unit: item.unit,
+          barcode: item.barcode,
+          initialStock: item.initialStock,
+          remainingStock: item.remainingStock
+        };
+      });
 
       const finalLotId = lotNumber.trim() || 'BATCH-ISSUE';
 
@@ -1701,42 +1760,66 @@ export default function BarcodeMaterialIssueView({
             />
 
             <div style={{ maxHeight: '280px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {filteredMaterials.map((mat) => (
-                <div
-                  key={mat.id}
-                  onClick={() => {
-                    setSelectedMaterial(mat);
-                    setScannedBarcode(mat.itemCode || mat.id);
-                    setScannedPacketInfo(null);
-                    setIssueQty(mat.stock > 0 ? 1 : 0);
-                    if (soundEnabled) playFeedbackSound('scan');
-                  }}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: '8px',
-                    background: selectedMaterial?.id === mat.id ? '#e0f2fe' : '#f8fafc',
-                    border: `1px solid ${selectedMaterial?.id === mat.id ? '#38bdf8' : '#e2e8f0'}`,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    transition: 'all 0.15s'
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>{mat.name}</div>
-                    <div style={{ fontSize: '11px', color: '#64748b' }}>
-                      {mat.itemCode || mat.id} • {mat.color || 'Default'} • {mat.location || 'Store'}
+              {filteredMaterials.map((mat) => {
+                const isBOMMapped = !hasRequiredBom || mappedMaterialIdSet.has(String(mat.id));
+                return (
+                  <div
+                    key={mat.id}
+                    onClick={() => {
+                      if (hasRequiredBom && !mappedMaterialIdSet.has(String(mat.id))) {
+                        if (soundEnabled) playFeedbackSound('error');
+                        setErrorMessage(`❌ Material "${mat.name}" (Code: ${mat.itemCode || mat.id}) is NOT mapped in the BOM for Lot ${lotNumber || selectedLotId}! Only mapped BOM components can be issued.`);
+                        return;
+                      }
+                      setSelectedMaterial(mat);
+                      setScannedBarcode(mat.itemCode || mat.id);
+                      setScannedPacketInfo(null);
+                      setIssueQty(mat.stock > 0 ? 1 : 0);
+                      if (soundEnabled) playFeedbackSound('scan');
+                    }}
+                    style={{
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      background: selectedMaterial?.id === mat.id ? '#e0f2fe' : '#f8fafc',
+                      border: `1px solid ${selectedMaterial?.id === mat.id ? '#38bdf8' : '#e2e8f0'}`,
+                      cursor: isBOMMapped ? 'pointer' : 'not-allowed',
+                      opacity: isBOMMapped ? 1 : 0.6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      transition: 'all 0.15s'
+                    }}
+                    title={!isBOMMapped ? `Not mapped in BOM for Lot ${lotNumber || selectedLotId}` : ''}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>{mat.name}</span>
+                        {hasRequiredBom && (
+                          <span style={{
+                            fontSize: '9.5px',
+                            fontWeight: '700',
+                            padding: '1px 5px',
+                            borderRadius: '3px',
+                            backgroundColor: isBOMMapped ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.1)',
+                            color: isBOMMapped ? '#059669' : '#dc2626'
+                          }}>
+                            {isBOMMapped ? '✓ BOM Mapped' : 'Not in BOM'}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                        {mat.itemCode || mat.id} • {mat.color || 'Default'} • {mat.location || 'Store'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: '800', fontSize: '13px', color: mat.stock > 0 ? '#059669' : '#ef4444' }}>
+                        {mat.stock} {mat.unit || 'Pcs'}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#94a3b8' }}>Stock</div>
                     </div>
                   </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: '800', fontSize: '13px', color: mat.stock > 0 ? '#059669' : '#ef4444' }}>
-                      {mat.stock} {mat.unit || 'Pcs'}
-                    </div>
-                    <div style={{ fontSize: '10px', color: '#94a3b8' }}>Stock</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 

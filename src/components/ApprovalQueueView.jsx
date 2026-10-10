@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { getCleanImageUrl } from '../utils/designHelpers';
 import {
   ClipboardCheck, CheckCircle, XCircle, Clock,
   Trash2, AlertTriangle, User, Calendar, Package,
@@ -1722,7 +1723,7 @@ export default function ApprovalQueueView({
                 {/* Collapsible BOM checklist table (only for design verification requests) */}
                 {isExpanded && req.type === 'design_verification' && (
                   <div className="card-expanded-table-container">
-                    <h5 className="expanded-table-title">Bill of Materials (BOM) Checklist</h5>
+                    <h5 className="expanded-table-title">Bill of Materials (BOM) Checklist & Inventory Mapping</h5>
                     <div className="custom-table-container">
                       <table className="custom-table" style={{ fontSize: '12.5px' }}>
                         <thead>
@@ -1731,6 +1732,7 @@ export default function ApprovalQueueView({
                             <th style={{ textAlign: 'center' }}>Required</th>
                             <th>Qty/Piece</th>
                             <th>Description</th>
+                            <th>Mapped Inventory Material</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1740,22 +1742,54 @@ export default function ApprovalQueueView({
                             if (bomList.length === 0) {
                               return (
                                 <tr>
-                                  <td colSpan="4" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No BOM components configured.</td>
+                                  <td colSpan="5" style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No BOM components configured.</td>
                                 </tr>
                               );
                             }
-                            return bomList.map((item, idx) => (
-                              <tr key={idx}>
-                                <td style={{ fontWeight: '600', color: 'var(--text-main)' }}>{item.name}</td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <span className={`status-badge ${String(item.status).toLowerCase() === 'yes' ? 'verified' : 'rejected'}`} style={{ fontSize: '11px', fontWeight: 'bold' }}>
-                                    {item.status || 'No'}
-                                  </span>
-                                </td>
-                                <td style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{item.detail || '—'}</td>
-                                <td style={{ color: 'var(--text-muted)' }}>{item.description || '—'}</td>
-                              </tr>
-                            ));
+                            return bomList.map((item, idx) => {
+                              const matchedMat = materials.find(m => String(m.id) === String(item.materialId));
+                              return (
+                                <tr key={idx}>
+                                  <td style={{ fontWeight: '600', color: 'var(--text-main)' }}>{item.name}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <span className={`status-badge ${String(item.status).toLowerCase() === 'yes' ? 'verified' : 'rejected'}`} style={{ fontSize: '11px', fontWeight: 'bold' }}>
+                                      {item.status || 'No'}
+                                    </span>
+                                  </td>
+                                  <td style={{ fontWeight: '700', color: 'var(--accent-color)' }}>{item.detail || '—'}</td>
+                                  <td style={{ color: 'var(--text-muted)' }}>{item.description || '—'}</td>
+                                  <td>
+                                    {matchedMat ? (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                        {matchedMat.imageUrl && (
+                                          <div style={{ width: '24px', height: '24px', borderRadius: '4px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
+                                            <img src={getCleanImageUrl(matchedMat.imageUrl)} alt={matchedMat.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                          </div>
+                                        )}
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
+                                          <span className="status-badge verified" style={{ fontSize: '11px', fontWeight: '600' }}>
+                                            ✓ {matchedMat.name}
+                                          </span>
+                                          <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: '#eef2ff', color: '#4338ca', fontSize: '10.5px', fontWeight: '700', fontFamily: 'monospace' }}>
+                                            🏷️ {matchedMat.itemCode || matchedMat.stCode || '—'}
+                                          </span>
+                                          <span style={{ padding: '1px 5px', borderRadius: '4px', backgroundColor: '#f1f5f9', color: '#475569', fontSize: '10.5px', fontWeight: '600' }}>
+                                            📁 {matchedMat.category || 'Accessory'}
+                                          </span>
+                                          <span style={{ fontSize: '10.5px', color: '#059669', fontWeight: '600' }}>
+                                            • Stock: {matchedMat.stock} {matchedMat.unit || 'pcs'}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <span style={{ color: String(item.status).toLowerCase() === 'yes' ? '#d97706' : 'var(--text-muted)', fontSize: '11px', fontStyle: 'italic' }}>
+                                        {String(item.status).toLowerCase() === 'yes' ? '⚠️ Unmapped' : '—'}
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            });
                           })()}
                         </tbody>
                       </table>
