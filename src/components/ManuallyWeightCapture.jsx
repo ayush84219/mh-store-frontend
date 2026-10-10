@@ -1633,35 +1633,19 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             />
           </div>
 
-          {/* Packets & Unit Selection */}
+          {/* Unit of Measure Selection */}
           <div className="form-group" style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px', border: '1.5px solid #cbd5e1' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div>
-                <label className="wcs-label">Total Packets <span style={{ color: '#ef4444' }}>*</span></label>
-                <input
-                  type="number"
-                  min="1"
-                  className="wcs-input"
-                  value={form.packets}
-                  onChange={setF('packets')}
-                  placeholder="1"
-                  style={{ height: '42px', fontWeight: '800' }}
-                />
-              </div>
-              <div>
-                <label className="wcs-label">Unit of Measure</label>
-                <select
-                  className="wcs-input"
-                  value={form.unit}
-                  onChange={setF('unit')}
-                  style={{ height: '42px', cursor: 'pointer', fontWeight: '800' }}
-                >
-                  {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch'].map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            <label className="wcs-label">Unit of Measure <span style={{ color: '#ef4444' }}>*</span></label>
+            <select
+              className="wcs-input"
+              value={form.unit}
+              onChange={setF('unit')}
+              style={{ height: '42px', cursor: 'pointer', fontWeight: '800' }}
+            >
+              {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch'].map(u => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group">
@@ -2299,7 +2283,6 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
               {[
                 ['Material', form.materialName],
                 ['Total Quantity', `${numPieces.toLocaleString()} ${form.unit}`],
-                ['Total Packets', `${form.packets || 1} packet(s)`],
                 ['PO Number', form.poNumber],
                 ['Bill / Invoice', form.invoiceNo],
                 ['Store Location', form.storeLocation],
@@ -2313,7 +2296,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
               ))}
             </div>
 
-            {/* Packet Location Assignment */}
+            {/* Store Location Confirmation */}
             <div style={{
               marginBottom: '20px',
               padding: '14px',
@@ -2323,136 +2306,19 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             }}>
               <label style={{
                 display: 'block', fontSize: '11.5px', fontWeight: '800',
-                color: 'var(--text-main)', marginBottom: '10px',
+                color: 'var(--text-main)', marginBottom: '8px',
                 textTransform: 'uppercase', letterSpacing: '0.5px'
               }}>
-                📍 Location Assignment for Packets
+                📍 Store Location Slot
               </label>
 
-              {/* Mode Selection Buttons */}
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLocationMode('same');
-                    const total = parseInt(form.packets, 10) || 1;
-                    setLocationGroups([{ location: form.storeLocation || '', count: total }]);
-                  }}
-                  style={{
-                    flex: 1, padding: '7px 8px', fontSize: '11px', fontWeight: '800',
-                    borderRadius: '6px', cursor: 'pointer',
-                    background: locationMode === 'same' ? 'var(--accent-color)' : 'var(--bg-secondary)',
-                    color: locationMode === 'same' ? '#fff' : 'var(--text-main)',
-                    border: locationMode === 'same' ? 'none' : '1px solid var(--border-color)'
-                  }}
-                >
-                  📍 Same Location (All Packets)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLocationMode('multiple');
-                    const total = parseInt(form.packets, 10) || 1;
-                    if (locationGroups.length <= 1) {
-                      setLocationGroups([
-                        { location: form.storeLocation || 'hall 1 rack 2', count: Math.ceil(total / 2) },
-                        { location: 'hall 2 rack 3', count: Math.floor(total / 2) || 1 }
-                      ]);
-                    }
-                  }}
-                  style={{
-                    flex: 1, padding: '7px 8px', fontSize: '11px', fontWeight: '800',
-                    borderRadius: '6px', cursor: 'pointer',
-                    background: locationMode === 'multiple' ? 'var(--accent-color)' : 'var(--bg-secondary)',
-                    color: locationMode === 'multiple' ? '#fff' : 'var(--text-main)',
-                    border: locationMode === 'multiple' ? 'none' : '1px solid var(--border-color)'
-                  }}
-                >
-                  🔀 Multiple Locations (Split)
-                </button>
-              </div>
-
-              {locationMode === 'same' ? (
-                <div>
-                  <label className="wcs-label">Store Location</label>
-                  <SearchableLocationSelect
-                    locations={generatedLocations}
-                    value={form.storeLocation}
-                    onChange={(val) => setForm(p => ({ ...p, storeLocation: val }))}
-                    placeholder="-- Select Configured Location Slot --"
-                    compact
-                  />
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {locationGroups.map((grp, idx) => (
-                    <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <div style={{ flex: 2 }}>
-                        <label style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)' }}>Location #{idx + 1}</label>
-                        <SearchableLocationSelect
-                          locations={generatedLocations}
-                          value={grp.location}
-                          onChange={(val) => {
-                            setLocationGroups(prev => prev.map((g, i) => i === idx ? { ...g, location: val } : g));
-                          }}
-                          placeholder="-- Select Slot --"
-                          compact
-                        />
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <label style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)' }}>Packets</label>
-                        <input
-                          type="number"
-                          min="1"
-                          className="wcs-input"
-                          value={grp.count}
-                          onChange={e => {
-                            const val = parseInt(e.target.value, 10) || 1;
-                            setLocationGroups(prev => prev.map((g, i) => i === idx ? { ...g, count: val } : g));
-                          }}
-                          style={{ padding: '6px 10px', fontSize: '12px', textAlign: 'center', fontWeight: '800' }}
-                        />
-                      </div>
-                      {locationGroups.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setLocationGroups(prev => prev.filter((_, i) => i !== idx))}
-                          style={{ marginTop: '14px', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '4px' }}
-                          title="Remove location"
-                        >
-                          <X size={16} />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => {
-                        const total = parseInt(form.packets, 10) || 1;
-                        const allocated = locationGroups.reduce((s, g) => s + (parseInt(g.count, 10) || 0), 0);
-                        const remaining = Math.max(1, total - allocated);
-                        setLocationGroups(prev => [...prev, { location: '', count: remaining }]);
-                      }}
-                      style={{ fontSize: '11px', padding: '4px 8px' }}
-                    >
-                      + Add Location Group
-                    </button>
-
-                    {(() => {
-                      const total = parseInt(form.packets, 10) || 1;
-                      const allocated = locationGroups.reduce((s, g) => s + (parseInt(g.count, 10) || 0), 0);
-                      return (
-                        <span style={{ fontSize: '11px', fontWeight: '800', color: allocated === total ? '#10b981' : '#f59e0b' }}>
-                          {allocated === total ? `✅ ${allocated}/${total} Allocated` : `⚠️ ${allocated}/${total} Allocated`}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
+              <SearchableLocationSelect
+                locations={generatedLocations}
+                value={form.storeLocation}
+                onChange={(val) => setForm(p => ({ ...p, storeLocation: val }))}
+                placeholder="-- Select Configured Location Slot --"
+                compact
+              />
             </div>
 
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>

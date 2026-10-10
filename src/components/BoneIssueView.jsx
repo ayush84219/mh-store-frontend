@@ -259,7 +259,7 @@ export default function BoneIssueView({
           body: JSON.stringify({
             slipNo: record.slipNo,
             lotNo: record.lotNo,
-            issuePcs: record.issuePcs || record.quantity || 600,
+            issuePcs: record.issuePcs || record.quantity || 0,
             issuerName: record.issuerName,
             receiverName: record.receiverName,
             issueDate: record.date,
@@ -267,7 +267,7 @@ export default function BoneIssueView({
             brand: record.brand,
             garmentType: record.garmentType,
             fabric: record.fabric,
-            quantity: record.quantity,
+            quantity: record.quantity || 0,
             shade: record.shade,
             size: record.size,
             remarks: record.remarks
@@ -286,7 +286,7 @@ export default function BoneIssueView({
             isReissue: false,
             isReturn: false,
             category: 'BONE / POCKETING',
-            volume: record.issuePcs || 600,
+            volume: record.issuePcs || 0,
             personName: record.issuerName,
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
@@ -382,20 +382,26 @@ export default function BoneIssueView({
       setSelectedShade(primaryShade);
 
       const cuttingQty = parseInt(data.quantity || 0, 10);
-      setIssuePcs(cuttingQty > 0 ? cuttingQty : 600);
-      setRemarks(`Internal Bone pocketing issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty || 600} Pcs.`);
+      const effQty = cuttingQty > 0 ? cuttingQty : (issuePcs || '');
+      setIssuePcs(effQty);
+      if (data.style || data.garmentType) {
+        setWithoutLotStyle(data.style || data.garmentType);
+      }
+      setRemarks(`Internal Bone pocketing issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${effQty || 0} Pcs.`);
 
       setRecentLots(prev => {
         const updated = [lotToQuery, ...prev.filter(l => l !== lotToQuery)];
         return updated.slice(0, 6);
       });
 
-      showToast(`Lot ${data.lotNo || lotToQuery} details loaded.`);
+      showToast(`Lot ${data.lotNo || lotToQuery} details loaded (${effQty || 0} Pcs).`);
     } catch (err) {
       console.warn('Lot search warning:', err);
       setLotError(err.message || 'Lot details not found in Google Sheets / Cutting Matrix.');
-      setLotDetails(null);
-      setIssuePcs(0);
+      if (!isWithoutLot) {
+        setLotDetails(null);
+        setIssuePcs('');
+      }
     } finally {
       setSearchingLot(false);
     }
@@ -410,7 +416,7 @@ export default function BoneIssueView({
     const {
       slipNo,
       lotNo,
-      issuePcs = 600,
+      issuePcs = 0,
       issuerName,
       receiverName,
       date,
@@ -418,7 +424,7 @@ export default function BoneIssueView({
       brand = 'Mohit Hosiery',
       garmentType = 'Trouser / Tracksuit',
       fabric = 'Cotton Poly Blend',
-      quantity = 600,
+      quantity = 0,
       shade = 'Standard',
       size = 'M, L, XL, 2XL',
       remarks = '',
@@ -448,7 +454,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.setTextColor(0, 0, 0);
-    doc.text(isWithoutLot ? 'MOHIT HOSIERY — W/O LOT ISSUE' : 'MOHIT HOSIERY', im, y + 14);
+    doc.text(isWithoutLot ? 'MOHIT HOSIERY — W/O BOM ISSUE' : 'MOHIT HOSIERY', im, y + 14);
 
     const effectiveMaterialMode = String(slipNo || '').toLowerCase().startsWith('tape')
       ? 'tape'
@@ -463,14 +469,14 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     const voucherSubTitle = isWithoutLot
-      ? `MATERIAL ISSUE SLIP (W/O LOT - ${modeLabel} ISSUE)`
+      ? `MATERIAL ISSUE SLIP (W/O BOM - ${modeLabel} ISSUE)`
       : `INTERNAL MATERIAL ISSUE VOUCHER — ${modeLabel}`;
     doc.text(voucherSubTitle, im, y + 27);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(80, 80, 80);
-    doc.text(isWithoutLot ? `Store Department • Direct Floor Stock Issue (W/O LOT - ${modeLabel})` : 'Store Department  •  Cutting Floor Material Movement', im, y + 39);
+    doc.text(isWithoutLot ? `Store Department • Direct Floor Stock Issue (W/O BOM - ${modeLabel})` : 'Store Department  •  Cutting Floor Material Movement', im, y + 39);
 
     // Right: Voucher No & Date (Clean aligned, no box)
     doc.setFont('helvetica', 'bold');
@@ -486,7 +492,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    doc.text(isWithoutLot ? `[ W/O LOT - ${modeLabel} ISSUE ]` : '[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
+    doc.text(isWithoutLot ? `[ W/O BOM - ${modeLabel} ISSUE ]` : '[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
 
     y += 50;
 
@@ -500,7 +506,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(isWithoutLot ? '1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O LOT)' : '1. LOT & PRODUCTION SPECIFICATIONS', im, y);
+    doc.text(isWithoutLot ? `1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O BOM - ${modeLabel})` : '1. LOT & PRODUCTION SPECIFICATIONS', im, y);
     y += 15;
 
     const halfW = iw / 2;
@@ -530,12 +536,16 @@ export default function BoneIssueView({
 
     // Row specifications
     if (isWithoutLot) {
-      drawSpec('Issue Mode', 'WITHOUT LOT (Direct Floor Issue)', im, y);
+      drawSpec('Lot Number', `LOT #${lotNo || '—'}`, im, y);
       drawSpec('Issue Quantity', `${issuePcs} Pcs`, im + halfW, y);
       y += 18;
 
-      drawSpec('Style / Item', style || 'Floor Issue', im, y);
-      drawSpec('Department', 'CUTTING FLOOR', im + halfW, y);
+      drawSpec('Issue Mode', `WITHOUT BOM (${modeLabel} Floor Issue)`, im, y);
+      drawSpec('Style / Item', style || 'Floor Issue', im + halfW, y);
+      y += 18;
+
+      drawSpec('Department', 'CUTTING FLOOR', im, y);
+      drawSpec('Supervisor Name', supervisorName || 'ROHIT / MONU', im + halfW, y);
       y += 18;
 
       drawSpec('Issued By', issuerName || 'STORE INCHARGE', im, y);
@@ -764,21 +774,22 @@ export default function BoneIssueView({
 
   // ── Generate Professional Bone Issue Voucher ─────────────────────────────
   const generateBoneIssueBill = async () => {
-    if (!lotDetails && !searchLotInput && !isWithoutLot) {
-      showToast('Please enter or search a Lot Number first, or switch to "Without Lot" mode.', 'error');
+    const enteredLotNo = (lotDetails?.lotNo || searchLotInput || '').trim();
+    if (!enteredLotNo) {
+      showToast('Please enter a Lot Number (Required in all modes).', 'error');
       return;
     }
 
-    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT LOT MODE)
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT BOM MODE)
     if (!isWithoutLot && bomStatus !== 'approved') {
       if (bomStatus === 'not_created') {
-        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Create BOM in Design View first, or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Create BOM in Design View first, or switch to "Without BOM" mode.', 'error');
       } else if (bomStatus === 'pending') {
-        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without BOM" mode.', 'error');
       } else if (bomStatus === 'rejected') {
-        showToast('Workflow Blocked: BOM was rejected by Admin! Revise in Design View or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM was rejected by Admin! Revise in Design View or switch to "Without BOM" mode.', 'error');
       } else {
-        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without BOM" mode.', 'error');
       }
       return;
     }
@@ -791,7 +802,7 @@ export default function BoneIssueView({
     setGenerating(true);
     try {
       const currentSlipNo = issueSlipNo || await fetchNextIssueSlipNo();
-      const currentLotNo = isWithoutLot ? '' : (lotDetails?.lotNo || searchLotInput.trim() || 'FLOOR-STOCK');
+      const currentLotNo = enteredLotNo.toUpperCase();
       const effectivePcs = parseInt(issuePcs, 10) || 600;
 
       const payload = {
@@ -889,7 +900,7 @@ export default function BoneIssueView({
 
       const doc = await createBoneIssuePDFDocument({
         slipNo: item.slipNo,
-        lotNo: isItemWithoutLot ? 'W/O-LOT' : item.lotNo,
+        lotNo: (item.lotNo && item.lotNo !== 'W/O-LOT') ? item.lotNo : '—',
         issuePcs: effectivePcs,
         width: item.width || '1.5 Inch (Standard)',
         tapeWidth: item.tapeWidth || '0.5 Inch (Standard)',
@@ -1065,7 +1076,7 @@ export default function BoneIssueView({
                     setLotDetails(null);
                     setSearchLotInput('');
                     setBomStatus('idle');
-                    showToast('Switched to "With Lot" Mode (BOM verification active).');
+                    showToast('Switched to "With BOM" Mode (BOM verification active).');
                   }}
                   style={{
                     padding: '8px 18px',
@@ -1082,25 +1093,28 @@ export default function BoneIssueView({
                     gap: '6px'
                   }}
                 >
-                  <ShieldCheck size={15} /> With Lot (BOM / PO Verified)
+                  <ShieldCheck size={15} /> With BOM (BOM Approved)
                 </button>
                 <button
                   type="button"
                   onClick={() => {
                     setIsWithoutLot(true);
                     setBomStatus('idle');
-                    setSearchLotInput('');
-                    setLotDetails({
-                      lotNo: '',
-                      style: withoutLotStyle || 'Floor Issue',
-                      quantity: issuePcs || 600,
-                      brand: 'Floor Issue',
-                      garmentType: withoutLotStyle || 'Floor Issue',
-                      fabric: 'Standard',
-                      shade: 'Standard'
-                    });
-                    if (!issuePcs) setIssuePcs(600);
-                    showToast('⚡ Switched to "Without Lot" Mode. All BOM & PO restrictions removed!');
+                    if (!lotDetails) {
+                      setLotDetails({
+                        lotNo: searchLotInput.trim() || '',
+                        style: withoutLotStyle || 'Floor Issue',
+                        quantity: issuePcs || 0,
+                        brand: 'Floor Issue',
+                        garmentType: withoutLotStyle || 'Floor Issue',
+                        fabric: 'Standard',
+                        shade: 'Standard'
+                      });
+                    }
+                    if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                      handleSearchLot(searchLotInput.trim());
+                    }
+                    showToast('⚡ Switched to "Without BOM" Mode. All BOM & PO restrictions removed!');
                   }}
                   style={{
                     padding: '8px 18px',
@@ -1117,19 +1131,19 @@ export default function BoneIssueView({
                     gap: '6px'
                   }}
                 >
-                  <Zap size={15} /> Without Lot (Direct Floor Issue - No Restriction)
+                  <Zap size={15} /> Without BOM (Direct Floor Issue - No Restriction)
                 </button>
               </div>
             </div>
 
             <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0369a1' }}>
               {isWithoutLot
-                ? '⚡ Without Lot: Direct floor issue unlocked. No BOM or PO restrictions!'
-                : '🏷️ With Lot: Search and verify Lot against approved BOM.'}
+                ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
+                : '🏷️ With BOM: Search and verify Lot against approved BOM.'}
             </span>
           </div>
 
-          {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT LOT VS WITH LOT */}
+          {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT BOM VS WITH BOM */}
           <div className="panel" style={{
             padding: '22px 24px',
             borderRadius: '16px',
@@ -1155,30 +1169,31 @@ export default function BoneIssueView({
                       alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
                     }}>1</span>
                     <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
-                      Direct Floor Movement Details (Without Lot)
+                      Direct Floor Movement Details (Without BOM)
                     </h3>
                   </div>
                   <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
                     Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
-                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT LOT</span>
+                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT BOM</span>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-                  {/* Optional Reference */}
+                  {/* Lot Number (Required) */}
                   <div>
                     <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      REFERENCE / TAG (OPTIONAL):
+                      LOT NUMBER (REQUIRED) <span style={{ color: '#dc2626' }}>*</span>:
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Floor Cutting / Sample / Lot #"
+                      placeholder="Enter Lot # (e.g. 62114)"
                       value={searchLotInput}
                       onChange={(e) => setSearchLotInput(e.target.value)}
+                      required
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
                         border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
                       }}
                     />
                   </div>
@@ -1209,8 +1224,17 @@ export default function BoneIssueView({
                     <input
                       type="number"
                       min="1"
-                      value={issuePcs || 600}
-                      onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      placeholder="Enter Target Cutting Pcs"
+                      value={issuePcs}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === '') {
+                          setIssuePcs('');
+                        } else {
+                          const parsed = parseInt(val, 10);
+                          setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
+                        }
+                      }}
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
                         border: '1.5px solid #fdba74', background: '#ffffff',
@@ -1924,10 +1948,10 @@ export default function BoneIssueView({
                     }}>
                       <div>
                         <span style={{ fontSize: '11px', color: '#c2410c', fontWeight: '800', textTransform: 'uppercase', display: 'block' }}>
-                          ISSUE MODE & ITEM
+                          ISSUE MODE & LOT
                         </span>
                         <strong style={{ fontSize: '13px', color: '#9a3412' }}>
-                          Without Lot — {withoutLotStyle || 'Floor Issue'}
+                          Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
                         </strong>
                       </div>
                       <span style={{ fontSize: '11px', fontWeight: '800', background: '#ea580c', color: '#ffffff', padding: '3px 8px', borderRadius: '4px' }}>
@@ -2047,7 +2071,7 @@ export default function BoneIssueView({
                     border: isWithoutLot ? '1px solid #fed7aa' : '1px solid #bae6fd',
                     marginTop: '4px'
                   }}>
-                    Issue Summary: <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} {isWithoutLot ? '(Direct Floor Issue - Without Lot)' : `for LOT #${lotDetails?.lotNo || searchLotInput || '—'}`}
+                    Issue Summary: <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} {isWithoutLot ? '(Direct Floor Issue - Without BOM)' : `for LOT #${lotDetails?.lotNo || searchLotInput || '—'}`}
                   </div>
                 </div>
 
@@ -2057,7 +2081,7 @@ export default function BoneIssueView({
               <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '13px', color: '#64748b' }}>
                   <span>
-                    Issuing <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} to <strong>{receiverName || 'Cutting Master'}</strong> {isWithoutLot ? '(Without Lot ✓)' : '(BOM Approved ✓)'}
+                    Issuing <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} to <strong>{receiverName || 'Cutting Master'}</strong> {isWithoutLot ? '(Without BOM ✓)' : '(BOM Approved ✓)'}
                   </span>
                 </div>
 
@@ -2229,24 +2253,26 @@ export default function BoneIssueView({
                           {item.date}
                         </td>
                         <td style={{ padding: '10px 12px' }}>
-                          {Boolean(item.isWithoutLot || !item.lotNo || item.lotNo === 'W/O-LOT' || item.lotNo === 'W/O-PO-FLOOR' || String(item.slipNo || '').toLowerCase().includes('-w/o-')) ? (
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '2px 8px',
-                              background: '#fff7ed',
-                              color: '#c2410c',
-                              border: '1px solid #fed7aa',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '800'
-                            }}>
-                              W/O LOT
-                            </span>
+                          {Boolean(item.isWithoutLot || String(item.slipNo || '').toLowerCase().includes('-w/o-')) ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                                {item.lotNo && item.lotNo !== 'W/O-LOT' && item.lotNo !== 'W/O-PO-FLOOR' ? `LOT #${item.lotNo}` : 'LOT #—'}
+                              </span>
+                              <span style={{
+                                padding: '2px 6px',
+                                background: '#fff7ed',
+                                color: '#c2410c',
+                                border: '1px solid #fed7aa',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: '800'
+                              }}>
+                                W/O BOM
+                              </span>
+                            </div>
                           ) : (
                             <span style={{ fontWeight: '700', color: '#0f172a' }}>
-                              LOT #{item.lotNo}
+                              LOT #{item.lotNo || '—'}
                             </span>
                           )}
                         </td>
@@ -2420,10 +2446,15 @@ export default function BoneIssueView({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px' }}>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>
-                      {generatedSlipData.isWithoutLot ? 'ISSUE MODE' : 'LOT NUMBER'}
+                      {generatedSlipData.isWithoutLot ? 'LOT NUMBER & MODE' : 'LOT NUMBER'}
                     </span>
-                    <strong style={{ color: generatedSlipData.isWithoutLot ? '#ea580c' : '#0f172a' }}>
-                      {generatedSlipData.isWithoutLot ? '⚡ WITHOUT LOT (Floor Issue)' : `LOT #${generatedSlipData.lotNo}`}
+                    <strong style={{ color: '#0f172a' }}>
+                      LOT #{generatedSlipData.lotNo || '—'}
+                      {generatedSlipData.isWithoutLot && (
+                        <span style={{ marginLeft: '6px', fontSize: '11px', color: '#ea580c', background: '#fff7ed', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                          ⚡ WITHOUT BOM
+                        </span>
+                      )}
                     </strong>
                   </div>
                   <div>

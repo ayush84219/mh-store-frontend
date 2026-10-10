@@ -20,6 +20,9 @@ export const getSortedMaterialsForBom = (bomItem, materials = []) => {
     const mCode = (m.itemCode || '').toLowerCase();
 
     let s = 0;
+    if (nameLower.includes('elastic') && (mCat.includes('elastic') || mName.includes('elastic'))) {
+      s += 500; // Super high priority for elastic materials
+    }
     if (descLower && (mName.includes(descLower) || descLower.includes(mName))) s += 100;
     if (nameLower && (mName.includes(nameLower) || mCat.includes(nameLower))) s += 50;
     if (detailLower && isNaN(Number(detailLower)) && (mName.includes(detailLower) || mCat.includes(detailLower))) s += 30;
@@ -42,12 +45,19 @@ function SearchableBomMaterialSelect({
   bomRow,
   placeholder = "— Select or Search Material —"
 }) {
+  const isElasticRow = (bomRow?.name || '').toLowerCase().includes('elastic');
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [onlyElastic, setOnlyElastic] = useState(isElasticRow);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 380, isAbove: false });
   const containerRef = useRef(null);
   const dropdownRef = useRef(null);
   const searchInputRef = useRef(null);
+
+  // Keep onlyElastic synced if bomRow switches
+  useEffect(() => {
+    if (isElasticRow) setOnlyElastic(true);
+  }, [isElasticRow]);
 
   const matchedMat = materials.find(m => String(m.id) === String(value));
 
@@ -97,18 +107,21 @@ function SearchableBomMaterialSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  // Sort & filter materials based on search query
+  // Sort & filter materials based on search query and elastic category
   const sorted = getSortedMaterialsForBom(bomRow, materials);
+  const baseList = (isElasticRow && onlyElastic)
+    ? sorted.filter(m => (m.category || '').toLowerCase().includes('elastic') || (m.name || '').toLowerCase().includes('elastic'))
+    : sorted;
   const q = searchQuery.toLowerCase().trim();
   const filtered = q
-    ? sorted.filter(m => {
+    ? baseList.filter(m => {
         const name = (m.name || '').toLowerCase();
         const cat = (m.category || '').toLowerCase();
         const code = (m.itemCode || m.stCode || '').toLowerCase();
         const color = (m.color || '').toLowerCase();
         return name.includes(q) || cat.includes(q) || code.includes(q) || color.includes(q);
       })
-    : sorted;
+    : baseList;
 
   return (
     <div ref={containerRef} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
@@ -243,6 +256,86 @@ function SearchableBomMaterialSelect({
             )}
           </div>
 
+          {/* Elastic Category Filter Banner & 3 Types Quick Shortcuts */}
+          {isElasticRow && (
+            <div style={{
+              background: '#f0fdf4',
+              border: '1.5px solid #86efac',
+              borderRadius: '8px',
+              padding: '8px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '6px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '11px', fontWeight: '800', color: '#047857' }}>
+                  ⚡ {onlyElastic ? 'Elastic Category (Filtered)' : 'All Inventory Materials'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setOnlyElastic(!onlyElastic)}
+                  style={{
+                    background: '#ffffff',
+                    border: '1px solid #86efac',
+                    borderRadius: '4px',
+                    padding: '2px 8px',
+                    fontSize: '10.5px',
+                    fontWeight: '700',
+                    color: '#047857',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {onlyElastic ? 'Show All Categories' : 'Show Only Elastic'}
+                </button>
+              </div>
+
+              {/* 3 Quick Select Types with Divisors */}
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                {[
+                  { label: '1" (÷ 25)', match: '1' },
+                  { label: '1.5" (÷ 23)', match: '1.5' },
+                  { label: '2" (÷ 23)', match: '2' }
+                ].map(item => {
+                  const targetMat = materials.find(m => {
+                    const n = (m.name || '').toLowerCase();
+                    const c = (m.category || '').toLowerCase();
+                    if (!c.includes('elastic') && !n.includes('elastic')) return false;
+                    if (item.match === '1.5') return n.includes('1.5');
+                    if (item.match === '2') return n.includes('2') && !n.includes('1.5');
+                    return n.includes('1') && !n.includes('1.5');
+                  });
+                  return (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => {
+                        if (targetMat) {
+                          onChange(targetMat.id);
+                          setIsOpen(false);
+                          setSearchQuery('');
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: '4px 6px',
+                        borderRadius: '5px',
+                        border: '1px solid #10b981',
+                        background: '#ffffff',
+                        color: '#047857',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                      title={targetMat ? `Click to map ${targetMat.name} (${targetMat.id})` : 'Type'}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Header count info */}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 4px', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
             <span>{filtered.length} inventory items available</span>
@@ -353,7 +446,7 @@ function SearchableBomMaterialSelect({
                         <div style={{ fontWeight: '600', fontSize: '12px', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                           {m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''}
                         </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px', flexWrap: 'wrap' }}>
                           <span style={{
                             padding: '0 4px',
                             borderRadius: '3px',
@@ -375,6 +468,19 @@ function SearchableBomMaterialSelect({
                           }}>
                             📁 {m.category || 'Accessory'}
                           </span>
+                          {/* Elastic Roll Divisor Indicator */}
+                          {((m.category || '').toLowerCase().includes('elastic') || (m.name || '').toLowerCase().includes('elastic')) && (
+                            <span style={{
+                              padding: '0 5px',
+                              borderRadius: '3px',
+                              backgroundColor: '#ecfdf5',
+                              color: '#047857',
+                              fontSize: '10.5px',
+                              fontWeight: '800'
+                            }}>
+                              {(m.name || '').includes('1.5') ? '÷ 23 (1.5" Elastic)' : (m.name || '').includes('2') ? '÷ 23 (2" Elastic)' : '÷ 25 (1" Elastic)'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>

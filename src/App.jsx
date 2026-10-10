@@ -2909,6 +2909,7 @@ export default function App() {
 
               {activeTab === 'settings' && currentUser?.role === 'Admin' && (
                 <SettingsView
+                  currentUser={currentUser}
                   vendors={vendors}
                   onAddVendor={handleAddVendor}
                   onDeleteVendor={handleDeleteVendor}

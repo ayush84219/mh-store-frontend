@@ -3,7 +3,7 @@ import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
-  ShieldCheck, Lock, ExternalLink, Ruler
+  ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -33,12 +33,13 @@ export default function ElasticIssueView({
   const [loadingDesigns, setLoadingDesigns] = useState(false);
 
   // Step 1.5: Automatic Size to Meter Backend Calculation State & Switch Mode
-  const [issuePcs, setIssuePcs] = useState(0);
+  const [issuePcs, setIssuePcs] = useState('');
   const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'bone' | 'both' | 'all'
   const [isWithoutLot, setIsWithoutLot] = useState(false); // Without Lot / Direct Floor Issue Mode
   const [isWithoutPo, setIsWithoutPo] = useState(false); // W/O PO (Direct Floor Issue) Mode
   const withoutLotActive = isWithoutLot || isWithoutPo;
   const [boneRollCount, setBoneRollCount] = useState(1);
+  const [boneWeightKg, setBoneWeightKg] = useState('2.50');
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customBoneWidth, setCustomBoneWidth] = useState('');
   const [withoutLotStyle, setWithoutLotStyle] = useState('Lower / Tracksuit');
@@ -67,6 +68,11 @@ export default function ElasticIssueView({
   const [customTapeWidth, setCustomTapeWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
 
+  const effectiveWidth = elasticWidth === 'Custom' ? (customWidth || '1 Inch') : elasticWidth;
+  const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
+  const effectiveBoneWidth = boneWidth === 'Custom' ? (customBoneWidth || '1.5 Inch') : boneWidth;
+  const effectiveDivisor = (String(effectiveWidth).includes('1.5') || String(effectiveWidth).includes('2')) ? 23 : 25;
+
   // Issuer, Receiver & Supervisor
   const [issuerName, setIssuerName] = useState(currentUser?.name || '');
   const [receiverName, setReceiverName] = useState('');
@@ -91,6 +97,142 @@ export default function ElasticIssueView({
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Materials list & mapped items (Elastic, Tape, Bone)
+  const [materials, setMaterials] = useState([]);
+  const [elasticMaterialName, setElasticMaterialName] = useState('Elastic');
+  const [selectedElasticMaterialId, setSelectedElasticMaterialId] = useState('');
+  const [tapeMaterialName, setTapeMaterialName] = useState('Tape');
+  const [selectedTapeMaterialId, setSelectedTapeMaterialId] = useState('');
+  const [boneMaterialName, setBoneMaterialName] = useState('Bone Pocketing');
+  const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('');
+
+  // Fetch materials to support mapping & inventory display
+  const fetchMaterials = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/materials`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setMaterials(data);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch materials in ElasticIssueView:', e);
+    }
+  };
+
+  // Filter materials to only show Elastic category
+  const elasticMaterials = useMemo(() => {
+    return (materials || []).filter(m => 
+      (m.category || '').toLowerCase().includes('elastic') || 
+      (m.name || '').toLowerCase().includes('elastic')
+    );
+  }, [materials]);
+
+  // Filter materials to show Tape category
+  const tapeMaterials = useMemo(() => {
+    return (materials || []).filter(m => 
+      (m.category || '').toLowerCase().includes('tape') || 
+      (m.name || '').toLowerCase().includes('tape')
+    );
+  }, [materials]);
+
+  // Filter materials to show Bone category
+  const boneMaterials = useMemo(() => {
+    return (materials || []).filter(m => 
+      (m.category || '').toLowerCase().includes('bone') || 
+      (m.name || '').toLowerCase().includes('bone')
+    );
+  }, [materials]);
+
+  // Active Selected Material Objects from Inventory
+  const currentElasticMaterial = useMemo(() => {
+    return (elasticMaterials || []).find(m => String(m.id) === String(selectedElasticMaterialId)) || null;
+  }, [elasticMaterials, selectedElasticMaterialId]);
+
+  const currentTapeMaterial = useMemo(() => {
+    return (tapeMaterials || []).find(m => String(m.id) === String(selectedTapeMaterialId)) || null;
+  }, [tapeMaterials, selectedTapeMaterialId]);
+
+  const currentBoneMaterial = useMemo(() => {
+    return (boneMaterials || []).find(m => String(m.id) === String(selectedBoneMaterialId)) || null;
+  }, [boneMaterials, selectedBoneMaterialId]);
+
+  // Handler for selecting an Elastic item
+  const handleSelectElasticMaterial = (id) => {
+    setSelectedElasticMaterialId(id);
+    const mat = elasticMaterials.find(m => String(m.id) === String(id));
+    if (mat) {
+      setElasticMaterialName(mat.name);
+      const n = (mat.name || '').toLowerCase();
+      if (n.includes('1.5')) setElasticWidth('1.5 Inch');
+      else if (n.includes('2')) setElasticWidth('2 Inch');
+      else setElasticWidth('1 Inch');
+    }
+  };
+
+  // Handler for selecting a Tape item
+  const handleSelectTapeMaterial = (id) => {
+    setSelectedTapeMaterialId(id);
+    const mat = tapeMaterials.find(m => String(m.id) === String(id));
+    if (mat) {
+      setTapeMaterialName(mat.name);
+    }
+  };
+
+  // Handler for selecting a Bone item
+  const handleSelectBoneMaterial = (id) => {
+    setSelectedBoneMaterialId(id);
+    const mat = boneMaterials.find(m => String(m.id) === String(id));
+    if (mat) {
+      setBoneMaterialName(mat.name);
+    }
+  };
+
+  // Auto-link matching elastic material on load or when width changes if not manually selected
+  useEffect(() => {
+    if (elasticMaterials.length > 0 && !selectedElasticMaterialId) {
+      const match = elasticMaterials.find(m => {
+        const n = (m.name || '').toLowerCase();
+        if (effectiveWidth.includes('1.5')) return n.includes('1.5');
+        if (effectiveWidth.includes('2')) return n.includes('2') && !n.includes('1.5');
+        return n.includes('1') && !n.includes('1.5');
+      }) || elasticMaterials[0];
+      if (match) {
+        setSelectedElasticMaterialId(match.id);
+        if (!elasticMaterialName || elasticMaterialName === 'Elastic') {
+          setElasticMaterialName(match.name);
+        }
+      }
+    }
+  }, [elasticMaterials, effectiveWidth]);
+
+  // Auto-link tape material on load
+  useEffect(() => {
+    if (tapeMaterials.length > 0 && !selectedTapeMaterialId) {
+      const firstTape = tapeMaterials[0];
+      if (firstTape) {
+        setSelectedTapeMaterialId(firstTape.id);
+        if (!tapeMaterialName || tapeMaterialName === 'Tape') {
+          setTapeMaterialName(firstTape.name);
+        }
+      }
+    }
+  }, [tapeMaterials]);
+
+  // Auto-link bone material on load
+  useEffect(() => {
+    if (boneMaterials.length > 0 && !selectedBoneMaterialId) {
+      const firstBone = boneMaterials[0];
+      if (firstBone) {
+        setSelectedBoneMaterialId(firstBone.id);
+        if (!boneMaterialName || boneMaterialName === 'Bone Pocketing') {
+          setBoneMaterialName(firstBone.name);
+        }
+      }
+    }
+  }, [boneMaterials]);
 
   // Fetch designs to verify BOM existence and approval status
   const fetchDesigns = async () => {
@@ -169,6 +311,7 @@ export default function ElasticIssueView({
     fetchNextIssueSlipNo();
     loadIssueHistory();
     fetchDesigns();
+    fetchMaterials();
   }, []);
 
   // Update slip number when withoutLotActive or materialMode changes
@@ -182,7 +325,7 @@ export default function ElasticIssueView({
     if (!trimmed || trimmed.length < 3) {
       return;
     }
-    if (lotDetails && String(lotDetails.lotNo || '').toLowerCase() === trimmed.toLowerCase()) {
+    if (lotDetails && String(lotDetails.lotNo || '').toLowerCase() === trimmed.toLowerCase() && lotDetails.quantity) {
       return;
     }
 
@@ -270,11 +413,22 @@ export default function ElasticIssueView({
     tSize = tapeSizeInput,
     tUnit = tapeUnit,
     targetLot = lotDetails,
-    customPcs = issuePcs
+    customPcs = issuePcs,
+    eWidth = elasticWidth
   ) => {
     try {
       setCalculating(true);
-      const pcs = parseInt(customPcs || targetLot?.quantity || 600, 10);
+      const pcs = parseInt(customPcs || targetLot?.quantity || 0, 10);
+      if (!pcs || pcs <= 0) {
+        setCalcResult(prev => ({
+          ...prev,
+          totalElasticMtr: 0,
+          totalTapeMtr: 0,
+          recommendedRolls: 0
+        }));
+        setRollCount(0);
+        return;
+      }
       const res = await fetch(`${getBackendUrl()}/api/elastic/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -285,13 +439,14 @@ export default function ElasticIssueView({
           elasticUnit: eUnit,
           unit: eUnit,
           tapeSizeInput: tSize,
-          tapeUnit: tUnit
+          tapeUnit: tUnit,
+          elasticWidth: eWidth
         })
       });
       if (res.ok) {
         const data = await res.json();
         setCalcResult(data);
-        if (data.recommendedRolls && (!rollCount || rollCount === 1)) {
+        if (data.recommendedRolls) {
           setRollCount(data.recommendedRolls);
         }
       }
@@ -302,10 +457,10 @@ export default function ElasticIssueView({
     }
   };
 
-  // Re-calculate automatically when size, unit, tape, lot, or issue pcs changes
+  // Re-calculate automatically when size, unit, tape, lot, issue pcs, or elasticWidth changes
   useEffect(() => {
-    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs);
-  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs]);
+    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth);
+  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth]);
 
   // Save new issue to history & database table
   const saveToHistory = async (record) => {
@@ -361,14 +516,31 @@ export default function ElasticIssueView({
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
             date: record.date,
-            materials: [{
-              name: 'Elastic Waistband Roll',
-              rolls: record.rolls,
-              shade: record.shade,
-              width: record.width,
-              elasticPerPcMtr: calcResult.elasticPerPcMtr,
-              totalElasticMtr: calcResult.totalElasticMtr
-            }]
+            materials: [
+              (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') ? {
+                name: record.elasticMaterialName || elasticMaterialName || 'Elastic Waistband Roll',
+                materialId: record.selectedElasticMaterialId || selectedElasticMaterialId || '',
+                rolls: record.rolls,
+                shade: record.shade,
+                width: record.width,
+                elasticPerPcMtr: calcResult.elasticPerPcMtr,
+                totalElasticMtr: calcResult.totalElasticMtr
+              } : null,
+              (materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') ? {
+                name: record.tapeMaterialName || tapeMaterialName || 'Tape Roll',
+                materialId: record.selectedTapeMaterialId || selectedTapeMaterialId || '',
+                rolls: record.tapeRollCount || 1,
+                width: record.tapeWidth,
+                tapePerPcMtr: calcResult.tapePerPcMtr,
+                totalTapeMtr: calcResult.totalTapeMtr
+              } : null,
+              (materialMode === 'bone' || materialMode === 'all') ? {
+                name: record.boneMaterialName || boneMaterialName || 'Bone Pocketing Roll',
+                materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
+                rolls: record.boneRolls || boneRollCount || 1,
+                width: record.boneWidth
+              } : null
+            ].filter(Boolean)
           })
         });
       } catch (_) {}
@@ -403,6 +575,34 @@ export default function ElasticIssueView({
         setBomDesign(null);
       } else {
         setBomDesign(matched);
+        const elasticBomRow = (matched.bom || []).find(b => (b.name || '').toLowerCase().includes('elastic'));
+        if (elasticBomRow && elasticBomRow.materialId) {
+          setSelectedElasticMaterialId(elasticBomRow.materialId);
+          const mappedMat = (materials || []).find(m => String(m.id) === String(elasticBomRow.materialId));
+          if (mappedMat) {
+            setElasticMaterialName(mappedMat.name);
+            const n = (mappedMat.name || '').toLowerCase();
+            if (n.includes('1.5')) setElasticWidth('1.5 Inch');
+            else if (n.includes('2')) setElasticWidth('2 Inch');
+            else if (n.includes('1')) setElasticWidth('1 Inch');
+          }
+        }
+        const tapeBomRow = (matched.bom || []).find(b => (b.name || '').toLowerCase().includes('tape'));
+        if (tapeBomRow && tapeBomRow.materialId) {
+          setSelectedTapeMaterialId(tapeBomRow.materialId);
+          const mappedTape = (materials || []).find(m => String(m.id) === String(tapeBomRow.materialId));
+          if (mappedTape) {
+            setTapeMaterialName(mappedTape.name);
+          }
+        }
+        const boneBomRow = (matched.bom || []).find(b => (b.name || '').toLowerCase().includes('bone'));
+        if (boneBomRow && boneBomRow.materialId) {
+          setSelectedBoneMaterialId(boneBomRow.materialId);
+          const mappedBone = (materials || []).find(m => String(m.id) === String(boneBomRow.materialId));
+          if (mappedBone) {
+            setBoneMaterialName(mappedBone.name);
+          }
+        }
         const st = String(matched.status || '').trim().toLowerCase();
         if (st === 'approved') {
           setBomStatus('approved');
@@ -444,8 +644,9 @@ export default function ElasticIssueView({
       const data = await res.json();
       setLotDetails(data);
       const cuttingQty = parseInt(data.quantity || 0, 10);
-      setIssuePcs(cuttingQty > 0 ? cuttingQty : 600);
-      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, data, cuttingQty > 0 ? cuttingQty : 600);
+      const effQty = cuttingQty > 0 ? cuttingQty : (issuePcs || '');
+      setIssuePcs(effQty);
+      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, data, effQty || 0);
 
       // Extract primary shade if available
       let primaryShade = '';
@@ -456,27 +657,32 @@ export default function ElasticIssueView({
       }
       setSelectedShade(primaryShade);
 
-      setRemarks(`Internal Elastic waistband issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${cuttingQty || 600} Pcs.`);
+      // Automatically sync style and garment info into withoutLotStyle so "STYLE / GARMENT ITEM" updates
+      if (data.style || data.garmentType) {
+        setWithoutLotStyle(data.style || data.garmentType);
+      }
+
+      setRemarks(`Internal Elastic waistband issue for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}). Cutting Qty: ${effQty || 0} Pcs.`);
 
       setRecentLots(prev => {
         const updated = [lotToQuery, ...prev.filter(l => l !== lotToQuery)];
         return updated.slice(0, 6);
       });
 
-      showToast(`Lot ${data.lotNo || lotToQuery} details loaded.`);
+      showToast(`Lot ${data.lotNo || lotToQuery} details loaded (${effQty || 0} Pcs).`);
     } catch (err) {
       console.warn('Lot search warning:', err);
       setLotError(err.message || 'Lot details not found in Google Sheets / Cutting Matrix.');
-      setLotDetails(null);
-      setIssuePcs(0);
+      if (!withoutLotActive) {
+        setLotDetails(null);
+        setIssuePcs('');
+      }
     } finally {
       setSearchingLot(false);
     }
   };
 
-  const effectiveWidth = elasticWidth === 'Custom' ? (customWidth || '1 Inch') : elasticWidth;
-  const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
-  const effectiveBoneWidth = boneWidth === 'Custom' ? (customBoneWidth || '1.5 Inch') : boneWidth;
+
 
   // ── Build Original Issue Bill / PO PDF Document (Clean B&W Layout) ──────
   const createElasticIssuePDFDocument = async (data) => {
@@ -493,22 +699,28 @@ export default function ElasticIssueView({
       brand = 'Mohit Hosiery',
       garmentType = 'LOWER',
       fabric = 'Cotton Poly Blend',
-      quantity = 600,
+      quantity = 0,
       shade = 'Standard',
       size = 'M, L, XL, 2XL',
       width = '1 Inch (Standard)',
       tapeWidth = '0.5 Inch (Standard)',
       boneWidth = '1.5 Inch (Standard)',
       boneRolls = 1,
+      boneWeightKg = '2.50',
       elasticPerPcMtr = 1.27,
-      totalElasticMtr = 762,
+      totalElasticMtr = 0,
       tapePerPcMtr = 0.62,
-      totalTapeMtr = 372,
+      totalTapeMtr = 0,
       elasticSizeInput = '50',
       elasticUnit = 'inch',
       tapeSizeInput = '62',
-      tapeUnit = 'cm',
       materialMode = 'elastic',
+      elasticMaterialName = 'Elastic Waistband Roll',
+      selectedElasticMaterialId = '',
+      tapeMaterialName = 'Tape Roll (Drawcord Tape)',
+      selectedTapeMaterialId = '',
+      boneMaterialName = 'Bone Pocketing / Piping Roll',
+      selectedBoneMaterialId = '',
       formulaExplanation = '',
       remarks = ''
     } = data;
@@ -566,14 +778,14 @@ export default function ElasticIssueView({
     doc.setFontSize(10);
     doc.setTextColor(0, 0, 0);
     const docTitle = withoutLotMode
-      ? `MATERIAL ISSUE SLIP (W/O LOT - ${modeLabel} ISSUE)`
+      ? `MATERIAL ISSUE SLIP (W/O BOM - ${modeLabel} ISSUE)`
       : `MATERIAL ISSUE BILL / PURCHASE ORDER (${modeLabel} ORIGINAL)`;
     doc.text(docTitle, im + 12, y + 35);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8.5);
     doc.setTextColor(80, 80, 80);
-    doc.text(withoutLotMode ? `Store & Accessories Department • Direct Floor Stock Issue (W/O LOT - ${modeLabel})` : `Store & Accessories Department • Production Floor Issue (${modeLabel})`, im + 12, y + 48);
+    doc.text(withoutLotMode ? `Store & Accessories Department • Direct Floor Stock Issue (W/O BOM - ${modeLabel})` : `Store & Accessories Department • Production Floor Issue (${modeLabel})`, im + 12, y + 48);
 
     // Right Header Information Box (Pure Black & White)
     doc.setFont('helvetica', 'bold');
@@ -589,7 +801,7 @@ export default function ElasticIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(withoutLotMode ? `[ W/O LOT - ${modeLabel} ISSUE ]` : `[ ORIGINAL ISSUE BILL - ${modeLabel} ]`, pw - im - 12, y + 48, { align: 'right' });
+    doc.text(withoutLotMode ? `[ W/O BOM - ${modeLabel} ISSUE ]` : `[ ORIGINAL ISSUE BILL - ${modeLabel} ]`, pw - im - 12, y + 48, { align: 'right' });
 
     y += 68;
 
@@ -603,7 +815,7 @@ export default function ElasticIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(withoutLotMode ? `1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O LOT - ${modeLabel})` : `1. PRODUCTION & LOT SPECIFICATIONS (${modeLabel})`, im + 8, y + 12);
+    doc.text(withoutLotMode ? `1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O BOM - ${modeLabel})` : `1. PRODUCTION & LOT SPECIFICATIONS (${modeLabel})`, im + 8, y + 12);
     
     // Spacing so text does not overwrite the section header
     y += 30;
@@ -623,20 +835,24 @@ export default function ElasticIssueView({
     };
 
     if (withoutLotMode) {
-      drawField('Issue Mode', `WITHOUT LOT (${modeLabel} Floor Issue)`, im + 6, y);
-      drawField('Issue Quantity', `${quantity || 600} Pcs`, im + colW + 6, y);
+      drawField('Lot Number', `LOT #${lotNo || '—'}`, im + 6, y);
+      drawField('Issue Quantity', `${quantity || 0} Pcs`, im + colW + 6, y);
       y += 18;
 
-      drawField('Item / Style Name', style || garmentType || 'LOWER', im + 6, y);
-      drawField('Supervisor Name', supervisorName || 'ROHIT / MONU', im + colW + 6, y);
+      drawField('Issue Mode', `WITHOUT BOM (${modeLabel} Floor Issue)`, im + 6, y);
+      drawField('Item / Style Name', style || garmentType || 'LOWER', im + colW + 6, y);
       y += 18;
 
       drawField('Department', 'CUTTING FLOOR', im + 6, y);
-      drawField('Issued By', issuerName || 'STORE INCHARGE', im + colW + 6, y);
+      drawField('Supervisor Name', supervisorName || 'ROHIT / MONU', im + colW + 6, y);
+      y += 18;
+
+      drawField('Issued By', issuerName || 'STORE INCHARGE', im + 6, y);
+      drawField('Received By', receiverName || 'CUTTING MASTER', im + colW + 6, y);
       y += 24;
     } else {
       drawField('Lot Number', `LOT #${lotNo}`, im + 6, y);
-      drawField('Total Cutting Quantity', `${quantity || 600} Pcs`, im + colW + 6, y);
+      drawField('Total Cutting Quantity', `${quantity || 0} Pcs`, im + colW + 6, y);
       y += 18;
 
       drawField('Item / Style Name', style || garmentType || 'LOWER', im + 6, y);
@@ -686,9 +902,14 @@ export default function ElasticIssueView({
     let itemIdx = 1;
     let grandTotalMtr = 0;
 
+    const effDiv = (String(width || '').includes('1.5') || String(width || '').includes('2')) ? 23 : 25;
+    const effRolls = data.rolls || Math.ceil((parseFloat(totalElasticMtr) || 0) / effDiv) || 1;
+    const effTapeRolls = Math.ceil((quantity || 0) / 45) || 1;
+    const effBoneTot = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${boneRolls || 1} Kg`);
+
     // Row: Elastic (Shown if elastic, both, or all)
     if (effectiveMode === 'elastic' || effectiveMode === 'both' || effectiveMode === 'all') {
-      const rowH = 24;
+      const rowH = 26;
       doc.setFillColor(255, 255, 255);
       doc.rect(im, y, iw, rowH, 'F');
       doc.setDrawColor(210, 210, 210);
@@ -698,22 +919,31 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(0, 0, 0);
-      doc.text(String(itemIdx++), im + 6, y + 15);
+      doc.text(String(itemIdx++), im + 6, y + 16);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Elastic Waistband Roll', im + 24, y + 15);
+      const effElasticTitle = selectedElasticMaterialId 
+        ? `${elasticMaterialName || 'Elastic Waistband Roll'} [${selectedElasticMaterialId}]`
+        : (elasticMaterialName || 'Elastic Waistband Roll');
+      doc.text(effElasticTitle, im + 24, y + 16);
 
       doc.setFont('helvetica', 'normal');
-      doc.text(width || '1 Inch (Standard)', im + 180, y + 15);
+      doc.text(width || '1 Inch (Standard)', im + 180, y + 16);
 
       doc.setFont('helvetica', 'bold');
-      doc.text(`${elasticPerPcMtr} Mtr (${elasticSizeInput} ${elasticUnit})`, im + 290, y + 15);
+      doc.text(`${elasticPerPcMtr} Mtr (${elasticSizeInput} ${elasticUnit})`, im + 290, y + 16);
 
-      doc.text(`${quantity || 600} Pcs`, im + 375, y + 15);
+      doc.text(`${quantity || 0} Pcs`, im + 375, y + 16);
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.text(`${totalElasticMtr} Mtr`, pw - im - 10, y + 15, { align: 'right' });
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`${totalElasticMtr} Mtr`, pw - im - 10, y + 10, { align: 'right' });
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(4, 120, 87);
+      doc.text(`= ${effRolls} ROLL(S)`, pw - im - 10, y + 20, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
 
       grandTotalMtr += parseFloat(totalElasticMtr) || 0;
       y += rowH;
@@ -734,19 +964,21 @@ export default function ElasticIssueView({
       doc.text(String(itemIdx++), im + 6, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Tape Roll (Drawcord Tape)', im + 24, y + 15);
-
+      const effTapeTitle = selectedTapeMaterialId 
+        ? `${tapeMaterialName || 'Tape Roll (Drawcord Tape)'} [${selectedTapeMaterialId}]`
+        : (tapeMaterialName || 'Tape Roll (Drawcord Tape)');
+      doc.text(effTapeTitle, im + 24, y + 15);
       doc.setFont('helvetica', 'normal');
       doc.text(tapeWidth || '0.5 Inch (Standard)', im + 180, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      doc.text(`${tapePerPcMtr} Mtr (${tapeSizeInput} ${tapeUnit})`, im + 290, y + 15);
+      doc.text(`Pcs / 45 Rule`, im + 290, y + 15);
 
-      doc.text(`${quantity || 600} Pcs`, im + 375, y + 15);
+      doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.text(`${totalTapeMtr} Mtr`, pw - im - 10, y + 15, { align: 'right' });
+      doc.text(`${effTapeRolls} Roll(s)`, pw - im - 10, y + 15, { align: 'right' });
 
       grandTotalMtr += parseFloat(totalTapeMtr) || 0;
       y += rowH;
@@ -767,19 +999,24 @@ export default function ElasticIssueView({
       doc.text(String(itemIdx++), im + 6, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('Bone Pocketing / Piping Roll', im + 24, y + 15);
+      const effBoneTitle = selectedBoneMaterialId 
+        ? `${boneMaterialName || 'Bone Pocketing / Piping Roll'} [${selectedBoneMaterialId}]`
+        : (boneMaterialName || 'Bone Pocketing / Piping Roll');
+      doc.text(effBoneTitle, im + 24, y + 15);
 
       doc.setFont('helvetica', 'normal');
       doc.text(boneWidth || '1.5 Inch (Standard)', im + 180, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      doc.text('18 CM Standard Cut', im + 290, y + 15);
+      doc.text('Direct Weight Issue', im + 290, y + 15);
 
-      doc.text(`${quantity || 600} Pcs`, im + 375, y + 15);
+      doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      doc.text(`${boneRolls || 1} Roll(s)`, pw - im - 10, y + 15, { align: 'right' });
+      const effBoneWeightVal = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${boneRolls || 1} Kg`);
+      const effBoneWeightStr = String(effBoneWeightVal).includes('Kg') ? effBoneWeightVal : `${effBoneWeightVal} Kg`;
+      doc.text(effBoneWeightStr, pw - im - 10, y + 15, { align: 'right' });
 
       y += rowH;
     }
@@ -802,10 +1039,12 @@ export default function ElasticIssueView({
     doc.setTextColor(0, 0, 0);
     doc.text(`TOTAL MATERIAL REQUIREMENT ON BILL (${modeLabel}):`, im + 8, y + 15);
 
-    doc.setFontSize(10);
+    doc.setFontSize(9.5);
     const totalDisplay = effectiveMode === 'bone'
-      ? `${boneRolls || 1} Roll(s)`
-      : `${grandTotalMtr.toFixed(2).replace(/\.00$/, '')} Mtr`;
+      ? `${String(effBoneTot).includes('Kg') ? effBoneTot : `${effBoneTot} Kg`} (Direct Weight Issue)`
+      : effectiveMode === 'tape'
+        ? `${((quantity || 0) / 45).toFixed(2)} Rolls  ===>  TOTAL = ${effTapeRolls} ROLL(S)`
+        : `${grandTotalMtr.toFixed(2).replace(/\.00$/, '')} Mtr / ${effDiv}  ===>  TOTAL = ${effRolls} ROLL(S)`;
     doc.text(totalDisplay, pw - im - 10, y + 15, { align: 'right' });
     y += totH + 18;
 
@@ -819,28 +1058,88 @@ export default function ElasticIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('3. FORMULA BREAKDOWN & INSTRUCTIONS', im + 8, y + 12);
+    doc.text(effectiveMode === 'bone' ? '3. ISSUE INSTRUCTIONS & ALLOCATION' : '3. FORMULA BREAKDOWN & INSTRUCTIONS', im + 8, y + 12);
     y += 24;
 
+    const boxH = 48;
     doc.setFillColor(255, 255, 255);
-    doc.rect(im, y, iw, 42, 'F');
+    doc.rect(im, y, iw, boxH, 'F');
     doc.setDrawColor(0, 0, 0);
     doc.setLineWidth(0.8);
-    doc.rect(im, y, iw, 42, 'S');
+    doc.rect(im, y, iw, boxH, 'S');
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(50, 50, 50);
-    const formText = effectiveMode === 'tape'
-      ? `${tapeSizeInput} ${tapeUnit} = ${tapePerPcMtr} m × ${quantity || 600} pcs = ${totalTapeMtr} m`
-      : effectiveMode === 'bone'
-        ? `18 CM Standard Cut × ${quantity || 600} pcs = ${boneRolls || 1} Roll(s)`
-        : (formulaExplanation || `${elasticSizeInput} ${elasticUnit} = ${elasticPerPcMtr} m × ${quantity || 600} pcs = ${totalElasticMtr} m`);
-    doc.text(`Conversion: ${formText}`, im + 8, y + 15);
+    if (effectiveMode === 'elastic') {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Step 1 (Meter Conversion): ${elasticSizeInput} ${elasticUnit} * 0.0254 = ${elasticPerPcMtr} Mtr/Pc  x  ${quantity || 0} Pcs = ${totalElasticMtr} Mtr`, im + 8, y + 14);
 
-    const remText = remarks || `Standard internal material issue bill for ${modeLabel} (${style || 'Garment'}).`;
-    doc.text(`Remarks: ${remText}`, im + 8, y + 30);
-    y += 54;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(4, 120, 87);
+      const exactElasticRolls = effDiv > 0 ? ((parseFloat(totalElasticMtr) || 0) / effDiv).toFixed(2) : effRolls;
+      doc.text(`Step 2 (Final Calculation): ${totalElasticMtr} Mtr / ${effDiv} Mtr = ${exactElasticRolls} Rolls  ===>  FINAL ISSUE = ${effRolls} ROLL(S) (${width || '1 Inch'})`, im + 8, y + 28);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      const remText = remarks || `Standard internal material issue bill for Elastic (${style || 'Garment'}). Cutting Qty: ${quantity || 0} Pcs.`;
+      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+
+    } else if (effectiveMode === 'tape') {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      const exactTapeRolls = ((quantity || 0) / 45).toFixed(2);
+      doc.text(`Step 1 (Tape Allocation): ${quantity || 0} Pcs / 45 Pcs per Roll = ${exactTapeRolls} Rolls`, im + 8, y + 14);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(29, 78, 216);
+      doc.text(`Step 2 (Final Calculation): Math.ceil(${exactTapeRolls})  ===>  FINAL ISSUE = ${effTapeRolls} ROLL(S) (${tapeWidth || '0.5 Inch'})`, im + 8, y + 28);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      const remText = remarks || `Standard internal material issue bill for Tape (${style || 'Garment'}). Cutting Qty: ${quantity || 0} Pcs.`;
+      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+
+    } else if (effectiveMode === 'bone') {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Step 1 (Bone Weight Allocation): Direct floor stock issue in Kilograms (Kg-Wise)`, im + 8, y + 14);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(3, 105, 161);
+      doc.text(`Step 2 (Final Floor Issue): Weight = ${effBoneTot}  ===>  FINAL ISSUE = ${effBoneTot}`, im + 8, y + 28);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      const remText = remarks || `Standard internal material issue bill for Bone (${style || 'Garment'}).`;
+      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+
+    } else {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Elastic: ${elasticSizeInput} ${elasticUnit} = ${elasticPerPcMtr}m * ${quantity}pcs = ${totalElasticMtr}m / ${effDiv} = ${effRolls} Rolls`, im + 8, y + 14);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(4, 120, 87);
+      doc.text(`Tape: ${quantity} Pcs / 45 = ${effTapeRolls} Rolls | Bone: ${effBoneTot}`, im + 8, y + 28);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Remarks: ${remarks || 'Standard internal combined material issue bill.'}`, im + 8, y + 41);
+    }
+
+    doc.setTextColor(0, 0, 0);
+    y += boxH + 14;
 
     // ── 4. VERIFICATION & SIGNATURES ──
     doc.setFillColor(242, 242, 242);
@@ -960,21 +1259,22 @@ export default function ElasticIssueView({
 
   // ── Generate Professional Original Issue Bill / PO / W/O PO Slip ─────────────────────────────
   const generateElasticIssueBill = async () => {
-    if (!lotDetails && !searchLotInput && !withoutLotActive) {
-      showToast('Please enter or search a Lot Number first, or switch to "Without Lot" mode.', 'error');
+    const enteredLotNo = (lotDetails?.lotNo || searchLotInput || '').trim();
+    if (!enteredLotNo) {
+      showToast('Please enter a Lot Number (Required in all modes).', 'error');
       return;
     }
 
-    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT LOT / W/O PO MODE)
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT BOM / W/O PO MODE)
     if (!withoutLotActive && bomStatus !== 'approved') {
       if (bomStatus === 'not_created') {
-        showToast('Workflow Blocked: BOM is not created for this Lot! Create BOM first or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM is not created for this Lot! Create BOM first or switch to "Without BOM" mode.', 'error');
       } else if (bomStatus === 'pending') {
-        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without BOM" mode.', 'error');
       } else if (bomStatus === 'rejected') {
-        showToast('Workflow Blocked: BOM was rejected! Revise in Design View or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM was rejected! Revise in Design View or switch to "Without BOM" mode.', 'error');
       } else {
-        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without Lot" mode.', 'error');
+        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without BOM" mode.', 'error');
       }
       return;
     }
@@ -996,20 +1296,27 @@ export default function ElasticIssueView({
       } else if (!currentSlipNo) {
         currentSlipNo = await fetchNextIssueSlipNo(false);
       }
-      const currentLotNo = withoutLotActive ? '' : (lotDetails?.lotNo || searchLotInput.trim() || 'FLOOR-STOCK');
-      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 600, 10);
-      const calculatedRolls = calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 762) / 25) || rollCount;
+      const currentLotNo = enteredLotNo.toUpperCase();
+      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+      const calculatedTapeRolls = Math.ceil(currentQuantity / 45) || 1;
+      const calculatedRolls = materialMode === 'tape'
+        ? calculatedTapeRolls
+        : (calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || rollCount);
 
       const payload = {
         slipNo: currentSlipNo,
         lotNo: currentLotNo,
         isWithoutLot: withoutLotActive,
         isWithoutPo: withoutLotActive,
-        rolls: calculatedRolls,
+        rolls: materialMode === 'bone' ? (parseFloat(boneWeightKg) || 1) : calculatedRolls,
+        tapeRolls: calculatedTapeRolls,
+        totalTapeRolls: calculatedTapeRolls,
         width: effectiveWidth,
         tapeWidth: effectiveTapeWidth,
         boneWidth: effectiveBoneWidth,
-        boneRolls: boneRollCount,
+        boneRolls: `${boneWeightKg || '0'} Kg`,
+        boneWeightKg: boneWeightKg || '0',
+        weight: boneWeightKg || '0',
         shade: selectedShade || lotDetails?.shade || 'Standard Shade',
         issuerName,
         receiverName,
@@ -1032,6 +1339,12 @@ export default function ElasticIssueView({
         tapeSizeInput,
         tapeUnit,
         materialMode,
+        elasticMaterialName,
+        selectedElasticMaterialId,
+        tapeMaterialName,
+        selectedTapeMaterialId,
+        boneMaterialName,
+        selectedBoneMaterialId,
         formulaExplanation: calcResult.formulaExplanation,
         remarks: remarks || (isWithoutPo ? 'Floor Material Issue without PO' : '')
       };
@@ -1121,7 +1434,7 @@ export default function ElasticIssueView({
         brand: item.brand || 'Mohit Hosiery',
         garmentType: item.garmentType || 'LOWER',
         fabric: item.fabric || 'Cotton Poly Blend',
-        quantity: item.quantity || 600,
+        quantity: item.quantity || item.issuePcs || 0,
         size: item.size || 'M, L, XL, 2XL',
         elasticPerPcMtr: item.elasticPerPcMtr || calcResult.elasticPerPcMtr,
         totalElasticMtr: item.totalElasticMtr || calcResult.totalElasticMtr,
@@ -1266,7 +1579,7 @@ export default function ElasticIssueView({
             border: '1px solid var(--border-color, #dbeafe)',
             boxShadow: 'var(--shadow-card)'
           }}>
-            {/* ISSUE METHOD SELECTOR: WITH LOT vs WITHOUT LOT */}
+            {/* ISSUE METHOD SELECTOR: WITH BOM vs WITHOUT BOM */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -1292,7 +1605,7 @@ export default function ElasticIssueView({
                       setLotDetails(null);
                       setSearchLotInput('');
                       setBomStatus('idle');
-                      showToast('Switched to "With Lot" Mode (BOM verification active).');
+                      showToast('Switched to "With BOM" Mode (BOM verification active).');
                     }}
                     style={{
                       padding: '8px 18px',
@@ -1309,7 +1622,7 @@ export default function ElasticIssueView({
                       gap: '6px'
                     }}
                   >
-                    <ShieldCheck size={15} /> With Lot (BOM / PO Verified)
+                    <ShieldCheck size={15} /> With BOM (BOM Approved)
                   </button>
                   <button
                     type="button"
@@ -1317,21 +1630,24 @@ export default function ElasticIssueView({
                       setIsWithoutLot(true);
                       setIsWithoutPo(true);
                       setBomStatus('idle');
-                      setSearchLotInput('');
-                      setLotDetails({
-                        lotNo: '',
-                        style: withoutLotStyle || 'Floor Issue',
-                        quantity: issuePcs || 600,
-                        brand: 'Floor Issue',
-                        garmentType: withoutLotStyle || 'Floor Issue',
-                        fabric: 'Standard',
-                        shade: 'Standard'
-                      });
+                      if (!lotDetails) {
+                        setLotDetails({
+                          lotNo: searchLotInput.trim() || '',
+                          style: withoutLotStyle || 'Floor Issue',
+                          quantity: issuePcs || 0,
+                          brand: 'Floor Issue',
+                          garmentType: withoutLotStyle || 'Floor Issue',
+                          fabric: 'Standard',
+                          shade: 'Standard'
+                        });
+                      }
                       if (materialMode === 'both' || materialMode === 'all') {
                         setMaterialMode('elastic');
                       }
-                      if (!issuePcs) setIssuePcs(600);
-                      showToast('⚡ Switched to "Without Lot" Mode. All BOM & PO restrictions removed!');
+                      if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                        handleSearchLot(searchLotInput.trim());
+                      }
+                      showToast('⚡ Switched to "Without BOM" Mode. All BOM & PO restrictions removed!');
                     }}
                     style={{
                       padding: '8px 18px',
@@ -1348,19 +1664,19 @@ export default function ElasticIssueView({
                       gap: '6px'
                     }}
                   >
-                    <Zap size={15} /> Without Lot (Direct Floor Issue - No Restriction)
+                    <Zap size={15} /> Without BOM (Direct Floor Issue - No Restriction)
                   </button>
                 </div>
               </div>
 
               <span style={{ fontSize: '12px', fontWeight: '700', color: withoutLotActive ? '#c2410c' : '#15803d' }}>
                 {withoutLotActive
-                  ? '⚡ Without Lot: Direct floor issue unlocked. No BOM or PO restrictions!'
-                  : '🏷️ With Lot: Search and verify Lot against approved BOM.'}
+                  ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
+                  : '🏷️ With BOM: Search and verify Lot against approved BOM.'}
               </span>
             </div>
 
-            {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT LOT VS WITH LOT */}
+            {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT BOM VS WITH BOM */}
             {withoutLotActive ? (
               <div style={{
                 marginBottom: '16px',
@@ -1380,30 +1696,31 @@ export default function ElasticIssueView({
                       alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
                     }}>1</span>
                     <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
-                      Direct Floor Movement Details (Without Lot)
+                      Direct Floor Movement Details (Without BOM)
                     </h3>
                   </div>
                   <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
                     Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
-                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT LOT</span>
+                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT BOM</span>
                   </div>
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-                  {/* Optional Reference */}
+                  {/* Lot Number (Required) */}
                   <div>
                     <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      REFERENCE / TAG (OPTIONAL):
+                      LOT NUMBER (REQUIRED) <span style={{ color: '#dc2626' }}>*</span>:
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Floor Cutting / Sample / Lot #"
+                      placeholder="Enter Lot # (e.g. 62114)"
                       value={searchLotInput}
                       onChange={(e) => setSearchLotInput(e.target.value)}
+                      required
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
                         border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
                       }}
                     />
                   </div>
@@ -1426,22 +1743,43 @@ export default function ElasticIssueView({
                     />
                   </div>
 
-                  {/* Quantity Pcs */}
+                  {/* Quantity Pcs / Weight */}
                   <div>
                     <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      TARGET CUTTING / ISSUE PCS:
+                      {materialMode === 'bone' ? 'TARGET ISSUE WEIGHT (KGS):' : 'TARGET CUTTING / ISSUE PCS:'}
                     </label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={issuePcs || 600}
-                      onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                      style={{
-                        width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '14px', fontWeight: '800', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <input
+                        type="number"
+                        step={materialMode === 'bone' ? '0.01' : '1'}
+                        min={materialMode === 'bone' ? '0.01' : '1'}
+                        placeholder={materialMode === 'bone' ? 'Enter Weight in Kg (e.g. 2.50)' : 'Enter Target Cutting Pcs'}
+                        value={materialMode === 'bone' ? boneWeightKg : issuePcs}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (materialMode === 'bone') {
+                            setBoneWeightKg(val);
+                          } else {
+                            if (val === '') {
+                              setIssuePcs('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
+                            }
+                          }
+                        }}
+                        style={{
+                          flex: 1, padding: '9px 12px', borderRadius: '8px',
+                          border: '1.5px solid #fdba74', background: '#ffffff',
+                          fontSize: '14px', fontWeight: '800', color: '#0f172a', boxSizing: 'border-box'
+                        }}
+                      />
+                      {materialMode === 'bone' && (
+                        <span style={{ fontSize: '13px', fontWeight: '900', color: '#c2410c', background: '#ffedd5', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fdba74' }}>
+                          Kgs
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1845,14 +2183,16 @@ export default function ElasticIssueView({
                         if (!lotDetails) {
                           setLotDetails({
                             lotNo: searchLotInput || 'W/O-PO-FLOOR',
-                            style: 'Floor Issue',
-                            quantity: issuePcs || 600,
+                            style: withoutLotStyle || 'Floor Issue',
+                            quantity: issuePcs || 0,
                             brand: 'Mohit Hosiery',
-                            garmentType: 'LOWER',
+                            garmentType: withoutLotStyle || 'LOWER',
                             fabric: 'Cotton Poly Blend',
                             shade: 'Standard'
                           });
-                          if (!issuePcs) setIssuePcs(600);
+                        }
+                        if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                          handleSearchLot(searchLotInput.trim());
                         }
                         showToast(`⚡ Issue W/O PO enabled for Lot #${lotDetails?.lotNo || searchLotInput}. Issue form unlocked!`);
                       }}
@@ -1871,7 +2211,7 @@ export default function ElasticIssueView({
                         gap: '6px'
                       }}
                     >
-                      <Zap size={15} /> ⚡ Issue W/O PO (Bypass PO / BOM)
+                      <Zap size={15} /> ⚡ Issue W/O BOM (Bypass BOM)
                     </button>
                   </div>
                 </div>
@@ -1881,586 +2221,863 @@ export default function ElasticIssueView({
             {/* BACKEND CALCULATION & STEP 2 (SHOWN AFTER LOT IS ENTERED & BOM APPROVED, OR IF W/O PO) */}
             {(lotDetails || isWithoutPo) && (bomStatus === 'approved' || isWithoutPo) && (
               <>
-                {/* BACKEND CALCULATION & CONVERSION CARD */}
-                <div style={{
-              marginTop: '18px',
-              padding: '18px 20px',
-              borderRadius: '14px',
-              background: '#ffffff',
-              border: '1.5px solid #059669',
-              boxShadow: '0 4px 14px rgba(5, 150, 105, 0.08)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{
-                    width: '32px', height: '32px', borderRadius: '8px',
-                    background: materialMode === 'tape' ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
-                  }}>
-                    <Calculator size={18} />
-                  </div>
-                  <div>
-                    <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
-                      Automated Backend Meter Conversion & Consumption
-                    </h4>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>
-                      Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong>
-                    </span>
-                  </div>
-                </div>
-
                 {/* MATERIAL SWITCH CONTROLS (ELASTIC, TAPE, BONE) */}
                 <div style={{
+                  marginTop: '18px',
+                  padding: '12px 18px',
+                  borderRadius: '12px',
+                  background: '#ffffff',
+                  border: '1.5px solid #e2e8f0',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  background: '#f1f5f9',
-                  padding: '4px',
-                  borderRadius: '10px',
-                  border: '1.5px solid #cbd5e1',
-                  flexWrap: 'wrap'
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '12px'
                 }}>
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('elastic')}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'elastic' ? '#059669' : 'transparent',
-                      color: materialMode === 'elastic' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'elastic' ? '0 2px 8px rgba(5, 150, 105, 0.35)' : 'none',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'elastic' ? '#a7f3d0' : '#059669' }}></span>
-                    Elastic Only
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('tape')}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'tape' ? '#2563eb' : 'transparent',
-                      color: materialMode === 'tape' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'tape' ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'tape' ? '#bfdbfe' : '#2563eb' }}></span>
-                    Tape Only
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('bone')}
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'bone' ? '#0284c7' : 'transparent',
-                      color: materialMode === 'bone' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'bone' ? '0 2px 8px rgba(2, 132, 199, 0.35)' : 'none',
-                      transition: 'all 0.15s ease'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'bone' ? '#bae6fd' : '#0284c7' }}></span>
-                    Bone Only
-                  </button>
-
-                  {!withoutLotActive && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setMaterialMode('both')}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: materialMode === 'both' ? '#0f172a' : 'transparent',
-                          color: materialMode === 'both' ? '#ffffff' : '#475569',
-                          fontWeight: '800',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          boxShadow: materialMode === 'both' ? '0 2px 8px rgba(15, 23, 42, 0.35)' : 'none',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <Sliders size={13} />
-                        Elastic + Tape
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setMaterialMode('all')}
-                        style={{
-                          padding: '6px 12px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: materialMode === 'all' ? '#7c3aed' : 'transparent',
-                          color: materialMode === 'all' ? '#ffffff' : '#475569',
-                          fontWeight: '800',
-                          fontSize: '12px',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          boxShadow: materialMode === 'all' ? '0 2px 8px rgba(124, 58, 237, 0.35)' : 'none',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <Layers size={13} />
-                        All (Elastic + Tape + Bone)
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* INPUT CONTROLS: ELASTIC, TAPE OR BONE (BASED ON SWITCH) */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
-                gap: '16px',
-                padding: '16px',
-                borderRadius: '12px',
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0'
-              }}>
-                {/* ELASTIC INPUT (Shown if 'elastic' or 'both') */}
-                {(materialMode === 'elastic' || materialMode === 'both') && (
-                  <div style={{
-                    padding: '14px',
-                    borderRadius: '10px',
-                    background: '#ffffff',
-                    border: '1.5px solid #86efac',
-                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
-                  }}>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                        ELASTIC SIZE INPUT
-                      </span>
-                      <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Formula: {String(elasticUnit).toLowerCase() === 'cm' ? '÷ 100' : String(elasticUnit).toLowerCase() === 'mtr' ? '× 1' : String(elasticUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
-                      </span>
-                    </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={elasticSizeInput}
-                        onChange={(e) => setElasticSizeInput(e.target.value)}
-                        placeholder="e.g. 50"
-                        style={{
-                          width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
-                          border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
-                          color: '#0f172a', background: '#ffffff', outline: 'none'
-                        }}
-                      />
-                      <SmartSelectWithManual
-                        value={elasticUnit}
-                        onChange={setElasticUnit}
-                        options={[
-                          { label: 'Inch (×0.0254)', value: 'inch' },
-                          { label: 'CM (÷100)', value: 'cm' },
-                          { label: 'Mtr (×1)', value: 'mtr' },
-                          { label: 'Yard (×0.9144)', value: 'yard' },
-                          { label: 'MM (÷1000)', value: 'mm' }
-                        ]}
-                        placeholder="Unit"
-                        manualPlaceholder="e.g. inch"
-                        manualLabel="+ Manual Unit"
-                        unitMode={true}
-                        icon="ruler"
-                        theme="emerald"
-                      />
-                    </div>
-
-                    {/* Elastic Presets */}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                      {[
-                        { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
-                        { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
-                        { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
-                      ].map(p => (
-                        <button
-                          key={p.label}
-                          type="button"
-                          onClick={() => {
-                            setElasticSizeInput(p.size);
-                            setElasticUnit(p.u);
-                          }}
-                          style={{
-                            padding: '4px 9px', borderRadius: '6px',
-                            border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                            background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
-                            color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
-                            fontSize: '11px', fontWeight: '700', cursor: 'pointer'
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* TAPE INPUT (Shown if 'tape' or 'both') */}
-                {(materialMode === 'tape' || materialMode === 'both') && (
-                  <div style={{
-                    padding: '14px',
-                    borderRadius: '10px',
-                    background: '#ffffff',
-                    border: '1.5px solid #93c5fd',
-                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.06)'
-                  }}>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                        TAPE SIZE INPUT
-                      </span>
-                      <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Formula: {String(tapeUnit).toLowerCase() === 'cm' ? '÷ 100' : String(tapeUnit).toLowerCase() === 'mtr' ? '× 1' : String(tapeUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
-                      </span>
-                    </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        step="any"
-                        min="0"
-                        value={tapeSizeInput}
-                        onChange={(e) => setTapeSizeInput(e.target.value)}
-                        placeholder="e.g. 62"
-                        style={{
-                          width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
-                          border: '1.5px solid #3b82f6', fontSize: '16px', fontWeight: '800',
-                          color: '#0f172a', background: '#ffffff', outline: 'none'
-                        }}
-                      />
-                      <SmartSelectWithManual
-                        value={tapeUnit}
-                        onChange={setTapeUnit}
-                        options={[
-                          { label: 'CM (÷100)', value: 'cm' },
-                          { label: 'Inch (×0.0254)', value: 'inch' },
-                          { label: 'Mtr (×1)', value: 'mtr' },
-                          { label: 'Yard (×0.9144)', value: 'yard' },
-                          { label: 'MM (÷1000)', value: 'mm' }
-                        ]}
-                        placeholder="Unit"
-                        manualPlaceholder="e.g. cm"
-                        manualLabel="+ Manual Unit"
-                        unitMode={true}
-                        icon="ruler"
-                        theme="blue"
-                      />
-                    </div>
-
-                    {/* Tape Presets */}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                      {[
-                        { label: '62 CM (0.62m)', size: '62', u: 'cm' },
-                        { label: '50 CM (0.50m)', size: '50', u: 'cm' },
-                        { label: '24 Inch (0.61m)', size: '24', u: 'inch' }
-                      ].map(p => (
-                        <button
-                          key={p.label}
-                          type="button"
-                          onClick={() => {
-                            setTapeSizeInput(p.size);
-                            setTapeUnit(p.u);
-                          }}
-                          style={{
-                            padding: '4px 9px', borderRadius: '6px',
-                            border: tapeSizeInput === p.size && tapeUnit === p.u ? '1.5px solid #3b82f6' : '1px solid #cbd5e1',
-                            background: tapeSizeInput === p.size && tapeUnit === p.u ? '#dbeafe' : '#ffffff',
-                            color: tapeSizeInput === p.size && tapeUnit === p.u ? '#1d4ed8' : '#475569',
-                            fontSize: '11px', fontWeight: '700', cursor: 'pointer'
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* BONE INPUT (Shown if 'bone' or 'all') */}
-                {(materialMode === 'bone' || materialMode === 'all') && (
-                  <div style={{
-                    padding: '14px',
-                    borderRadius: '10px',
-                    background: '#ffffff',
-                    border: '1.5px solid #0284c7',
-                    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.06)'
-                  }}>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
-                        BONE POCKETING INPUT
-                      </span>
-                      <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Pocket Bone Roll
-                      </span>
-                    </label>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={boneRollCount}
-                        onChange={(e) => setBoneRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                        placeholder="Rolls (e.g. 1)"
-                        style={{
-                          width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
-                          border: '1.5px solid #0284c7', fontSize: '16px', fontWeight: '800',
-                          color: '#0f172a', background: '#ffffff', outline: 'none'
-                        }}
-                      />
-                      <SmartSelectWithManual
-                        value={boneWidth}
-                        onChange={setBoneWidth}
-                        options={[
-                          { label: '1.5 Inch (Standard)', value: '1.5 Inch (Standard)' },
-                          { label: '1 Inch', value: '1 Inch' },
-                          { label: '1.25 Inch', value: '1.25 Inch' },
-                          { label: '2 Inch', value: '2 Inch' },
-                          { label: 'Custom', value: 'Custom' }
-                        ]}
-                        placeholder="Bone Width"
-                        manualPlaceholder="e.g. 1.75 Inch"
-                        manualLabel="+ Custom Width"
-                        icon="ruler"
-                        theme="blue"
-                      />
-                    </div>
-
-                    {/* Bone Presets */}
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                      {['1.5 Inch (Standard)', '1.25 Inch', '1 Inch'].map(bw => (
-                        <button
-                          key={bw}
-                          type="button"
-                          onClick={() => setBoneWidth(bw)}
-                          style={{
-                            padding: '4px 9px', borderRadius: '6px',
-                            border: boneWidth === bw ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                            background: boneWidth === bw ? '#e0f2fe' : '#ffffff',
-                            color: boneWidth === bw ? '#0284c7' : '#475569',
-                            fontSize: '11px', fontWeight: '700', cursor: 'pointer'
-                          }}
-                        >
-                          {bw}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* EXACT BREAKDOWN TABLE: ELASTIC, TAPE OR BONE */}
-              <div style={{ marginTop: '16px', overflowX: 'auto', borderRadius: '10px', border: '1.5px solid #cbd5e1', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ background: '#0f172a', color: '#ffffff', fontSize: '12px', fontWeight: '800' }}>
-                      <th style={{ padding: '10px 14px', borderRight: '1px solid #334155' }}>Material</th>
-                      <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Input</th>
-                      <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'center' }}>Conversion Formula</th>
-                      <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Per Pc (In Mtr)</th>
-                      <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Pcs</th>
-                      <th style={{ padding: '10px 14px', textAlign: 'right' }}>Total Requirement</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const effPcs = parseInt(issuePcs || lotDetails?.quantity || 600, 10);
-                      const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
-                      const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
-
-                      const tPerPc = parseFloat(calcResult.tapePerPcMtr || (tapeUnit === 'cm' ? (parseFloat(tapeSizeInput) || 0) / 100 : (parseFloat(tapeSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
-                      const tTotal = parseFloat((tPerPc * effPcs).toFixed(4));
-
-                      return (
-                        <>
-                          {/* ELASTIC ROW */}
-                          {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                            <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'both' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                                Elastic
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                {elasticSizeInput || 0} {elasticUnit === 'cm' ? 'CM' : 'Inch'}
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                  {elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`}
-                                </code>
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
-                                {ePerPc} m
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                {effPcs}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#065f46', fontSize: '15px', background: '#dcfce7' }}>
-                                {eTotal} m
-                              </td>
-                            </tr>
-                          )}
-
-                          {/* TAPE ROW */}
-                          {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
-                            <tr style={{ background: '#ffffff', borderBottom: materialMode === 'all' ? '1px solid #e2e8f0' : 'none' }}>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#1d4ed8', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                                Tape
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                {tapeSizeInput || 0} {tapeUnit === 'cm' ? 'CM' : 'Inch'}
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                  {tapeUnit === 'cm' ? `${tapeSizeInput || 0} ÷ 100` : `${tapeSizeInput || 0} × 0.0254`}
-                                </code>
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#1d4ed8', fontSize: '14px', background: '#eff6ff' }}>
-                                {tPerPc} m
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                {effPcs}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
-                                {tTotal} m
-                              </td>
-                            </tr>
-                          )}
-
-                          {/* BONE ROW */}
-                          {(materialMode === 'bone' || materialMode === 'all') && (
-                            <tr style={{ background: '#ffffff' }}>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', fontWeight: '800', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
-                                Bone Pocketing
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                {boneRollCount} Roll(s) ({effectiveBoneWidth})
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                <code style={{ background: '#f0f9ff', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                  18 CM Standard Cut
-                                </code>
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#0284c7', fontSize: '14px', background: '#f0f9ff' }}>
-                                {effectiveBoneWidth}
-                              </td>
-                              <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                {effPcs}
-                              </td>
-                              <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#0369a1', fontSize: '15px', background: '#e0f2fe' }}>
-                                {boneRollCount} Roll(s)
-                              </td>
-                            </tr>
-                          )}
-                        </>
-                      );
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* EXCEL SHEET PRODUCTION ROW PREVIEW */}
-              <div style={{ marginTop: '16px', borderTop: '1px dashed #cbd5e1', paddingTop: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Table size={14} color="#059669" />
-                    <span>Excel Sheet Output Preview ({materialMode === 'elastic' ? 'Elastic' : materialMode === 'tape' ? 'Tape' : 'Both'}):</span>
-                  </span>
-                  {materialMode !== 'tape' && (
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>
-                      Total Requirement: <strong>{calcResult.totalElasticMtr} Mtr</strong>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>Material To Issue:</span>
+                    <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                      {materialMode === 'bone' ? 'Bone Pocketing Selected • Direct Roll Issue (No Calculation Step Required)' : 'Select material type to configure consumption'}
                     </span>
-                  )}
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    background: '#f1f5f9',
+                    padding: '4px',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    flexWrap: 'wrap'
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setMaterialMode('elastic')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: materialMode === 'elastic' ? '#059669' : 'transparent',
+                        color: materialMode === 'elastic' ? '#ffffff' : '#475569',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: materialMode === 'elastic' ? '0 2px 8px rgba(5, 150, 105, 0.35)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'elastic' ? '#a7f3d0' : '#059669' }}></span>
+                      Elastic Only
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setMaterialMode('tape')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: materialMode === 'tape' ? '#2563eb' : 'transparent',
+                        color: materialMode === 'tape' ? '#ffffff' : '#475569',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: materialMode === 'tape' ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'tape' ? '#bfdbfe' : '#2563eb' }}></span>
+                      Tape Only
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setMaterialMode('bone')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: materialMode === 'bone' ? '#0284c7' : 'transparent',
+                        color: materialMode === 'bone' ? '#ffffff' : '#475569',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: materialMode === 'bone' ? '0 2px 8px rgba(2, 132, 199, 0.35)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'bone' ? '#bae6fd' : '#0284c7' }}></span>
+                      Bone Only
+                    </button>
+
+                    {!withoutLotActive && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setMaterialMode('both')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: materialMode === 'both' ? '#0f172a' : 'transparent',
+                            color: materialMode === 'both' ? '#ffffff' : '#475569',
+                            fontWeight: '800',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            boxShadow: materialMode === 'both' ? '0 2px 8px rgba(15, 23, 42, 0.35)' : 'none',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Sliders size={13} />
+                          Elastic + Tape
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMaterialMode('all')}
+                          style={{
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: materialMode === 'all' ? '#7c3aed' : 'transparent',
+                            color: materialMode === 'all' ? '#ffffff' : '#475569',
+                            fontWeight: '800',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            boxShadow: materialMode === 'all' ? '0 2px 8px rgba(124, 58, 237, 0.35)' : 'none',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Layers size={13} />
+                          All (Elastic + Tape + Bone)
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
-                    <thead>
-                      <tr style={{ background: '#f1f5f9', color: '#0f172a', fontWeight: '800', borderBottom: '1.5px solid #cbd5e1' }}>
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>DATE</th>
-                        {!withoutLotActive && (
-                          <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Lot No.</th>
-                        )}
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs (Issued)</th>
-                        <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
-                        {(materialMode === 'tape' || materialMode === 'both') && (
-                          <th style={{ padding: '8px 10px', borderRight: materialMode === 'both' ? '1px solid #e2e8f0' : 'none' }}>Tape Per Pc (In mtr.)</th>
-                        )}
-                        {(materialMode === 'elastic' || materialMode === 'both') && (
-                          <th style={{ padding: '8px 10px' }}>Elastic Per Pc (In mtr.)</th>
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr style={{ background: '#ffffff', color: '#0f172a' }}>
-                        <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>{issueDate}</td>
-                        {!withoutLotActive && (
-                          <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#059669' }}>
-                            {lotDetails?.lotNo || searchLotInput || '—'}
-                          </td>
-                        )}
-                        <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '700' }}>
-                          {withoutLotActive ? (withoutLotStyle || 'LOWER') : (lotDetails?.garmentType || lotDetails?.style || 'LOWER')}
-                        </td>
-                        <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
-                          {issuePcs}
-                        </td>
-                        <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
-                          {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
-                        </td>
-                        {(materialMode === 'tape' || materialMode === 'both') && (
-                          <td style={{ padding: '8px 10px', borderRight: materialMode === 'both' ? '1px solid #e2e8f0' : 'none', fontWeight: '700', color: '#1d4ed8' }}>
-                            {calcResult.tapePerPcMtr > 0 ? `${calcResult.tapePerPcMtr}` : '—'}
-                          </td>
-                        )}
-                        {(materialMode === 'elastic' || materialMode === 'both') && (
-                          <td style={{ padding: '8px 10px', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
-                            {calcResult.elasticPerPcMtr || 0}
-                          </td>
-                        )}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC & TAPE ONLY - REMOVED FOR BONE) */}
+                {materialMode !== 'bone' && (
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '18px 20px',
+                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: materialMode === 'tape' ? '1.5px solid #3b82f6' : '1.5px solid #059669',
+                    boxShadow: materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '8px',
+                          background: materialMode === 'tape' ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
+                        }}>
+                          <Calculator size={18} />
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                            {materialMode === 'tape' ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)' : 'Automated Backend Meter Conversion & Consumption'}
+                          </h4>
+                          <span style={{ fontSize: '11px', color: '#64748b' }}>
+                            {materialMode === 'tape'
+                              ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
+                              : <span>Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong> &bull; <strong>Tape: Pcs ÷ 45 = Rolls</strong></span>}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
 
-            </div>
+                    {/* INPUT CONTROLS: ELASTIC & TAPE (BASED ON SWITCH) */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
+                      gap: '16px',
+                      padding: '16px',
+                      borderRadius: '12px',
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0'
+                    }}>
+                      {/* ELASTIC INPUT (Shown if 'elastic' or 'both') */}
+                      {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                        <div style={{
+                          padding: '14px',
+                          borderRadius: '10px',
+                          background: '#ffffff',
+                          border: '1.5px solid #86efac',
+                          boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
+                        }}>
+                          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                              ELASTIC SIZE INPUT
+                            </span>
+                            <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                              Formula: {String(elasticUnit).toLowerCase() === 'cm' ? '÷ 100' : String(elasticUnit).toLowerCase() === 'mtr' ? '× 1' : String(elasticUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
+                            </span>
+                          </label>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={elasticSizeInput}
+                              onChange={(e) => setElasticSizeInput(e.target.value)}
+                              placeholder="e.g. 50"
+                              style={{
+                                width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
+                                border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
+                                color: '#0f172a', background: '#ffffff', outline: 'none'
+                              }}
+                            />
+                            <SmartSelectWithManual
+                              value={elasticUnit}
+                              onChange={setElasticUnit}
+                              options={[
+                                { label: 'Inch (×0.0254)', value: 'inch' },
+                                { label: 'CM (÷100)', value: 'cm' },
+                                { label: 'Mtr (×1)', value: 'mtr' },
+                                { label: 'Yard (×0.9144)', value: 'yard' },
+                                { label: 'MM (÷1000)', value: 'mm' }
+                              ]}
+                              placeholder="Unit"
+                              manualPlaceholder="e.g. inch"
+                              manualLabel="+ Manual Unit"
+                              unitMode={true}
+                              icon="ruler"
+                              theme="emerald"
+                            />
+                          </div>
+
+                          {/* Elastic Presets */}
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                            {[
+                              { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
+                              { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
+                              { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
+                            ].map(p => (
+                              <button
+                                key={p.label}
+                                type="button"
+                                onClick={() => {
+                                  setElasticSizeInput(p.size);
+                                  setElasticUnit(p.u);
+                                }}
+                                style={{
+                                  padding: '4px 9px', borderRadius: '6px',
+                                  border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                                  background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
+                                  color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
+                                  fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                                }}
+                              >
+                                {p.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* TAPE CONSUMPTION (DIRECT PIECES ÷ 45 RULE - NO SIZE INPUT) */}
+                      {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                        <div style={{
+                          padding: '14px 16px',
+                          borderRadius: '10px',
+                          background: '#eff6ff',
+                          border: '1.5px solid #93c5fd',
+                          boxShadow: '0 2px 6px rgba(37, 99, 235, 0.06)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                            <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                              TAPE ALLOCATION (DIRECT PIECES ÷ 45)
+                            </label>
+                            <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                              Formula: Issue Pcs ÷ 45 = Total Tape Rolls
+                            </span>
+                          </div>
+
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                            gap: '12px',
+                            background: '#ffffff',
+                            padding: '12px 14px',
+                            borderRadius: '8px',
+                            border: '1px solid #bfdbfe',
+                            alignItems: 'center'
+                          }}>
+                            {/* 1. Pieces Input */}
+                            <div>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                1. ENTER / VERIFY PIECES:
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={issuePcs}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+                                  }}
+                                  placeholder="Enter Pcs..."
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
+                                    border: '1.5px solid #3b82f6', fontSize: '15px', fontWeight: '800',
+                                    color: '#0f172a', background: '#f8fafc', outline: 'none'
+                                  }}
+                                />
+                                <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e40af' }}>Pcs</span>
+                              </div>
+                            </div>
+
+                            {/* 2. Divisor 45 */}
+                            <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                2. STANDARD DIVISOR:
+                              </span>
+                              <div style={{ fontSize: '18px', fontWeight: '900', color: '#1d4ed8' }}>
+                                ÷ 45 <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                              </div>
+                            </div>
+
+                            {/* 3. Result Amount to Issue */}
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1e40af', display: 'block', marginBottom: '4px' }}>
+                                3. TAPE AMOUNT TO ISSUE:
+                              </span>
+                              <div style={{ fontSize: '22px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
+                                {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
+                              </div>
+                              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
+                                ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ 45 = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45).toFixed(2)} Rolls)
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* EXACT BREAKDOWN TABLE: ELASTIC, TAPE & BONE */}
+                    <div style={{ marginTop: '16px', overflowX: 'auto', borderRadius: '10px', border: '1.5px solid #cbd5e1', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: '#0f172a', color: '#ffffff', fontSize: '12px', fontWeight: '800' }}>
+                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', minWidth: '290px' }}>Material (Editable & Mapped)</th>
+                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Input</th>
+                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'center' }}>Conversion Formula</th>
+                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Per Pc (In Mtr)</th>
+                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Pcs</th>
+                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>Total Requirement</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const effPcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                            const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
+                            const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
+
+                            const tapeExactRolls = effPcs > 0 ? parseFloat((effPcs / 45).toFixed(2)) : 0;
+                            const tapeCalculatedRolls = effPcs > 0 ? Math.ceil(effPcs / 45) : 0;
+
+                            return (
+                              <>
+                                {/* ELASTIC ROW */}
+                                {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                                  <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'both' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
+                                      {/* Top: Bullet & Editable Material Name */}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669', flexShrink: 0 }}></span>
+                                        <div style={{ flex: 1, position: 'relative' }}>
+                                          <input
+                                            type="text"
+                                            value={elasticMaterialName}
+                                            onChange={(e) => setElasticMaterialName(e.target.value)}
+                                            placeholder="Material Name (e.g. Elastic 1 Inch)..."
+                                            title="Click to edit material name directly"
+                                            style={{
+                                              width: '100%',
+                                              boxSizing: 'border-box',
+                                              padding: '5px 8px',
+                                              paddingRight: '26px',
+                                              borderRadius: '6px',
+                                              border: '1.5px solid #86efac',
+                                              background: '#f0fdf4',
+                                              color: '#047857',
+                                              fontSize: '13px',
+                                              fontWeight: '800',
+                                              outline: 'none',
+                                              transition: 'all 0.15s ease'
+                                            }}
+                                          />
+                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#059669', opacity: 0.7 }}>
+                                            <Edit2 size={12} />
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Middle: Map to choose material dropdown (Elastic category only) */}
+                                      <div style={{ marginBottom: '6px' }}>
+                                        <select
+                                          value={selectedElasticMaterialId}
+                                          onChange={(e) => handleSelectElasticMaterial(e.target.value)}
+                                          title="Choose material from inventory (Elastic items only)"
+                                          style={{
+                                            width: '100%',
+                                            padding: '5px 8px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #cbd5e1',
+                                            background: '#ffffff',
+                                            fontSize: '11px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            outline: 'none',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          <option value="">— Map to Elastic Item ({elasticMaterials.length}) —</option>
+                                          {elasticMaterials.map(m => (
+                                            <option key={m.id} value={m.id}>
+                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Bottom: All material details according to issue */}
+                                      {currentElasticMaterial ? (
+                                        <div style={{
+                                          display: 'flex',
+                                          flexWrap: 'wrap',
+                                          gap: '4px',
+                                          alignItems: 'center',
+                                          fontSize: '10.5px',
+                                          background: '#ecfdf5',
+                                          padding: '5px 7px',
+                                          borderRadius: '6px',
+                                          border: '1px dashed #a7f3d0'
+                                        }}>
+                                          <span style={{ fontWeight: '800', color: '#065f46', background: '#dcfce7', padding: '1px 5px', borderRadius: '3px' }}>
+                                            ID: {currentElasticMaterial.id}
+                                          </span>
+                                          <span style={{ fontWeight: '700', color: currentElasticMaterial.stock > 0 ? '#047857' : '#dc2626' }}>
+                                            Stock: {currentElasticMaterial.stock} {currentElasticMaterial.unit || 'Roll'}
+                                          </span>
+                                          {currentElasticMaterial.location && (
+                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                              <MapPin size={10} color="#059669" />
+                                              {currentElasticMaterial.location}
+                                            </span>
+                                          )}
+                                          <span style={{ color: '#047857', fontWeight: '800' }}>
+                                            {effectiveDivisor === 25 ? '÷ 25 (1")' : `÷ ${effectiveDivisor} (${effectiveWidth})`}
+                                          </span>
+                                          {currentElasticMaterial.packets > 0 && (
+                                            <span style={{ color: '#64748b' }}>
+                                              {currentElasticMaterial.packets} Pkts
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                          Custom Name • Select item above to map inventory & details
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                      {elasticSizeInput || 0} {elasticUnit === 'cm' ? 'CM' : 'Inch'}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                      <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                        {elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`}
+                                      </code>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
+                                      {ePerPc} m
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                      {effPcs}
+                                    </td>
+                                    <td style={{ padding: '10px 14px', textAlign: 'right', background: '#dcfce7' }}>
+                                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#065f46', lineHeight: '1.1' }}>
+                                        {Math.ceil(eTotal / effectiveDivisor)} <span style={{ fontSize: '13px', fontWeight: '800' }}>Rolls</span>
+                                      </div>
+                                      <div style={{ fontSize: '11px', fontWeight: '700', color: '#047857', marginTop: '2px' }}>
+                                        Total: {eTotal} m &bull; (÷ {effectiveDivisor} for {effectiveWidth})
+                                      </div>
+                                      <span style={{ fontSize: '10px', background: '#059669', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
+                                        Total Issue: {Math.ceil(eTotal / effectiveDivisor)} Rolls
+                                      </span>
+                                    </td>
+                                  </tr>
+                                )}
+
+                                {/* TAPE ROW */}
+                                {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                                  <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
+                                      {/* Top: Bullet & Editable Material Name */}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
+                                        <div style={{ flex: 1, position: 'relative' }}>
+                                          <input
+                                            type="text"
+                                            value={tapeMaterialName}
+                                            onChange={(e) => setTapeMaterialName(e.target.value)}
+                                            placeholder="Tape Material Name (e.g. Tape 2 Inch)..."
+                                            title="Click to edit tape material name directly"
+                                            style={{
+                                              width: '100%',
+                                              boxSizing: 'border-box',
+                                              padding: '5px 8px',
+                                              paddingRight: '26px',
+                                              borderRadius: '6px',
+                                              border: '1.5px solid #93c5fd',
+                                              background: '#eff6ff',
+                                              color: '#1d4ed8',
+                                              fontSize: '13px',
+                                              fontWeight: '800',
+                                              outline: 'none',
+                                              transition: 'all 0.15s ease'
+                                            }}
+                                          />
+                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', opacity: 0.7 }}>
+                                            <Edit2 size={12} />
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Middle: Map to choose material dropdown (Tape category only) */}
+                                      <div style={{ marginBottom: '6px' }}>
+                                        <select
+                                          value={selectedTapeMaterialId}
+                                          onChange={(e) => handleSelectTapeMaterial(e.target.value)}
+                                          title="Choose material from inventory (Tape items only)"
+                                          style={{
+                                            width: '100%',
+                                            padding: '5px 8px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #cbd5e1',
+                                            background: '#ffffff',
+                                            fontSize: '11px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            outline: 'none',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          <option value="">— Map to Tape Item ({tapeMaterials.length}) —</option>
+                                          {tapeMaterials.map(m => (
+                                            <option key={m.id} value={m.id}>
+                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Mtr'} • {m.location || 'Store'}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Bottom: All material details according to issue */}
+                                      {currentTapeMaterial ? (
+                                        <div style={{
+                                          display: 'flex',
+                                          flexWrap: 'wrap',
+                                          gap: '4px',
+                                          alignItems: 'center',
+                                          fontSize: '10.5px',
+                                          background: '#eff6ff',
+                                          padding: '5px 7px',
+                                          borderRadius: '6px',
+                                          border: '1px dashed #bfdbfe'
+                                        }}>
+                                          <span style={{ fontWeight: '800', color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: '3px' }}>
+                                            ID: {currentTapeMaterial.id}
+                                          </span>
+                                          <span style={{ fontWeight: '700', color: currentTapeMaterial.stock > 0 ? '#1d4ed8' : '#dc2626' }}>
+                                            Stock: {currentTapeMaterial.stock} {currentTapeMaterial.unit || 'Mtr'}
+                                          </span>
+                                          {currentTapeMaterial.location && (
+                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                              <MapPin size={10} color="#3b82f6" />
+                                              {currentTapeMaterial.location}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                          Custom Name • Select item above to map inventory & details
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>
+                                      Direct (45 Pcs/Roll)
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                      <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '800' }}>
+                                        {effPcs} Pcs ÷ 45
+                                      </code>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8', fontSize: '13px', background: '#eff6ff' }}>
+                                      1/45 Roll
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                      {effPcs}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
+                                      <div>
+                                        <span style={{ fontSize: '16px' }}>{tapeCalculatedRolls} Roll(s)</span>
+                                        {effPcs > 0 && (
+                                          <span style={{ fontSize: '10.5px', display: 'block', color: '#64748b', fontWeight: '700' }}>
+                                            ({tapeExactRolls} Exact)
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+
+                                {/* BONE ROW (Shown if bone or all) */}
+                                {(materialMode === 'bone' || materialMode === 'all') && (
+                                  <tr style={{ background: '#ffffff', borderBottom: 'none' }}>
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
+                                      {/* Top: Bullet & Editable Material Name */}
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }}></span>
+                                        <div style={{ flex: 1, position: 'relative' }}>
+                                          <input
+                                            type="text"
+                                            value={boneMaterialName}
+                                            onChange={(e) => setBoneMaterialName(e.target.value)}
+                                            placeholder="Bone Material Name (e.g. Bone Chinese)..."
+                                            title="Click to edit bone material name directly"
+                                            style={{
+                                              width: '100%',
+                                              boxSizing: 'border-box',
+                                              padding: '5px 8px',
+                                              paddingRight: '26px',
+                                              borderRadius: '6px',
+                                              border: '1.5px solid #7dd3fc',
+                                              background: '#f0f9ff',
+                                              color: '#0369a1',
+                                              fontSize: '13px',
+                                              fontWeight: '800',
+                                              outline: 'none',
+                                              transition: 'all 0.15s ease'
+                                            }}
+                                          />
+                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#0284c7', opacity: 0.7 }}>
+                                            <Edit2 size={12} />
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Middle: Map to choose material dropdown (Bone category only) */}
+                                      <div style={{ marginBottom: '6px' }}>
+                                        <select
+                                          value={selectedBoneMaterialId}
+                                          onChange={(e) => handleSelectBoneMaterial(e.target.value)}
+                                          title="Choose material from inventory (Bone items only)"
+                                          style={{
+                                            width: '100%',
+                                            padding: '5px 8px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #cbd5e1',
+                                            background: '#ffffff',
+                                            fontSize: '11px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            outline: 'none',
+                                            cursor: 'pointer'
+                                          }}
+                                        >
+                                          <option value="">— Map to Bone Item ({boneMaterials.length}) —</option>
+                                          {boneMaterials.map(m => (
+                                            <option key={m.id} value={m.id}>
+                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {/* Bottom: All material details according to issue */}
+                                      {currentBoneMaterial ? (
+                                        <div style={{
+                                          display: 'flex',
+                                          flexWrap: 'wrap',
+                                          gap: '4px',
+                                          alignItems: 'center',
+                                          fontSize: '10.5px',
+                                          background: '#f0f9ff',
+                                          padding: '5px 7px',
+                                          borderRadius: '6px',
+                                          border: '1px dashed #bae6fd'
+                                        }}>
+                                          <span style={{ fontWeight: '800', color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '3px' }}>
+                                            ID: {currentBoneMaterial.id}
+                                          </span>
+                                          <span style={{ fontWeight: '700', color: currentBoneMaterial.stock > 0 ? '#0284c7' : '#dc2626' }}>
+                                            Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Roll'}
+                                          </span>
+                                          {currentBoneMaterial.location && (
+                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                              <MapPin size={10} color="#0284c7" />
+                                              {currentBoneMaterial.location}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                          Custom Name • Select item above to map inventory & details
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                      Direct: {boneWeightKg || '0'} Kg
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                      <code style={{ background: '#f0f9ff', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                        Weight-Wise Issue
+                                      </code>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#0284c7', fontSize: '14px', background: '#f0f9ff' }}>
+                                      {effPcs > 0 ? `${(parseFloat(boneWeightKg || 0) / effPcs).toFixed(4)} kg` : '—'}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                      {effPcs || '—'}
+                                    </td>
+                                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#0369a1', fontSize: '15px', background: '#e0f2fe' }}>
+                                      <div>{boneWeightKg || '0'} Kg</div>
+                                      <div style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', marginTop: '2px' }}>
+                                        Direct Floor Issue
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* EXCEL SHEET PRODUCTION ROW PREVIEW */}
+                    <div style={{ marginTop: '16px', borderTop: '1px dashed #cbd5e1', paddingTop: '14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Table size={14} color="#059669" />
+                          <span>Excel Sheet Output Preview ({materialMode === 'elastic' ? 'Elastic' : materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'All'}):</span>
+                        </span>
+                        {materialMode !== 'tape' && materialMode !== 'bone' && (
+                          <span style={{ fontSize: '11px', color: '#64748b' }}>
+                            Total Requirement: <strong>{calcResult.totalElasticMtr} Mtr</strong> &bull; <strong>÷ {effectiveDivisor} = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ background: '#f1f5f9', color: '#0f172a', fontWeight: '800', borderBottom: '1.5px solid #cbd5e1' }}>
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>DATE</th>
+                              {!withoutLotActive && (
+                                <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Lot No.</th>
+                              )}
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Mapped Material</th>
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs (Issued)</th>
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
+                              {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                                <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Tape Roll(s) (Pcs ÷ 45)</th>
+                              )}
+                              {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                                <th style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>Elastic Per Pc (In mtr.)</th>
+                              )}
+                              {(materialMode === 'bone' || materialMode === 'all') && (
+                                <th style={{ padding: '8px 10px' }}>Bone Weight (Kg)</th>
+                              )}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{ background: '#ffffff', color: '#0f172a' }}>
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>{issueDate}</td>
+                              {!withoutLotActive && (
+                                <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#059669' }}>
+                                  {lotDetails?.lotNo || searchLotInput || '—'}
+                                </td>
+                              )}
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '700' }}>
+                                {withoutLotActive ? (withoutLotStyle || 'LOWER') : (lotDetails?.garmentType || lotDetails?.style || 'LOWER')}
+                              </td>
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
+                                {materialMode === 'elastic' ? (
+                                  <span style={{ color: '#047857' }}>
+                                    {elasticMaterialName || 'Elastic'} {currentElasticMaterial ? `[${currentElasticMaterial.id}]` : ''}
+                                  </span>
+                                ) : materialMode === 'tape' ? (
+                                  <span style={{ color: '#1d4ed8' }}>
+                                    {tapeMaterialName || 'Tape'} {currentTapeMaterial ? `[${currentTapeMaterial.id}]` : ''}
+                                  </span>
+                                ) : materialMode === 'bone' ? (
+                                  <span style={{ color: '#0369a1' }}>
+                                    {boneMaterialName || 'Bone'} {currentBoneMaterial ? `[${currentBoneMaterial.id}]` : ''}
+                                  </span>
+                                ) : (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                    <span style={{ color: '#047857' }}>{elasticMaterialName} {currentElasticMaterial ? `[${currentElasticMaterial.id}]` : ''}</span>
+                                    <span style={{ color: '#1d4ed8', fontSize: '11px' }}>{tapeMaterialName} {currentTapeMaterial ? `[${currentTapeMaterial.id}]` : ''}</span>
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
+                                {issuePcs}
+                              </td>
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
+                                {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
+                              </td>
+                              {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                                <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#1d4ed8', background: '#eff6ff' }}>
+                                  {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45)} Roll(s)
+                                  {parseInt(issuePcs || lotDetails?.quantity || 0, 10) > 0 && (
+                                    <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', marginLeft: '4px' }}>
+                                      ({(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45).toFixed(2)})
+                                    </span>
+                                  )}
+                                </td>
+                              )}
+                              {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                                <td style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
+                                  {calcResult.elasticPerPcMtr || 0}
+                                </td>
+                              )}
+                              {(materialMode === 'bone' || materialMode === 'all') && (
+                                <td style={{ padding: '8px 10px', fontWeight: '800', color: '#0284c7', background: '#f0f9ff' }}>
+                                  {boneWeightKg || '0'} Kg
+                                </td>
+                              )}
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
             {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
             <div style={{
@@ -2567,6 +3184,162 @@ export default function ElasticIssueView({
                   />
                 </div>
 
+                {/* ELASTIC SPECIFICATION & MATERIAL MAPPING (3 TYPES: 1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23) */}
+                {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                  <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Ruler size={14} color="#059669" />
+                        <span>Elastic Specification & Material Mapping:</span>
+                      </span>
+                      <span style={{
+                        fontSize: '10.5px',
+                        background: '#dcfce7',
+                        color: '#065f46',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontWeight: '800'
+                      }}>
+                        Divisor: ÷ {effectiveDivisor} ({effectiveWidth})
+                      </span>
+                    </div>
+
+                    {/* 3 Standard Elastic Types Quick Selection */}
+                    <div>
+                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', display: 'block', marginBottom: '4px' }}>
+                        ELASTIC WIDTH TYPE (3 TYPES):
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                        {[
+                          { label: '1 Inch', desc: '÷ 25 Formula', val: '1 Inch' },
+                          { label: '1.5 Inch', desc: '÷ 23 Formula', val: '1.5 Inch' },
+                          { label: '2 Inch', desc: '÷ 23 Formula', val: '2 Inch' }
+                        ].map(t => {
+                          const isActive = effectiveWidth.includes(t.val) || (t.val === '1 Inch' && (effectiveWidth.includes('Standard') || effectiveWidth === '1 Inch'));
+                          return (
+                            <button
+                              key={t.val}
+                              type="button"
+                              onClick={() => {
+                                setElasticWidth(t.val);
+                                const match = elasticMaterials.find(m => {
+                                  const n = (m.name || '').toLowerCase();
+                                  if (t.val === '1.5 Inch') return n.includes('1.5');
+                                  if (t.val === '2 Inch') return n.includes('2') && !n.includes('1.5');
+                                  return n.includes('1') && !n.includes('1.5');
+                                });
+                                if (match) setSelectedElasticMaterialId(match.id);
+                              }}
+                              style={{
+                                padding: '6px 4px',
+                                borderRadius: '8px',
+                                border: isActive ? '2px solid #059669' : '1px solid #cbd5e1',
+                                background: isActive ? '#dcfce7' : '#ffffff',
+                                color: isActive ? '#065f46' : '#334155',
+                                cursor: 'pointer',
+                                textAlign: 'center',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <div style={{ fontSize: '12px', fontWeight: '800' }}>{t.label}</div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: isActive ? '#047857' : '#64748b' }}>
+                                {t.desc}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Mapped Elastic Inventory Material Dropdown (Elastic Category Only) */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', margin: 0 }}>
+                          MATERIAL NAME MAPPING (ELASTIC CATEGORY):
+                        </label>
+                        <span style={{ fontSize: '10px', color: '#047857', fontWeight: '700' }}>
+                          {elasticMaterials.length} Items Available
+                        </span>
+                      </div>
+                      <select
+                        value={selectedElasticMaterialId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setSelectedElasticMaterialId(id);
+                          const mat = elasticMaterials.find(m => String(m.id) === String(id));
+                          if (mat) {
+                            const n = (mat.name || '').toLowerCase();
+                            if (n.includes('1.5')) setElasticWidth('1.5 Inch');
+                            else if (n.includes('2')) setElasticWidth('2 Inch');
+                            else setElasticWidth('1 Inch');
+                          }
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #86efac',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          color: '#0f172a',
+                          background: '#ffffff',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="">— Select Elastic Inventory Item —</option>
+                        {elasticMaterials.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.id}) • Stock: {m.stock} {m.unit || 'Roll'} &bull; Divisor: {(m.name || '').includes('1.5') ? '÷ 23' : (m.name || '').includes('2') ? '÷ 23' : '÷ 25'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Roll Count Input & Live Division Formula */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'center' }}>
+                      <div>
+                        <label style={{ fontSize: '10.5px', fontWeight: '700', color: '#047857', display: 'block', marginBottom: '2px' }}>
+                          ROLLS (AUTO):
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={rollCount || calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1}
+                          onChange={(e) => setRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          style={{
+                            width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: '6px',
+                            border: '1.5px solid #059669', fontSize: '13px', fontWeight: '800',
+                            color: '#0f172a', background: '#ffffff', outline: 'none'
+                          }}
+                        />
+                      </div>
+                      <div style={{
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        background: '#ffffff',
+                        border: '1px dashed #86efac',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        color: '#047857',
+                        lineHeight: '1.3'
+                      }}>
+                        <div>Calculation: {calcResult.totalElasticMtr} Mtr ÷ {effectiveDivisor}</div>
+                        <div style={{ color: '#065f46', fontWeight: '800' }}>
+                          = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Issue Date & Remarks */}
                 <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
                   <div>
@@ -2601,6 +3374,8 @@ export default function ElasticIssueView({
                     />
                   </div>
                 </div>
+
+
 
               </div>
 
@@ -2641,10 +3416,10 @@ export default function ElasticIssueView({
                     }}>
                       <div>
                         <span style={{ fontSize: '10.5px', color: '#c2410c', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
-                          ISSUE MODE & ITEM
+                          ISSUE MODE & LOT
                         </span>
                         <strong style={{ color: '#9a3412', fontSize: '13.5px' }}>
-                          Without Lot — {withoutLotStyle || 'Floor Issue'}
+                          Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
                         </strong>
                       </div>
                       <span style={{
@@ -2665,127 +3440,432 @@ export default function ElasticIssueView({
                         <strong style={{ color: '#0f172a' }}>LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.garmentType || lotDetails?.style || 'LOWER'})</strong>
                       </div>
                       <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>CUTTING MATRIX PCS</span>
-                        <strong style={{ color: '#059669', fontSize: '13.5px' }}>{lotDetails?.quantity || 600} Pcs</strong>
+                        <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>
+                          {materialMode === 'bone' ? 'ISSUE WEIGHT (KG)' : 'CUTTING MATRIX PCS'}
+                        </span>
+                        <strong style={{ color: '#059669', fontSize: '13.5px' }}>
+                          {materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${lotDetails?.quantity || issuePcs || '—'} Pcs`}
+                        </strong>
                       </div>
                     </div>
                   )}
 
-                  {/* Editable Issue Pcs Box */}
-                  <div style={{
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    background: '#f0fdf4',
-                    border: '1.5px solid #86efac',
-                    marginBottom: '14px'
-                  }}>
-                    <label style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Scissors size={14} color="#059669" />
-                        <span>Issue Pcs (Editable):</span>
-                      </span>
-                      <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#047857', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
-                        Live Auto-Calculation
-                      </span>
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={issuePcs}
-                        onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                        placeholder="e.g. 600"
-                        style={{
-                          flex: 1,
-                          padding: '7px 10px',
-                          borderRadius: '6px',
-                          border: '1.5px solid #059669',
-                          background: '#ffffff',
-                          fontSize: '15px',
-                          fontWeight: '800',
-                          color: '#0f172a',
-                          outline: 'none'
-                        }}
-                      />
-                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>Pcs</span>
-                      {!withoutLotActive && lotDetails?.quantity && (
-                        <button
-                          type="button"
-                          onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
-                          style={{
-                            padding: '6px 9px',
-                            borderRadius: '6px',
-                            border: '1px solid #86efac',
-                            background: '#ffffff',
-                            color: '#047857',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          Match Cutting ({lotDetails.quantity})
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Material Requirement Highlights */}
-                  {(materialMode === 'elastic' || materialMode === 'both') && (
+                  {/* Editable Issue Box: Direct Weight in Kgs for Bone, Pcs for Elastic & Tape */}
+                  {materialMode === 'bone' ? (
                     <div style={{
                       padding: '12px 14px',
                       borderRadius: '10px',
+                      background: '#f0f9ff',
+                      border: '1.5px solid #0284c7',
+                      marginBottom: '14px',
+                      boxShadow: '0 2px 10px rgba(2, 132, 199, 0.08)'
+                    }}>
+                      <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Scale size={16} color="#0284c7" />
+                          <span>Direct Issue Weight (Editable):</span>
+                        </span>
+                        <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                          Kg-Wise Floor Issue
+                        </span>
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          value={boneWeightKg}
+                          onChange={(e) => setBoneWeightKg(e.target.value)}
+                          placeholder="Enter Weight in Kg (e.g. 2.50)"
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '2px solid #0284c7',
+                            background: '#ffffff',
+                            fontSize: '16px',
+                            fontWeight: '900',
+                            color: '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                        <span style={{
+                          fontSize: '15px',
+                          fontWeight: '900',
+                          color: '#0369a1',
+                          background: '#e0f2fe',
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #bae6fd'
+                        }}>
+                          Kgs
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
+                        {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
+                          <button
+                            key={w}
+                            type="button"
+                            onClick={() => setBoneWeightKg(w)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              border: boneWeightKg === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                              background: boneWeightKg === w ? '#0284c7' : '#ffffff',
+                              color: boneWeightKg === w ? '#ffffff' : '#0369a1',
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              transition: 'all 0.1s ease'
+                            }}
+                          >
+                            {w} Kg
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{
+                      padding: '10px 12px',
+                      borderRadius: '8px',
                       background: '#f0fdf4',
                       border: '1.5px solid #86efac',
-                      marginBottom: materialMode === 'both' ? '10px' : '14px'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <span style={{ fontSize: '11px', color: '#047857', fontWeight: '800', textTransform: 'uppercase' }}>
-                            Elastic Total Requirement
-                          </span>
-                          <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '2px' }}>
-                            Per Pc: <strong>{calcResult.elasticPerPcMtr} Mtr</strong> ({elasticSizeInput} {elasticUnit}) × {issuePcs} Pcs
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '22px', fontWeight: '900', color: '#059669', lineHeight: '1.1' }}>
-                            {calcResult.totalElasticMtr} Mtr
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {(materialMode === 'tape' || materialMode === 'both') && (
-                    <div style={{
-                      padding: '12px 14px',
-                      borderRadius: '10px',
-                      background: '#eff6ff',
-                      border: '1.5px solid #93c5fd',
                       marginBottom: '14px'
                     }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Scissors size={14} color="#059669" />
+                          <span>Issue Pcs (Editable):</span>
+                        </span>
+                        <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#047857', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                          Live Auto-Calculation
+                        </span>
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          min="1"
+                          value={issuePcs}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') {
+                              setIssuePcs('');
+                            } else {
+                              const parsed = parseInt(val, 10);
+                              setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
+                            }
+                          }}
+                          placeholder="Enter Issue Pcs"
+                          style={{
+                            flex: 1,
+                            padding: '7px 10px',
+                            borderRadius: '6px',
+                            border: '1.5px solid #059669',
+                            background: '#ffffff',
+                            fontSize: '15px',
+                            fontWeight: '800',
+                            color: '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                        <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>Pcs</span>
+                        {!withoutLotActive && lotDetails?.quantity && (
+                          <button
+                            type="button"
+                            onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
+                            style={{
+                              padding: '6px 9px',
+                              borderRadius: '6px',
+                              border: '1px solid #86efac',
+                              background: '#ffffff',
+                              color: '#047857',
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            Match Cutting ({lotDetails.quantity})
+                          </button>
+                        )}
+                      </div>
+                      {materialMode === 'all' && (
+                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #86efac', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', minWidth: '130px' }}>Bone Weight (Kg):</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={boneWeightKg}
+                            onChange={(e) => setBoneWeightKg(e.target.value)}
+                            placeholder="e.g. 2.50"
+                            style={{
+                              flex: 1,
+                              padding: '6px 10px',
+                              borderRadius: '6px',
+                              border: '1.5px solid #0284c7',
+                              background: '#ffffff',
+                              fontSize: '14px',
+                              fontWeight: '800',
+                              color: '#0f172a',
+                              outline: 'none'
+                            }}
+                          />
+                          <span style={{ fontSize: '13px', fontWeight: '900', color: '#0369a1' }}>Kgs</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Material Requirement Highlights */}
+                  {(materialMode === 'elastic' || materialMode === 'both') && (() => {
+                    const effectiveRollsToIssue = calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1;
+                    return (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        background: '#f0fdf4',
+                        border: '2px solid #059669',
+                        marginBottom: materialMode === 'both' ? '12px' : '16px',
+                        boxShadow: '0 3px 12px rgba(5, 150, 105, 0.08)'
+                      }}>
+                        {/* Top: Material Name & Per Pc Details */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                              <span style={{ fontSize: '11px', color: '#047857', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                {elasticMaterialName || 'Elastic'} Total Requirement
+                              </span>
+                              {currentElasticMaterial && (
+                                <span style={{ fontSize: '10px', background: '#dcfce7', color: '#065f46', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                  ID: {currentElasticMaterial.id}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
+                              Per Pc: <strong>{calcResult.elasticPerPcMtr} Mtr</strong> ({elasticSizeInput} {elasticUnit}) × <strong>{issuePcs} Pcs</strong>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                              Total Length
+                            </span>
+                            <span style={{ fontSize: '18px', fontWeight: '900', color: '#0f172a' }}>
+                              {calcResult.totalElasticMtr} Mtr
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* HERO CALLOUT: TOTAL ISSUE (31 ROLLS) */}
+                        <div style={{
+                          background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '38px', height: '38px', borderRadius: '8px',
+                              background: 'rgba(255,255,255,0.2)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '20px', fontWeight: '900'
+                            }}>
+                              📦
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                TOTAL ISSUE QUANTITY
+                              </div>
+                              <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                Formula: {calcResult.totalElasticMtr} Mtr ÷ {effectiveDivisor} ({effectiveWidth})
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                              = {effectiveRollsToIssue} <span style={{ fontSize: '18px', fontWeight: '800' }}>Roll(s)</span>
+                            </div>
+                            <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                              {currentElasticMaterial ? `Stock in store: ${currentElasticMaterial.stock} Roll(s)` : 'Total to hand over'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {(materialMode === 'tape' || materialMode === 'both') && (() => {
+                    const effTapePcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                    const tapeExact = effTapePcs > 0 ? (effTapePcs / 45).toFixed(2) : '0';
+                    const tapeRolls = effTapePcs > 0 ? Math.ceil(effTapePcs / 45) : 0;
+
+                    return (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '12px',
+                        background: '#eff6ff',
+                        border: '2px solid #2563eb',
+                        marginBottom: '14px',
+                        boxShadow: '0 3px 12px rgba(37, 99, 235, 0.08)'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                              <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                {tapeMaterialName || 'Tape'} Total Requirement (Pcs ÷ 45)
+                              </span>
+                              {currentTapeMaterial && (
+                                <span style={{ fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                  ID: {currentTapeMaterial.id}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
+                              Formula: <strong>{effTapePcs} Pcs ÷ 45</strong> = <strong>{tapeExact} Rolls</strong>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                              Standard Rule
+                            </span>
+                            <span style={{ fontSize: '14px', fontWeight: '900', color: '#1d4ed8' }}>
+                              1 Roll / 45 Pcs
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* HERO CALLOUT: TAPE TOTAL ISSUE */}
+                        <div style={{
+                          background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '42px', height: '42px', borderRadius: '8px',
+                              background: 'rgba(255,255,255,0.2)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              fontSize: '22px'
+                            }}>
+                              📦
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                TOTAL TAPE ISSUE QUANTITY
+                              </div>
+                              <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                {effTapePcs} Pcs ÷ 45 = {tapeExact} → {tapeRolls} Roll(s)
+                              </div>
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                              {tapeRolls} <span style={{ fontSize: '16px', fontWeight: '800' }}>Roll(s)</span>
+                            </div>
+                            <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                              {currentTapeMaterial ? `Stock in store: ${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Roll'}` : 'Total to issue'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Bone Roll Requirement Highlight */}
+                  {(materialMode === 'bone' || materialMode === 'all') && (
+                    <div style={{
+                      padding: '14px 16px',
+                      borderRadius: '12px',
+                      background: '#f0f9ff',
+                      border: '2px solid #0284c7',
+                      marginBottom: '14px',
+                      boxShadow: '0 3px 12px rgba(2, 132, 199, 0.08)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
                         <div>
-                          <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase' }}>
-                            Tape Total Requirement
-                          </span>
-                          <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '2px' }}>
-                            Per Pc: <strong>{calcResult.tapePerPcMtr} Mtr</strong> ({tapeSizeInput} {tapeUnit}) × {issuePcs} Pcs
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
+                            <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              {boneMaterialName || 'Bone'} Requirement
+                            </span>
+                            {currentBoneMaterial && (
+                              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                ID: {currentBoneMaterial.id}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '700', marginTop: '3px' }}>
+                            Direct Floor Issue (Kg-Wise)
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '20px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
-                            {calcResult.totalTapeMtr} Mtr
+                          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                            Issue Unit
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '800', color: '#0284c7' }}>
+                            Kilograms (Kg)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* HERO CALLOUT: BONE TOTAL ISSUE */}
+                      <div style={{
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '38px', height: '38px', borderRadius: '8px',
+                            background: 'rgba(255,255,255,0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '20px', fontWeight: '900'
+                          }}>
+                            📦
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                              TOTAL BONE ISSUE
+                            </div>
+                            <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                              Direct Floor Weight Issue (Kg-Wise)
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                            {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
+                          </div>
+                          <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                            {currentBoneMaterial ? `Store stock: ${currentBoneMaterial.stock || 'Available'}` : 'Weight-wise direct floor issue'}
                           </div>
                         </div>
                       </div>
                     </div>
                   )}
 
-                  {/* Formula Note */}
-                  <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
-                    Conversion Formula: <strong style={{ color: '#0f172a' }}>{calcResult.formulaExplanation}</strong>
-                  </div>
+                  {/* Formula Note (Shown for Elastic & Tape only) */}
+                  {materialMode !== 'bone' && (
+                    <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
+                      Conversion Formula: <strong style={{ color: '#0f172a' }}>{materialMode === 'tape' ? (calcResult.tapeFormula || `${issuePcs || lotDetails?.quantity || 0} Pcs ÷ 45 = ${calcResult.tapeRolls || Math.ceil((issuePcs || lotDetails?.quantity || 0)/45)} Roll(s)`) : calcResult.formulaExplanation}</strong>
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ fontSize: '12px', color: '#059669', fontWeight: '700', marginTop: '10px', textAlign: 'center' }}>
@@ -2800,11 +3880,11 @@ export default function ElasticIssueView({
               <div style={{ fontSize: '13px', color: '#64748b' }}>
                 {withoutLotActive ? (
                   <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Zap size={15} /> Without Lot Mode ({materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; Total: <strong style={{ color: '#ea580c' }}>{materialMode === 'tape' ? `${calcResult.totalTapeMtr} Mtr` : materialMode === 'bone' ? `${boneRollCount} Roll(s)` : `${calcResult.totalElasticMtr} Mtr`}</strong>
+                    <Zap size={15} /> Without BOM Mode ({materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong>
                   </span>
                 ) : bomStatus === 'approved' ? (
                   <span>
-                    Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.totalTapeMtr} Mtr` : materialMode === 'bone' ? `${boneRollCount} Roll(s)` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
+                    Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
                   </span>
                 ) : (
                   <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -2847,7 +3927,7 @@ export default function ElasticIssueView({
                   {generating
                     ? 'Generating Original Bill...'
                     : withoutLotActive
-                      ? `Generate W/O Lot ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
+                      ? `Generate W/O BOM ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
                       : 'Generate Original Issue Bill / PO'}
                 </span>
               </button>
@@ -2893,18 +3973,23 @@ export default function ElasticIssueView({
             <button
               type="button"
               onClick={() => {
+                setIsWithoutLot(true);
                 setIsWithoutPo(true);
-                setLotDetails({
-                  lotNo: searchLotInput || 'W/O-PO-FLOOR',
-                  style: 'Floor Issue',
-                  quantity: 600,
-                  brand: 'Mohit Hosiery',
-                  garmentType: 'LOWER',
-                  fabric: 'Cotton Poly Blend',
-                  shade: 'Standard'
-                });
-                setIssuePcs(600);
-                showToast('⚡ Issue W/O PO enabled. Form is unlocked for direct issue!');
+                if (!lotDetails) {
+                  setLotDetails({
+                    lotNo: searchLotInput || '',
+                    style: withoutLotStyle || 'Floor Issue',
+                    quantity: issuePcs || 0,
+                    brand: 'Mohit Hosiery',
+                    garmentType: withoutLotStyle || 'LOWER',
+                    fabric: 'Cotton Poly Blend',
+                    shade: 'Standard'
+                  });
+                }
+                if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                  handleSearchLot(searchLotInput.trim());
+                }
+                showToast('⚡ Switched to Without BOM mode. Enter Lot Number to proceed!');
               }}
               style={{
                 padding: '9px 20px',
@@ -2921,7 +4006,7 @@ export default function ElasticIssueView({
                 gap: '8px'
               }}
             >
-              <Zap size={16} /> ⚡ Issue W/O PO (Elastic, Tape or Bone Floor Issue)
+              <Zap size={16} /> ⚡ Direct Issue Without BOM (No BOM Required)
             </button>
           </div>
         </div>
@@ -3029,33 +4114,44 @@ export default function ElasticIssueView({
                           {item.date}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
-                          {(!item.lotNo || item.lotNo === 'W/O-LOT' || item.lotNo === 'W/O-PO-FLOOR' || item.isWithoutLot || item.isWithoutPo || String(item.slipNo).toLowerCase().includes('-w/o-')) ? (
-                            <span style={{
-                              background: '#fff7ed',
-                              color: '#c2410c',
-                              padding: '3px 8px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: '800',
-                              border: '1px solid #fed7aa'
-                            }}>
-                              W/O LOT
-                            </span>
+                          {String(item.slipNo || '').toLowerCase().includes('-w/o-') || item.isWithoutLot || item.isWithoutPo ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <span>{item.lotNo && item.lotNo !== 'W/O-LOT' && item.lotNo !== 'W/O-PO-FLOOR' ? `LOT #${item.lotNo}` : 'LOT #—'}</span>
+                              <span style={{
+                                background: '#fff7ed',
+                                color: '#c2410c',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontSize: '10px',
+                                fontWeight: '800',
+                                border: '1px solid #fed7aa'
+                              }}>
+                                W/O BOM
+                              </span>
+                            </div>
                           ) : (
-                            `LOT #${item.lotNo}`
+                            `LOT #${item.lotNo || '—'}`
                           )}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.style || item.garmentType || 'LOWER'}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                          {item.quantity || 600} Pcs
+                          {item.quantity || item.issuePcs || 0} Pcs
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800', color: '#047857' }}>
-                          {item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '1.27 Mtr'}
+                          {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+                            ? '1/45 Roll'
+                            : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+                              ? '18 CM Cut'
+                              : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—')}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '900', color: '#065f46', background: '#f0fdf4' }}>
-                          {item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : '762 Mtr'}
+                          {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+                            ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
+                            : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+                              ? `${item.boneRolls || item.rolls || 1} Roll(s)`
+                              : (item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : `${item.rolls || 1} Roll(s)`)}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.issuerName || 'STORE STAFF'}
@@ -3224,23 +4320,40 @@ export default function ElasticIssueView({
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px' }}>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>
-                      {(generatedSlipData.isWithoutLot || generatedSlipData.isWithoutPo) ? 'ISSUE MODE' : 'LOT NUMBER'}
+                      {(generatedSlipData.isWithoutLot || generatedSlipData.isWithoutPo) ? 'LOT NUMBER & MODE' : 'LOT NUMBER'}
                     </span>
-                    <strong style={{ color: (generatedSlipData.isWithoutLot || generatedSlipData.isWithoutPo) ? '#ea580c' : '#0f172a' }}>
-                      {(generatedSlipData.isWithoutLot || generatedSlipData.isWithoutPo) ? '⚡ WITHOUT LOT (Floor Issue)' : `LOT #${generatedSlipData.lotNo}`}
+                    <strong style={{ color: '#0f172a' }}>
+                      LOT #{generatedSlipData.lotNo || '—'}
+                      {(generatedSlipData.isWithoutLot || generatedSlipData.isWithoutPo) && (
+                        <span style={{ marginLeft: '6px', fontSize: '11px', color: '#ea580c', background: '#fff7ed', padding: '2px 6px', borderRadius: '4px', border: '1px solid #fed7aa' }}>
+                          ⚡ WITHOUT BOM
+                        </span>
+                      )}
                     </strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>TOTAL REQUIREMENT ON BILL</span>
-                    <strong style={{ color: '#059669', fontSize: '16px' }}>{generatedSlipData.totalElasticMtr || 762} Mtr</strong>
+                    <strong style={{ color: '#059669', fontSize: '16px' }}>
+                      {materialMode === 'tape' || String(generatedSlipData.slipNo || '').toLowerCase().includes('tape-')
+                        ? `${generatedSlipData.tapeRolls || generatedSlipData.rolls || Math.ceil((generatedSlipData.issuePcs || generatedSlipData.quantity || 0) / 45)} Roll(s)`
+                        : materialMode === 'bone' || String(generatedSlipData.slipNo || '').toLowerCase().includes('bone-')
+                          ? `${generatedSlipData.boneRolls || 1} Roll(s)`
+                          : `${generatedSlipData.totalElasticMtr || 0} Mtr (${generatedSlipData.rolls || 1} Rolls)`}
+                    </strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ITEM / STYLE & PCS</span>
-                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.style || 'LOWER'} • {generatedSlipData.issuePcs || generatedSlipData.quantity || 600} Pcs</strong>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.style || 'LOWER'} • {generatedSlipData.issuePcs || generatedSlipData.quantity || 0} Pcs</strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>PER PC REQUIREMENT</span>
-                    <strong style={{ color: '#047857' }}>{generatedSlipData.elasticPerPcMtr || 1.27} Mtr / Pc</strong>
+                    <strong style={{ color: '#047857' }}>
+                      {materialMode === 'tape' || String(generatedSlipData.slipNo || '').toLowerCase().includes('tape-')
+                        ? '1/45 Roll / Pc (Pcs ÷ 45 Rule)'
+                        : materialMode === 'bone' || String(generatedSlipData.slipNo || '').toLowerCase().includes('bone-')
+                          ? '18 CM / Pc (Standard Cut)'
+                          : `${generatedSlipData.elasticPerPcMtr || 1.27} Mtr / Pc`}
+                    </strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE DATE</span>

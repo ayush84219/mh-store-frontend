@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield } from 'lucide-react';
+import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield, Mail, UserCheck, ShieldCheck } from 'lucide-react';
 import { getBackendUrl } from '../utils/api';
 
 export default function SettingsView({
+  currentUser,
   vendors,
   onAddVendor,
   onDeleteVendor,
@@ -30,6 +31,46 @@ export default function SettingsView({
   allowWarehouseAddRack = false,
   onToggleAllowWarehouseAddRack
 }) {
+  // Registered Users (Signup Name & Gmail / Email) State
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  const fetchRegisteredUsers = async () => {
+    try {
+      setLoadingUsers(true);
+      const res = await fetch(`${getBackendUrl()}/api/users`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setRegisteredUsers(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch registered users:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRegisteredUsers();
+  }, []);
+
+  const displayUsers = useMemo(() => {
+    let list = [...registeredUsers];
+    if (list.length === 0 && currentUser) {
+      list = [currentUser];
+    }
+    if (!userSearchQuery.trim()) return list;
+    const q = userSearchQuery.toLowerCase().trim();
+    return list.filter(u =>
+      String(u.name || '').toLowerCase().includes(q) ||
+      String(u.email || '').toLowerCase().includes(q) ||
+      String(u.role || '').toLowerCase().includes(q)
+    );
+  }, [registeredUsers, currentUser, userSearchQuery]);
+
   const [isAddingVendor, setIsAddingVendor] = useState(false);
   const [vendorName, setVendorName] = useState('');
   const [vendorEmail, setVendorEmail] = useState('');
@@ -420,6 +461,256 @@ export default function SettingsView({
       <div style={{ marginBottom: '24px' }}>
         <h2 style={{ fontFamily: 'var(--font-family-title)', fontSize: '22px', fontWeight: '700' }}>System Settings & Configurations</h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Manage textile accessories catalog, designers directory, suppliers, Google Sheets integration, and system reset utilities.</p>
+      </div>
+
+      {/* ── 1. ACTIVE LOGGED-IN USER PROFILE & GMAIL CARD ── */}
+      <div style={{
+        marginBottom: '24px',
+        padding: '20px 24px',
+        borderRadius: '16px',
+        background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+        color: '#ffffff',
+        boxShadow: '0 10px 25px -5px rgba(15, 23, 42, 0.3)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '20px',
+        border: '1.5px solid rgba(255, 255, 255, 0.12)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{
+            width: '58px',
+            height: '58px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+            fontWeight: '900',
+            color: '#ffffff',
+            boxShadow: '0 4px 14px rgba(37, 99, 235, 0.45)',
+            border: '2.5px solid rgba(255, 255, 255, 0.3)',
+            flexShrink: 0
+          }}>
+            {String(currentUser?.name || 'U').charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#93c5fd' }}>
+                LOGGED-IN ACCOUNT PROFILE
+              </span>
+              <span style={{
+                fontSize: '11px',
+                fontWeight: '800',
+                padding: '2px 8px',
+                borderRadius: '6px',
+                background: 'rgba(16, 185, 129, 0.2)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.4)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                <CheckCircle size={11} /> Verified User
+              </span>
+            </div>
+            <h3 style={{ margin: '4px 0 2px 0', fontSize: '22px', fontWeight: '900', color: '#ffffff', letterSpacing: '-0.02em' }}>
+              {currentUser?.name || 'Store User'}
+            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '18px', flexWrap: 'wrap', marginTop: '6px', fontSize: '13.5px' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', background: 'rgba(255, 255, 255, 0.08)', padding: '3px 10px', borderRadius: '6px' }}>
+                <Mail size={15} style={{ color: '#f87171' }} />
+                <span style={{ color: '#cbd5e1', fontSize: '12px' }}>Gmail / Email:</span>
+                <strong style={{ color: '#ffffff', fontFamily: 'monospace' }}>{currentUser?.email || 'N/A'}</strong>
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Shield size={14} style={{ color: '#a78bfa' }} />
+                <span style={{ color: '#cbd5e1', fontSize: '12px' }}>System Role:</span>
+                <span style={{
+                  padding: '1px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11.5px',
+                  fontWeight: '800',
+                  background: currentUser?.role === 'Admin' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(59, 130, 246, 0.25)',
+                  color: currentUser?.role === 'Admin' ? '#fca5a5' : '#93c5fd'
+                }}>
+                  {currentUser?.role || 'Admin'}
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.07)',
+            padding: '10px 18px',
+            borderRadius: '12px',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            textAlign: 'right'
+          }}>
+            <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Security Session</div>
+            <div style={{ fontSize: '13px', color: '#38bdf8', fontWeight: '800', marginTop: '2px' }}>12-Hour Active Session</div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── 2. REGISTERED USERS DIRECTORY (SIGNUP NAME & GMAIL DIRECTORY) ── */}
+      <div className="panel" style={{ marginBottom: '24px' }}>
+        <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Users size={20} className="text-accent" />
+            <div>
+              <h3 className="panel-title" style={{ margin: 0, fontSize: '15px' }}>
+                Registered Accounts Directory ({displayUsers.length})
+              </h3>
+              <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                System user signup names, registered Gmail / email addresses, and account permissions.
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ position: 'relative', width: '220px' }}>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Search name or gmail..."
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
+                style={{ padding: '7px 10px 7px 30px', fontSize: '12.5px', height: '34px' }}
+              />
+              <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={fetchRegisteredUsers}
+              disabled={loadingUsers}
+              title="Refresh users list"
+              style={{ height: '34px', display: 'flex', alignItems: 'center', gap: '5px' }}
+            >
+              <RefreshCw size={13} className={loadingUsers ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {displayUsers.length === 0 ? (
+          <div style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <User size={32} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
+            <div style={{ fontSize: '14px', fontWeight: '700' }}>No users found matching your search.</div>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-primary)', borderBottom: '2px solid var(--border-color)', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11.5px', fontWeight: '800' }}>
+                  <th style={{ padding: '10px 14px' }}># ID</th>
+                  <th style={{ padding: '10px 14px' }}>SIGNUP NAME</th>
+                  <th style={{ padding: '10px 14px' }}>GMAIL / EMAIL</th>
+                  <th style={{ padding: '10px 14px' }}>ROLE</th>
+                  <th style={{ padding: '10px 14px' }}>ACCOUNT STATUS</th>
+                  <th style={{ padding: '10px 14px' }}>REGISTRATION DATE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayUsers.map((u, index) => {
+                  const isCurrent = currentUser && (u.email === currentUser.email || u.id === currentUser.id);
+                  return (
+                    <tr key={u.id || u.email || index} style={{
+                      borderBottom: '1px solid var(--border-color)',
+                      background: isCurrent ? 'rgba(59, 130, 246, 0.05)' : 'transparent'
+                    }}>
+                      <td style={{ padding: '12px 14px', color: 'var(--text-muted)', fontWeight: '700' }}>
+                        #{u.id || index + 1}
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '34px',
+                            height: '34px',
+                            borderRadius: '50%',
+                            background: isCurrent ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : '#475569',
+                            color: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '13.5px',
+                            fontWeight: '800',
+                            flexShrink: 0,
+                            boxShadow: isCurrent ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none'
+                          }}>
+                            {String(u.name || 'U').charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              {u.name || 'Anonymous User'}
+                              {isCurrent && (
+                                <span style={{
+                                  fontSize: '10.5px',
+                                  fontWeight: '800',
+                                  padding: '1px 6px',
+                                  borderRadius: '4px',
+                                  background: '#dbeafe',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe'
+                                }}>
+                                  You (Active)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '7px', color: 'var(--text-main)', fontWeight: '700' }}>
+                          <Mail size={15} style={{ color: '#ef4444' }} />
+                          <span style={{ fontFamily: 'monospace', fontSize: '13px', color: 'var(--text-main)' }}>{u.email}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          padding: '3px 9px',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: '800',
+                          background: u.role === 'Admin' ? 'rgba(239, 68, 68, 0.1)' : u.role === 'Designer' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                          color: u.role === 'Admin' ? '#dc2626' : u.role === 'Designer' ? '#7e22ce' : '#2563eb',
+                          border: `1px solid ${u.role === 'Admin' ? 'rgba(239, 68, 68, 0.25)' : u.role === 'Designer' ? 'rgba(168, 85, 247, 0.25)' : 'rgba(59, 130, 246, 0.25)'}`
+                        }}>
+                          {u.role || 'User'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 14px' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          color: '#059669',
+                          background: 'rgba(16, 185, 129, 0.1)',
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid rgba(16, 185, 129, 0.25)'
+                        }}>
+                          <CheckCircle size={12} /> Active &bull; Verified
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 14px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'Active Account'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="split-view" style={{ gridTemplateColumns: '0.9fr 1.1fr' }}>
