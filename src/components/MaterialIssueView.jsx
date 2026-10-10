@@ -1,7 +1,7 @@
 import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check } from 'lucide-react';
+import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check, User, Users, Download, Building } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import BarcodeMaterialIssueView from './BarcodeMaterialIssueView';
@@ -574,7 +574,17 @@ export default function MaterialIssueView({
   const [receiverDept, setReceiverDept] = useState('Cutting');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [printLog, setPrintLog] = useState(null);
-  const [auditTab, setAuditTab] = useState('combined_audit'); // 'combined_audit', 'by_lot', or 'all_logs'
+  const [auditTab, setAuditTab] = useState('combined_audit'); // 'combined_audit', 'by_lot', 'person_wise', 'receiver_wise', or 'all_logs'
+  const [personFilter, setPersonFilter] = useState('all');
+  const [receiverFilter, setReceiverFilter] = useState('all');
+  const [expandedPersonCards, setExpandedPersonCards] = useState({});
+  const [expandedReceiverCards, setExpandedReceiverCards] = useState({});
+  const togglePersonCardExpand = (pName) => {
+    setExpandedPersonCards(prev => ({ ...prev, [pName]: !prev[pName] }));
+  };
+  const toggleReceiverCardExpand = (rName) => {
+    setExpandedReceiverCards(prev => ({ ...prev, [rName]: !prev[rName] }));
+  };
   const [expandedAuditLots, setExpandedAuditLots] = useState({});
   const toggleAuditLotExpand = (lotId) => {
     setExpandedAuditLots(prev => ({ ...prev, [lotId]: !prev[lotId] }));
@@ -1303,6 +1313,510 @@ export default function MaterialIssueView({
       document.body.classList.remove('print-single-issue-slip-mode');
       setPrintLog(null);
     }, 100);
+  };
+
+  // Group issue logs by Person (Issuer)
+  const personAuditSummary = useMemo(() => {
+    const map = {};
+    issueLogs.forEach(log => {
+      const personKey = (log.personName || 'Store Incharge').trim();
+      if (!map[personKey]) {
+        map[personKey] = {
+          personName: personKey,
+          totalTransactions: 0,
+          totalPieces: 0,
+          lots: new Set(),
+          receivers: new Set(),
+          materialsSummary: {},
+          logs: []
+        };
+      }
+      map[personKey].totalTransactions += 1;
+      map[personKey].totalPieces += Number(log.volume || 0);
+      if (log.lotId && log.lotId !== 'N/A') map[personKey].lots.add(String(log.lotId));
+      if (log.receiverName) map[personKey].receivers.add(String(log.receiverName).trim());
+      map[personKey].logs.push(log);
+
+      if (Array.isArray(log.materials)) {
+        log.materials.forEach(m => {
+          const matKey = m.name || m.bomItemName || 'Item';
+          if (!map[personKey].materialsSummary[matKey]) {
+            map[personKey].materialsSummary[matKey] = {
+              name: matKey,
+              bomItemName: m.bomItemName || matKey,
+              qty: 0,
+              unit: m.unit || 'pcs'
+            };
+          }
+          map[personKey].materialsSummary[matKey].qty += Number(m.qty || 0);
+        });
+      }
+    });
+
+    return Object.values(map).map(p => ({
+      ...p,
+      uniqueLotsCount: p.lots.size,
+      lotsList: Array.from(p.lots),
+      receiversList: Array.from(p.receivers)
+    })).sort((a, b) => b.totalTransactions - a.totalTransactions);
+  }, [issueLogs]);
+
+  // Group issue logs by Receiver (Name / Issued To)
+  const receiverAuditSummary = useMemo(() => {
+    const map = {};
+    issueLogs.forEach(log => {
+      const receiverKey = (log.receiverName || 'Unspecified Receiver').trim();
+      const dept = (log.receiverDept || 'Cutting').trim();
+      if (!map[receiverKey]) {
+        map[receiverKey] = {
+          receiverName: receiverKey,
+          department: dept,
+          totalTransactions: 0,
+          totalPieces: 0,
+          lots: new Set(),
+          issuers: new Set(),
+          materialsSummary: {},
+          logs: []
+        };
+      }
+      map[receiverKey].totalTransactions += 1;
+      map[receiverKey].totalPieces += Number(log.volume || 0);
+      if (log.lotId && log.lotId !== 'N/A') map[receiverKey].lots.add(String(log.lotId));
+      if (log.personName) map[receiverKey].issuers.add(String(log.personName).trim());
+      map[receiverKey].logs.push(log);
+
+      if (Array.isArray(log.materials)) {
+        log.materials.forEach(m => {
+          const matKey = m.name || m.bomItemName || 'Item';
+          if (!map[receiverKey].materialsSummary[matKey]) {
+            map[receiverKey].materialsSummary[matKey] = {
+              name: matKey,
+              bomItemName: m.bomItemName || matKey,
+              qty: 0,
+              unit: m.unit || 'pcs'
+            };
+          }
+          map[receiverKey].materialsSummary[matKey].qty += Number(m.qty || 0);
+        });
+      }
+    });
+
+    return Object.values(map).map(r => ({
+      ...r,
+      uniqueLotsCount: r.lots.size,
+      lotsList: Array.from(r.lots),
+      issuersList: Array.from(r.issuers)
+    })).sort((a, b) => b.totalTransactions - a.totalTransactions);
+  }, [issueLogs]);
+
+  const filteredPersonAudits = useMemo(() => {
+    let list = personAuditSummary;
+    if (personFilter !== 'all') {
+      list = list.filter(p => p.personName.toLowerCase() === personFilter.toLowerCase());
+    }
+    const q = logSearchQuery.toLowerCase().trim();
+    if (q) {
+      list = list.filter(p =>
+        p.personName.toLowerCase().includes(q) ||
+        p.lotsList.some(lot => lot.toLowerCase().includes(q)) ||
+        p.receiversList.some(r => r.toLowerCase().includes(q)) ||
+        Object.keys(p.materialsSummary).some(m => m.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [personAuditSummary, personFilter, logSearchQuery]);
+
+  const filteredReceiverAudits = useMemo(() => {
+    let list = receiverAuditSummary;
+    if (receiverFilter !== 'all') {
+      list = list.filter(r => r.receiverName.toLowerCase() === receiverFilter.toLowerCase());
+    }
+    const q = logSearchQuery.toLowerCase().trim();
+    if (q) {
+      list = list.filter(r =>
+        r.receiverName.toLowerCase().includes(q) ||
+        r.department.toLowerCase().includes(q) ||
+        r.lotsList.some(lot => lot.toLowerCase().includes(q)) ||
+        r.issuersList.some(iss => iss.toLowerCase().includes(q)) ||
+        Object.keys(r.materialsSummary).some(m => m.toLowerCase().includes(q))
+      );
+    }
+    return list;
+  }, [receiverAuditSummary, receiverFilter, logSearchQuery]);
+
+  // PDF Report Generation for a Specific Person (Issuer)
+  const handleDownloadPersonPdf = (personAudit) => {
+    if (!personAudit) return;
+    try {
+      const doc = new jsPDF();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(30, 41, 59);
+      doc.text('MH ACCESSORIES & BOM STORE', 14, 16);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Production Operations & Material Distribution Audit — Person-Wise Report', 14, 21);
+
+      doc.setFillColor(37, 99, 235);
+      doc.roundedRect(14, 25, 182, 9, 2, 2, 'F');
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`MATERIAL ISSUE AUDIT REPORT — ISSUER: ${personAudit.personName.toUpperCase()}`, 16, 31);
+
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 37, 182, 20, 2, 2, 'FD');
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Person / Issuer:', 18, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(personAudit.personName, 48, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Issue Slips:', 110, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${personAudit.totalTransactions} transactions`, 140, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Garment Pieces Volume:', 18, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(37, 99, 235);
+      doc.text(`${personAudit.totalPieces.toLocaleString()} pcs`, 56, 51);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text('Production Lots Served:', 110, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${personAudit.uniqueLotsCount} lots (${personAudit.lotsList.slice(0, 5).join(', ')}${personAudit.lotsList.length > 5 ? '...' : ''})`, 146, 51);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(37, 99, 235);
+      doc.text('1. TOTAL MATERIALS DISPATCHED BREAKDOWN', 14, 63);
+
+      const matRows = Object.values(personAudit.materialsSummary).map((m, idx) => [
+        idx + 1,
+        m.bomItemName,
+        m.name,
+        `${Number(m.qty.toFixed(2)).toLocaleString()}`,
+        m.unit
+      ]);
+
+      autoTable(doc, {
+        startY: 66,
+        head: [['#', 'Component', 'Material Description', 'Total Dispatched Qty', 'Unit']],
+        body: matRows.length > 0 ? matRows : [['—', '—', 'No materials logged', '0', '—']],
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 35, fontStyle: 'bold' },
+          2: { cellWidth: 75 },
+          3: { cellWidth: 35, halign: 'right', fontStyle: 'bold', textColor: [37, 99, 235] },
+          4: { cellWidth: 25, halign: 'center' }
+        }
+      });
+
+      let nextY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 90) + 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text('2. TRANSACTION SLIPS & DISPATCH HISTORY', 14, nextY);
+
+      const slipRows = personAudit.logs.map((l, idx) => [
+        idx + 1,
+        l.id,
+        l.date,
+        l.lotId && l.lotId !== 'N/A' ? `Lot ${l.lotId}` : '—',
+        l.category || 'General',
+        `${Number(l.volume || 0).toLocaleString()} pcs`,
+        `${l.receiverName || '—'} (${l.receiverDept || 'Cutting'})`,
+        (l.materials || []).map(m => `${m.bomItemName || m.name}: ${m.qty} ${m.unit || 'pcs'}`).join(', ')
+      ]);
+
+      autoTable(doc, {
+        startY: nextY + 3,
+        head: [['#', 'Slip ID', 'Date', 'Lot', 'Garment', 'Volume', 'Issued To (Receiver)', 'Materials Details']],
+        body: slipRows,
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 7.5, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 20, fontStyle: 'bold' },
+          2: { cellWidth: 24 },
+          3: { cellWidth: 16 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 18, halign: 'right' },
+          6: { cellWidth: 28 },
+          7: { cellWidth: 48 }
+        }
+      });
+
+      const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 180) + 16;
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.line(14, finalY, 65, finalY);
+      doc.text(`Issuer (${personAudit.personName})`, 14, finalY + 4);
+
+      doc.line(75, finalY, 125, finalY);
+      doc.text('Store Supervisor', 75, finalY + 4);
+
+      doc.line(135, finalY, 185, finalY);
+      doc.text('Audited By (Admin)', 135, finalY + 4);
+
+      doc.save(`PERSON_WISE_REPORT_${personAudit.personName.replace(/\s+/g, '_')}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate person PDF:', err);
+      alert('Could not generate PDF: ' + err.message);
+    }
+  };
+
+  // PDF Report Generation for a Specific Receiver (Name-Wise)
+  const handleDownloadReceiverPdf = (receiverAudit) => {
+    if (!receiverAudit) return;
+    try {
+      const doc = new jsPDF();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(30, 41, 59);
+      doc.text('MH ACCESSORIES & BOM STORE', 14, 16);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Production Operations & Material Distribution Audit — Name-Wise (Receiver) Report', 14, 21);
+
+      doc.setFillColor(13, 148, 136);
+      doc.roundedRect(14, 25, 182, 9, 2, 2, 'F');
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`MATERIAL RECEIPT AUDIT REPORT — RECEIVER: ${receiverAudit.receiverName.toUpperCase()}`, 16, 31);
+
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(14, 37, 182, 20, 2, 2, 'FD');
+      doc.setFontSize(8.5);
+      doc.setTextColor(15, 23, 42);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Receiver / Name:', 18, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiverAudit.receiverName, 50, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Department:', 110, 43);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiverAudit.department, 135, 43);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Total Receipts:', 18, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${receiverAudit.totalTransactions} slips`, 45, 51);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Garment Pieces Volume:', 110, 51);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(13, 148, 136);
+      doc.text(`${receiverAudit.totalPieces.toLocaleString()} pcs (${receiverAudit.uniqueLotsCount} lots)`, 150, 51);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(13, 148, 136);
+      doc.text('1. TOTAL MATERIALS RECEIVED BREAKDOWN', 14, 63);
+
+      const matRows = Object.values(receiverAudit.materialsSummary).map((m, idx) => [
+        idx + 1,
+        m.bomItemName,
+        m.name,
+        `${Number(m.qty.toFixed(2)).toLocaleString()}`,
+        m.unit
+      ]);
+
+      autoTable(doc, {
+        startY: 66,
+        head: [['#', 'Component', 'Material Description', 'Total Received Qty', 'Unit']],
+        body: matRows.length > 0 ? matRows : [['—', '—', 'No materials logged', '0', '—']],
+        theme: 'grid',
+        headStyles: { fillColor: [13, 148, 136], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 35, fontStyle: 'bold' },
+          2: { cellWidth: 75 },
+          3: { cellWidth: 35, halign: 'right', fontStyle: 'bold', textColor: [13, 148, 136] },
+          4: { cellWidth: 25, halign: 'center' }
+        }
+      });
+
+      let nextY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 90) + 8;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text('2. RECEIPT TRANSACTION SLIPS', 14, nextY);
+
+      const slipRows = receiverAudit.logs.map((l, idx) => [
+        idx + 1,
+        l.id,
+        l.date,
+        l.lotId && l.lotId !== 'N/A' ? `Lot ${l.lotId}` : '—',
+        l.category || 'General',
+        `${Number(l.volume || 0).toLocaleString()} pcs`,
+        `${l.personName || 'Store Incharge'}`,
+        (l.materials || []).map(m => `${m.bomItemName || m.name}: ${m.qty} ${m.unit || 'pcs'}`).join(', ')
+      ]);
+
+      autoTable(doc, {
+        startY: nextY + 3,
+        head: [['#', 'Slip ID', 'Date', 'Lot', 'Garment', 'Volume', 'Issued By (Issuer)', 'Materials Details']],
+        body: slipRows,
+        theme: 'grid',
+        headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 7.5, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 8, halign: 'center' },
+          1: { cellWidth: 20, fontStyle: 'bold' },
+          2: { cellWidth: 24 },
+          3: { cellWidth: 16 },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 18, halign: 'right' },
+          6: { cellWidth: 28 },
+          7: { cellWidth: 48 }
+        }
+      });
+
+      const finalY = (doc.lastAutoTable ? doc.lastAutoTable.finalY : 180) + 16;
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.line(14, finalY, 65, finalY);
+      doc.text(`Receiver (${receiverAudit.receiverName})`, 14, finalY + 4);
+
+      doc.line(75, finalY, 125, finalY);
+      doc.text('Department Head', 75, finalY + 4);
+
+      doc.line(135, finalY, 185, finalY);
+      doc.text('Audited By (Admin)', 135, finalY + 4);
+
+      doc.save(`NAME_WISE_RECEIVER_REPORT_${receiverAudit.receiverName.replace(/\s+/g, '_')}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate receiver PDF:', err);
+      alert('Could not generate PDF: ' + err.message);
+    }
+  };
+
+  // Master PDF Download for All Issuers (Person-Wise)
+  const handleDownloadAllPersonsReportPdf = () => {
+    try {
+      const doc = new jsPDF();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(30, 41, 59);
+      doc.text('MH ACCESSORIES & BOM STORE', 14, 16);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Production Operations & Material Distribution Audit — Consolidated Person-Wise Summary', 14, 21);
+
+      doc.setFillColor(37, 99, 235);
+      doc.roundedRect(14, 25, 182, 9, 2, 2, 'F');
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`MASTER PERSON-WISE MATERIAL ISSUE AUDIT REPORT (${personAuditSummary.length} ISSUERS)`, 16, 31);
+
+      const tableRows = personAuditSummary.map((p, idx) => [
+        idx + 1,
+        p.personName,
+        `${p.totalTransactions} slips`,
+        `${p.totalPieces.toLocaleString()} pcs`,
+        `${p.uniqueLotsCount} lots`,
+        Object.values(p.materialsSummary).map(m => `${m.bomItemName || m.name}: ${Number(m.qty.toFixed(1))} ${m.unit}`).slice(0, 4).join(', ') + (Object.keys(p.materialsSummary).length > 4 ? '...' : '')
+      ]);
+
+      autoTable(doc, {
+        startY: 38,
+        head: [['#', 'Person (Issuer)', 'Total Slips', 'Pieces Volume', 'Lots Handled', 'Major Materials Dispatched']],
+        body: tableRows.length > 0 ? tableRows : [['—', 'No issuers found', '0', '0', '0', '—']],
+        theme: 'grid',
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 35, fontStyle: 'bold' },
+          2: { cellWidth: 22, halign: 'right' },
+          3: { cellWidth: 26, halign: 'right', fontStyle: 'bold', textColor: [37, 99, 235] },
+          4: { cellWidth: 24, halign: 'center' },
+          5: { cellWidth: 65 }
+        }
+      });
+
+      doc.save(`MASTER_PERSON_WISE_ISSUE_REPORT_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert('Could not generate PDF: ' + err.message);
+    }
+  };
+
+  // Master PDF Download for All Receivers (Name-Wise)
+  const handleDownloadAllReceiversReportPdf = () => {
+    try {
+      const doc = new jsPDF();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(30, 41, 59);
+      doc.text('MH ACCESSORIES & BOM STORE', 14, 16);
+
+      doc.setFontSize(8.5);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text('Production Operations & Material Distribution Audit — Consolidated Name-Wise (Receiver) Summary', 14, 21);
+
+      doc.setFillColor(13, 148, 136);
+      doc.roundedRect(14, 25, 182, 9, 2, 2, 'F');
+      doc.setFontSize(9.5);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(255, 255, 255);
+      doc.text(`MASTER NAME-WISE (RECEIVER) MATERIAL AUDIT REPORT (${receiverAuditSummary.length} RECEIVERS)`, 16, 31);
+
+      const tableRows = receiverAuditSummary.map((r, idx) => [
+        idx + 1,
+        r.receiverName,
+        r.department,
+        `${r.totalTransactions} slips`,
+        `${r.totalPieces.toLocaleString()} pcs`,
+        `${r.uniqueLotsCount} lots`,
+        Object.values(r.materialsSummary).map(m => `${m.bomItemName || m.name}: ${Number(m.qty.toFixed(1))} ${m.unit}`).slice(0, 4).join(', ') + (Object.keys(r.materialsSummary).length > 4 ? '...' : '')
+      ]);
+
+      autoTable(doc, {
+        startY: 38,
+        head: [['#', 'Receiver (Name)', 'Department', 'Total Receipts', 'Pieces Volume', 'Lots Received', 'Major Materials Received']],
+        body: tableRows.length > 0 ? tableRows : [['—', 'No receivers found', '—', '0', '0', '0', '—']],
+        theme: 'grid',
+        headStyles: { fillColor: [13, 148, 136], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+        bodyStyles: { fontSize: 8, textColor: [15, 23, 42] },
+        columnStyles: {
+          0: { cellWidth: 10, halign: 'center' },
+          1: { cellWidth: 35, fontStyle: 'bold' },
+          2: { cellWidth: 24 },
+          3: { cellWidth: 22, halign: 'right' },
+          4: { cellWidth: 26, halign: 'right', fontStyle: 'bold', textColor: [13, 148, 136] },
+          5: { cellWidth: 22, halign: 'center' },
+          6: { cellWidth: 43 }
+        }
+      });
+
+      doc.save(`MASTER_NAME_WISE_RECEIVER_REPORT_${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert('Could not generate PDF: ' + err.message);
+    }
   };
 
   // Download PDF report for a Lot Audit with 3 Clear Sections (1st Time, Extra, Both Combined)
@@ -2524,6 +3038,68 @@ export default function MaterialIssueView({
                   </span>
                 </button>
 
+                  <button
+                  type="button"
+                  onClick={() => setAuditTab('person_wise')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: auditTab === 'person_wise' ? 'var(--accent-color)' : 'transparent',
+                    color: auditTab === 'person_wise' ? '#ffffff' : 'var(--text-main)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <User size={13} />
+                  <span>Person-Wise (Issuer)</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    backgroundColor: auditTab === 'person_wise' ? 'rgba(255,255,255,0.25)' : 'var(--bg-primary)',
+                    color: auditTab === 'person_wise' ? '#ffffff' : 'var(--text-muted)'
+                  }}>
+                    {personAuditSummary.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAuditTab('receiver_wise')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '5px 12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    borderRadius: '4px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    backgroundColor: auditTab === 'receiver_wise' ? 'var(--accent-color)' : 'transparent',
+                    color: auditTab === 'receiver_wise' ? '#ffffff' : 'var(--text-main)',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <Users size={13} />
+                  <span>Name-Wise (Receiver)</span>
+                  <span style={{
+                    fontSize: '10px',
+                    padding: '1px 5px',
+                    borderRadius: '10px',
+                    backgroundColor: auditTab === 'receiver_wise' ? 'rgba(255,255,255,0.25)' : 'var(--bg-primary)',
+                    color: auditTab === 'receiver_wise' ? '#ffffff' : 'var(--text-muted)'
+                  }}>
+                    {receiverAuditSummary.length}
+                  </span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setAuditTab('all_logs')}
@@ -2557,7 +3133,7 @@ export default function MaterialIssueView({
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
               {auditTab === 'combined_audit' && (
                 <button
                   type="button"
@@ -2587,12 +3163,70 @@ export default function MaterialIssueView({
                   </span>
                 </button>
               )}
+
+              {auditTab === 'person_wise' && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select
+                    className="form-select"
+                    style={{ height: '32px', fontSize: '12px', padding: '0 8px', borderRadius: '6px' }}
+                    value={personFilter}
+                    onChange={(e) => setPersonFilter(e.target.value)}
+                  >
+                    <option value="all">👤 All Issuers ({personAuditSummary.length})</option>
+                    {personAuditSummary.map((p, idx) => (
+                      <option key={idx} value={p.personName}>{p.personName} ({p.totalTransactions} slips)</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleDownloadAllPersonsReportPdf}
+                    style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '32px', padding: '0 10px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', color: '#1e40af', backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }}
+                    title="Download Consolidated Person-Wise PDF Report"
+                  >
+                    <Download size={13} />
+                    <span>Master PDF</span>
+                  </button>
+                </div>
+              )}
+
+              {auditTab === 'receiver_wise' && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select
+                    className="form-select"
+                    style={{ height: '32px', fontSize: '12px', padding: '0 8px', borderRadius: '6px' }}
+                    value={receiverFilter}
+                    onChange={(e) => setReceiverFilter(e.target.value)}
+                  >
+                    <option value="all">🏷️ All Receivers ({receiverAuditSummary.length})</option>
+                    {receiverAuditSummary.map((r, idx) => (
+                      <option key={idx} value={r.receiverName}>{r.receiverName} ({r.totalTransactions} slips)</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleDownloadAllReceiversReportPdf}
+                    style={{ display: 'flex', alignItems: 'center', gap: '5px', height: '32px', padding: '0 10px', fontSize: '12px', fontWeight: '700', whiteSpace: 'nowrap', color: '#0f766e', backgroundColor: '#f0fdfa', borderColor: '#99f6e4' }}
+                    title="Download Consolidated Name-Wise Receiver PDF Report"
+                  >
+                    <Download size={13} />
+                    <span>Master PDF</span>
+                  </button>
+                </div>
+              )}
+
               <div style={{ position: 'relative', width: '230px' }}>
                 <input
                   type="text"
                   className="form-input"
                   style={{ height: '32px', fontSize: '13px', paddingLeft: '12px' }}
-                  placeholder={auditTab === 'all_logs' ? "🔍 Search logs..." : "🔍 Search lot, garment, material..."}
+                  placeholder={
+                    auditTab === 'all_logs' ? "🔍 Search logs..." :
+                    auditTab === 'person_wise' ? "🔍 Search person, lot, material..." :
+                    auditTab === 'receiver_wise' ? "🔍 Search receiver, dept, lot..." :
+                    "🔍 Search lot, garment, material..."
+                  }
                   value={logSearchQuery}
                   onChange={(e) => setLogSearchQuery(e.target.value)}
                 />
@@ -3310,6 +3944,461 @@ export default function MaterialIssueView({
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Person-Wise (Issuer) Report */}
+          {auditTab === 'person_wise' && (
+            <div>
+              {/* Aggregated KPI Strip */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                padding: '14px 16px',
+                backgroundColor: 'var(--bg-primary)',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <div style={{ padding: '10px 14px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Total Issuing Persons</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>
+                    {personAuditSummary.length} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>Operators</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(37, 99, 235, 0.08)', borderRadius: '6px', border: '1px solid rgba(37, 99, 235, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '700', textTransform: 'uppercase' }}>Total Issue Transactions</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#1d4ed8', marginTop: '2px' }}>
+                    {personAuditSummary.reduce((sum, p) => sum + p.totalTransactions, 0)} <span style={{ fontSize: '12px', fontWeight: '600' }}>vouchers</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#059669', fontWeight: '700', textTransform: 'uppercase' }}>Total Garment Pieces Handled</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#047857', marginTop: '2px' }}>
+                    {personAuditSummary.reduce((sum, p) => sum + p.totalPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>pcs</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(124, 58, 237, 0.08)', borderRadius: '6px', border: '1px solid rgba(124, 58, 237, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#7c3aed', fontWeight: '700', textTransform: 'uppercase' }}>Production Lots Served</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#6d28d9', marginTop: '2px' }}>
+                    {new Set(issueLogs.map(l => l.lotId).filter(Boolean)).size} <span style={{ fontSize: '12px', fontWeight: '600' }}>Unique Lots</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* List of Persons Cards */}
+              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {filteredPersonAudits.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                    No person-wise records match the filter criteria.
+                  </div>
+                ) : (
+                  filteredPersonAudits.map((person, idx) => {
+                    const isExpanded = !!expandedPersonCards[person.personName];
+                    const matList = Object.values(person.materialsSummary);
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          backgroundColor: 'var(--bg-secondary)',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          overflow: 'hidden',
+                          boxShadow: 'var(--shadow-sm)'
+                        }}
+                      >
+                        {/* Person Card Header */}
+                        <div style={{
+                          padding: '12px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          backgroundColor: 'var(--bg-primary)',
+                          borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none',
+                          flexWrap: 'wrap',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              backgroundColor: '#2563eb',
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: '800',
+                              fontSize: '13px'
+                            }}>
+                              <User size={16} />
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>
+                                  {person.personName}
+                                </strong>
+                                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: '#dbeafe', color: '#1e40af', fontWeight: '700' }}>
+                                  Issuer / Incharge
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                <span>{person.totalTransactions} Issue Slips</span> • 
+                                <span style={{ color: '#2563eb', fontWeight: '700', marginLeft: '4px' }}>{person.totalPieces.toLocaleString()} pcs volume</span> • 
+                                <span style={{ marginLeft: '4px' }}>{person.uniqueLotsCount} Lots served</span> • 
+                                <span style={{ marginLeft: '4px' }}>{matList.length} Material Types</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleDownloadPersonPdf(person)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', fontWeight: '700', color: '#1e40af', backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }}
+                              title="Download PDF Report for this Person"
+                            >
+                              <Download size={13} />
+                              <span>PDF Report</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => togglePersonCardExpand(person.personName)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px' }}
+                            >
+                              <Eye size={13} />
+                              <span>{isExpanded ? 'Hide Slips' : `View Slips (${person.logs.length})`}</span>
+                              <ChevronDown size={13} style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Major Dispatched Materials Chips */}
+                        <div style={{ padding: '10px 16px', backgroundColor: 'var(--bg-secondary)', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', borderBottom: isExpanded ? '1px dashed var(--border-color)' : 'none' }}>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                            Dispatched Materials:
+                          </span>
+                          {matList.slice(0, 8).map((m, mIdx) => (
+                            <span
+                              key={mIdx}
+                              style={{
+                                fontSize: '11px',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--bg-primary)',
+                                border: '1px solid var(--border-color)',
+                                color: 'var(--text-main)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <strong>{m.bomItemName}:</strong> {Number(m.qty.toFixed(1)).toLocaleString()} {m.unit}
+                            </span>
+                          ))}
+                          {matList.length > 8 && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                              +{matList.length - 8} more
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Expanded Slips Table */}
+                        {isExpanded && (
+                          <div style={{ overflowX: 'auto', padding: '0 8px 8px 8px' }}>
+                            <table className="custom-table" style={{ fontSize: '12px', marginTop: '6px' }}>
+                              <thead>
+                                <tr style={{ backgroundColor: 'var(--bg-primary)' }}>
+                                  <th style={{ padding: '8px 10px' }}>Slip ID</th>
+                                  <th style={{ padding: '8px 10px' }}>Date</th>
+                                  <th style={{ padding: '8px 10px' }}>Lot #</th>
+                                  <th style={{ padding: '8px 10px' }}>Garment</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Pieces</th>
+                                  <th style={{ padding: '8px 10px' }}>Issued To (Receiver)</th>
+                                  <th style={{ padding: '8px 10px' }}>Materials Dispatched</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'center' }}>Slip</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {person.logs.map((log) => (
+                                  <tr key={log.id}>
+                                    <td style={{ fontWeight: '700' }}>{log.id}</td>
+                                    <td>{log.date}</td>
+                                    <td>
+                                      <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>
+                                        Lot {log.lotId}
+                                      </span>
+                                    </td>
+                                    <td>{log.category}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: '700' }}>
+                                      {Number(log.volume || 0).toLocaleString()} pcs
+                                    </td>
+                                    <td>
+                                      <strong>{log.receiverName || '—'}</strong>
+                                      {log.receiverDept && <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginLeft: '4px' }}>({log.receiverDept})</span>}
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {(log.materials || []).map((m, mIdx) => (
+                                          <span key={mIdx} style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '3px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                                            {m.bomItemName || m.name}: {m.qty} {m.unit || 'pcs'}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-xs"
+                                        onClick={() => handlePrintSingleLog(log)}
+                                        style={{ padding: '2px 6px', fontSize: '11px' }}
+                                        title="Print Single Slip"
+                                      >
+                                        <Printer size={11} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: Name-Wise (Receiver) Report */}
+          {auditTab === 'receiver_wise' && (
+            <div>
+              {/* Aggregated KPI Strip */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+                padding: '14px 16px',
+                backgroundColor: 'var(--bg-primary)',
+                borderBottom: '1px solid var(--border-color)'
+              }}>
+                <div style={{ padding: '10px 14px', backgroundColor: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Total Receivers (Names)</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px' }}>
+                    {receiverAuditSummary.length} <span style={{ fontSize: '12px', fontWeight: '500', color: 'var(--text-muted)' }}>Persons</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(13, 148, 136, 0.08)', borderRadius: '6px', border: '1px solid rgba(13, 148, 136, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#0d9488', fontWeight: '700', textTransform: 'uppercase' }}>Total Receipts</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#0f766e', marginTop: '2px' }}>
+                    {receiverAuditSummary.reduce((sum, r) => sum + r.totalTransactions, 0)} <span style={{ fontSize: '12px', fontWeight: '600' }}>vouchers</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#059669', fontWeight: '700', textTransform: 'uppercase' }}>Total Garment Pieces Received</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#047857', marginTop: '2px' }}>
+                    {receiverAuditSummary.reduce((sum, r) => sum + r.totalPieces, 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '600' }}>pcs</span>
+                  </div>
+                </div>
+
+                <div style={{ padding: '10px 14px', backgroundColor: 'rgba(99, 102, 241, 0.08)', borderRadius: '6px', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                  <div style={{ fontSize: '11px', color: '#6366f1', fontWeight: '700', textTransform: 'uppercase' }}>Unique Lots Received</div>
+                  <div style={{ fontSize: '18px', fontWeight: '800', color: '#4f46e5', marginTop: '2px' }}>
+                    {new Set(issueLogs.map(l => l.lotId).filter(Boolean)).size} <span style={{ fontSize: '12px', fontWeight: '600' }}>Production Lots</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* List of Receivers Cards */}
+              <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {filteredReceiverAudits.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '36px', color: 'var(--text-muted)' }}>
+                    No receiver-wise records match the filter criteria.
+                  </div>
+                ) : (
+                  filteredReceiverAudits.map((receiver, idx) => {
+                    const isExpanded = !!expandedReceiverCards[receiver.receiverName];
+                    const matList = Object.values(receiver.materialsSummary);
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          backgroundColor: 'var(--bg-secondary)',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          overflow: 'hidden',
+                          boxShadow: 'var(--shadow-sm)'
+                        }}
+                      >
+                        {/* Receiver Card Header */}
+                        <div style={{
+                          padding: '12px 16px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          backgroundColor: 'var(--bg-primary)',
+                          borderBottom: isExpanded ? '1px solid var(--border-color)' : 'none',
+                          flexWrap: 'wrap',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              backgroundColor: '#0d9488',
+                              color: '#fff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: '800',
+                              fontSize: '13px'
+                            }}>
+                              <Users size={16} />
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <strong style={{ fontSize: '15px', color: 'var(--text-main)' }}>
+                                  {receiver.receiverName}
+                                </strong>
+                                <span style={{ fontSize: '11px', padding: '2px 8px', borderRadius: '12px', backgroundColor: '#ccfbf1', color: '#0f766e', fontWeight: '700' }}>
+                                  Dept: {receiver.department}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                <span>{receiver.totalTransactions} Receipts</span> • 
+                                <span style={{ color: '#0d9488', fontWeight: '700', marginLeft: '4px' }}>{receiver.totalPieces.toLocaleString()} pcs volume</span> • 
+                                <span style={{ marginLeft: '4px' }}>{receiver.uniqueLotsCount} Lots received</span> • 
+                                <span style={{ marginLeft: '4px' }}>{matList.length} Material Types</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleDownloadReceiverPdf(receiver)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', fontWeight: '700', color: '#0f766e', backgroundColor: '#f0fdfa', borderColor: '#99f6e4' }}
+                              title="Download PDF Report for this Receiver"
+                            >
+                              <Download size={13} />
+                              <span>PDF Report</span>
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => toggleReceiverCardExpand(receiver.receiverName)}
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px' }}
+                            >
+                              <Eye size={13} />
+                              <span>{isExpanded ? 'Hide Slips' : `View Slips (${receiver.logs.length})`}</span>
+                              <ChevronDown size={13} style={{ transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Major Received Materials Chips */}
+                        <div style={{ padding: '10px 16px', backgroundColor: 'var(--bg-secondary)', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', borderBottom: isExpanded ? '1px dashed var(--border-color)' : 'none' }}>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: 'var(--text-muted)' }}>
+                            Received Materials:
+                          </span>
+                          {matList.slice(0, 8).map((m, mIdx) => (
+                            <span
+                              key={mIdx}
+                              style={{
+                                fontSize: '11px',
+                                padding: '3px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: 'var(--bg-primary)',
+                                border: '1px solid var(--border-color)',
+                                color: 'var(--text-main)',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <strong>{m.bomItemName}:</strong> {Number(m.qty.toFixed(1)).toLocaleString()} {m.unit}
+                            </span>
+                          ))}
+                          {matList.length > 8 && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                              +{matList.length - 8} more
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Expanded Slips Table */}
+                        {isExpanded && (
+                          <div style={{ overflowX: 'auto', padding: '0 8px 8px 8px' }}>
+                            <table className="custom-table" style={{ fontSize: '12px', marginTop: '6px' }}>
+                              <thead>
+                                <tr style={{ backgroundColor: 'var(--bg-primary)' }}>
+                                  <th style={{ padding: '8px 10px' }}>Slip ID</th>
+                                  <th style={{ padding: '8px 10px' }}>Date</th>
+                                  <th style={{ padding: '8px 10px' }}>Lot #</th>
+                                  <th style={{ padding: '8px 10px' }}>Garment</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Pieces</th>
+                                  <th style={{ padding: '8px 10px' }}>Issued By (Issuer)</th>
+                                  <th style={{ padding: '8px 10px' }}>Materials Received</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'center' }}>Slip</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {receiver.logs.map((log) => (
+                                  <tr key={log.id}>
+                                    <td style={{ fontWeight: '700' }}>{log.id}</td>
+                                    <td>{log.date}</td>
+                                    <td>
+                                      <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>
+                                        Lot {log.lotId}
+                                      </span>
+                                    </td>
+                                    <td>{log.category}</td>
+                                    <td style={{ textAlign: 'right', fontWeight: '700' }}>
+                                      {Number(log.volume || 0).toLocaleString()} pcs
+                                    </td>
+                                    <td>
+                                      <strong>{log.personName || 'Store Incharge'}</strong>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                        {(log.materials || []).map((m, mIdx) => (
+                                          <span key={mIdx} style={{ fontSize: '10.5px', padding: '1px 5px', borderRadius: '3px', backgroundColor: 'var(--bg-primary)', border: '1px solid var(--border-color)' }}>
+                                            {m.bomItemName || m.name}: {m.qty} {m.unit || 'pcs'}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button
+                                        type="button"
+                                        className="btn btn-secondary btn-xs"
+                                        onClick={() => handlePrintSingleLog(log)}
+                                        style={{ padding: '2px 6px', fontSize: '11px' }}
+                                        title="Print Single Slip"
+                                      >
+                                        <Printer size={11} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </div>
           )}

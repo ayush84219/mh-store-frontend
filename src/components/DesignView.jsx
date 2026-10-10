@@ -1,7 +1,7 @@
 import { getBackendUrl } from '../utils/api';
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3, Zap, CheckCircle, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3, Zap, CheckCircle, AlertTriangle, ChevronDown, Maximize2 } from 'lucide-react';
 
 import { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES } from '../utils/designHelpers';
 export { getCleanImageUrl, getGoogleDrivePreviewUrl, formatDesignTime, GARMENT_CATEGORIES };
@@ -817,6 +817,22 @@ export default function DesignView({
 
   // Image preview modal state
   const [previewModalData, setPreviewModalData] = useState(null);
+
+  // Full Screen Garment Accessories BOM Dialog states
+  const [showFullBomModal, setShowFullBomModal] = useState(false);
+  const [fullBomModalSearch, setFullBomModalSearch] = useState('');
+  const [fullBomModalFilter, setFullBomModalFilter] = useState('all');
+
+  // Close full BOM modal on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && showFullBomModal) {
+        setShowFullBomModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showFullBomModal]);
 
   const [showAddInline, setShowAddInline] = useState(false);
   const [newInlineName, setNewInlineName] = useState('');
@@ -2490,9 +2506,39 @@ export default function DesignView({
 
                 {/* BOM Table */}
                 <div style={{ marginTop: '24px' }}>
-                  <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '15px', fontWeight: '600', marginBottom: '12px' }}>
-                    Garment Accessories BOM
-                  </h4>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <h4 style={{ fontFamily: 'var(--font-family-title)', fontSize: '15px', fontWeight: '700', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Layers3 size={18} style={{ color: '#1e3a8a' }} />
+                      <span>Garment Accessories BOM</span>
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowFullBomModal(true);
+                        setFullBomModalSearch('');
+                        setFullBomModalFilter('all');
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#1e40af',
+                        backgroundColor: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 1px 2px rgba(30, 64, 175, 0.08)'
+                      }}
+                      title="View all garment BOM accessories in full screen dialog"
+                    >
+                      <Maximize2 size={13} />
+                      <span>View More (Full Screen)</span>
+                    </button>
+                  </div>
                   <div className="custom-table-container">
                     <table className="custom-table">
                       <thead>
@@ -2557,6 +2603,36 @@ export default function DesignView({
                       </tbody>
                     </table>
                   </div>
+
+                  {selectedDesign.bom && selectedDesign.bom.length > 4 && (
+                    <div style={{ marginTop: '12px', textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowFullBomModal(true);
+                          setFullBomModalSearch('');
+                          setFullBomModalFilter('all');
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '7px 18px',
+                          fontSize: '12.5px',
+                          fontWeight: '700',
+                          color: '#1d4ed8',
+                          backgroundColor: '#eff6ff',
+                          border: '1px solid #bfdbfe',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <Maximize2 size={13} />
+                        <span>View More / View All {selectedDesign.bom.length} Accessories in Full Screen</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </>
@@ -2730,25 +2806,414 @@ export default function DesignView({
         </div>
       )}
 
+      {/* ── FULL SCREEN GARMENT ACCESSORIES BOM DIALOG BOX (PORTALIZED TO BODY) ─────────────── */}
+      {showFullBomModal && selectedDesign && createPortal(
+        <div
+          onClick={() => setShowFullBomModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(15, 23, 42, 0.72)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999999,
+            padding: '20px',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '1200px',
+              width: 'min(1200px, 96vw)',
+              maxHeight: '90vh',
+              height: 'auto',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.1)',
+              border: '1px solid #cbd5e1',
+              overflow: 'hidden',
+              position: 'relative'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 24px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#f8fafc',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  backgroundColor: '#1e3a8a',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  boxShadow: '0 2px 6px rgba(30, 58, 138, 0.3)'
+                }}>
+                  <Layers3 size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: '#0f172a', lineHeight: 1.2 }}>
+                    Garment Accessories BOM — Full Detail View
+                  </h3>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '4px', fontSize: '12px', color: '#64748b', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: '800', color: '#1e3a8a', backgroundColor: '#dbeafe', padding: '2px 8px', borderRadius: '4px' }}>
+                      Lot #{selectedDesign.id}
+                    </span>
+                    <span>•</span>
+                    <span>Item: <strong style={{ color: '#0f172a' }}>{selectedDesign.category}</strong></span>
+                    {selectedDesign.brand && (
+                      <>
+                        <span>•</span>
+                        <span>Brand: <strong style={{ color: '#0f172a' }}>{selectedDesign.brand}</strong></span>
+                      </>
+                    )}
+                    {selectedDesign.style && (
+                      <>
+                        <span>•</span>
+                        <span>Style: <strong style={{ color: '#0f172a' }}>{selectedDesign.style}</strong></span>
+                      </>
+                    )}
+                    {selectedDesign.fabricType && (
+                      <>
+                        <span>•</span>
+                        <span>Fabric: <strong style={{ color: '#0f172a' }}>{selectedDesign.fabricType}</strong></span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
 
+              <button
+                type="button"
+                onClick={() => setShowFullBomModal(false)}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  padding: '7px 16px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: '#334155',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Close Full Screen View (Esc)"
+              >
+                <X size={16} />
+                <span>Close</span>
+              </button>
+            </div>
 
-      {/* ── PHOTO FULL PREVIEW MODAL ────────────────────────────────────────── */}
-      {previewModalData && (
+            {/* Modal Controls Bar (Search & Filter Pills) */}
+            <div style={{
+              padding: '12px 24px',
+              backgroundColor: '#ffffff',
+              borderBottom: '1px solid #f1f5f9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap'
+            }}>
+              {/* Search Bar */}
+              <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
+                <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <input
+                  type="text"
+                  placeholder="Search accessory, description, material code..."
+                  value={fullBomModalSearch}
+                  onChange={(e) => setFullBomModalSearch(e.target.value)}
+                  style={{
+                    width: '100%',
+                    paddingLeft: '32px',
+                    paddingRight: '10px',
+                    height: '34px',
+                    fontSize: '12.5px',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Filter Pills */}
+              <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {(() => {
+                  const allBom = selectedDesign.bom || [];
+                  const yesCount = allBom.filter(b => String(b.status).toLowerCase() === 'yes').length;
+                  const noCount = allBom.filter(b => String(b.status).toLowerCase() !== 'yes').length;
+                  const mappedCount = allBom.filter(b => b.materialId).length;
+                  return (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setFullBomModalFilter('all')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: fullBomModalFilter === 'all' ? '#1e3a8a' : '#f1f5f9',
+                          color: fullBomModalFilter === 'all' ? '#ffffff' : '#475569',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        All ({allBom.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFullBomModalFilter('yes')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: fullBomModalFilter === 'yes' ? '#059669' : '#ecfdf5',
+                          color: fullBomModalFilter === 'yes' ? '#ffffff' : '#059669',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        ✓ Required Only ({yesCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFullBomModalFilter('no')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: fullBomModalFilter === 'no' ? '#dc2626' : '#fef2f2',
+                          color: fullBomModalFilter === 'no' ? '#ffffff' : '#dc2626',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        ✕ Not Required ({noCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFullBomModalFilter('mapped')}
+                        style={{
+                          padding: '5px 12px',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          border: 'none',
+                          cursor: 'pointer',
+                          backgroundColor: fullBomModalFilter === 'mapped' ? '#4338ca' : '#eef2ff',
+                          color: fullBomModalFilter === 'mapped' ? '#ffffff' : '#4338ca',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        🔒 Mapped ({mappedCount})
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* Modal Table Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px 24px 24px' }}>
+              <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1', marginTop: '12px' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                    <tr style={{ backgroundColor: '#1a365d', color: '#ffffff' }}>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', letterSpacing: '0.04em', fontSize: '12px', textTransform: 'uppercase' }}>
+                        Accessory Name
+                      </th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', letterSpacing: '0.04em', fontSize: '12px', textTransform: 'uppercase', textAlign: 'center' }}>
+                        Required Status
+                      </th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', letterSpacing: '0.04em', fontSize: '12px', textTransform: 'uppercase', textAlign: 'center' }}>
+                        Qty/Piece
+                      </th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', letterSpacing: '0.04em', fontSize: '12px', textTransform: 'uppercase' }}>
+                        Description
+                      </th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', letterSpacing: '0.04em', fontSize: '12px', textTransform: 'uppercase' }}>
+                        Inventory Item Map &amp; Photo
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const allBom = selectedDesign.bom || [];
+                      const filtered = allBom.filter(item => {
+                        const isYes = String(item.status).toLowerCase() === 'yes';
+                        if (fullBomModalFilter === 'yes' && !isYes) return false;
+                        if (fullBomModalFilter === 'no' && isYes) return false;
+                        if (fullBomModalFilter === 'mapped' && !item.materialId) return false;
+                        if (fullBomModalSearch.trim()) {
+                          const q = fullBomModalSearch.toLowerCase();
+                          const mat = materials.find(m => m.id === item.materialId);
+                          const mName = mat?.name?.toLowerCase() || '';
+                          const mCode = mat?.itemCode?.toLowerCase() || '';
+                          const iName = (item.name || '').toLowerCase();
+                          const iDesc = (item.description || '').toLowerCase();
+                          const iDetail = (item.detail || '').toLowerCase();
+                          return iName.includes(q) || iDesc.includes(q) || iDetail.includes(q) || mName.includes(q) || mCode.includes(q);
+                        }
+                        return true;
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <tr>
+                            <td colSpan={5} style={{ padding: '36px', textAlign: 'center', color: '#64748b', fontSize: '14px' }}>
+                              No accessories found matching the selected filter or search term.
+                            </td>
+                          </tr>
+                        );
+                      }
+
+                      return filtered.map((item, idx) => {
+                        const matchedMat = materials.find(m => m.id === item.materialId);
+                        const isYes = String(item.status).toLowerCase() === 'yes';
+                        return (
+                          <tr
+                            key={idx}
+                            style={{
+                              borderBottom: '1px solid #e2e8f0',
+                              backgroundColor: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
+                              transition: 'background-color 0.15s'
+                            }}
+                          >
+                            <td style={{ padding: '12px 16px', fontWeight: '700', color: '#0f172a' }}>
+                              {item.name}
+                            </td>
+                            <td style={{ padding: '12px 16px', textAlign: 'center' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '3px 14px',
+                                borderRadius: '16px',
+                                fontSize: '12px',
+                                fontWeight: '800',
+                                backgroundColor: isYes ? '#ecfdf5' : '#fef2f2',
+                                color: isYes ? '#059669' : '#dc2626',
+                                border: `1px solid ${isYes ? '#a7f3d0' : '#fecaca'}`
+                              }}>
+                                {isYes ? 'Yes' : 'No'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '12px 16px', textAlign: 'center', fontWeight: '600', color: '#334155' }}>
+                              {item.detail || '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px', color: '#475569', fontSize: '13px' }}>
+                              {item.description || '—'}
+                            </td>
+                            <td style={{ padding: '12px 16px' }}>
+                              {matchedMat ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  {matchedMat.imageUrl && (
+                                    <div
+                                      onClick={() => setPreviewModalData({
+                                        imageUrl: matchedMat.imageUrl,
+                                        name: matchedMat.name,
+                                        itemCode: matchedMat.itemCode || matchedMat.stCode,
+                                        category: matchedMat.category,
+                                        stock: `${matchedMat.stock} ${matchedMat.unit || 'pcs'}`
+                                      })}
+                                      title="Click to view enlarged material photo"
+                                      style={{
+                                        width: '36px',
+                                        height: '36px',
+                                        borderRadius: '6px',
+                                        overflow: 'hidden',
+                                        cursor: 'pointer',
+                                        border: '1.5px solid #cbd5e1',
+                                        flexShrink: 0,
+                                        boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                      }}
+                                    >
+                                      <img
+                                        src={getCleanImageUrl(matchedMat.imageUrl)}
+                                        alt={matchedMat.name}
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                      />
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <span style={{ fontWeight: '700', fontSize: '13px', color: '#0f172a' }}>
+                                      {matchedMat.name} {matchedMat.color && matchedMat.color !== 'Default' ? `(${matchedMat.color})` : ''}
+                                    </span>
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '11px', flexWrap: 'wrap' }}>
+                                      <span style={{ padding: '1px 6px', borderRadius: '4px', backgroundColor: '#eef2ff', color: '#4338ca', fontWeight: '700', fontFamily: 'monospace', border: '1px solid #c7d2fe' }}>
+                                        🏷️ Code: {matchedMat.itemCode || matchedMat.stCode || '—'}
+                                      </span>
+                                      <span style={{ color: '#64748b' }}>
+                                        📁 {matchedMat.category || 'Accessory'}
+                                      </span>
+                                      <span style={{ color: '#059669', fontWeight: '700' }}>
+                                        • Stock: {matchedMat.stock} {matchedMat.unit || 'pcs'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>
+                                  — Unmapped —
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ── PHOTO FULL PREVIEW MODAL (PORTALIZED TO BODY) ───────────────────── */}
+      {previewModalData && createPortal(
         <div
           onClick={() => setPreviewModalData(null)}
           style={{
             position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.8)',
-            backdropFilter: 'blur(5px)',
+            inset: 0,
+            width: '100vw',
+            height: '100vh',
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            backdropFilter: 'blur(6px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            zIndex: 999999,
-            padding: '24px'
+            zIndex: 100000000,
+            padding: '24px',
+            boxSizing: 'border-box'
           }}
         >
           <div
@@ -2841,7 +3306,8 @@ export default function DesignView({
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

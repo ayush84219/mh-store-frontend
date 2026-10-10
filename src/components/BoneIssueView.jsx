@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
-  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink
+  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -18,6 +18,11 @@ export default function BoneIssueView({
   // Tab Mode: 'generator' (Issue Form) or 'history' (Past Issue Slips)
   const [viewMode, setViewMode] = useState('generator');
 
+  // Issue Method: With Lot vs Without Lot
+  const [isWithoutLot, setIsWithoutLot] = useState(false);
+  const [materialMode, setMaterialMode] = useState('bone'); // 'bone' | 'tape' | 'elastic' (NO COMBOS)
+  const [withoutLotStyle, setWithoutLotStyle] = useState('Trouser / Pocketing');
+
   // Step 1: Search Lot State
   const [searchLotInput, setSearchLotInput] = useState(prefilledLotNo || '');
   const [searchingLot, setSearchingLot] = useState(false);
@@ -29,6 +34,10 @@ export default function BoneIssueView({
   const [issuePcs, setIssuePcs] = useState(0);
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
+  const [tapeWidth, setTapeWidth] = useState('0.5 Inch (Standard)');
+  const [customTapeWidth, setCustomTapeWidth] = useState('');
+  const [elasticWidth, setElasticWidth] = useState('1 Inch (Standard)');
+  const [customElasticWidth, setCustomElasticWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
   
   // Issuer & Receiver
@@ -85,8 +94,39 @@ export default function BoneIssueView({
     return (designs || []).filter(d => String(d.status || '').toLowerCase().trim() === 'approved');
   }, [designs]);
 
-  // Fetch next Issue Slip Number from backend
-  const fetchNextIssueSlipNo = async () => {
+  // Helper to calculate sequential without lot slip number from history
+  const getNextWithoutLotSeq = (history = issueHistory, mode = materialMode) => {
+    const prefix = mode === 'tape' ? 'tape-w/o-' : mode === 'elastic' ? 'elastic-w/o-' : 'bone-w/o-';
+    let max = 0;
+    (history || []).forEach(h => {
+      const s = String(h.slipNo || '').toLowerCase();
+      if (s.startsWith(prefix)) {
+        const n = parseInt(s.replace(prefix, ''), 10);
+        if (!isNaN(n) && n > max) max = n;
+      }
+    });
+    return `${prefix}${String(max + 1).padStart(2, '0')}`;
+  };
+
+  // Fetch next Issue Slip Number from backend or local sequence
+  const fetchNextIssueSlipNo = async (isWo = isWithoutLot) => {
+    if (isWo) {
+      const type = materialMode === 'tape' ? 'tape_wo' : materialMode === 'elastic' ? 'elastic_wo' : 'bone_wo';
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/po-number/next/${type}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.poNumber) {
+            setIssueSlipNo(data.poNumber);
+            return data.poNumber;
+          }
+        }
+      } catch (_) {}
+      const fallback = getNextWithoutLotSeq(issueHistory, materialMode);
+      setIssueSlipNo(fallback);
+      return fallback;
+    }
+
     try {
       const res = await fetch(`${getBackendUrl()}/api/po-number/next/bone_issue`);
       if (res.ok) {
@@ -109,6 +149,11 @@ export default function BoneIssueView({
     loadIssueHistory();
     fetchDesigns();
   }, []);
+
+  // Update slip number when isWithoutLot or materialMode changes
+  useEffect(() => {
+    fetchNextIssueSlipNo(isWithoutLot);
+  }, [isWithoutLot, materialMode]);
 
   // Auto-search lot with debounce as user types
   useEffect(() => {
@@ -357,6 +402,8 @@ export default function BoneIssueView({
   };
 
   const effectiveWidth = boneWidth === 'Custom' ? (customWidth || '1.5 Inch') : boneWidth;
+  const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
+  const effectiveElasticWidth = elasticWidth === 'Custom' ? (customElasticWidth || '1 Inch') : elasticWidth;
 
   // ── Build Professional, High-Contrast Black & White Issue Voucher PDF ──────
   const createBoneIssuePDFDocument = async (data) => {
@@ -374,7 +421,12 @@ export default function BoneIssueView({
       quantity = 600,
       shade = 'Standard',
       size = 'M, L, XL, 2XL',
-      remarks = ''
+      remarks = '',
+      isWithoutLot = false,
+      materialMode = 'bone',
+      width = '1.5 Inch',
+      tapeWidth = '0.5 Inch',
+      elasticWidth = '1 Inch'
     } = data;
 
     // Create Portrait A4 Document
@@ -396,22 +448,35 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
     doc.setTextColor(0, 0, 0);
-    doc.text('MOHIT HOSIERY', im, y + 14);
+    doc.text(isWithoutLot ? 'MOHIT HOSIERY — W/O LOT ISSUE' : 'MOHIT HOSIERY', im, y + 14);
+
+    const effectiveMaterialMode = String(slipNo || '').toLowerCase().startsWith('tape')
+      ? 'tape'
+      : String(slipNo || '').toLowerCase().startsWith('elastic')
+        ? 'elastic'
+        : String(slipNo || '').toLowerCase().startsWith('bone')
+          ? 'bone'
+          : (materialMode || 'bone');
+
+    const modeLabel = effectiveMaterialMode === 'tape' ? 'TAPE' : effectiveMaterialMode === 'elastic' ? 'ELASTIC' : 'BONE POCKETING';
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text('INTERNAL MATERIAL ISSUE VOUCHER — BONE POCKETING', im, y + 27);
+    doc.setFontSize(9.5);
+    const voucherSubTitle = isWithoutLot
+      ? `MATERIAL ISSUE SLIP (W/O LOT - ${modeLabel} ISSUE)`
+      : `INTERNAL MATERIAL ISSUE VOUCHER — ${modeLabel}`;
+    doc.text(voucherSubTitle, im, y + 27);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(80, 80, 80);
-    doc.text('Store Department  •  Cutting Floor Material Movement', im, y + 39);
+    doc.text(isWithoutLot ? `Store Department • Direct Floor Stock Issue (W/O LOT - ${modeLabel})` : 'Store Department  •  Cutting Floor Material Movement', im, y + 39);
 
     // Right: Voucher No & Date (Clean aligned, no box)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(`VOUCHER NO:  ${slipNo}`, pw - im, y + 14, { align: 'right' });
+    doc.text(isWithoutLot ? `SLIP NO:  ${slipNo}` : `VOUCHER NO:  ${slipNo}`, pw - im, y + 14, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9.5);
@@ -421,7 +486,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    doc.text('[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
+    doc.text(isWithoutLot ? `[ W/O LOT - ${modeLabel} ISSUE ]` : '[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
 
     y += 50;
 
@@ -435,7 +500,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('1. LOT & PRODUCTION SPECIFICATIONS', im, y);
+    doc.text(isWithoutLot ? '1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O LOT)' : '1. LOT & PRODUCTION SPECIFICATIONS', im, y);
     y += 15;
 
     const halfW = iw / 2;
@@ -463,30 +528,45 @@ export default function BoneIssueView({
       doc.text(displayVal, xPos + labelW + 4, yPos);
     };
 
-    // Row 1
-    drawSpec('Lot Number', `LOT #${lotNo}`, im, y);
-    drawSpec('Cutting Quantity', `${quantity || issuePcs} Pcs`, im + halfW, y);
-    y += 18;
+    // Row specifications
+    if (isWithoutLot) {
+      drawSpec('Issue Mode', 'WITHOUT LOT (Direct Floor Issue)', im, y);
+      drawSpec('Issue Quantity', `${issuePcs} Pcs`, im + halfW, y);
+      y += 18;
 
-    // Row 2
-    drawSpec('Style Name', style, im, y);
-    drawSpec('Brand / Buyer', brand, im + halfW, y);
-    y += 18;
+      drawSpec('Style / Item', style || 'Floor Issue', im, y);
+      drawSpec('Department', 'CUTTING FLOOR', im + halfW, y);
+      y += 18;
 
-    // Row 3
-    drawSpec('Garment Type', garmentType, im, y);
-    drawSpec('Fabric Type', fabric, im + halfW, y);
-    y += 18;
+      drawSpec('Issued By', issuerName || 'STORE INCHARGE', im, y);
+      drawSpec('Received By', receiverName || 'CUTTING MASTER', im + halfW, y);
+      y += 24;
+    } else {
+      // Row 1
+      drawSpec('Lot Number', `LOT #${lotNo}`, im, y);
+      drawSpec('Cutting Quantity', `${quantity || issuePcs} Pcs`, im + halfW, y);
+      y += 18;
 
-    // Row 4
-    drawSpec('Lot Shade / Color', shade || 'Standard', im, y);
-    drawSpec('Target Sizes', size || 'M, L, XL, 2XL', im + halfW, y);
-    y += 18;
+      // Row 2
+      drawSpec('Style Name', style, im, y);
+      drawSpec('Brand / Buyer', brand, im + halfW, y);
+      y += 18;
 
-    // Row 5
-    drawSpec('Department', 'CUTTING FLOOR', im, y);
-    drawSpec('Issue Pcs Quantity', `${issuePcs} Pcs`, im + halfW, y);
-    y += 24;
+      // Row 3
+      drawSpec('Garment Type', garmentType, im, y);
+      drawSpec('Fabric Type', fabric, im + halfW, y);
+      y += 18;
+
+      // Row 4
+      drawSpec('Lot Shade / Color', shade || 'Standard', im, y);
+      drawSpec('Target Sizes', size || 'M, L, XL, 2XL', im + halfW, y);
+      y += 18;
+
+      // Row 5
+      drawSpec('Department', 'CUTTING FLOOR', im, y);
+      drawSpec('Issue Pcs Quantity', `${issuePcs} Pcs`, im + halfW, y);
+      y += 24;
+    }
 
     // Clean horizontal divider rule
     doc.setDrawColor(210, 210, 210);
@@ -516,7 +596,9 @@ export default function BoneIssueView({
     doc.setTextColor(0, 0, 0);
     doc.text('#', im + 12, y + 15);
     doc.text('ITEM / MATERIAL DESCRIPTION', im + 40, y + 15);
-    doc.text('CUTTING PCS', im + 290, y + 15);
+    if (!isWithoutLot) {
+      doc.text('CUTTING PCS', im + 290, y + 15);
+    }
     doc.text('ISSUE PCS', pw - im - 14, y + 15, { align: 'right' });
     y += thH;
 
@@ -529,10 +611,17 @@ export default function BoneIssueView({
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
-    doc.text('Bone Pocketing / Piping Fabric', im + 40, y + 17);
+    const itemDesc = effectiveMaterialMode === 'tape'
+      ? `Tape Roll (Drawcord Tape - ${tapeWidth || '0.5 Inch'})`
+      : effectiveMaterialMode === 'elastic'
+        ? `Elastic Waistband Roll (${elasticWidth || '1 Inch'})`
+        : `Bone Pocketing / Piping Fabric (${width || '1.5 Inch'})`;
+    doc.text(itemDesc, im + 40, y + 17);
 
-    doc.setFont('helvetica', 'normal');
-    doc.text(`${quantity || issuePcs || 0} Pcs`, im + 290, y + 17);
+    if (!isWithoutLot) {
+      doc.setFont('helvetica', 'normal');
+      doc.text(`${quantity || issuePcs || 0} Pcs`, im + 290, y + 17);
+    }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
@@ -552,7 +641,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('TOTAL ISSUE QUANTITY:', im + 12, y + 16);
+    doc.text(`TOTAL ISSUE QUANTITY (${modeLabel}):`, im + 12, y + 16);
 
     doc.setFontSize(10.5);
     doc.text(`${issuePcs} Pcs`, pw - im - 14, y + 16, { align: 'right' });
@@ -675,21 +764,21 @@ export default function BoneIssueView({
 
   // ── Generate Professional Bone Issue Voucher ─────────────────────────────
   const generateBoneIssueBill = async () => {
-    if (!lotDetails && !searchLotInput) {
-      showToast('Please enter or search a Lot Number first.', 'error');
+    if (!lotDetails && !searchLotInput && !isWithoutLot) {
+      showToast('Please enter or search a Lot Number first, or switch to "Without Lot" mode.', 'error');
       return;
     }
 
-    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED
-    if (bomStatus !== 'approved') {
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT LOT MODE)
+    if (!isWithoutLot && bomStatus !== 'approved') {
       if (bomStatus === 'not_created') {
-        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Please create BOM in Design View first.', 'error');
+        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Create BOM in Design View first, or switch to "Without Lot" mode.', 'error');
       } else if (bomStatus === 'pending') {
-        showToast('Workflow Blocked: BOM is Pending Approval! It must be approved by Admin in the Approval Queue before issuing Bone pocketing.', 'error');
+        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without Lot" mode.', 'error');
       } else if (bomStatus === 'rejected') {
-        showToast('Workflow Blocked: BOM was rejected by Admin! Please revise and get the BOM approved first.', 'error');
+        showToast('Workflow Blocked: BOM was rejected by Admin! Revise in Design View or switch to "Without Lot" mode.', 'error');
       } else {
-        showToast('Workflow Blocked: BOM must be created and Approved before Bone pocketing can be issued.', 'error');
+        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without Lot" mode.', 'error');
       }
       return;
     }
@@ -702,23 +791,27 @@ export default function BoneIssueView({
     setGenerating(true);
     try {
       const currentSlipNo = issueSlipNo || await fetchNextIssueSlipNo();
-      const currentLotNo = lotDetails?.lotNo || searchLotInput.trim();
+      const currentLotNo = isWithoutLot ? '' : (lotDetails?.lotNo || searchLotInput.trim() || 'FLOOR-STOCK');
       const effectivePcs = parseInt(issuePcs, 10) || 600;
 
       const payload = {
         slipNo: currentSlipNo,
         lotNo: currentLotNo,
+        isWithoutLot,
+        materialMode,
         issuePcs: effectivePcs,
         width: effectiveWidth,
+        tapeWidth: effectiveTapeWidth,
+        elasticWidth: effectiveElasticWidth,
         shade: selectedShade || lotDetails?.shade || 'Standard Shade',
         issuerName,
         receiverName,
         date: issueDate,
-        style: lotDetails?.style || 'Garment Design',
-        brand: lotDetails?.brand || 'Mohit Hosiery',
-        garmentType: lotDetails?.garmentType || 'Trouser / Tracksuit',
+        style: isWithoutLot ? (withoutLotStyle || 'Floor Issue') : (lotDetails?.style || 'Garment Design'),
+        brand: isWithoutLot ? 'Floor Issue' : (lotDetails?.brand || 'Mohit Hosiery'),
+        garmentType: isWithoutLot ? (withoutLotStyle || 'Floor Issue') : (lotDetails?.garmentType || 'Trouser / Tracksuit'),
         fabric: lotDetails?.fabric || 'Cotton Poly Blend',
-        quantity: lotDetails?.quantity || effectivePcs,
+        quantity: isWithoutLot ? effectivePcs : (lotDetails?.quantity || effectivePcs),
         size: lotDetails?.size || 'M, L, XL, 2XL',
         remarks
       };
@@ -780,11 +873,27 @@ export default function BoneIssueView({
   const handleReprintFromHistory = async (item) => {
     try {
       const effectivePcs = item.issuePcs || item.quantity || item.rolls || 600;
+      const isItemWithoutLot = Boolean(
+        item.isWithoutLot ||
+        !item.lotNo ||
+        item.lotNo === 'W/O-LOT' ||
+        String(item.slipNo).toLowerCase().includes('-w/o-')
+      );
+      const itemMode = String(item.slipNo || '').toLowerCase().startsWith('tape')
+        ? 'tape'
+        : String(item.slipNo || '').toLowerCase().startsWith('elastic')
+          ? 'elastic'
+          : String(item.slipNo || '').toLowerCase().startsWith('bone')
+            ? 'bone'
+            : (item.materialMode || materialMode);
+
       const doc = await createBoneIssuePDFDocument({
         slipNo: item.slipNo,
-        lotNo: item.lotNo,
+        lotNo: isItemWithoutLot ? 'W/O-LOT' : item.lotNo,
         issuePcs: effectivePcs,
         width: item.width || '1.5 Inch (Standard)',
+        tapeWidth: item.tapeWidth || '0.5 Inch (Standard)',
+        elasticWidth: item.elasticWidth || '1 Inch (Standard)',
         shade: item.shade || 'Standard',
         issuerName: item.issuerName || 'Store Staff',
         receiverName: item.receiverName || 'Cutting Master',
@@ -795,7 +904,9 @@ export default function BoneIssueView({
         fabric: item.fabric || 'Cotton Poly Blend',
         quantity: item.quantity || effectivePcs,
         size: item.size || 'M, L, XL, 2XL',
-        remarks: item.remarks || ''
+        remarks: item.remarks || '',
+        isWithoutLot: isItemWithoutLot,
+        materialMode: itemMode
       });
 
       const pdfBlob = doc.output('blob');
@@ -929,7 +1040,96 @@ export default function BoneIssueView({
 
       {viewMode === 'generator' ? (
         <>
-          {/* STEP 1: SEARCH LOT NUMBER */}
+          {/* ISSUE METHOD SELECTOR: WITH LOT vs WITHOUT LOT */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            padding: '12px 18px',
+            borderRadius: '14px',
+            background: isWithoutLot ? '#fff7ed' : '#f0f9ff',
+            border: isWithoutLot ? '1.5px solid #fdba74' : '1.5px solid #bae6fd',
+            marginBottom: '16px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: isWithoutLot ? '#9a3412' : '#0369a1' }}>
+                Select Issue Option:
+              </span>
+              <div style={{ display: 'inline-flex', background: '#ffffff', padding: '4px', borderRadius: '10px', border: '1px solid #cbd5e1', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWithoutLot(false);
+                    setLotDetails(null);
+                    setSearchLotInput('');
+                    setBomStatus('idle');
+                    showToast('Switched to "With Lot" Mode (BOM verification active).');
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    background: !isWithoutLot ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'transparent',
+                    color: !isWithoutLot ? '#ffffff' : '#64748b',
+                    boxShadow: !isWithoutLot ? '0 2px 8px rgba(2, 132, 199, 0.3)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <ShieldCheck size={15} /> With Lot (BOM / PO Verified)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWithoutLot(true);
+                    setBomStatus('idle');
+                    setSearchLotInput('');
+                    setLotDetails({
+                      lotNo: '',
+                      style: withoutLotStyle || 'Floor Issue',
+                      quantity: issuePcs || 600,
+                      brand: 'Floor Issue',
+                      garmentType: withoutLotStyle || 'Floor Issue',
+                      fabric: 'Standard',
+                      shade: 'Standard'
+                    });
+                    if (!issuePcs) setIssuePcs(600);
+                    showToast('⚡ Switched to "Without Lot" Mode. All BOM & PO restrictions removed!');
+                  }}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    background: isWithoutLot ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'transparent',
+                    color: isWithoutLot ? '#ffffff' : '#64748b',
+                    boxShadow: isWithoutLot ? '0 2px 8px rgba(234, 88, 12, 0.35)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Zap size={15} /> Without Lot (Direct Floor Issue - No Restriction)
+                </button>
+              </div>
+            </div>
+
+            <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0369a1' }}>
+              {isWithoutLot
+                ? '⚡ Without Lot: Direct floor issue unlocked. No BOM or PO restrictions!'
+                : '🏷️ With Lot: Search and verify Lot against approved BOM.'}
+            </span>
+          </div>
+
+          {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT LOT VS WITH LOT */}
           <div className="panel" style={{
             padding: '22px 24px',
             borderRadius: '16px',
@@ -937,214 +1137,317 @@ export default function BoneIssueView({
             border: '1px solid var(--border-color, #dbeafe)',
             boxShadow: 'var(--shadow-card)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{
-                  width: '26px', height: '26px', borderRadius: '50%',
-                  background: '#0284c7', color: '#ffffff', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
-                }}>1</span>
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                  Search Lot Number
-                </h3>
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)' }}>
-                Voucher No: <strong style={{ color: '#0284c7' }}>{issueSlipNo || 'Loading...'}</strong>
-              </div>
-            </div>
-
-            {/* Search Input Box */}
-            <div style={{ display: 'flex', gap: '10px', maxWidth: '640px' }}>
-              <div style={{ position: 'relative', flex: 1 }}>
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  placeholder="Enter Lot Number (auto-searches on typing)..."
-                  value={searchLotInput}
-                  onChange={(e) => setSearchLotInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleSearchLot(); }}
-                  style={{
-                    width: '100%',
-                    padding: '11px 16px 11px 38px',
-                    borderRadius: '10px',
-                    border: '1.5px solid var(--border-color, #cbd5e1)',
-                    background: 'var(--bg-input, #f8fafc)',
-                    fontSize: '14px',
-                    fontWeight: '600',
-                    color: 'var(--text-main, #0f172a)',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
-                {searchingLot && (
-                  <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '11.5px', fontWeight: '700', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <RefreshCw size={12} className="animate-spin" /> Searching...
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleSearchLot()}
-                disabled={searchingLot}
-                style={{
-                  padding: '0 24px',
-                  borderRadius: '10px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                  color: '#ffffff',
-                  fontSize: '13.5px',
-                  fontWeight: '700',
-                  cursor: searchingLot ? 'wait' : 'pointer',
-                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}
-              >
-                {searchingLot ? <RefreshCw size={16} className="animate-spin" /> : <Search size={16} />}
-                <span>{searchingLot ? 'Searching...' : 'Search Lot'}</span>
-              </button>
-            </div>
-
-            {/* Approved BOM Lots Quick Selector */}
-            {approvedDesignsList.length > 0 && (
+            {isWithoutLot ? (
               <div style={{
-                marginTop: '12px',
-                padding: '10px 14px',
-                borderRadius: '10px',
-                background: 'rgba(22, 163, 74, 0.06)',
-                border: '1px solid rgba(22, 163, 74, 0.25)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                flexWrap: 'wrap'
-              }}>
-                <span style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <ShieldCheck size={14} /> Ready to Issue (Approved BOM Lots):
-                </span>
-                {approvedDesignsList.slice(0, 8).map(d => (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => { setSearchLotInput(d.id); handleSearchLot(d.id); }}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #86efac',
-                      background: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#16a34a' : '#ffffff',
-                      color: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#ffffff' : '#166534',
-                      fontSize: '11px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                    }}
-                  >
-                    <span>LOT #{d.id}</span>
-                    <span style={{ opacity: 0.8, fontSize: '10px' }}>({d.style || 'Garment'})</span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Recent suggestions */}
-            {recentLots.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>Recent:</span>
-                {recentLots.map(l => (
-                  <button
-                    key={l}
-                    type="button"
-                    onClick={() => { setSearchLotInput(l); handleSearchLot(l); }}
-                    style={{
-                      padding: '3px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid #cbd5e1',
-                      background: '#f1f5f9',
-                      fontSize: '11px',
-                      fontWeight: '700',
-                      color: '#334155',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Lot #{l}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {lotError && (
-              <div style={{
-                marginTop: '12px', padding: '10px 14px', borderRadius: '8px',
-                background: 'rgba(239, 68, 68, 0.1)', color: '#dc2626',
-                fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px'
-              }}>
-                <AlertTriangle size={16} />
-                <span>{lotError}</span>
-              </div>
-            )}
-
-            {/* LOT DETAILS DISPLAY CARD */}
-            {lotDetails && (
-              <div style={{
-                marginTop: '16px',
                 padding: '16px 20px',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                border: '1.5px solid #bae6fd'
+                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                border: '1.5px solid #fdba74',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px'
               }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{
-                      padding: '4px 10px', borderRadius: '6px',
-                      background: '#0284c7', color: '#ffffff',
-                      fontSize: '12.5px', fontWeight: '800', letterSpacing: '0.5px'
-                    }}>
-                      LOT #{lotDetails.lotNo}
-                    </span>
-                    <span style={{ fontSize: '14px', fontWeight: '800', color: '#0369a1' }}>
-                      {lotDetails.style || 'Garment Design'}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>
-                      • {lotDetails.brand || 'Mohit Hosiery'}
-                    </span>
+                      width: '26px', height: '26px', borderRadius: '50%',
+                      background: '#ea580c', color: '#ffffff', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                    }}>1</span>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
+                      Direct Floor Movement Details (Without Lot)
+                    </h3>
                   </div>
-                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#0369a1', background: '#ffffff', padding: '4px 10px', borderRadius: '6px', border: '1px solid #bae6fd' }}>
-                    Cutting Qty: <strong>{lotDetails.quantity || 0} Pcs</strong>
+                  <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
+                    Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
+                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT LOT</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                  {/* Optional Reference */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                      REFERENCE / TAG (OPTIONAL):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Floor Cutting / Sample / Lot #"
+                      value={searchLotInput}
+                      onChange={(e) => setSearchLotInput(e.target.value)}
+                      style={{
+                        width: '100%', padding: '9px 12px', borderRadius: '8px',
+                        border: '1.5px solid #fdba74', background: '#ffffff',
+                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Style / Garment Name */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                      STYLE / GARMENT ITEM:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Trouser, Tracksuit, Lower..."
+                      value={withoutLotStyle}
+                      onChange={(e) => setWithoutLotStyle(e.target.value)}
+                      style={{
+                        width: '100%', padding: '9px 12px', borderRadius: '8px',
+                        border: '1.5px solid #fdba74', background: '#ffffff',
+                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Quantity Pcs */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                      TARGET CUTTING / ISSUE PCS:
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={issuePcs || 600}
+                      onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      style={{
+                        width: '100%', padding: '9px 12px', borderRadius: '8px',
+                        border: '1.5px solid #fdba74', background: '#ffffff',
+                        fontSize: '14px', fontWeight: '800', color: '#0f172a', boxSizing: 'border-box'
+                      }}
+                    />
                   </div>
                 </div>
 
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                  gap: '12px',
-                  fontSize: '12px'
+                  padding: '9px 14px',
+                  borderRadius: '8px',
+                  background: '#ffffff',
+                  border: '1px solid #fed7aa',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  color: '#c2410c',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
                 }}>
-                  <div>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>GARMENT TYPE</span>
-                    <strong style={{ color: '#0f172a' }}>{lotDetails.garmentType || 'N/A'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>FABRIC</span>
-                    <strong style={{ color: '#0f172a' }}>{lotDetails.fabric || 'N/A'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SHADE / COLOR</span>
-                    <strong style={{ color: '#0f172a' }}>{selectedShade || lotDetails.shade || 'Standard'}</strong>
-                  </div>
-                  <div>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SIZES</span>
-                    <strong style={{ color: '#0f172a' }}>{lotDetails.size || 'M, L, XL, XXL'}</strong>
-                  </div>
+                  <CheckCircle size={16} color="#ea580c" />
+                  <span>Unrestricted Mode: No BOM or PO required! Issue form is completely unlocked below.</span>
                 </div>
               </div>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{
+                      width: '26px', height: '26px', borderRadius: '50%',
+                      background: '#0284c7', color: '#ffffff', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                    }}>1</span>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                      Search Lot Number
+                    </h3>
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)' }}>
+                    Voucher No: <strong style={{ color: '#0284c7' }}>{issueSlipNo || 'Loading...'}</strong>
+                  </div>
+                </div>
+
+                {/* Search Input Box */}
+                <div style={{ display: 'flex', gap: '10px', maxWidth: '640px' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      placeholder="Enter Lot Number (auto-searches on typing)..."
+                      value={searchLotInput}
+                      onChange={(e) => setSearchLotInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleSearchLot(); }}
+                      style={{
+                        width: '100%',
+                        padding: '11px 16px 11px 38px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-color, #cbd5e1)',
+                        background: 'var(--bg-input, #f8fafc)',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: 'var(--text-main, #0f172a)',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    <Search size={18} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                    {searchingLot && (
+                      <span style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', fontSize: '11.5px', fontWeight: '700', color: '#0284c7', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <RefreshCw size={12} className="animate-spin" /> Searching...
+                      </span>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSearchLot()}
+                    disabled={searchingLot}
+                    style={{
+                      padding: '0 24px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                      color: '#ffffff',
+                      fontSize: '13.5px',
+                      fontWeight: '700',
+                      cursor: searchingLot ? 'wait' : 'pointer',
+                      boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    {searchingLot ? <RefreshCw size={16} className="animate-spin" /> : <Search size={16} />}
+                    <span>{searchingLot ? 'Searching...' : 'Search Lot'}</span>
+                  </button>
+                </div>
+
+                {/* Approved BOM Lots Quick Selector */}
+                {approvedDesignsList.length > 0 && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    background: 'rgba(22, 163, 74, 0.06)',
+                    border: '1px solid rgba(22, 163, 74, 0.25)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    flexWrap: 'wrap'
+                  }}>
+                    <span style={{ fontSize: '11.5px', color: '#15803d', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <ShieldCheck size={14} /> Ready to Issue (Approved BOM Lots):
+                    </span>
+                    {approvedDesignsList.slice(0, 8).map(d => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => { setSearchLotInput(d.id); handleSearchLot(d.id); }}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #86efac',
+                          background: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#16a34a' : '#ffffff',
+                          color: (lotDetails?.lotNo === d.id || searchLotInput === d.id) ? '#ffffff' : '#166534',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                        }}
+                      >
+                        <span>LOT #{d.id}</span>
+                        <span style={{ opacity: 0.8, fontSize: '10px' }}>({d.style || 'Garment'})</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Recent suggestions */}
+                {recentLots.length > 0 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>Recent:</span>
+                    {recentLots.map(l => (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => { setSearchLotInput(l); handleSearchLot(l); }}
+                        style={{
+                          padding: '3px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #cbd5e1',
+                          background: '#f1f5f9',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          color: '#334155',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Lot #{l}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {lotError && (
+                  <div style={{
+                    marginTop: '12px', padding: '10px 14px', borderRadius: '8px',
+                    background: 'rgba(239, 68, 68, 0.1)', color: '#dc2626',
+                    fontSize: '12.5px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px'
+                  }}>
+                    <AlertTriangle size={16} />
+                    <span>{lotError}</span>
+                  </div>
+                )}
+
+                {/* LOT DETAILS DISPLAY CARD */}
+                {lotDetails && (
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '16px 20px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                    border: '1.5px solid #bae6fd'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <span style={{
+                          padding: '4px 10px', borderRadius: '6px',
+                          background: '#0284c7', color: '#ffffff',
+                          fontSize: '12.5px', fontWeight: '800', letterSpacing: '0.5px'
+                        }}>
+                          LOT #{lotDetails.lotNo}
+                        </span>
+                        <span style={{ fontSize: '14px', fontWeight: '800', color: '#0369a1' }}>
+                          {lotDetails.style || 'Garment Design'}
+                        </span>
+                        <span style={{ fontSize: '12px', color: '#64748b' }}>
+                          • {lotDetails.brand || 'Mohit Hosiery'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#0369a1', background: '#ffffff', padding: '4px 10px', borderRadius: '6px', border: '1px solid #bae6fd' }}>
+                        Cutting Qty: <strong>{lotDetails.quantity || 0} Pcs</strong>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                      gap: '12px',
+                      fontSize: '12px'
+                    }}>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>GARMENT TYPE</span>
+                        <strong style={{ color: '#0f172a' }}>{lotDetails.garmentType || 'N/A'}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>FABRIC</span>
+                        <strong style={{ color: '#0f172a' }}>{lotDetails.fabric || 'N/A'}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SHADE / COLOR</span>
+                        <strong style={{ color: '#0f172a' }}>{selectedShade || lotDetails.shade || 'Standard'}</strong>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SIZES</span>
+                        <strong style={{ color: '#0f172a' }}>{lotDetails.size || 'M, L, XL, XXL'}</strong>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
-            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY) */}
-            {(lotDetails || searchLotInput.trim().length >= 3) && (
+            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY - STRICTLY FOR WITH LOT MODE) */}
+            {!isWithoutLot && (lotDetails || searchLotInput.trim().length >= 3) && (
               <div style={{
                 marginTop: '14px',
                 padding: '16px 20px',
@@ -1314,8 +1617,8 @@ export default function BoneIssueView({
             )}
           </div>
 
-          {/* STEP 2: SIMPLE INTERNAL ISSUE DETAILS (ONLY SHOWN AFTER LOT IS ENTERED & BOM APPROVED) */}
-          {lotDetails && bomStatus === 'approved' && (
+          {/* STEP 2: SIMPLE INTERNAL ISSUE DETAILS (SHOWN AFTER LOT IS ENTERED & BOM APPROVED, OR IF WITHOUT LOT) */}
+          {(lotDetails || isWithoutLot) && (bomStatus === 'approved' || isWithoutLot) && (
             <div className="panel" style={{
               padding: '22px 24px',
               borderRadius: '16px',
@@ -1323,15 +1626,187 @@ export default function BoneIssueView({
               border: '1px solid var(--border-color, #dbeafe)',
               boxShadow: 'var(--shadow-card)'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '18px' }}>
-                <span style={{
-                  width: '26px', height: '26px', borderRadius: '50%',
-                  background: '#0284c7', color: '#ffffff', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
-                }}>2</span>
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                  Issue Details (Quantity of Rolls & Issuer / Receiver)
-                </h3>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '26px', height: '26px', borderRadius: '50%',
+                    background: '#0284c7', color: '#ffffff', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                  }}>2</span>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                    Issue Details (Material, Quantity & Issuer / Receiver)
+                  </h3>
+                </div>
+
+                {/* Material Mode Switcher (Bone Only, Tape Only, Elastic Only - NO COMBOS) */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  background: '#f1f5f9',
+                  padding: '4px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #cbd5e1'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('bone')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'bone' ? '#0284c7' : 'transparent',
+                      color: materialMode === 'bone' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      boxShadow: materialMode === 'bone' ? '0 2px 8px rgba(2, 132, 199, 0.35)' : 'none'
+                    }}
+                  >
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'bone' ? '#bae6fd' : '#0284c7' }}></span>
+                    Bone Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('tape')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'tape' ? '#2563eb' : 'transparent',
+                      color: materialMode === 'tape' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      boxShadow: materialMode === 'tape' ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none'
+                    }}
+                  >
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'tape' ? '#bfdbfe' : '#2563eb' }}></span>
+                    Tape Only
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setMaterialMode('elastic')}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '8px',
+                      border: 'none',
+                      background: materialMode === 'elastic' ? '#059669' : 'transparent',
+                      color: materialMode === 'elastic' ? '#ffffff' : '#475569',
+                      fontWeight: '800',
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      boxShadow: materialMode === 'elastic' ? '0 2px 8px rgba(5, 150, 105, 0.35)' : 'none'
+                    }}
+                  >
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'elastic' ? '#a7f3d0' : '#059669' }}></span>
+                    Elastic Only
+                  </button>
+                </div>
+              </div>
+
+              {/* Selected Material Width Specification Banner */}
+              <div style={{
+                marginBottom: '16px',
+                padding: '12px 16px',
+                borderRadius: '10px',
+                background: materialMode === 'tape' ? '#eff6ff' : materialMode === 'elastic' ? '#f0fdf4' : '#f0f9ff',
+                border: `1.5px solid ${materialMode === 'tape' ? '#bfdbfe' : materialMode === 'elastic' ? '#bbf7d0' : '#bae6fd'}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12.5px', fontWeight: '800', color: materialMode === 'tape' ? '#1d4ed8' : materialMode === 'elastic' ? '#15803d' : '#0369a1' }}>
+                    {materialMode === 'tape' ? 'Tape Width:' : materialMode === 'elastic' ? 'Elastic Width:' : 'Bone Pocketing Width:'}
+                  </span>
+                  {materialMode === 'bone' && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {['1.5 Inch (Standard)', '1.0 Inch', '1.25 Inch', '2.0 Inch', 'Custom'].map(w => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setBoneWidth(w)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: boneWidth === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                            background: boneWidth === w ? '#0284c7' : '#ffffff',
+                            color: boneWidth === w ? '#ffffff' : '#334155',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {materialMode === 'tape' && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {['0.5 Inch (Standard)', '0.75 Inch', '1.0 Inch', 'Custom'].map(w => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setTapeWidth(w)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: tapeWidth === w ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                            background: tapeWidth === w ? '#2563eb' : '#ffffff',
+                            color: tapeWidth === w ? '#ffffff' : '#334155',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {materialMode === 'elastic' && (
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                      {['1 Inch (Standard)', '1.25 Inch', '1.5 Inch', 'Custom'].map(w => (
+                        <button
+                          key={w}
+                          type="button"
+                          onClick={() => setElasticWidth(w)}
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            border: elasticWidth === w ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                            background: elasticWidth === w ? '#059669' : '#ffffff',
+                            color: elasticWidth === w ? '#ffffff' : '#334155',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {w}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>
+                  Effective Width: <strong style={{ color: '#0f172a' }}>{materialMode === 'tape' ? effectiveTapeWidth : materialMode === 'elastic' ? effectiveElasticWidth : effectiveWidth}</strong>
+                </span>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
@@ -1437,27 +1912,51 @@ export default function BoneIssueView({
                   </div>
 
                   {/* Cutting Pcs Matrix Reference Badge */}
-                  <div style={{
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    background: '#f0f9ff',
-                    border: '1px solid #bae6fd',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <div>
-                      <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                        Cutting Pcs (Lot Matrix)
-                      </span>
-                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                        Lot #{lotDetails?.lotNo || searchLotInput || '—'}
+                  {isWithoutLot ? (
+                    <div style={{
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: '#fff7ed',
+                      border: '1.5px solid #fed7aa',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#c2410c', fontWeight: '800', textTransform: 'uppercase', display: 'block' }}>
+                          ISSUE MODE & ITEM
+                        </span>
+                        <strong style={{ fontSize: '13px', color: '#9a3412' }}>
+                          Without Lot — {withoutLotStyle || 'Floor Issue'}
+                        </strong>
+                      </div>
+                      <span style={{ fontSize: '11px', fontWeight: '800', background: '#ea580c', color: '#ffffff', padding: '3px 8px', borderRadius: '4px' }}>
+                        ⚡ DIRECT FLOOR ISSUE
                       </span>
                     </div>
-                    <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
-                      {lotDetails?.quantity || 0} Pcs
-                    </strong>
-                  </div>
+                  ) : (
+                    <div style={{
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      background: '#f0f9ff',
+                      border: '1px solid #bae6fd',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                          Cutting Pcs (Lot Matrix)
+                        </span>
+                        <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                          Lot #{lotDetails?.lotNo || searchLotInput || '—'}
+                        </span>
+                      </div>
+                      <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
+                        {lotDetails?.quantity || 0} Pcs
+                      </strong>
+                    </div>
+                  )}
 
                   {/* Editable Issue Pcs Input */}
                   <div>
@@ -1498,7 +1997,7 @@ export default function BoneIssueView({
 
                   {/* Quick Presets for Issue Pcs */}
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {lotDetails?.quantity && (
+                    {!isWithoutLot && lotDetails?.quantity && (
                       <button
                         key="same-cut"
                         type="button"
@@ -1538,8 +2037,17 @@ export default function BoneIssueView({
                     ))}
                   </div>
 
-                  <div style={{ fontSize: '12.5px', fontWeight: '700', color: '#0369a1', background: '#e0f2fe', padding: '10px 14px', borderRadius: '8px', border: '1px solid #bae6fd', marginTop: '4px' }}>
-                    Issue Summary: <strong>{issuePcs} Pcs</strong> of Bone Pocketing for LOT #{lotDetails?.lotNo || searchLotInput || '—'}
+                  <div style={{
+                    fontSize: '12.5px',
+                    fontWeight: '700',
+                    color: isWithoutLot ? '#9a3412' : '#0369a1',
+                    background: isWithoutLot ? '#fff7ed' : '#e0f2fe',
+                    padding: '10px 14px',
+                    borderRadius: '8px',
+                    border: isWithoutLot ? '1px solid #fed7aa' : '1px solid #bae6fd',
+                    marginTop: '4px'
+                  }}>
+                    Issue Summary: <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} {isWithoutLot ? '(Direct Floor Issue - Without Lot)' : `for LOT #${lotDetails?.lotNo || searchLotInput || '—'}`}
                   </div>
                 </div>
 
@@ -1549,7 +2057,7 @@ export default function BoneIssueView({
               <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '13px', color: '#64748b' }}>
                   <span>
-                    Issuing <strong>{issuePcs} Pcs</strong> of Bone Pocketing to <strong>{receiverName || 'Cutting Master'}</strong> (BOM Approved ✓)
+                    Issuing <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} to <strong>{receiverName || 'Cutting Master'}</strong> {isWithoutLot ? '(Without Lot ✓)' : '(BOM Approved ✓)'}
                   </span>
                 </div>
 
@@ -1580,15 +2088,15 @@ export default function BoneIssueView({
                   <span>
                     {generating
                       ? 'Generating Issue Slip...'
-                      : 'Generate Bone Issue Bill'}
+                      : 'Generate Material Issue Bill'}
                   </span>
                 </button>
               </div>
             </div>
           )}
 
-          {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET) */}
-          {!lotDetails && (
+          {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET AND NOT IN WITHOUT LOT MODE) */}
+          {!lotDetails && !isWithoutLot && (
             <div className="panel" style={{
               padding: '36px 24px',
               borderRadius: '16px',
@@ -1702,14 +2210,45 @@ export default function BoneIssueView({
                     })
                     .map((item, idx) => (
                       <tr key={item.slipNo || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#0284c7' }}>
-                          {item.slipNo}
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '3px 8px',
+                            background: String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '#fff7ed' : '#f0f9ff',
+                            color: String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '#c2410c' : '#0284c7',
+                            border: `1px solid ${String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '#fed7aa' : '#bae6fd'}`,
+                            borderRadius: '5px',
+                            fontFamily: 'monospace',
+                            fontSize: '12px',
+                            fontWeight: '800'
+                          }}>
+                            {item.slipNo}
+                          </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#64748b' }}>
+                        <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px' }}>
                           {item.date}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
-                          LOT #{item.lotNo}
+                        <td style={{ padding: '10px 12px' }}>
+                          {Boolean(item.isWithoutLot || !item.lotNo || item.lotNo === 'W/O-LOT' || item.lotNo === 'W/O-PO-FLOOR' || String(item.slipNo || '').toLowerCase().includes('-w/o-')) ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 8px',
+                              background: '#fff7ed',
+                              color: '#c2410c',
+                              border: '1px solid #fed7aa',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: '800'
+                            }}>
+                              W/O LOT
+                            </span>
+                          ) : (
+                            <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                              LOT #{item.lotNo}
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800', color: '#059669' }}>
                           {item.issuePcs || item.quantity || item.rolls || 600} Pcs
@@ -1880,17 +2419,23 @@ export default function BoneIssueView({
               }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px' }}>
                   <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>LOT NUMBER</span>
-                    <strong style={{ color: '#0f172a' }}>LOT #{generatedSlipData.lotNo}</strong>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>
+                      {generatedSlipData.isWithoutLot ? 'ISSUE MODE' : 'LOT NUMBER'}
+                    </span>
+                    <strong style={{ color: generatedSlipData.isWithoutLot ? '#ea580c' : '#0f172a' }}>
+                      {generatedSlipData.isWithoutLot ? '⚡ WITHOUT LOT (Floor Issue)' : `LOT #${generatedSlipData.lotNo}`}
+                    </strong>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE QUANTITY (PCS)</span>
                     <strong style={{ color: '#0284c7', fontSize: '16px' }}>{generatedSlipData.issuePcs} Pcs</strong>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>CUTTING MATRIX PCS</span>
-                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.quantity || 600} Pcs</strong>
-                  </div>
+                  {!generatedSlipData.isWithoutLot && (
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>CUTTING MATRIX PCS</span>
+                      <strong style={{ color: '#0f172a' }}>{generatedSlipData.quantity || 600} Pcs</strong>
+                    </div>
+                  )}
                   <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE DATE</span>
                     <strong style={{ color: '#0f172a' }}>{generatedSlipData.date}</strong>
