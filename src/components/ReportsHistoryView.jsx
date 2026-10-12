@@ -98,7 +98,11 @@ export default function ReportsHistoryView({
   pos = [], 
   designs = [],
   issueLogs = [],
-  currencySymbol = 'R' 
+  currencySymbol = 'R',
+  onNavigateToMaterialIssue,
+  onNavigateToElasticIssue,
+  onNavigateToDesign,
+  onRedirectToTab
 }) {
   const [selectedPo, setSelectedPo] = useState(null);
   
@@ -250,6 +254,17 @@ export default function ReportsHistoryView({
   const [undesignedFabricFilter, setUndesignedFabricFilter] = useState('all');
   const [undesignedSort, setUndesignedSort] = useState('latest');
 
+  // BOM Created (Material Not Issued) Report states
+  const [bomNotIssuedList, setBomNotIssuedList] = useState([]);
+  const [loadingBomNotIssued, setLoadingBomNotIssued] = useState(false);
+  const [bomNotIssuedSearch, setBomNotIssuedSearch] = useState('');
+  const [bomNotIssuedFabricFilter, setBomNotIssuedFabricFilter] = useState('all');
+  const [bomNotIssuedGarmentFilter, setBomNotIssuedGarmentFilter] = useState('all');
+  const [bomNotIssuedStatusFilter, setBomNotIssuedStatusFilter] = useState('all');
+  const [bomNotIssuedSort, setBomNotIssuedSort] = useState('latest');
+  const [selectedBomLotModal, setSelectedBomLotModal] = useState(null);
+  const [expandedBomLotIds, setExpandedBomLotIds] = useState(new Set());
+
   // RGP Pass Register states
   const [rgpList, setRgpList] = useState([]);
   const [rgpLoading, setRgpLoading] = useState(false);
@@ -342,10 +357,30 @@ export default function ReportsHistoryView({
         setRgpList(Array.isArray(rData) ? rData : []);
       }
       fetchLotWiseData();
+      fetchBomNotIssued();
     } catch (err) {
       console.error('Error fetching master data:', err);
     } finally {
       setMasterLoading(false);
+    }
+  };
+
+  // Fetch BOM Created (Material Not Issued) from backend
+  const fetchBomNotIssued = async () => {
+    setLoadingBomNotIssued(true);
+    const backendUrl = getBackendUrl();
+    try {
+      const res = await fetch(`${backendUrl}/api/reports/bom-created-not-issued`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setBomNotIssuedList(data);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch bom-created-not-issued, fallback to client computation:', err);
+    } finally {
+      setLoadingBomNotIssued(false);
     }
   };
 
@@ -424,9 +459,76 @@ export default function ReportsHistoryView({
         .catch(err => console.error('Error fetching undesigned lots:', err))
         .finally(() => setLoadingUndesigned(false));
     }
+
+    // Fetch BOM created pending material issue lots
+    if (activeReportTab === 'bom_created_not_issued') {
+      fetchBomNotIssued();
+    }
   }, [activeReportTab]);
 
   const allIssueLogs = issueLogs && issueLogs.length > 0 ? issueLogs : fetchedIssueLogs;
+
+  // Reactive calculation for BOM Created (Material Not Issued)
+  const computedBomNotIssued = useMemo(() => {
+    const currentIssues = allIssueLogs || [];
+    const issuedLotsMap = new Map();
+
+    currentIssues.forEach(il => {
+      const lotId = String(il.lotId || il.lot_no || '').trim().toLowerCase();
+      if (!lotId || il.isReturn) return;
+      let matCount = 0;
+      try {
+        const mats = typeof il.materials === 'string' ? JSON.parse(il.materials || '[]') : (il.materials || []);
+        matCount = Array.isArray(mats) ? mats.length : 1;
+      } catch (_) { matCount = 1; }
+      issuedLotsMap.set(lotId, (issuedLotsMap.get(lotId) || 0) + matCount);
+    });
+
+    (extraMaterialIssues || []).forEach(ex => {
+      const lotId = String(ex.lot_no || ex.lot_id || ex.lotId || '').trim().toLowerCase();
+      if (lotId) issuedLotsMap.set(lotId, (issuedLotsMap.get(lotId) || 0) + 1);
+    });
+
+    return (designs || []).map(d => {
+      const lotKey = String(d.id || d.lotNo || '').trim().toLowerCase();
+      const lotId = String(d.id || d.lotNo || '').trim();
+      const issuedCount = issuedLotsMap.get(lotKey) || 0;
+      const isIssued = issuedCount > 0;
+
+      let bomItems = [];
+      try {
+        if (Array.isArray(d.bom)) bomItems = d.bom;
+        else if (typeof d.bom === 'string') bomItems = JSON.parse(d.bom || '[]');
+      } catch (_) { bomItems = []; }
+
+      return {
+        id: d.id,
+        lotNo: lotId,
+        style: d.style || '',
+        brand: d.brand || '',
+        fabricType: d.fabricType || '',
+        garmentType: d.garmentType || 'Garment',
+        targetPieces: parseInt(d.quantity) || 0,
+        cuttingQty: parseInt(d.quantity) || 0,
+        bomDate: d.createdAt || d.created_at || d.updatedAt || '',
+        bomStatus: d.status || 'BOM Created',
+        designer: d.actorName || d.designer || d.created_by || 'Designer',
+        materialsRequired: bomItems,
+        materialsCount: bomItems.length,
+        totalIssuedCount: issuedCount,
+        isIssued,
+        issueStatus: isIssued ? (issuedCount < bomItems.length ? 'Partially Issued' : 'Issued') : 'Material Not Issued'
+      };
+    });
+  }, [designs, allIssueLogs, extraMaterialIssues]);
+
+  // Unified list for BOM Created (Material Not Issued)
+  const effectiveBomNotIssuedList = useMemo(() => {
+    if (bomNotIssuedList && bomNotIssuedList.length > 0) {
+      return bomNotIssuedList;
+    }
+    return computedBomNotIssued.filter(l => !l.isIssued || l.totalIssuedCount === 0);
+  }, [bomNotIssuedList, computedBomNotIssued]);
 
   // Calculate stats
   const totalPOValue = pos.reduce((sum, po) => sum + po.total, 0);
@@ -2650,6 +2752,28 @@ export default function ReportsHistoryView({
         >
           <Scissors size={14} />
           <span>Undesigned Cutting Lots ({undesignedLots.length || 0})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('bom_created_not_issued')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: activeReportTab === 'bom_created_not_issued' ? 'none' : '1px solid rgba(239, 68, 68, 0.4)',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'bom_created_not_issued' ? '#dc2626' : 'rgba(254, 242, 242, 0.8)',
+            color: activeReportTab === 'bom_created_not_issued' ? '#ffffff' : '#b91c1c',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: activeReportTab === 'bom_created_not_issued' ? '0 2px 8px rgba(220, 38, 38, 0.35)' : 'none'
+          }}
+        >
+          <AlertTriangle size={14} />
+          <span>BOM Created (Not Issued) ({effectiveBomNotIssuedList.length || 0})</span>
         </button>
         <button
           type="button"
@@ -6492,6 +6616,885 @@ export default function ReportsHistoryView({
           </div>
         </div>
       )}
+
+      {/* ── 5.1 BOM CREATED (MATERIAL NOT ISSUED) COMPLETE LOT DETAIL REPORT ── */}
+      {activeReportTab === 'bom_created_not_issued' && (() => {
+        // Compute filtered list
+        const filtered = (effectiveBomNotIssuedList || []).filter(lot => {
+          const q = (bomNotIssuedSearch || '').toLowerCase().trim();
+          const matchesSearch = !q ||
+            String(lot.lotNo || lot.id || '').toLowerCase().includes(q) ||
+            String(lot.style || '').toLowerCase().includes(q) ||
+            String(lot.brand || '').toLowerCase().includes(q) ||
+            String(lot.fabricType || '').toLowerCase().includes(q) ||
+            String(lot.garmentType || '').toLowerCase().includes(q) ||
+            String(lot.designer || '').toLowerCase().includes(q);
+
+          const matchesFabric = bomNotIssuedFabricFilter === 'all' ||
+            String(lot.fabricType || '').toLowerCase().trim() === bomNotIssuedFabricFilter.toLowerCase().trim();
+
+          const matchesGarment = bomNotIssuedGarmentFilter === 'all' ||
+            String(lot.garmentType || '').toLowerCase().trim() === bomNotIssuedGarmentFilter.toLowerCase().trim();
+
+          const matchesStatus = bomNotIssuedStatusFilter === 'all' ||
+            (bomNotIssuedStatusFilter === 'not_issued' && (!lot.isIssued || lot.totalIssuedCount === 0)) ||
+            (bomNotIssuedStatusFilter === 'partial' && lot.isIssued && lot.totalIssuedCount < (lot.materialsCount || 1));
+
+          return matchesSearch && matchesFabric && matchesGarment && matchesStatus;
+        }).sort((a, b) => {
+          if (bomNotIssuedSort === 'latest') return String(b.id || '').localeCompare(String(a.id || ''), undefined, { numeric: true });
+          if (bomNotIssuedSort === 'oldest') return String(a.id || '').localeCompare(String(b.id || ''), undefined, { numeric: true });
+          if (bomNotIssuedSort === 'qty_desc') return (Number(b.targetPieces) || 0) - (Number(a.targetPieces) || 0);
+          if (bomNotIssuedSort === 'qty_asc') return (Number(a.targetPieces) || 0) - (Number(b.targetPieces) || 0);
+          if (bomNotIssuedSort === 'lot_asc') return String(a.lotNo || '').localeCompare(String(b.lotNo || ''));
+          return 0;
+        });
+
+        const totalPendingLots = filtered.length;
+        const totalPendingPieces = filtered.reduce((sum, l) => sum + (Number(l.targetPieces) || 0), 0);
+        const totalAccessoriesRequired = filtered.reduce((sum, l) => sum + (Number(l.materialsCount) || (Array.isArray(l.materialsRequired) ? l.materialsRequired.length : 0)), 0);
+        const uniqueFabrics = new Set(filtered.map(l => (l.fabricType || '').trim()).filter(Boolean)).size;
+
+        const allAvailableFabrics = Array.from(new Set((effectiveBomNotIssuedList || []).map(l => (l.fabricType || '').trim()).filter(Boolean))).sort();
+        const allAvailableGarments = Array.from(new Set((effectiveBomNotIssuedList || []).map(l => (l.garmentType || '').trim()).filter(Boolean))).sort();
+
+        const handleExportCSV = () => {
+          const headers = [
+            'Lot Number', 'Style', 'Brand', 'Fabric Type', 'Garment Type',
+            'Target/Cutting Pieces', 'BOM Date', 'Designer', 'BOM Status',
+            'Issue Status', 'Required Items Count', 'Materials Required In BOM'
+          ];
+          const rows = filtered.map(l => {
+            const matsStr = Array.isArray(l.materialsRequired)
+              ? l.materialsRequired.map(m => `${m.name || m.itemDesc || 'Item'} (${m.requiredQty || m.totalRequired || m.consumption || 0} ${m.unit || 'pcs'})`).join('; ')
+              : '';
+            return [
+              `"${l.lotNo || l.id}"`,
+              `"${(l.style || '').replace(/"/g, '""')}"`,
+              `"${(l.brand || '').replace(/"/g, '""')}"`,
+              `"${(l.fabricType || '').replace(/"/g, '""')}"`,
+              `"${(l.garmentType || '').replace(/"/g, '""')}"`,
+              l.targetPieces || 0,
+              `"${formatDateTime(l.bomDate)}"`,
+              `"${(l.designer || '').replace(/"/g, '""')}"`,
+              `"${l.bomStatus || 'BOM Created'}"`,
+              `"${l.issueStatus || 'Material Not Issued'}"`,
+              l.materialsCount || (Array.isArray(l.materialsRequired) ? l.materialsRequired.length : 0),
+              `"${matsStr.replace(/"/g, '""')}"`
+            ].join(',');
+          });
+
+          const csvContent = "data:text/csv;charset=utf-8," + [headers.join(',')].concat(rows).join('\n');
+          const encodedUri = encodeURI(csvContent);
+          const link = document.createElement("a");
+          link.setAttribute("href", encodedUri);
+          link.setAttribute("download", `bom_created_material_not_issued_${new Date().toISOString().slice(0, 10)}.csv`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+
+        return (
+          <div className="animate-scale" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Top Header Card */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '16px',
+              backgroundColor: 'var(--bg-secondary)',
+              padding: '16px 20px',
+              borderRadius: '12px',
+              border: '1px solid var(--border-color)',
+              boxShadow: 'var(--shadow-sm)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '10px',
+                  backgroundColor: '#dc2626',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)'
+                }}>
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h2 style={{
+                    margin: 0,
+                    fontSize: '20px',
+                    fontWeight: '800',
+                    color: 'var(--text-main)',
+                    letterSpacing: '-0.3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}>
+                    <span>BOM Created (Material Not Issued) — Complete Lot Detail</span>
+                    <span style={{
+                      fontSize: '12px',
+                      background: '#fee2e2',
+                      color: '#b91c1c',
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      fontWeight: '800'
+                    }}>
+                      {filtered.length} Lots Pending Issue
+                    </span>
+                  </h2>
+                  <p style={{ margin: '3px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                    Complete factory floor tracking: All lots where Bill of Materials (BOM) was created &amp; approved, but accessories &amp; materials have NOT been issued from store yet.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="print-hide" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBomNotIssuedSearch('');
+                    setBomNotIssuedFabricFilter('all');
+                    setBomNotIssuedGarmentFilter('all');
+                    setBomNotIssuedStatusFilter('all');
+                    setBomNotIssuedSort('latest');
+                  }}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px' }}
+                >
+                  <RotateCcw size={13} />
+                  <span>Reset Filters</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={fetchBomNotIssued}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px' }}
+                >
+                  <RefreshCw size={13} className={loadingBomNotIssued ? "animate-spin" : ""} />
+                  <span>Refresh Data</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px', color: '#16a34a' }}
+                >
+                  <FileSpreadsheet size={13} />
+                  <span>Export CSV / Excel</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="btn btn-secondary btn-sm"
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px' }}
+                >
+                  <Printer size={13} />
+                  <span>Print Report</span>
+                </button>
+              </div>
+            </div>
+
+            {/* KPI Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+              <div className="card" style={{ padding: '16px', borderLeft: '4px solid #dc2626', backgroundColor: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Lots Pending Material Issue
+                </span>
+                <h3 style={{ margin: '6px 0 2px 0', fontSize: '26px', fontWeight: '900', color: '#dc2626' }}>
+                  {totalPendingLots}
+                </h3>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  BOM Created &bull; Awaiting floor issue
+                </span>
+              </div>
+
+              <div className="card" style={{ padding: '16px', borderLeft: '4px solid #f59e0b', backgroundColor: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Total Production Pieces
+                </span>
+                <h3 style={{ margin: '6px 0 2px 0', fontSize: '26px', fontWeight: '900', color: '#f59e0b' }}>
+                  {totalPendingPieces.toLocaleString()}
+                </h3>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Target &amp; cutting pieces across lots
+                </span>
+              </div>
+
+              <div className="card" style={{ padding: '16px', borderLeft: '4px solid #6366f1', backgroundColor: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Accessories Lines In BOM
+                </span>
+                <h3 style={{ margin: '6px 0 2px 0', fontSize: '26px', fontWeight: '900', color: '#6366f1' }}>
+                  {totalAccessoriesRequired}
+                </h3>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Total material items awaiting handover
+                </span>
+              </div>
+
+              <div className="card" style={{ padding: '16px', borderLeft: '4px solid #10b981', backgroundColor: 'var(--bg-secondary)', borderRadius: '10px' }}>
+                <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Unique Fabrics
+                </span>
+                <h3 style={{ margin: '6px 0 2px 0', fontSize: '26px', fontWeight: '900', color: '#10b981' }}>
+                  {uniqueFabrics}
+                </h3>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                  Distinct fabric styles in pending lots
+                </span>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="panel print-hide" style={{ padding: '14px 18px', backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', gap: '10px', flex: '1 1 600px', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {/* Search Input */}
+                  <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '220px' }}>
+                    <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Search Lot Number, Style, Brand, Fabric..."
+                      style={{ paddingLeft: '34px', width: '100%', height: '36px', fontSize: '13px' }}
+                      value={bomNotIssuedSearch}
+                      onChange={(e) => setBomNotIssuedSearch(e.target.value)}
+                    />
+                  </div>
+
+                  {/* Fabric Filter */}
+                  <select
+                    className="form-input"
+                    style={{ height: '36px', width: '170px', fontSize: '12.5px', flexShrink: 0 }}
+                    value={bomNotIssuedFabricFilter}
+                    onChange={(e) => setBomNotIssuedFabricFilter(e.target.value)}
+                  >
+                    <option value="all">All Fabrics ({allAvailableFabrics.length})</option>
+                    {allAvailableFabrics.map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+
+                  {/* Garment Type Filter */}
+                  <select
+                    className="form-input"
+                    style={{ height: '36px', width: '160px', fontSize: '12.5px', flexShrink: 0 }}
+                    value={bomNotIssuedGarmentFilter}
+                    onChange={(e) => setBomNotIssuedGarmentFilter(e.target.value)}
+                  >
+                    <option value="all">All Garments ({allAvailableGarments.length})</option>
+                    {allAvailableGarments.map(g => (
+                      <option key={g} value={g}>{g}</option>
+                    ))}
+                  </select>
+
+                  {/* Issue Status Filter */}
+                  <select
+                    className="form-input"
+                    style={{ height: '36px', width: '170px', fontSize: '12.5px', flexShrink: 0 }}
+                    value={bomNotIssuedStatusFilter}
+                    onChange={(e) => setBomNotIssuedStatusFilter(e.target.value)}
+                  >
+                    <option value="all">All Pending / Not Issued</option>
+                    <option value="not_issued">Not Issued (0% Issued)</option>
+                    <option value="partial">Partially Issued (&lt;100%)</option>
+                  </select>
+
+                  {/* Sort Filter */}
+                  <select
+                    className="form-input"
+                    style={{ height: '36px', width: '160px', fontSize: '12.5px', flexShrink: 0 }}
+                    value={bomNotIssuedSort}
+                    onChange={(e) => setBomNotIssuedSort(e.target.value)}
+                  >
+                    <option value="latest">Latest BOM First</option>
+                    <option value="oldest">Oldest BOM First</option>
+                    <option value="qty_desc">Highest Pieces</option>
+                    <option value="qty_asc">Lowest Pieces</option>
+                    <option value="lot_asc">Lot Number A-Z</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Complete Lot Detail Table */}
+            <div className="panel" style={{ overflowX: 'auto', padding: 0, backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              {loadingBomNotIssued ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 12px auto' }} />
+                  <p>Loading BOM Created pending material issue lots...</p>
+                </div>
+              ) : filtered.length === 0 ? (
+                <div style={{ padding: '50px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <AlertCircle size={32} style={{ margin: '0 auto 12px auto', opacity: 0.6, color: '#10b981' }} />
+                  <h4 style={{ margin: 0, color: 'var(--text-main)', fontSize: '16px', fontWeight: '800' }}>
+                    No Pending Material Issue Lots Found
+                  </h4>
+                  <p style={{ margin: '6px 0 0 0', fontSize: '13px' }}>
+                    All lots with created BOM either have their materials issued or match no active filter.
+                  </p>
+                </div>
+              ) : (
+                <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-primary)' }}>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', width: '140px' }}>Lot Number</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Style &amp; Brand</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Fabric &amp; Garment</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'right', width: '110px' }}>Target Pcs</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>BOM Date &amp; Designer</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Materials Required In BOM</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'center', width: '170px' }}>Floor Issue Status</th>
+                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'center', width: '260px' }}>Direct Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((lot, idx) => {
+                      const matItems = Array.isArray(lot.materialsRequired) ? lot.materialsRequired : [];
+                      const matCount = lot.materialsCount || matItems.length;
+
+                      return (
+                        <tr
+                          key={lot.id || idx}
+                          style={{
+                            borderBottom: '1px solid var(--border-color)',
+                            transition: 'background-color 0.15s'
+                          }}
+                          className="table-row-hover"
+                        >
+                          {/* Lot Number */}
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '3px 8px',
+                                backgroundColor: 'rgba(220, 38, 38, 0.12)',
+                                color: '#b91c1c',
+                                borderRadius: '6px',
+                                fontWeight: '800',
+                                fontSize: '13px'
+                              }}>
+                                #{lot.lotNo || lot.id}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => handleCopyDoc(e, lot.lotNo || lot.id)}
+                                title="Copy Lot Number"
+                                style={{
+                                  border: 'none', background: 'transparent', cursor: 'pointer',
+                                  color: copiedDocNo === (lot.lotNo || lot.id) ? '#16a34a' : 'var(--text-muted)',
+                                  padding: '2px', display: 'flex', alignItems: 'center'
+                                }}
+                              >
+                                {copiedDocNo === (lot.lotNo || lot.id) ? <Check size={12} /> : <Copy size={12} />}
+                              </button>
+                            </div>
+                            <span style={{ display: 'block', fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                              BOM #{lot.id}
+                            </span>
+                          </td>
+
+                          {/* Style & Brand */}
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <strong style={{ color: 'var(--text-main)', fontSize: '13.5px', display: 'block' }}>
+                              {lot.style || '—'}
+                            </strong>
+                            {lot.brand && (
+                              <span style={{
+                                display: 'inline-block',
+                                marginTop: '4px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                background: '#f1f5f9',
+                                color: '#475569',
+                                padding: '1px 6px',
+                                borderRadius: '4px'
+                              }}>
+                                {lot.brand}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Fabric & Garment */}
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                              {lot.fabricType || '—'}
+                            </div>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              {lot.garmentType || 'Garment'}
+                            </span>
+                          </td>
+
+                          {/* Target Pcs */}
+                          <td style={{ padding: '12px 16px', textAlign: 'right', verticalAlign: 'top' }}>
+                            <div style={{ fontSize: '15px', fontWeight: '900', color: 'var(--text-main)' }}>
+                              {(Number(lot.targetPieces) || 0).toLocaleString()}
+                            </div>
+                            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Pcs</span>
+                          </td>
+
+                          {/* BOM Date & Designer */}
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main)' }}>
+                              {formatDateTime(lot.bomDate)}
+                            </div>
+                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              By: {lot.designer || 'Designer'}
+                            </span>
+                          </td>
+
+                          {/* Materials Required in BOM */}
+                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', marginBottom: '6px' }}>
+                              {matItems.slice(0, 3).map((m, mIdx) => (
+                                <span
+                                  key={mIdx}
+                                  style={{
+                                    fontSize: '10.5px',
+                                    fontWeight: '700',
+                                    padding: '2px 6px',
+                                    borderRadius: '4px',
+                                    background: '#f8fafc',
+                                    border: '1px solid #e2e8f0',
+                                    color: '#334155'
+                                  }}
+                                >
+                                  {m.name || m.itemDesc || m.materialName || 'Item'}
+                                </span>
+                              ))}
+                              {matCount > 3 && (
+                                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>
+                                  +{matCount - 3} more
+                                </span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBomLotModal(lot)}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--accent-color, #2563eb)',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                padding: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                textDecoration: 'underline'
+                              }}
+                            >
+                              <Eye size={12} />
+                              View Complete BOM ({matCount} Items)
+                            </button>
+                          </td>
+
+                          {/* Floor Issue Status */}
+                          <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '4px 10px',
+                              borderRadius: '20px',
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              backgroundColor: '#fee2e2',
+                              color: '#b91c1c',
+                              border: '1px solid #fca5a5'
+                            }}>
+                              <AlertCircle size={12} />
+                              NOT ISSUED (0%)
+                            </span>
+                            <span style={{ display: 'block', fontSize: '10px', color: '#dc2626', marginTop: '3px', fontWeight: '700' }}>
+                              ⚠️ Pending Material Issue
+                            </span>
+                          </td>
+
+                          {/* Direct Actions */}
+                          <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                              {/* 1. Direct Issue Material (Trims / BOM Issue) */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onNavigateToMaterialIssue) {
+                                    onNavigateToMaterialIssue(lot.lotNo || lot.id);
+                                  } else {
+                                    window.location.href = `/material-issue?lotNo=${encodeURIComponent(lot.lotNo || lot.id)}`;
+                                  }
+                                }}
+                                className="btn btn-primary btn-sm"
+                                style={{
+                                  padding: '5px 10px',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#2563eb'
+                                }}
+                                title="Issue materials & accessories for this lot"
+                              >
+                                <ExternalLink size={12} />
+                                <span>Issue Material</span>
+                              </button>
+
+                              {/* 2. Direct Issue Elastic / Tape / Bone */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (onNavigateToElasticIssue) {
+                                    onNavigateToElasticIssue(lot.lotNo || lot.id);
+                                  } else {
+                                    window.location.href = `/elastic-issue?lotNo=${encodeURIComponent(lot.lotNo || lot.id)}`;
+                                  }
+                                }}
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  padding: '5px 9px',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#059669',
+                                  color: '#ffffff'
+                                }}
+                                title="Issue elastic, tape, or bone for this lot"
+                              >
+                                <Package size={12} />
+                                <span>Issue Elastic</span>
+                              </button>
+
+                              {/* 3. Full Details Modal */}
+                              <button
+                                type="button"
+                                onClick={() => setSelectedBomLotModal(lot)}
+                                className="btn btn-secondary btn-sm"
+                                style={{
+                                  padding: '5px 8px',
+                                  fontSize: '11px',
+                                  borderRadius: '6px'
+                                }}
+                                title="View full lot specification & BOM items"
+                              >
+                                <Eye size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Complete Lot Detail & Full BOM Breakdown Modal */}
+            {selectedBomLotModal && createPortal(
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                  backdropFilter: 'blur(4px)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 99999,
+                  padding: '16px'
+                }}
+                onClick={() => setSelectedBomLotModal(null)}
+              >
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-secondary, #ffffff)',
+                    borderRadius: '16px',
+                    width: '100%',
+                    maxWidth: '850px',
+                    maxHeight: '90vh',
+                    overflowY: 'auto',
+                    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.25)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div style={{
+                    padding: '20px 24px',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: 'var(--bg-primary, #f8fafc)',
+                    borderTopLeftRadius: '16px',
+                    borderTopRightRadius: '16px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        backgroundColor: '#dc2626',
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <Layers size={20} />
+                      </div>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '800', color: 'var(--text-main)' }}>
+                          BOM Detail &bull; Lot #{selectedBomLotModal.lotNo || selectedBomLotModal.id}
+                        </h3>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                          Style: <strong>{selectedBomLotModal.style || '—'}</strong> &bull; Target: <strong>{(Number(selectedBomLotModal.targetPieces) || 0).toLocaleString()} Pcs</strong> &bull; Status: <strong style={{ color: '#dc2626' }}>Pending Material Issue</strong>
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBomLotModal(null)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        borderRadius: '6px'
+                      }}
+                    >
+                      <X size={20} />
+                    </button>
+                  </div>
+
+                  {/* Modal Content */}
+                  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    {/* Lot Metadata Grid */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                      gap: '12px',
+                      background: '#f8fafc',
+                      padding: '16px',
+                      borderRadius: '10px',
+                      border: '1px solid #e2e8f0'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Lot Number</span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                          #{selectedBomLotModal.lotNo || selectedBomLotModal.id}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Style / Code</span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                          {selectedBomLotModal.style || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Buyer / Brand</span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                          {selectedBomLotModal.brand || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Fabric Type</span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                          {selectedBomLotModal.fabricType || '—'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Garment Type</span>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                          {selectedBomLotModal.garmentType || 'Garment'}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Target / Cutting Qty</span>
+                        <div style={{ fontSize: '15px', fontWeight: '900', color: '#16a34a', marginTop: '2px' }}>
+                          {(Number(selectedBomLotModal.targetPieces) || 0).toLocaleString()} Pcs
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>BOM Created Date</span>
+                        <div style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a', marginTop: '2px' }}>
+                          {formatDateTime(selectedBomLotModal.bomDate)}
+                        </div>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Designer / Actor</span>
+                        <div style={{ fontSize: '13px', fontWeight: '700', color: '#0f172a', marginTop: '2px' }}>
+                          {selectedBomLotModal.designer || 'Designer'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Materials in BOM Table */}
+                    <div>
+                      <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Package size={16} color="#dc2626" />
+                        <span>Bill of Materials (BOM) Requirements ({Array.isArray(selectedBomLotModal.materialsRequired) ? selectedBomLotModal.materialsRequired.length : 0} Items):</span>
+                      </h4>
+
+                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', textAlign: 'left' }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-primary, #f8fafc)', borderBottom: '1px solid var(--border-color)', fontWeight: '800' }}>
+                              <th style={{ padding: '10px 14px' }}>#</th>
+                              <th style={{ padding: '10px 14px' }}>Item / Accessory Name</th>
+                              <th style={{ padding: '10px 14px' }}>Category</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'right' }}>Per Pc</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'right' }}>Total Required</th>
+                              <th style={{ padding: '10px 14px' }}>Unit</th>
+                              <th style={{ padding: '10px 14px', textAlign: 'center' }}>Issue Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Array.isArray(selectedBomLotModal.materialsRequired) && selectedBomLotModal.materialsRequired.length > 0 ? (
+                              selectedBomLotModal.materialsRequired.map((mat, mIdx) => (
+                                <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                  <td style={{ padding: '10px 14px', color: '#64748b', fontWeight: '700' }}>{mIdx + 1}</td>
+                                  <td style={{ padding: '10px 14px', fontWeight: '800', color: 'var(--text-main)' }}>
+                                    {mat.name || mat.itemDesc || mat.materialName || 'Accessory Item'}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', color: '#475569' }}>
+                                    {mat.category || mat.type || 'Trim / Accessory'}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '700' }}>
+                                    {mat.consumption || mat.perPc || mat.rate || '—'}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: '900', color: '#dc2626' }}>
+                                    {(mat.requiredQty || mat.totalRequired || mat.qty || '—').toLocaleString ? (mat.requiredQty || mat.totalRequired || mat.qty || '—').toLocaleString() : (mat.requiredQty || mat.totalRequired || mat.qty || '—')}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', fontWeight: '700', color: '#475569' }}>
+                                    {mat.unit || mat.uom || 'pcs'}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'center' }}>
+                                    <span style={{
+                                      fontSize: '11px',
+                                      fontWeight: '800',
+                                      padding: '2px 8px',
+                                      borderRadius: '12px',
+                                      backgroundColor: '#fee2e2',
+                                      color: '#b91c1c'
+                                    }}>
+                                      Not Issued
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td colSpan="7" style={{ padding: '20px', textAlign: 'center', color: '#64748b', fontStyle: 'italic' }}>
+                                  No individual material breakdown items recorded in this BOM design.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Modal Footer Actions */}
+                  <div style={{
+                    padding: '16px 24px',
+                    borderTop: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'flex-end',
+                    gap: '10px',
+                    backgroundColor: 'var(--bg-primary, #f8fafc)',
+                    borderBottomLeftRadius: '16px',
+                    borderBottomRightRadius: '16px'
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBomLotModal(null)}
+                      className="btn btn-secondary"
+                      style={{ padding: '8px 16px', fontSize: '13px' }}
+                    >
+                      Close
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetLot = selectedBomLotModal.lotNo || selectedBomLotModal.id;
+                        setSelectedBomLotModal(null);
+                        if (onNavigateToMaterialIssue) {
+                          onNavigateToMaterialIssue(targetLot);
+                        } else {
+                          window.location.href = `/material-issue?lotNo=${encodeURIComponent(targetLot)}`;
+                        }
+                      }}
+                      className="btn btn-primary"
+                      style={{
+                        padding: '8px 18px',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        backgroundColor: '#2563eb'
+                      }}
+                    >
+                      <ExternalLink size={14} />
+                      <span>Issue Materials for Lot #{selectedBomLotModal.lotNo || selectedBomLotModal.id}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetLot = selectedBomLotModal.lotNo || selectedBomLotModal.id;
+                        setSelectedBomLotModal(null);
+                        if (onNavigateToElasticIssue) {
+                          onNavigateToElasticIssue(targetLot);
+                        } else {
+                          window.location.href = `/elastic-issue?lotNo=${encodeURIComponent(targetLot)}`;
+                        }
+                      }}
+                      className="btn btn-secondary"
+                      style={{
+                        padding: '8px 18px',
+                        fontSize: '13px',
+                        fontWeight: '800',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        backgroundColor: '#059669',
+                        color: '#ffffff'
+                      }}
+                    >
+                      <Package size={14} />
+                      <span>Issue Elastic / Tape</span>
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body
+            )}
+          </div>
+        );
+      })()}
 
       {/* ============================================================ */}
       {/* ANALYTICS & GRAPHS TAB                                        */}

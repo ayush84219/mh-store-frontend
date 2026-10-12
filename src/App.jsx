@@ -2935,6 +2935,22 @@ export default function App() {
                   designs={designs}
                   issueLogs={issueLogs}
                   currencySymbol={currencySymbol}
+                  onNavigateToMaterialIssue={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('material_issue');
+                  }}
+                  onNavigateToElasticIssue={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('elastic_issue');
+                  }}
+                  onNavigateToDesign={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('design');
+                  }}
+                  onRedirectToTab={(tab, lotNo) => {
+                    if (lotNo) setPrefilledLotNo(lotNo);
+                    setActiveTab(tab);
+                  }}
                 />
               )}
 

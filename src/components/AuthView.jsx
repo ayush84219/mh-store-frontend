@@ -79,7 +79,7 @@ export default function AuthView({ onLoginSuccess, sessionExpiredMessage }) {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Invalid credentials.');
+        setError(data.error || data.message || 'Invalid credentials.');
         setLoading(false);
         return;
       }
@@ -145,7 +145,7 @@ export default function AuthView({ onLoginSuccess, sessionExpiredMessage }) {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.error || 'Registration failed.');
+        setError(data.error || data.message || 'Registration failed.');
         setLoading(false);
         return;
       }

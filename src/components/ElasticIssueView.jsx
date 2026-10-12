@@ -7,14 +7,15 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
+import { getCleanImageUrl } from '../utils/designHelpers';
 import SmartSelectWithManual from './SmartSelectWithManual';
 
 export default function ElasticIssueView({
   currencySymbol = '₹',
   currentUser = null,
   prefilledLotNo = '',
-  setPrefilledLotNo = () => {},
-  onNavigate = () => {}
+  setPrefilledLotNo = () => { },
+  onNavigate = () => { }
 }) {
   // Tab Mode: 'generator' (Issue Form) or 'history' (Past Issue Slips)
   const [viewMode, setViewMode] = useState('generator');
@@ -34,7 +35,10 @@ export default function ElasticIssueView({
 
   // Step 1.5: Automatic Size to Meter Backend Calculation State & Switch Mode
   const [issuePcs, setIssuePcs] = useState('');
-  const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'bone' | 'both' | 'all'
+  const [materialMode, setMaterialMode] = useState('elastic'); // 'elastic' | 'tape' | 'bone' | 'other' | 'both' | 'all'
+  const [otherMaterialName, setOtherMaterialName] = useState('Drawcord / Other Accessory');
+  const [otherRollCount, setOtherRollCount] = useState(1);
+  const [otherUnit, setOtherUnit] = useState('Roll');
   const [isWithoutLot, setIsWithoutLot] = useState(false); // Without Lot / Direct Floor Issue Mode
   const [isWithoutPo, setIsWithoutPo] = useState(false); // W/O PO (Direct Floor Issue) Mode
   const withoutLotActive = isWithoutLot || isWithoutPo;
@@ -90,6 +94,90 @@ export default function ElasticIssueView({
   const [issueHistory, setIssueHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
+  const [historyLineFilter, setHistoryLineFilter] = useState('all'); // 'all' | 'elastic_wo' | 'tape_wo' | 'bone_wo' | 'standard'
+  const [historySortMode, setHistorySortMode] = useState('seq_asc'); // 'seq_asc' | 'seq_desc' | 'date_desc'
+  const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null); // { url, title, code, stock, location }
+
+  // Helper to extract sequence metadata from slip number
+  const getSlipMeta = (slipNo) => {
+    const s = String(slipNo || '').trim().toLowerCase();
+    if (s.startsWith('elastic-w/o-')) {
+      const num = parseInt(s.replace('elastic-w/o-', ''), 10);
+      return { line: 'elastic_wo', label: 'Elastic W/O', seq: isNaN(num) ? 0 : num, color: '#c2410c', bg: '#fff7ed', border: '#fed7aa', badgeText: 'ELASTIC W/O' };
+    }
+    if (s.startsWith('tape-w/o-')) {
+      const num = parseInt(s.replace('tape-w/o-', ''), 10);
+      return { line: 'tape_wo', label: 'Tape W/O', seq: isNaN(num) ? 0 : num, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe', badgeText: 'TAPE W/O' };
+    }
+    if (s.startsWith('bone-w/o-')) {
+      const num = parseInt(s.replace('bone-w/o-', ''), 10);
+      return { line: 'bone_wo', label: 'Bone W/O', seq: isNaN(num) ? 0 : num, color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd', badgeText: 'BONE W/O' };
+    }
+    if (s.startsWith('other-w/o-')) {
+      const num = parseInt(s.replace('other-w/o-', ''), 10);
+      return { line: 'other_wo', label: 'Other Acc W/O', seq: isNaN(num) ? 0 : num, color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', badgeText: 'OTHER W/O' };
+    }
+    const numMatch = s.match(/\d+/);
+    const num = numMatch ? parseInt(numMatch[0], 10) : 0;
+    return { line: 'standard', label: 'With LOT', seq: num, color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', badgeText: 'WITH LOT' };
+  };
+
+  // Counts of each line in history
+  const historyLineCounts = useMemo(() => {
+    const counts = { all: issueHistory.length, elastic_wo: 0, tape_wo: 0, bone_wo: 0, other_wo: 0, standard: 0 };
+    (issueHistory || []).forEach(h => {
+      const meta = getSlipMeta(h.slipNo);
+      if (counts[meta.line] !== undefined) {
+        counts[meta.line]++;
+      }
+    });
+    return counts;
+  }, [issueHistory]);
+
+  // Line-wise and sequence-sorted history list
+  const processedHistory = useMemo(() => {
+    let list = (issueHistory || []).filter(h => {
+      const meta = getSlipMeta(h.slipNo);
+      if (historyLineFilter !== 'all' && meta.line !== historyLineFilter) return false;
+      if (!historySearch) return true;
+      const q = historySearch.toLowerCase();
+      return String(h.slipNo || '').toLowerCase().includes(q) ||
+        String(h.lotNo || '').toLowerCase().includes(q) ||
+        String(h.receiverName || '').toLowerCase().includes(q) ||
+        String(h.issuerName || '').toLowerCase().includes(q) ||
+        String(h.style || '').toLowerCase().includes(q);
+    });
+
+    return [...list].sort((a, b) => {
+      const metaA = getSlipMeta(a.slipNo);
+      const metaB = getSlipMeta(b.slipNo);
+
+      if (historySortMode === 'seq_asc') {
+        if (historyLineFilter === 'all') {
+          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, standard: 4 };
+          const pA = priority[metaA.line] || 99;
+          const pB = priority[metaB.line] || 99;
+          if (pA !== pB) return pA - pB;
+        }
+        return metaA.seq - metaB.seq;
+      }
+
+      if (historySortMode === 'seq_desc') {
+        if (historyLineFilter === 'all') {
+          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, standard: 4 };
+          const pA = priority[metaA.line] || 99;
+          const pB = priority[metaB.line] || 99;
+          if (pA !== pB) return pA - pB;
+        }
+        return metaB.seq - metaA.seq;
+      }
+
+      // Date desc (newest first)
+      const dateA = new Date(a.date || a.issueDate || 0).getTime();
+      const dateB = new Date(b.date || b.issueDate || 0).getTime();
+      return dateB - dateA;
+    });
+  }, [issueHistory, historyLineFilter, historySortMode, historySearch]);
 
   const searchInputRef = useRef(null);
 
@@ -98,7 +186,7 @@ export default function ElasticIssueView({
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Materials list & mapped items (Elastic, Tape, Bone)
+  // Materials list & mapped items (Elastic, Tape, Bone, Other Accessories)
   const [materials, setMaterials] = useState([]);
   const [elasticMaterialName, setElasticMaterialName] = useState('Elastic');
   const [selectedElasticMaterialId, setSelectedElasticMaterialId] = useState('');
@@ -106,6 +194,16 @@ export default function ElasticIssueView({
   const [selectedTapeMaterialId, setSelectedTapeMaterialId] = useState('');
   const [boneMaterialName, setBoneMaterialName] = useState('Bone Chinese (Beige)');
   const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
+  const [selectedOtherMaterialId, setSelectedOtherMaterialId] = useState('');
+  const [otherEntryMode, setOtherEntryMode] = useState('choose'); // 'choose' | 'manual'
+  const [customOtherNames, setCustomOtherNames] = useState(() => {
+    try {
+      const s = localStorage.getItem('gpdms_custom_other_names');
+      return s ? JSON.parse(s) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Fetch materials to support mapping & inventory display
   const fetchMaterials = async () => {
@@ -124,24 +222,24 @@ export default function ElasticIssueView({
 
   // Filter materials to only show Elastic category
   const elasticMaterials = useMemo(() => {
-    return (materials || []).filter(m => 
-      (m.category || '').toLowerCase().includes('elastic') || 
+    return (materials || []).filter(m =>
+      (m.category || '').toLowerCase().includes('elastic') ||
       (m.name || '').toLowerCase().includes('elastic')
     );
   }, [materials]);
 
   // Filter materials to show Tape category
   const tapeMaterials = useMemo(() => {
-    return (materials || []).filter(m => 
-      (m.category || '').toLowerCase().includes('tape') || 
+    return (materials || []).filter(m =>
+      (m.category || '').toLowerCase().includes('tape') ||
       (m.name || '').toLowerCase().includes('tape')
     );
   }, [materials]);
 
   // Filter materials to show Bone category
   const boneMaterials = useMemo(() => {
-    return (materials || []).filter(m => 
-      (m.category || '').toLowerCase().includes('bone') || 
+    return (materials || []).filter(m =>
+      (m.category || '').toLowerCase().includes('bone') ||
       (m.name || '').toLowerCase().includes('bone')
     );
   }, [materials]);
@@ -158,6 +256,71 @@ export default function ElasticIssueView({
   const currentBoneMaterial = useMemo(() => {
     return (boneMaterials || []).find(m => String(m.id) === String(selectedBoneMaterialId)) || null;
   }, [boneMaterials, selectedBoneMaterialId]);
+
+  // Filter materials to show Other Accessories (Trims & Accessories from store inventory)
+  const otherMaterials = useMemo(() => {
+    return (materials || []);
+  }, [materials]);
+
+  const currentOtherMaterial = useMemo(() => {
+    return (materials || []).find(m => String(m.id) === String(selectedOtherMaterialId)) || null;
+  }, [materials, selectedOtherMaterialId]);
+
+  // Handler for selecting an Other Accessory item from store inventory
+  const handleSelectOtherMaterial = (id) => {
+    setSelectedOtherMaterialId(id);
+    const mat = (materials || []).find(m => String(m.id) === String(id));
+    if (mat) {
+      setOtherMaterialName(mat.name);
+      if (mat.unit) {
+        setOtherUnit(mat.unit);
+      }
+    }
+  };
+
+  // Handler for adding and saving a new custom material name
+  const handleAddNewCustomName = (nameToAdd) => {
+    const trimmed = (nameToAdd || otherMaterialName || '').trim();
+    if (!trimmed) return;
+    setOtherMaterialName(trimmed);
+    if (!customOtherNames.includes(trimmed)) {
+      const updated = [trimmed, ...customOtherNames].slice(0, 30);
+      setCustomOtherNames(updated);
+      try {
+        localStorage.setItem('gpdms_custom_other_names', JSON.stringify(updated));
+      } catch (e) {}
+    }
+    showToast(`Saved "${trimmed}" to quick names.`);
+  };
+
+  const handleRemoveCustomName = (nameToRemove, e) => {
+    if (e) e.stopPropagation();
+    const updated = customOtherNames.filter(n => n !== nameToRemove);
+    setCustomOtherNames(updated);
+    try {
+      localStorage.setItem('gpdms_custom_other_names', JSON.stringify(updated));
+    } catch (err) {}
+  };
+
+  // Auto-link first suitable other material on initial load if not selected
+  useEffect(() => {
+    if (materials.length > 0 && !selectedOtherMaterialId) {
+      const firstOther = materials.find(m => {
+        const cat = (m.category || '').toLowerCase();
+        const n = (m.name || '').toLowerCase();
+        return !cat.includes('elastic') && !cat.includes('bone') && !n.includes('elastic') && !n.includes('bone');
+      }) || materials[0];
+      if (firstOther) {
+        setSelectedOtherMaterialId(firstOther.id);
+        if (!otherMaterialName || otherMaterialName === 'Drawcord / Other Accessory') {
+          setOtherMaterialName(firstOther.name);
+        }
+        if (firstOther.unit) {
+          setOtherUnit(firstOther.unit);
+        }
+      }
+    }
+  }, [materials]);
 
   // Handler for selecting an Elastic item
   const handleSelectElasticMaterial = (id) => {
@@ -259,7 +422,7 @@ export default function ElasticIssueView({
 
   // Helper to calculate sequential without lot slip number from history
   const getNextWithoutLotSeq = (history = issueHistory, mode = materialMode) => {
-    const prefix = mode === 'tape' ? 'tape-w/o-' : mode === 'bone' ? 'bone-w/o-' : 'elastic-w/o-';
+    const prefix = mode === 'tape' ? 'tape-w/o-' : mode === 'bone' ? 'bone-w/o-' : mode === 'other' ? 'other-w/o-' : 'elastic-w/o-';
     let max = 0;
     (history || []).forEach(h => {
       const s = String(h.slipNo || '').toLowerCase();
@@ -274,7 +437,7 @@ export default function ElasticIssueView({
   // Fetch next Issue Slip Number from backend or local sequence
   const fetchNextIssueSlipNo = async (isWo = withoutLotActive, mode = materialMode) => {
     if (isWo) {
-      const type = mode === 'tape' ? 'tape_wo' : mode === 'bone' ? 'bone_wo' : 'elastic_wo';
+      const type = mode === 'tape' ? 'tape_wo' : mode === 'bone' ? 'bone_wo' : mode === 'other' ? 'other_wo' : 'elastic_wo';
       try {
         const res = await fetch(`${getBackendUrl()}/api/po-number/next/${type}`);
         if (res.ok) {
@@ -284,7 +447,7 @@ export default function ElasticIssueView({
             return data.poNumber;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
       const fallback = getNextWithoutLotSeq(issueHistory, mode);
       setIssueSlipNo(fallback);
       return fallback;
@@ -299,7 +462,7 @@ export default function ElasticIssueView({
           return data.poNumber;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const fallback = `ELASTIC-ISSUE-${randomSuffix}`;
     setIssueSlipNo(fallback);
@@ -351,7 +514,7 @@ export default function ElasticIssueView({
       const localSaved = localStorage.getItem('gpdms_elastic_issue_history');
       let localList = [];
       if (localSaved) {
-        try { localList = JSON.parse(localSaved); } catch (_) {}
+        try { localList = JSON.parse(localSaved); } catch (_) { }
       }
 
       // 1. Fetch from Dedicated elastic_issue Table
@@ -366,7 +529,7 @@ export default function ElasticIssueView({
             return;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // 2. Legacy fallback from issue_logs
       try {
@@ -396,7 +559,7 @@ export default function ElasticIssueView({
           setLoadingHistory(false);
           return;
         }
-      } catch (_) {}
+      } catch (_) { }
 
       setIssueHistory(localList);
     } catch (e) {
@@ -429,6 +592,28 @@ export default function ElasticIssueView({
         setRollCount(0);
         return;
       }
+
+      // Without BOM Mode: direct piece allocation by width divisor (1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23)
+      if (withoutLotActive) {
+        const currentDiv = (String(eWidth).includes('1.5') || String(eWidth).includes('2')) ? 23 : 25;
+        const woRolls = pcs > 0 ? Math.ceil(pcs / currentDiv) : 0;
+        const exactRolls = pcs > 0 ? (pcs / currentDiv).toFixed(2) : '0';
+        const tapeRolls = pcs > 0 ? Math.ceil(pcs / 45) : 0;
+        setCalcResult(prev => ({
+          ...prev,
+          totalElasticMtr: 0,
+          totalTapeMtr: 0,
+          recommendedRolls: woRolls,
+          tapeRolls: tapeRolls,
+          elasticFormula: `${pcs} Pcs ÷ ${currentDiv} (${eWidth}) = ${exactRolls} Rolls ➔ TOTAL = ${woRolls} Roll(s)`,
+          tapeFormula: `${pcs} Pcs ÷ 45 = ${pcs > 0 ? (pcs / 45).toFixed(2) : 0} Rolls ➔ TOTAL = ${tapeRolls} Roll(s)`,
+          formulaExplanation: `Without BOM: ${pcs} Pcs ÷ ${currentDiv} (${eWidth}) = ${exactRolls} Rolls ➔ TOTAL = ${woRolls} Roll(s)`
+        }));
+        setRollCount(woRolls);
+        setTapeRollCount(tapeRolls);
+        return;
+      }
+
       const res = await fetch(`${getBackendUrl()}/api/elastic/calculate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -457,10 +642,10 @@ export default function ElasticIssueView({
     }
   };
 
-  // Re-calculate automatically when size, unit, tape, lot, issue pcs, or elasticWidth changes
+  // Re-calculate automatically when size, unit, tape, lot, issue pcs, elasticWidth, or withoutLotActive changes
   useEffect(() => {
     triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth);
-  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth]);
+  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, withoutLotActive]);
 
   // Save new issue to history & database table
   const saveToHistory = async (record) => {
@@ -539,11 +724,17 @@ export default function ElasticIssueView({
                 materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
                 rolls: record.boneRolls || boneRollCount || 1,
                 width: record.boneWidth
+              } : null,
+              (materialMode === 'other') ? {
+                name: record.otherMaterialName || otherMaterialName || 'Other Accessory',
+                materialId: record.selectedOtherMaterialId || selectedOtherMaterialId || '',
+                rolls: record.otherRollCount || otherRollCount || 1,
+                unit: record.otherUnit || otherUnit || 'Roll'
               } : null
             ].filter(Boolean)
           })
         });
-      } catch (_) {}
+      } catch (_) { }
     } catch (e) {
       console.warn('Backend sync warning:', e);
     }
@@ -562,10 +753,10 @@ export default function ElasticIssueView({
             currentDesigns = fresh;
           }
         }
-      } catch (_) {}
+      } catch (_) { }
 
       const cleanQ = String(lotQuery || '').trim().toLowerCase();
-      const matched = (currentDesigns || []).find(d => 
+      const matched = (currentDesigns || []).find(d =>
         String(d.id || '').trim().toLowerCase() === cleanQ ||
         String(d.lot_no || '').trim().toLowerCase() === cleanQ
       );
@@ -754,19 +945,23 @@ export default function ElasticIssueView({
       ? 'tape'
       : String(slipNo || '').toLowerCase().startsWith('bone')
         ? 'bone'
-        : String(slipNo || '').toLowerCase().startsWith('elastic')
-          ? 'elastic'
-          : (materialMode || 'elastic');
+        : String(slipNo || '').toLowerCase().startsWith('other')
+          ? 'other'
+          : String(slipNo || '').toLowerCase().startsWith('elastic')
+            ? 'elastic'
+            : (materialMode || 'elastic');
 
     const modeLabel = effectiveMode === 'tape'
       ? 'TAPE'
       : effectiveMode === 'bone'
         ? 'BONE'
-        : effectiveMode === 'both'
-          ? 'ELASTIC & TAPE'
-          : effectiveMode === 'all'
-            ? 'ALL ACCESSORIES'
-            : 'ELASTIC';
+        : effectiveMode === 'other'
+          ? 'OTHER ACCESSORIES'
+          : effectiveMode === 'both'
+            ? 'ELASTIC & TAPE'
+            : effectiveMode === 'all'
+              ? 'ALL ACCESSORIES'
+              : 'ELASTIC';
 
     // Company & Document Title (Pure Black)
     doc.setFont('helvetica', 'bold');
@@ -816,7 +1011,7 @@ export default function ElasticIssueView({
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
     doc.text(withoutLotMode ? `1. DIRECT FLOOR MOVEMENT SPECIFICATIONS (W/O BOM - ${modeLabel})` : `1. PRODUCTION & LOT SPECIFICATIONS (${modeLabel})`, im + 8, y + 12);
-    
+
     // Spacing so text does not overwrite the section header
     y += 30;
 
@@ -879,7 +1074,7 @@ export default function ElasticIssueView({
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
     doc.text(`2. MATERIAL ALLOCATION & TOTAL REQUIREMENT (${modeLabel} SPEC)`, im + 8, y + 12);
-    
+
     // Spacing before table header
     y += 26;
 
@@ -903,7 +1098,9 @@ export default function ElasticIssueView({
     let grandTotalMtr = 0;
 
     const effDiv = (String(width || '').includes('1.5') || String(width || '').includes('2')) ? 23 : 25;
-    const effRolls = data.rolls || Math.ceil((parseFloat(totalElasticMtr) || 0) / effDiv) || 1;
+    const effRolls = withoutLotMode
+      ? (data.rolls || Math.ceil((quantity || 0) / effDiv) || 1)
+      : (data.rolls || Math.ceil((parseFloat(totalElasticMtr) || 0) / effDiv) || 1);
     const effTapeRolls = Math.ceil((quantity || 0) / 45) || 1;
     const effBoneTot = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${boneRolls || 1} Kg`);
 
@@ -922,7 +1119,7 @@ export default function ElasticIssueView({
       doc.text(String(itemIdx++), im + 6, y + 16);
 
       doc.setFont('helvetica', 'bold');
-      const effElasticTitle = selectedElasticMaterialId 
+      const effElasticTitle = selectedElasticMaterialId
         ? `${elasticMaterialName || 'Elastic Waistband Roll'} [${selectedElasticMaterialId}]`
         : (elasticMaterialName || 'Elastic Waistband Roll');
       doc.text(effElasticTitle, im + 24, y + 16);
@@ -930,20 +1127,29 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.text(width || '1 Inch (Standard)', im + 180, y + 16);
 
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${elasticPerPcMtr} Mtr (${elasticSizeInput} ${elasticUnit})`, im + 290, y + 16);
-
-      doc.text(`${quantity || 0} Pcs`, im + 375, y + 16);
-
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(0, 0, 0);
-      doc.text(`${totalElasticMtr} Mtr`, pw - im - 10, y + 10, { align: 'right' });
-      doc.setFontSize(9.5);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(4, 120, 87);
-      doc.text(`= ${effRolls} ROLL(S)`, pw - im - 10, y + 20, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
+      if (withoutLotMode) {
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Pcs ÷ ${effDiv} Rule (${width || '1 Inch'})`, im + 290, y + 16);
+        doc.text(`${quantity || 0} Pcs`, im + 375, y + 16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(4, 120, 87);
+        doc.text(`= ${effRolls} ROLL(S)`, pw - im - 10, y + 16, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+      } else {
+        doc.setFont('helvetica', 'bold');
+        doc.text(`${elasticPerPcMtr} Mtr (${elasticSizeInput} ${elasticUnit})`, im + 290, y + 16);
+        doc.text(`${quantity || 0} Pcs`, im + 375, y + 16);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(0, 0, 0);
+        doc.text(`${totalElasticMtr} Mtr`, pw - im - 10, y + 10, { align: 'right' });
+        doc.setFontSize(9.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(4, 120, 87);
+        doc.text(`= ${effRolls} ROLL(S)`, pw - im - 10, y + 20, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+      }
 
       grandTotalMtr += parseFloat(totalElasticMtr) || 0;
       y += rowH;
@@ -964,7 +1170,7 @@ export default function ElasticIssueView({
       doc.text(String(itemIdx++), im + 6, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      const effTapeTitle = selectedTapeMaterialId 
+      const effTapeTitle = selectedTapeMaterialId
         ? `${tapeMaterialName || 'Tape Roll (Drawcord Tape)'} [${selectedTapeMaterialId}]`
         : (tapeMaterialName || 'Tape Roll (Drawcord Tape)');
       doc.text(effTapeTitle, im + 24, y + 15);
@@ -999,7 +1205,7 @@ export default function ElasticIssueView({
       doc.text(String(itemIdx++), im + 6, y + 15);
 
       doc.setFont('helvetica', 'bold');
-      const effBoneTitle = selectedBoneMaterialId 
+      const effBoneTitle = selectedBoneMaterialId
         ? `${boneMaterialName || 'Bone Pocketing / Piping Roll'} [${selectedBoneMaterialId}]`
         : (boneMaterialName || 'Bone Pocketing / Piping Roll');
       doc.text(effBoneTitle, im + 24, y + 15);
@@ -1017,6 +1223,42 @@ export default function ElasticIssueView({
       const effBoneWeightVal = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${boneRolls || 1} Kg`);
       const effBoneWeightStr = String(effBoneWeightVal).includes('Kg') ? effBoneWeightVal : `${effBoneWeightVal} Kg`;
       doc.text(effBoneWeightStr, pw - im - 10, y + 15, { align: 'right' });
+      y += rowH;
+    }
+
+    // Row: Other Accessories (Shown if other)
+    if (effectiveMode === 'other') {
+      const rowH = 24;
+      doc.setFillColor(255, 255, 255);
+      doc.rect(im, y, iw, rowH, 'F');
+      doc.setDrawColor(210, 210, 210);
+      doc.setLineWidth(0.6);
+      doc.line(im, y + rowH, pw - im, y + rowH);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(String(itemIdx++), im + 6, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      const chosenOtherId = data.selectedOtherMaterialId || selectedOtherMaterialId;
+      const effOtherTitle = (data.otherMaterialName || otherMaterialName || 'Other Accessory') +
+        (chosenOtherId ? ` [${chosenOtherId}]` : '');
+      doc.text(effOtherTitle, im + 24, y + 15);
+
+      doc.setFont('helvetica', 'normal');
+      doc.text(data.otherUnit || otherUnit || 'Roll', im + 180, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.text('Direct Floor Issue', im + 290, y + 15);
+
+      doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(109, 40, 217);
+      doc.text(`= ${data.rolls || otherRollCount || 1} ${data.otherUnit || otherUnit || 'Roll'}(s)`, pw - im - 10, y + 15, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
 
       y += rowH;
     }
@@ -1042,9 +1284,13 @@ export default function ElasticIssueView({
     doc.setFontSize(9.5);
     const totalDisplay = effectiveMode === 'bone'
       ? `${String(effBoneTot).includes('Kg') ? effBoneTot : `${effBoneTot} Kg`} (Direct Weight Issue)`
-      : effectiveMode === 'tape'
-        ? `${((quantity || 0) / 45).toFixed(2)} Rolls  ===>  TOTAL = ${effTapeRolls} ROLL(S)`
-        : `${grandTotalMtr.toFixed(2).replace(/\.00$/, '')} Mtr / ${effDiv}  ===>  TOTAL = ${effRolls} ROLL(S)`;
+      : effectiveMode === 'other'
+        ? `${data.otherMaterialName || otherMaterialName || 'Material'}: ${data.rolls || otherRollCount || 1} ${data.otherUnit || otherUnit || 'Roll'}(s) for ${quantity || 0} Pcs`
+        : effectiveMode === 'tape'
+          ? `${((quantity || 0) / 45).toFixed(2)} Rolls  ===>  TOTAL = ${effTapeRolls} ROLL(S)`
+          : withoutLotMode
+            ? `${quantity || 0} Pcs ÷ ${effDiv} (${width || '1 Inch'})  ===>  TOTAL = ${effRolls} ROLL(S)`
+            : `${grandTotalMtr.toFixed(2).replace(/\.00$/, '')} Mtr / ${effDiv}  ===>  TOTAL = ${effRolls} ROLL(S)`;
     doc.text(totalDisplay, pw - im - 10, y + 15, { align: 'right' });
     y += totH + 18;
 
@@ -1058,7 +1304,7 @@ export default function ElasticIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(effectiveMode === 'bone' ? '3. ISSUE INSTRUCTIONS & ALLOCATION' : '3. FORMULA BREAKDOWN & INSTRUCTIONS', im + 8, y + 12);
+    doc.text((effectiveMode === 'bone' || effectiveMode === 'other') ? '3. ISSUE INSTRUCTIONS & ALLOCATION' : '3. FORMULA BREAKDOWN & INSTRUCTIONS', im + 8, y + 12);
     y += 24;
 
     const boxH = 48;
@@ -1069,16 +1315,29 @@ export default function ElasticIssueView({
     doc.rect(im, y, iw, boxH, 'S');
 
     if (effectiveMode === 'elastic') {
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
-      doc.setTextColor(30, 41, 59);
-      doc.text(`Step 1 (Meter Conversion): ${elasticSizeInput} ${elasticUnit} * 0.0254 = ${elasticPerPcMtr} Mtr/Pc  x  ${quantity || 0} Pcs = ${totalElasticMtr} Mtr`, im + 8, y + 14);
+      if (withoutLotMode) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        const exactElasticRolls = effDiv > 0 ? ((quantity || 0) / effDiv).toFixed(2) : effRolls;
+        doc.text(`Step 1 (Elastic Allocation): ${quantity || 0} Pcs ÷ ${effDiv} Divisor (${width || '1 Inch'}) = ${exactElasticRolls} Rolls`, im + 8, y + 14);
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9.5);
-      doc.setTextColor(4, 120, 87);
-      const exactElasticRolls = effDiv > 0 ? ((parseFloat(totalElasticMtr) || 0) / effDiv).toFixed(2) : effRolls;
-      doc.text(`Step 2 (Final Calculation): ${totalElasticMtr} Mtr / ${effDiv} Mtr = ${exactElasticRolls} Rolls  ===>  FINAL ISSUE = ${effRolls} ROLL(S) (${width || '1 Inch'})`, im + 8, y + 28);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(4, 120, 87);
+        doc.text(`Step 2 (Final Calculation): Math.ceil(${exactElasticRolls})  ===>  FINAL ISSUE = ${effRolls} ROLL(S) (${width || '1 Inch'})`, im + 8, y + 28);
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        doc.text(`Step 1 (Meter Conversion): ${elasticSizeInput} ${elasticUnit} * 0.0254 = ${elasticPerPcMtr} Mtr/Pc  x  ${quantity || 0} Pcs = ${totalElasticMtr} Mtr`, im + 8, y + 14);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9.5);
+        doc.setTextColor(4, 120, 87);
+        const exactElasticRolls = effDiv > 0 ? ((parseFloat(totalElasticMtr) || 0) / effDiv).toFixed(2) : effRolls;
+        doc.text(`Step 2 (Final Calculation): ${totalElasticMtr} Mtr / ${effDiv} Mtr = ${exactElasticRolls} Rolls  ===>  FINAL ISSUE = ${effRolls} ROLL(S) (${width || '1 Inch'})`, im + 8, y + 28);
+      }
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
@@ -1121,6 +1380,22 @@ export default function ElasticIssueView({
       const remText = remarks || `Standard internal material issue bill for Bone (${style || 'Garment'}).`;
       doc.text(`Remarks: ${remText}`, im + 8, y + 41);
 
+    } else if (effectiveMode === 'other') {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(`Step 1 (Other Accessory Allocation): Manual accessory entry for production floor requisition`, im + 8, y + 14);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(109, 40, 217);
+      doc.text(`Step 2 (Final Issue): Total Issue = ${data.rolls || otherRollCount || 1} ${data.otherUnit || otherUnit || 'Roll'}(s) for ${quantity || 0} Pcs`, im + 8, y + 28);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(71, 85, 105);
+      const remText = remarks || `Manual material issue bill for ${data.otherMaterialName || otherMaterialName || 'Other Accessory'} (${style || 'Garment'}). Target Qty: ${quantity || 0} Pcs.`;
+      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
     } else {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
@@ -1289,7 +1564,7 @@ export default function ElasticIssueView({
       // Ensure slip prefix matches active mode in without lot mode
       let currentSlipNo = issueSlipNo;
       if (withoutLotActive) {
-        const expectedPrefix = materialMode === 'tape' ? 'tape-w/o-' : materialMode === 'bone' ? 'bone-w/o-' : 'elastic-w/o-';
+        const expectedPrefix = materialMode === 'tape' ? 'tape-w/o-' : materialMode === 'bone' ? 'bone-w/o-' : materialMode === 'other' ? 'other-w/o-' : 'elastic-w/o-';
         if (!currentSlipNo || !currentSlipNo.toLowerCase().startsWith(expectedPrefix)) {
           currentSlipNo = await fetchNextIssueSlipNo(true, materialMode);
         }
@@ -1299,9 +1574,14 @@ export default function ElasticIssueView({
       const currentLotNo = enteredLotNo.toUpperCase();
       const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
       const calculatedTapeRolls = Math.ceil(currentQuantity / 45) || 1;
+      const calculatedElasticRolls = withoutLotActive
+        ? (Math.ceil(currentQuantity / effectiveDivisor) || 1)
+        : (calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || rollCount || 1);
       const calculatedRolls = materialMode === 'tape'
         ? calculatedTapeRolls
-        : (calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || rollCount);
+        : materialMode === 'other'
+          ? (parseFloat(otherRollCount) || 1)
+          : calculatedElasticRolls;
 
       const payload = {
         slipNo: currentSlipNo,
@@ -1309,6 +1589,9 @@ export default function ElasticIssueView({
         isWithoutLot: withoutLotActive,
         isWithoutPo: withoutLotActive,
         rolls: materialMode === 'bone' ? (parseFloat(boneWeightKg) || 1) : calculatedRolls,
+        otherRollCount: parseFloat(otherRollCount) || 1,
+        otherMaterialName: otherMaterialName || 'Other Accessory',
+        otherUnit: otherUnit || 'Roll',
         tapeRolls: calculatedTapeRolls,
         totalTapeRolls: calculatedTapeRolls,
         width: effectiveWidth,
@@ -1345,6 +1628,7 @@ export default function ElasticIssueView({
         selectedTapeMaterialId,
         boneMaterialName,
         selectedBoneMaterialId,
+        selectedOtherMaterialId,
         formulaExplanation: calcResult.formulaExplanation,
         remarks: remarks || (isWithoutPo ? 'Floor Material Issue without PO' : '')
       };
@@ -2321,6 +2605,29 @@ export default function ElasticIssueView({
                       Bone Only
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => setMaterialMode('other')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: materialMode === 'other' ? '#7c3aed' : 'transparent',
+                        color: materialMode === 'other' ? '#ffffff' : '#475569',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: materialMode === 'other' ? '0 2px 8px rgba(124, 58, 237, 0.35)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'other' ? '#e9d5ff' : '#7c3aed' }}></span>
+                      Other Accessories
+                    </button>
+
                     {!withoutLotActive && (
                       <>
                         <button
@@ -2373,39 +2680,53 @@ export default function ElasticIssueView({
                   </div>
                 </div>
 
-                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC & TAPE ONLY - REMOVED FOR BONE) */}
+                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC, TAPE & OTHER ACCESSORIES) */}
                 {materialMode !== 'bone' && (
                   <div style={{
                     marginTop: '16px',
                     padding: '18px 20px',
                     borderRadius: '14px',
                     background: '#ffffff',
-                    border: materialMode === 'tape' ? '1.5px solid #3b82f6' : '1.5px solid #059669',
-                    boxShadow: materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
+                    border: materialMode === 'other' ? '1.5px solid #7c3aed' : materialMode === 'tape' ? '1.5px solid #3b82f6' : '1.5px solid #059669',
+                    boxShadow: materialMode === 'other' ? '0 4px 14px rgba(124, 58, 237, 0.08)' : materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <div style={{
                           width: '32px', height: '32px', borderRadius: '8px',
-                          background: materialMode === 'tape' ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                          background: materialMode === 'other'
+                            ? 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)'
+                            : materialMode === 'tape'
+                              ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                              : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
                         }}>
-                          <Calculator size={18} />
+                          {materialMode === 'other' ? <Package size={18} /> : <Calculator size={18} />}
                         </div>
                         <div>
                           <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
-                            {materialMode === 'tape' ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)' : 'Automated Backend Meter Conversion & Consumption'}
+                            {materialMode === 'other'
+                              ? 'Other Accessories Manual Allocation & Floor Issue'
+                              : materialMode === 'tape'
+                                ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)'
+                                : withoutLotActive
+                                  ? `Elastic Without BOM Allocation `
+                                  : 'Automated Backend Meter Conversion & Consumption'}
                           </h4>
                           <span style={{ fontSize: '11px', color: '#64748b' }}>
-                            {materialMode === 'tape'
-                              ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
-                              : <span>Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong> &bull; <strong>Tape: Pcs ÷ 45 = Rolls</strong></span>}
+                            {materialMode === 'other'
+                              ? <span>Enter Material Name manually &bull; Enter Pieces &bull; Enter Total Material / Rolls To Issue</span>
+                              : materialMode === 'tape'
+                                ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
+                                : withoutLotActive
+                                  ? <span>Divisors: <strong>1 Inch ÷ 25</strong> &bull; <strong>1.5 Inch ÷ 23</strong> &bull; <strong>2 Inch ÷ 23</strong> &bull; Formula: <strong>Issue Pcs ÷ Inch Divisor = Total Rolls</strong></span>
+                                  : <span>Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong> &bull; <strong>Tape: Pcs ÷ 45 = Rolls</strong></span>}
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* INPUT CONTROLS: ELASTIC & TAPE (BASED ON SWITCH) */}
+                    {/* INPUT CONTROLS: ELASTIC, TAPE & OTHER (BASED ON SWITCH) */}
                     <div style={{
                       display: 'grid',
                       gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
@@ -2415,8 +2736,503 @@ export default function ElasticIssueView({
                       background: '#f8fafc',
                       border: '1px solid #e2e8f0'
                     }}>
-                      {/* ELASTIC INPUT (Shown if 'elastic' or 'both') */}
-                      {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                      {/* OTHER ACCESSORIES CARD */}
+                      {materialMode === 'other' && (
+                        <div style={{
+                          padding: '16px 18px',
+                          borderRadius: '12px',
+                          background: '#faf5ff',
+                          border: '1.5px solid #c084fc',
+                          boxShadow: '0 3px 12px rgba(124, 58, 237, 0.08)'
+                        }}>
+                          {/* Card Header with Dual-Mode Segmented Control */}
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            marginBottom: '14px',
+                            flexWrap: 'wrap',
+                            gap: '10px'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <div style={{
+                                width: '28px', height: '28px', borderRadius: '7px',
+                                background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                color: '#ffffff', boxShadow: '0 2px 6px rgba(124, 58, 237, 0.3)'
+                              }}>
+                                <Package size={16} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: '13px', fontWeight: '800', color: '#581c87', margin: 0, display: 'block' }}>
+                                  OTHER ACCESSORIES SPECIFICATION
+                                </label>
+                                <span style={{ fontSize: '10.5px', color: '#7e22ce' }}>
+                                  Choose from store inventory or type/save custom accessory name
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Dual Toggle Pill: Choose Material vs Add Manually */}
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              background: '#f3e8ff',
+                              padding: '3px',
+                              borderRadius: '8px',
+                              border: '1px solid #d8b4fe',
+                              gap: '3px'
+                            }}>
+                              <button
+                                type="button"
+                                onClick={() => setOtherEntryMode('choose')}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  background: otherEntryMode === 'choose' ? '#7c3aed' : 'transparent',
+                                  color: otherEntryMode === 'choose' ? '#ffffff' : '#6b21a8',
+                                  fontSize: '11.5px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  boxShadow: otherEntryMode === 'choose' ? '0 2px 6px rgba(124, 58, 237, 0.35)' : 'none',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <Box size={13} />
+                                Choose Material
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setOtherEntryMode('manual')}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '6px',
+                                  border: 'none',
+                                  background: otherEntryMode === 'manual' ? '#7c3aed' : 'transparent',
+                                  color: otherEntryMode === 'manual' ? '#ffffff' : '#6b21a8',
+                                  fontSize: '11.5px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '5px',
+                                  boxShadow: otherEntryMode === 'manual' ? '0 2px 6px rgba(124, 58, 237, 0.35)' : 'none',
+                                  transition: 'all 0.15s ease'
+                                }}
+                              >
+                                <Edit2 size={13} />
+                                + Add Manually
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* 3-Column Specification Controls */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                            gap: '14px',
+                            background: '#ffffff',
+                            padding: '16px',
+                            borderRadius: '10px',
+                            border: '1px solid #e9d5ff',
+                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.04)'
+                          }}>
+                            {/* 1. Material Specification (Choose or Manual) */}
+                            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                                  <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                    1. {otherEntryMode === 'choose' ? 'CHOOSE MATERIAL:' : 'ENTER MATERIAL NAME:'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setOtherEntryMode(otherEntryMode === 'choose' ? 'manual' : 'choose')}
+                                    style={{
+                                      border: 'none',
+                                      background: 'transparent',
+                                      color: '#7c3aed',
+                                      fontSize: '10px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      textDecoration: 'underline',
+                                      padding: 0
+                                    }}
+                                  >
+                                    {otherEntryMode === 'choose' ? '+ Type Custom Name' : '📋 Pick from Inventory'}
+                                  </button>
+                                </div>
+
+                                {otherEntryMode === 'choose' ? (
+                                  <div>
+                                    <select
+                                      value={selectedOtherMaterialId}
+                                      onChange={(e) => handleSelectOtherMaterial(e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        boxSizing: 'border-box',
+                                        padding: '9px 12px',
+                                        borderRadius: '7px',
+                                        border: '1.5px solid #7c3aed',
+                                        fontSize: '12.5px',
+                                        fontWeight: '700',
+                                        color: '#0f172a',
+                                        background: '#ffffff',
+                                        outline: 'none',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      <option value="">— Select Material ({otherMaterials.length} Items Available) —</option>
+                                      {otherMaterials.map(m => (
+                                        <option key={m.id} value={m.id}>
+                                          {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.category || 'Accessory'}
+                                        </option>
+                                      ))}
+                                    </select>
+
+                                    {/* Selected Material Info Badge */}
+                                    {currentOtherMaterial ? (
+                                      <div style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '6px',
+                                        flexWrap: 'wrap',
+                                        marginTop: '8px',
+                                        padding: '6px 8px',
+                                        borderRadius: '6px',
+                                        background: '#faf5ff',
+                                        border: '1px dashed #d8b4fe'
+                                      }}>
+                                        {/* Photo Swatch */}
+                                        {(() => {
+                                          const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
+                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                          return cleanImg ? (
+                                            <div
+                                              onClick={() => setPreviewPhotoUrl({
+                                                url: cleanImg,
+                                                title: currentOtherMaterial.name,
+                                                code: currentOtherMaterial.id,
+                                                stock: `${currentOtherMaterial.stock} ${currentOtherMaterial.unit || 'Roll'}`,
+                                                location: currentOtherMaterial.location
+                                              })}
+                                              title="Click to view & zoom material photo"
+                                              style={{
+                                                width: '28px', height: '28px', borderRadius: '4px',
+                                                border: '1px solid #7c3aed', overflow: 'hidden', cursor: 'zoom-in', flexShrink: 0
+                                              }}
+                                            >
+                                              <img src={cleanImg} alt={currentOtherMaterial.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                            </div>
+                                          ) : null;
+                                        })()}
+                                        <span style={{ fontSize: '10px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '1px 5px', borderRadius: '3px' }}>
+                                          ID: {currentOtherMaterial.id}
+                                        </span>
+                                        <span style={{ fontSize: '10px', fontWeight: '700', color: currentOtherMaterial.stock > 0 ? '#059669' : '#dc2626' }}>
+                                          Stock: {currentOtherMaterial.stock} {currentOtherMaterial.unit || 'Roll'}
+                                        </span>
+                                        {currentOtherMaterial.location && (
+                                          <span style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                            <MapPin size={9} color="#7c3aed" /> {currentOtherMaterial.location}
+                                          </span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div style={{ fontSize: '10.5px', color: '#9333ea', marginTop: '6px', fontStyle: 'italic' }}>
+                                        Select from store inventory, or switch to manual to type any custom item
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div>
+                                    {/* Manual Input with Save Button */}
+                                    <div style={{ display: 'flex', gap: '6px' }}>
+                                      <input
+                                        type="text"
+                                        value={otherMaterialName}
+                                        onChange={(e) => setOtherMaterialName(e.target.value)}
+                                        placeholder="e.g. Drawcord 5mm, Metal Zipper..."
+                                        style={{
+                                          flex: 1,
+                                          boxSizing: 'border-box',
+                                          padding: '8px 10px',
+                                          borderRadius: '6px',
+                                          border: '1.5px solid #7c3aed',
+                                          fontSize: '13px',
+                                          fontWeight: '800',
+                                          color: '#0f172a',
+                                          background: '#ffffff',
+                                          outline: 'none'
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleAddNewCustomName(otherMaterialName)}
+                                        title="Save this name for fast one-click selection"
+                                        style={{
+                                          padding: '0 10px',
+                                          borderRadius: '6px',
+                                          border: 'none',
+                                          background: '#7c3aed',
+                                          color: '#ffffff',
+                                          fontSize: '11px',
+                                          fontWeight: '800',
+                                          cursor: 'pointer',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        + Save
+                                      </button>
+                                    </div>
+
+                                    {/* Suggestions & Saved Names Chips */}
+                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px', maxHeight: '54px', overflowY: 'auto' }}>
+                                      {Array.from(new Set([
+                                        'Drawcord', 'Zipper', 'Button', 'Eyelet', 'Cuff Rib', 'Thread', 'Label', 'Piping', 'Velcro', 'Badge', 'Buckle',
+                                        ...customOtherNames
+                                      ])).map(matSuggestion => {
+                                        const isSavedCustom = customOtherNames.includes(matSuggestion);
+                                        const isSelected = otherMaterialName === matSuggestion;
+                                        return (
+                                          <div
+                                            key={matSuggestion}
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '2px',
+                                              padding: '2px 7px',
+                                              borderRadius: '4px',
+                                              border: isSelected ? '1px solid #7c3aed' : '1px solid #e9d5ff',
+                                              background: isSelected ? '#7c3aed' : '#f5f3ff',
+                                              color: isSelected ? '#ffffff' : '#6b21a8',
+                                              fontSize: '10px',
+                                              fontWeight: '700',
+                                              cursor: 'pointer'
+                                            }}
+                                            onClick={() => setOtherMaterialName(matSuggestion)}
+                                          >
+                                            <span>{matSuggestion}</span>
+                                            {isSavedCustom && (
+                                              <span
+                                                onClick={(e) => handleRemoveCustomName(matSuggestion, e)}
+                                                title="Remove saved name"
+                                                style={{
+                                                  marginLeft: '2px',
+                                                  color: isSelected ? '#ffffff' : '#a855f7',
+                                                  cursor: 'pointer',
+                                                  fontWeight: '900',
+                                                  fontSize: '11px'
+                                                }}
+                                              >
+                                                &times;
+                                              </span>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* 2. Issue Pieces Input */}
+                            <div>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
+                                2. ENTER / VERIFY PIECES:
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={issuePcs}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+                                  }}
+                                  placeholder="Enter Pcs..."
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '7px',
+                                    border: '1.5px solid #7c3aed', fontSize: '15px', fontWeight: '800',
+                                    color: '#0f172a', background: '#fdf4ff', outline: 'none'
+                                  }}
+                                />
+                                <span style={{ fontSize: '13px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '8px 10px', borderRadius: '7px' }}>
+                                  Pcs
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '5px' }}>
+                                Total Cutting Qty: <strong>{lotDetails?.quantity || issuePcs || 0} Pcs</strong>
+                              </div>
+                            </div>
+
+                            {/* 3. Rolls / Material Issue Quantity & Unit */}
+                            <div>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
+                                3. TOTAL MATERIAL / QUANTITY TO ISSUE:
+                              </span>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 95px', gap: '6px', alignItems: 'center' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="any"
+                                  value={otherRollCount}
+                                  onChange={(e) => setOtherRollCount(e.target.value)}
+                                  placeholder="Qty..."
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '7px',
+                                    border: '1.5px solid #7c3aed', fontSize: '15px', fontWeight: '900',
+                                    color: '#6b21a8', background: '#faf5ff', outline: 'none'
+                                  }}
+                                />
+                                <select
+                                  value={otherUnit}
+                                  onChange={(e) => setOtherUnit(e.target.value)}
+                                  style={{
+                                    padding: '9px 8px', borderRadius: '7px',
+                                    border: '1.5px solid #7c3aed', fontSize: '12px', fontWeight: '800',
+                                    color: '#6b21a8', background: '#ffffff', outline: 'none', cursor: 'pointer'
+                                  }}
+                                >
+                                  <option value="Roll">Roll</option>
+                                  <option value="Pkt">Pkt</option>
+                                  <option value="Pcs">Pcs</option>
+                                  <option value="Cone">Cone</option>
+                                  <option value="Meter">Mtr</option>
+                                  <option value="Kg">Kg</option>
+                                  <option value="Box">Box</option>
+                                  <option value="Dozen">Dozen</option>
+                                  <option value="Gross">Gross</option>
+                                </select>
+                              </div>
+                              <div style={{
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                color: '#6b21a8',
+                                background: '#f3e8ff',
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                marginTop: '6px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between'
+                              }}>
+                                <span>Total To Issue:</span>
+                                <strong>{otherRollCount || 1} {otherUnit || 'Roll'}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs</strong>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ELASTIC INPUT: WITHOUT BOM DIRECT PIECE DIVISION BY INCH DIVISOR */}
+                      {withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                        <div style={{
+                          padding: '14px 16px',
+                          borderRadius: '10px',
+                          background: '#ecfdf5',
+                          border: '1.5px solid #86efac',
+                          boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                            <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                              ELASTIC ALLOCATION
+                            </label>
+                            <span style={{ fontSize: '11px', background: '#dcfce7', color: '#047857', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                              Selected: {effectiveWidth} &bull; Rule: Pcs ÷ {effectiveDivisor}
+                            </span>
+                          </div>
+
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                            gap: '12px',
+                            background: '#ffffff',
+                            padding: '12px 14px',
+                            borderRadius: '8px',
+                            border: '1px solid #bbf7d0',
+                            alignItems: 'center'
+                          }}>
+                            {/* 1. Pieces Input */}
+                            <div>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                1. ENTER / VERIFY PIECES:
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  value={issuePcs}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+                                  }}
+                                  placeholder="Enter Pcs..."
+                                  style={{
+                                    width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
+                                    border: '1.5px solid #059669', fontSize: '15px', fontWeight: '800',
+                                    color: '#0f172a', background: '#f8fafc', outline: 'none'
+                                  }}
+                                />
+                                <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857' }}>Pcs</span>
+                              </div>
+                            </div>
+
+                            {/* 2. Inch Width & Divisor */}
+                            <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                                2. INCH DIVISOR ({effectiveWidth}):
+                              </span>
+                              <div style={{ fontSize: '18px', fontWeight: '900', color: '#047857' }}>
+                                ÷ {effectiveDivisor} <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
+                                {['1 Inch', '1.5 Inch', '2 Inch'].map(w => (
+                                  <button
+                                    key={w}
+                                    type="button"
+                                    onClick={() => setElasticWidth(w)}
+                                    style={{
+                                      padding: '1px 6px',
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      borderRadius: '4px',
+                                      border: effectiveWidth.includes(w) ? '1px solid #059669' : '1px solid #cbd5e1',
+                                      background: effectiveWidth.includes(w) ? '#dcfce7' : '#f8fafc',
+                                      color: effectiveWidth.includes(w) ? '#047857' : '#64748b',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {w} ({w === '1 Inch' ? '÷25' : '÷23'})
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* 3. Result Amount to Issue */}
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#047857', display: 'block', marginBottom: '4px' }}>
+                                3. TOTAL ROLLS TO ISSUE:
+                              </span>
+                              <div style={{ fontSize: '22px', fontWeight: '900', color: '#047857', lineHeight: '1.1' }}>
+                                {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
+                              </div>
+                              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
+                                ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ {effectiveDivisor} = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor).toFixed(2)} Rolls)
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ELASTIC INPUT (WITH BOM STANDARD MODE) */}
+                      {!withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
                         <div style={{
                           padding: '14px',
                           borderRadius: '10px',
@@ -2603,129 +3419,239 @@ export default function ElasticIssueView({
                                 {/* ELASTIC ROW */}
                                 {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
                                   <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'both' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
-                                      {/* Top: Bullet & Editable Material Name */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669', flexShrink: 0 }}></span>
-                                        <div style={{ flex: 1, position: 'relative' }}>
-                                          <input
-                                            type="text"
-                                            value={elasticMaterialName}
-                                            onChange={(e) => setElasticMaterialName(e.target.value)}
-                                            placeholder="Material Name (e.g. Elastic 1 Inch)..."
-                                            title="Click to edit material name directly"
-                                            style={{
-                                              width: '100%',
-                                              boxSizing: 'border-box',
-                                              padding: '5px 8px',
-                                              paddingRight: '26px',
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                        {/* Material Image Swatch Thumbnail */}
+                                        {(() => {
+                                          const rawImg = currentElasticMaterial?.imageUrl || currentElasticMaterial?.image || currentElasticMaterial?.photo || currentElasticMaterial?.imgUrl;
+                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                          return (
+                                            <div
+                                              onClick={() => {
+                                                if (cleanImg) {
+                                                  setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentElasticMaterial?.name || elasticMaterialName || 'Elastic Material',
+                                                    code: currentElasticMaterial?.id || currentElasticMaterial?.itemCode || '',
+                                                    stock: `${currentElasticMaterial?.stock || 0} ${currentElasticMaterial?.unit || 'Roll'}`,
+                                                    location: currentElasticMaterial?.location || ''
+                                                  });
+                                                }
+                                              }}
+                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this elastic item"}
+                                              style={{
+                                                width: '56px',
+                                                height: '56px',
+                                                borderRadius: '8px',
+                                                border: cleanImg ? '2px solid #059669' : '1.5px dashed #cbd5e1',
+                                                background: cleanImg ? '#ffffff' : '#f8fafc',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                cursor: cleanImg ? 'zoom-in' : 'default',
+                                                overflow: 'hidden',
+                                                boxShadow: cleanImg ? '0 2px 6px rgba(5, 150, 105, 0.2)' : 'none',
+                                                position: 'relative',
+                                                transition: 'all 0.15s ease',
+                                                marginTop: '2px'
+                                              }}
+                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                            >
+                                              {cleanImg ? (
+                                                <>
+                                                  <img
+                                                    src={cleanImg}
+                                                    alt={currentElasticMaterial?.name || 'Elastic'}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                  />
+                                                  <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    background: 'rgba(5, 150, 105, 0.85)',
+                                                    color: '#ffffff',
+                                                    fontSize: '8px',
+                                                    fontWeight: '800',
+                                                    textAlign: 'center',
+                                                    padding: '1px 0',
+                                                    letterSpacing: '0.5px'
+                                                  }}>
+                                                    ZOOM
+                                                  </div>
+                                                </>
+                                              ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                  <Package size={20} />
+                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+
+                                        {/* Right Controls: Name, Dropdown & Details */}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          {/* Top: Bullet & Editable Material Name */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669', flexShrink: 0 }}></span>
+                                            <div style={{ flex: 1, position: 'relative' }}>
+                                              <input
+                                                type="text"
+                                                value={elasticMaterialName}
+                                                onChange={(e) => setElasticMaterialName(e.target.value)}
+                                                placeholder="Material Name (e.g. Elastic 1 Inch)..."
+                                                title="Click to edit material name directly"
+                                                style={{
+                                                  width: '100%',
+                                                  boxSizing: 'border-box',
+                                                  padding: '5px 8px',
+                                                  paddingRight: '26px',
+                                                  borderRadius: '6px',
+                                                  border: '1.5px solid #86efac',
+                                                  background: '#f0fdf4',
+                                                  color: '#047857',
+                                                  fontSize: '13px',
+                                                  fontWeight: '800',
+                                                  outline: 'none',
+                                                  transition: 'all 0.15s ease'
+                                                }}
+                                              />
+                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#059669', opacity: 0.7 }}>
+                                                <Edit2 size={12} />
+                                              </span>
+                                            </div>
+                                          </div>
+
+                                          {/* Middle: Map to choose material dropdown (Elastic category only) */}
+                                          <div style={{ marginBottom: '6px' }}>
+                                            <select
+                                              value={selectedElasticMaterialId}
+                                              onChange={(e) => handleSelectElasticMaterial(e.target.value)}
+                                              title="Choose material from inventory (Elastic items only)"
+                                              style={{
+                                                width: '100%',
+                                                padding: '5px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                background: '#ffffff',
+                                                fontSize: '11px',
+                                                fontWeight: '700',
+                                                color: '#0f172a',
+                                                outline: 'none',
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              <option value="">— Map to Elastic Item ({elasticMaterials.length}) —</option>
+                                              {elasticMaterials.map(m => (
+                                                <option key={m.id} value={m.id}>
+                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          {/* Bottom: All material details according to issue */}
+                                          {currentElasticMaterial ? (
+                                            <div style={{
+                                              display: 'flex',
+                                              flexWrap: 'wrap',
+                                              gap: '4px',
+                                              alignItems: 'center',
+                                              fontSize: '10.5px',
+                                              background: '#ecfdf5',
+                                              padding: '5px 7px',
                                               borderRadius: '6px',
-                                              border: '1.5px solid #86efac',
-                                              background: '#f0fdf4',
-                                              color: '#047857',
-                                              fontSize: '13px',
-                                              fontWeight: '800',
-                                              outline: 'none',
-                                              transition: 'all 0.15s ease'
-                                            }}
-                                          />
-                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#059669', opacity: 0.7 }}>
-                                            <Edit2 size={12} />
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      {/* Middle: Map to choose material dropdown (Elastic category only) */}
-                                      <div style={{ marginBottom: '6px' }}>
-                                        <select
-                                          value={selectedElasticMaterialId}
-                                          onChange={(e) => handleSelectElasticMaterial(e.target.value)}
-                                          title="Choose material from inventory (Elastic items only)"
-                                          style={{
-                                            width: '100%',
-                                            padding: '5px 8px',
-                                            borderRadius: '6px',
-                                            border: '1px solid #cbd5e1',
-                                            background: '#ffffff',
-                                            fontSize: '11px',
-                                            fontWeight: '700',
-                                            color: '#0f172a',
-                                            outline: 'none',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          <option value="">— Map to Elastic Item ({elasticMaterials.length}) —</option>
-                                          {elasticMaterials.map(m => (
-                                            <option key={m.id} value={m.id}>
-                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-
-                                      {/* Bottom: All material details according to issue */}
-                                      {currentElasticMaterial ? (
-                                        <div style={{
-                                          display: 'flex',
-                                          flexWrap: 'wrap',
-                                          gap: '4px',
-                                          alignItems: 'center',
-                                          fontSize: '10.5px',
-                                          background: '#ecfdf5',
-                                          padding: '5px 7px',
-                                          borderRadius: '6px',
-                                          border: '1px dashed #a7f3d0'
-                                        }}>
-                                          <span style={{ fontWeight: '800', color: '#065f46', background: '#dcfce7', padding: '1px 5px', borderRadius: '3px' }}>
-                                            ID: {currentElasticMaterial.id}
-                                          </span>
-                                          <span style={{ fontWeight: '700', color: currentElasticMaterial.stock > 0 ? '#047857' : '#dc2626' }}>
-                                            Stock: {currentElasticMaterial.stock} {currentElasticMaterial.unit || 'Roll'}
-                                          </span>
-                                          {currentElasticMaterial.location && (
-                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                              <MapPin size={10} color="#059669" />
-                                              {currentElasticMaterial.location}
-                                            </span>
-                                          )}
-                                          <span style={{ color: '#047857', fontWeight: '800' }}>
-                                            {effectiveDivisor === 25 ? '÷ 25 (1")' : `÷ ${effectiveDivisor} (${effectiveWidth})`}
-                                          </span>
-                                          {currentElasticMaterial.packets > 0 && (
-                                            <span style={{ color: '#64748b' }}>
-                                              {currentElasticMaterial.packets} Pkts
-                                            </span>
+                                              border: '1px dashed #a7f3d0'
+                                            }}>
+                                              <span style={{ fontWeight: '800', color: '#065f46', background: '#dcfce7', padding: '1px 5px', borderRadius: '3px' }}>
+                                                ID: {currentElasticMaterial.id}
+                                              </span>
+                                              <span style={{ fontWeight: '700', color: currentElasticMaterial.stock > 0 ? '#047857' : '#dc2626' }}>
+                                                Stock: {currentElasticMaterial.stock} {currentElasticMaterial.unit || 'Roll'}
+                                              </span>
+                                              {currentElasticMaterial.location && (
+                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                  <MapPin size={10} color="#059669" />
+                                                  {currentElasticMaterial.location}
+                                                </span>
+                                              )}
+                                              <span style={{ color: '#047857', fontWeight: '800' }}>
+                                                {effectiveDivisor === 25 ? '÷ 25 (1")' : `÷ ${effectiveDivisor} (${effectiveWidth})`}
+                                              </span>
+                                              {currentElasticMaterial.packets > 0 && (
+                                                <span style={{ color: '#64748b' }}>
+                                                  {currentElasticMaterial.packets} Pkts
+                                                </span>
+                                              )}
+                                              {(() => {
+                                                const rawImg = currentElasticMaterial.imageUrl || currentElasticMaterial.image || currentElasticMaterial.photo || currentElasticMaterial.imgUrl;
+                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                                return cleanImg ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPreviewPhotoUrl({
+                                                      url: cleanImg,
+                                                      title: currentElasticMaterial.name,
+                                                      code: currentElasticMaterial.id,
+                                                      stock: `${currentElasticMaterial.stock} ${currentElasticMaterial.unit || 'Roll'}`,
+                                                      location: currentElasticMaterial.location
+                                                    })}
+                                                    style={{
+                                                      border: 'none',
+                                                      background: '#059669',
+                                                      color: '#ffffff',
+                                                      fontSize: '9.5px',
+                                                      fontWeight: '800',
+                                                      padding: '1px 6px',
+                                                      borderRadius: '4px',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '3px'
+                                                    }}
+                                                    title="Click to zoom image"
+                                                  >
+                                                    🔍 View Photo
+                                                  </button>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : (
+                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                              Custom Name • Select item above to map inventory & details
+                                            </div>
                                           )}
                                         </div>
-                                      ) : (
-                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                          Custom Name • Select item above to map inventory & details
-                                        </div>
-                                      )}
+                                      </div>
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                      {elasticSizeInput || 0} {elasticUnit === 'cm' ? 'CM' : 'Inch'}
+                                      {withoutLotActive ? `Direct (${effectiveWidth})` : `${elasticSizeInput || 0} ${elasticUnit === 'cm' ? 'CM' : 'Inch'}`}
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
                                       <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                        {elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`}
+                                        {withoutLotActive ? `${effPcs} Pcs ÷ ${effectiveDivisor}` : (elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`)}
                                       </code>
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
-                                      {ePerPc} m
+                                      {withoutLotActive ? `1/${effectiveDivisor} Roll` : `${ePerPc} m`}
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
                                       {effPcs}
                                     </td>
                                     <td style={{ padding: '10px 14px', textAlign: 'right', background: '#dcfce7' }}>
                                       <div style={{ fontSize: '18px', fontWeight: '900', color: '#065f46', lineHeight: '1.1' }}>
-                                        {Math.ceil(eTotal / effectiveDivisor)} <span style={{ fontSize: '13px', fontWeight: '800' }}>Rolls</span>
+                                        {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} <span style={{ fontSize: '13px', fontWeight: '800' }}>Rolls</span>
                                       </div>
                                       <div style={{ fontSize: '11px', fontWeight: '700', color: '#047857', marginTop: '2px' }}>
-                                        Total: {eTotal} m &bull; (÷ {effectiveDivisor} for {effectiveWidth})
+                                        {withoutLotActive ? `(${effPcs} ÷ ${effectiveDivisor} = ${(effPcs / effectiveDivisor).toFixed(2)} Rolls)` : `Total: ${eTotal} m • (÷ ${effectiveDivisor} for ${effectiveWidth})`}
                                       </div>
                                       <span style={{ fontSize: '10px', background: '#059669', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
-                                        Total Issue: {Math.ceil(eTotal / effectiveDivisor)} Rolls
+                                        Total Issue: {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} Rolls
                                       </span>
                                     </td>
                                   </tr>
@@ -2734,97 +3660,207 @@ export default function ElasticIssueView({
                                 {/* TAPE ROW */}
                                 {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
                                   <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
-                                      {/* Top: Bullet & Editable Material Name */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
-                                        <div style={{ flex: 1, position: 'relative' }}>
-                                          <input
-                                            type="text"
-                                            value={tapeMaterialName}
-                                            onChange={(e) => setTapeMaterialName(e.target.value)}
-                                            placeholder="Tape Material Name (e.g. Tape 2 Inch)..."
-                                            title="Click to edit tape material name directly"
-                                            style={{
-                                              width: '100%',
-                                              boxSizing: 'border-box',
-                                              padding: '5px 8px',
-                                              paddingRight: '26px',
-                                              borderRadius: '6px',
-                                              border: '1.5px solid #93c5fd',
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                        {/* Material Image Swatch Thumbnail */}
+                                        {(() => {
+                                          const rawImg = currentTapeMaterial?.imageUrl || currentTapeMaterial?.image || currentTapeMaterial?.photo || currentTapeMaterial?.imgUrl;
+                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                          return (
+                                            <div
+                                              onClick={() => {
+                                                if (cleanImg) {
+                                                  setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentTapeMaterial?.name || tapeMaterialName || 'Tape Material',
+                                                    code: currentTapeMaterial?.id || currentTapeMaterial?.itemCode || '',
+                                                    stock: `${currentTapeMaterial?.stock || 0} ${currentTapeMaterial?.unit || 'Mtr'}`,
+                                                    location: currentTapeMaterial?.location || ''
+                                                  });
+                                                }
+                                              }}
+                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this tape item"}
+                                              style={{
+                                                width: '56px',
+                                                height: '56px',
+                                                borderRadius: '8px',
+                                                border: cleanImg ? '2px solid #3b82f6' : '1.5px dashed #cbd5e1',
+                                                background: cleanImg ? '#ffffff' : '#f8fafc',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                cursor: cleanImg ? 'zoom-in' : 'default',
+                                                overflow: 'hidden',
+                                                boxShadow: cleanImg ? '0 2px 6px rgba(59, 130, 246, 0.22)' : 'none',
+                                                position: 'relative',
+                                                transition: 'all 0.15s ease',
+                                                marginTop: '2px'
+                                              }}
+                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                            >
+                                              {cleanImg ? (
+                                                <>
+                                                  <img
+                                                    src={cleanImg}
+                                                    alt={currentTapeMaterial?.name || 'Tape'}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                  />
+                                                  <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    background: 'rgba(30, 64, 175, 0.85)',
+                                                    color: '#ffffff',
+                                                    fontSize: '8px',
+                                                    fontWeight: '800',
+                                                    textAlign: 'center',
+                                                    padding: '1px 0',
+                                                    letterSpacing: '0.5px'
+                                                  }}>
+                                                    ZOOM
+                                                  </div>
+                                                </>
+                                              ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                  <Package size={20} />
+                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+
+                                        {/* Right Controls: Name, Dropdown & Details */}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          {/* Top: Bullet & Editable Material Name */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
+                                            <div style={{ flex: 1, position: 'relative' }}>
+                                              <input
+                                                type="text"
+                                                value={tapeMaterialName}
+                                                onChange={(e) => setTapeMaterialName(e.target.value)}
+                                                placeholder="Tape Material Name (e.g. Tape 2 Inch)..."
+                                                title="Click to edit tape material name directly"
+                                                style={{
+                                                  width: '100%',
+                                                  boxSizing: 'border-box',
+                                                  padding: '5px 8px',
+                                                  paddingRight: '26px',
+                                                  borderRadius: '6px',
+                                                  border: '1.5px solid #93c5fd',
+                                                  background: '#eff6ff',
+                                                  color: '#1d4ed8',
+                                                  fontSize: '13px',
+                                                  fontWeight: '800',
+                                                  outline: 'none',
+                                                  transition: 'all 0.15s ease'
+                                                }}
+                                              />
+                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', opacity: 0.7 }}>
+                                                <Edit2 size={12} />
+                                              </span>
+                                            </div>
+                                          </div>
+
+                                          {/* Middle: Map to choose material dropdown (Tape category only) */}
+                                          <div style={{ marginBottom: '6px' }}>
+                                            <select
+                                              value={selectedTapeMaterialId}
+                                              onChange={(e) => handleSelectTapeMaterial(e.target.value)}
+                                              title="Choose material from inventory (Tape items only)"
+                                              style={{
+                                                width: '100%',
+                                                padding: '5px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                background: '#ffffff',
+                                                fontSize: '11px',
+                                                fontWeight: '700',
+                                                color: '#0f172a',
+                                                outline: 'none',
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              <option value="">— Map to Tape Item ({tapeMaterials.length}) —</option>
+                                              {tapeMaterials.map(m => (
+                                                <option key={m.id} value={m.id}>
+                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Mtr'} • {m.location || 'Store'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          {/* Bottom: All material details according to issue */}
+                                          {currentTapeMaterial ? (
+                                            <div style={{
+                                              display: 'flex',
+                                              flexWrap: 'wrap',
+                                              gap: '4px',
+                                              alignItems: 'center',
+                                              fontSize: '10.5px',
                                               background: '#eff6ff',
-                                              color: '#1d4ed8',
-                                              fontSize: '13px',
-                                              fontWeight: '800',
-                                              outline: 'none',
-                                              transition: 'all 0.15s ease'
-                                            }}
-                                          />
-                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', opacity: 0.7 }}>
-                                            <Edit2 size={12} />
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      {/* Middle: Map to choose material dropdown (Tape category only) */}
-                                      <div style={{ marginBottom: '6px' }}>
-                                        <select
-                                          value={selectedTapeMaterialId}
-                                          onChange={(e) => handleSelectTapeMaterial(e.target.value)}
-                                          title="Choose material from inventory (Tape items only)"
-                                          style={{
-                                            width: '100%',
-                                            padding: '5px 8px',
-                                            borderRadius: '6px',
-                                            border: '1px solid #cbd5e1',
-                                            background: '#ffffff',
-                                            fontSize: '11px',
-                                            fontWeight: '700',
-                                            color: '#0f172a',
-                                            outline: 'none',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          <option value="">— Map to Tape Item ({tapeMaterials.length}) —</option>
-                                          {tapeMaterials.map(m => (
-                                            <option key={m.id} value={m.id}>
-                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Mtr'} • {m.location || 'Store'}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-
-                                      {/* Bottom: All material details according to issue */}
-                                      {currentTapeMaterial ? (
-                                        <div style={{
-                                          display: 'flex',
-                                          flexWrap: 'wrap',
-                                          gap: '4px',
-                                          alignItems: 'center',
-                                          fontSize: '10.5px',
-                                          background: '#eff6ff',
-                                          padding: '5px 7px',
-                                          borderRadius: '6px',
-                                          border: '1px dashed #bfdbfe'
-                                        }}>
-                                          <span style={{ fontWeight: '800', color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: '3px' }}>
-                                            ID: {currentTapeMaterial.id}
-                                          </span>
-                                          <span style={{ fontWeight: '700', color: currentTapeMaterial.stock > 0 ? '#1d4ed8' : '#dc2626' }}>
-                                            Stock: {currentTapeMaterial.stock} {currentTapeMaterial.unit || 'Mtr'}
-                                          </span>
-                                          {currentTapeMaterial.location && (
-                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                              <MapPin size={10} color="#3b82f6" />
-                                              {currentTapeMaterial.location}
-                                            </span>
+                                              padding: '5px 7px',
+                                              borderRadius: '6px',
+                                              border: '1px dashed #bfdbfe'
+                                            }}>
+                                              <span style={{ fontWeight: '800', color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: '3px' }}>
+                                                ID: {currentTapeMaterial.id}
+                                              </span>
+                                              <span style={{ fontWeight: '700', color: currentTapeMaterial.stock > 0 ? '#1d4ed8' : '#dc2626' }}>
+                                                Stock: {currentTapeMaterial.stock} {currentTapeMaterial.unit || 'Mtr'}
+                                              </span>
+                                              {currentTapeMaterial.location && (
+                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                  <MapPin size={10} color="#3b82f6" />
+                                                  {currentTapeMaterial.location}
+                                                </span>
+                                              )}
+                                              {(() => {
+                                                const rawImg = currentTapeMaterial.imageUrl || currentTapeMaterial.image || currentTapeMaterial.photo || currentTapeMaterial.imgUrl;
+                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                                return cleanImg ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPreviewPhotoUrl({
+                                                      url: cleanImg,
+                                                      title: currentTapeMaterial.name,
+                                                      code: currentTapeMaterial.id,
+                                                      stock: `${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Mtr'}`,
+                                                      location: currentTapeMaterial.location
+                                                    })}
+                                                    style={{
+                                                      border: 'none',
+                                                      background: '#2563eb',
+                                                      color: '#ffffff',
+                                                      fontSize: '9.5px',
+                                                      fontWeight: '800',
+                                                      padding: '1px 6px',
+                                                      borderRadius: '4px',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '3px'
+                                                    }}
+                                                    title="Click to zoom image"
+                                                  >
+                                                    🔍 View Photo
+                                                  </button>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : (
+                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                              Custom Name • Select item above to map inventory & details
+                                            </div>
                                           )}
                                         </div>
-                                      ) : (
-                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                          Custom Name • Select item above to map inventory & details
-                                        </div>
-                                      )}
+                                      </div>
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>
                                       Direct (45 Pcs/Roll)
@@ -2856,97 +3892,207 @@ export default function ElasticIssueView({
                                 {/* BONE ROW (Shown if bone or all) */}
                                 {(materialMode === 'bone' || materialMode === 'all') && (
                                   <tr style={{ background: '#ffffff', borderBottom: 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '290px' }}>
-                                      {/* Top: Bullet & Editable Material Name */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }}></span>
-                                        <div style={{ flex: 1, position: 'relative' }}>
-                                          <input
-                                            type="text"
-                                            value={boneMaterialName}
-                                            onChange={(e) => setBoneMaterialName(e.target.value)}
-                                            placeholder="Bone Material Name (e.g. Bone Chinese)..."
-                                            title="Click to edit bone material name directly"
-                                            style={{
-                                              width: '100%',
-                                              boxSizing: 'border-box',
-                                              padding: '5px 8px',
-                                              paddingRight: '26px',
-                                              borderRadius: '6px',
-                                              border: '1.5px solid #7dd3fc',
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                        {/* Material Image Swatch Thumbnail */}
+                                        {(() => {
+                                          const rawImg = currentBoneMaterial?.imageUrl || currentBoneMaterial?.image || currentBoneMaterial?.photo || currentBoneMaterial?.imgUrl;
+                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                          return (
+                                            <div
+                                              onClick={() => {
+                                                if (cleanImg) {
+                                                  setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentBoneMaterial?.name || boneMaterialName || 'Bone Material',
+                                                    code: currentBoneMaterial?.id || currentBoneMaterial?.itemCode || '',
+                                                    stock: `${currentBoneMaterial?.stock || 0} ${currentBoneMaterial?.unit || 'Roll'}`,
+                                                    location: currentBoneMaterial?.location || ''
+                                                  });
+                                                }
+                                              }}
+                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this bone item"}
+                                              style={{
+                                                width: '56px',
+                                                height: '56px',
+                                                borderRadius: '8px',
+                                                border: cleanImg ? '2px solid #0284c7' : '1.5px dashed #cbd5e1',
+                                                background: cleanImg ? '#ffffff' : '#f8fafc',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                cursor: cleanImg ? 'zoom-in' : 'default',
+                                                overflow: 'hidden',
+                                                boxShadow: cleanImg ? '0 2px 6px rgba(2, 132, 199, 0.22)' : 'none',
+                                                position: 'relative',
+                                                transition: 'all 0.15s ease',
+                                                marginTop: '2px'
+                                              }}
+                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                            >
+                                              {cleanImg ? (
+                                                <>
+                                                  <img
+                                                    src={cleanImg}
+                                                    alt={currentBoneMaterial?.name || 'Bone'}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                  />
+                                                  <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    background: 'rgba(2, 132, 199, 0.85)',
+                                                    color: '#ffffff',
+                                                    fontSize: '8px',
+                                                    fontWeight: '800',
+                                                    textAlign: 'center',
+                                                    padding: '1px 0',
+                                                    letterSpacing: '0.5px'
+                                                  }}>
+                                                    ZOOM
+                                                  </div>
+                                                </>
+                                              ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                  <Package size={20} />
+                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+
+                                        {/* Right Controls: Name, Dropdown & Details */}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          {/* Top: Bullet & Editable Material Name */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }}></span>
+                                            <div style={{ flex: 1, position: 'relative' }}>
+                                              <input
+                                                type="text"
+                                                value={boneMaterialName}
+                                                onChange={(e) => setBoneMaterialName(e.target.value)}
+                                                placeholder="Bone Material Name (e.g. Bone Chinese)..."
+                                                title="Click to edit bone material name directly"
+                                                style={{
+                                                  width: '100%',
+                                                  boxSizing: 'border-box',
+                                                  padding: '5px 8px',
+                                                  paddingRight: '26px',
+                                                  borderRadius: '6px',
+                                                  border: '1.5px solid #7dd3fc',
+                                                  background: '#f0f9ff',
+                                                  color: '#0369a1',
+                                                  fontSize: '13px',
+                                                  fontWeight: '800',
+                                                  outline: 'none',
+                                                  transition: 'all 0.15s ease'
+                                                }}
+                                              />
+                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#0284c7', opacity: 0.7 }}>
+                                                <Edit2 size={12} />
+                                              </span>
+                                            </div>
+                                          </div>
+
+                                          {/* Middle: Map to choose material dropdown (Bone category only) */}
+                                          <div style={{ marginBottom: '6px' }}>
+                                            <select
+                                              value={selectedBoneMaterialId}
+                                              onChange={(e) => handleSelectBoneMaterial(e.target.value)}
+                                              title="Choose material from inventory (Bone items only)"
+                                              style={{
+                                                width: '100%',
+                                                padding: '5px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                background: '#ffffff',
+                                                fontSize: '11px',
+                                                fontWeight: '700',
+                                                color: '#0f172a',
+                                                outline: 'none',
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              <option value="">— Map to Bone Item ({boneMaterials.length}) —</option>
+                                              {boneMaterials.map(m => (
+                                                <option key={m.id} value={m.id}>
+                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          {/* Bottom: All material details according to issue */}
+                                          {currentBoneMaterial ? (
+                                            <div style={{
+                                              display: 'flex',
+                                              flexWrap: 'wrap',
+                                              gap: '4px',
+                                              alignItems: 'center',
+                                              fontSize: '10.5px',
                                               background: '#f0f9ff',
-                                              color: '#0369a1',
-                                              fontSize: '13px',
-                                              fontWeight: '800',
-                                              outline: 'none',
-                                              transition: 'all 0.15s ease'
-                                            }}
-                                          />
-                                          <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#0284c7', opacity: 0.7 }}>
-                                            <Edit2 size={12} />
-                                          </span>
-                                        </div>
-                                      </div>
-
-                                      {/* Middle: Map to choose material dropdown (Bone category only) */}
-                                      <div style={{ marginBottom: '6px' }}>
-                                        <select
-                                          value={selectedBoneMaterialId}
-                                          onChange={(e) => handleSelectBoneMaterial(e.target.value)}
-                                          title="Choose material from inventory (Bone items only)"
-                                          style={{
-                                            width: '100%',
-                                            padding: '5px 8px',
-                                            borderRadius: '6px',
-                                            border: '1px solid #cbd5e1',
-                                            background: '#ffffff',
-                                            fontSize: '11px',
-                                            fontWeight: '700',
-                                            color: '#0f172a',
-                                            outline: 'none',
-                                            cursor: 'pointer'
-                                          }}
-                                        >
-                                          <option value="">— Map to Bone Item ({boneMaterials.length}) —</option>
-                                          {boneMaterials.map(m => (
-                                            <option key={m.id} value={m.id}>
-                                              {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-
-                                      {/* Bottom: All material details according to issue */}
-                                      {currentBoneMaterial ? (
-                                        <div style={{
-                                          display: 'flex',
-                                          flexWrap: 'wrap',
-                                          gap: '4px',
-                                          alignItems: 'center',
-                                          fontSize: '10.5px',
-                                          background: '#f0f9ff',
-                                          padding: '5px 7px',
-                                          borderRadius: '6px',
-                                          border: '1px dashed #bae6fd'
-                                        }}>
-                                          <span style={{ fontWeight: '800', color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '3px' }}>
-                                            ID: {currentBoneMaterial.id}
-                                          </span>
-                                          <span style={{ fontWeight: '700', color: currentBoneMaterial.stock > 0 ? '#0284c7' : '#dc2626' }}>
-                                            Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Roll'}
-                                          </span>
-                                          {currentBoneMaterial.location && (
-                                            <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                              <MapPin size={10} color="#0284c7" />
-                                              {currentBoneMaterial.location}
-                                            </span>
+                                              padding: '5px 7px',
+                                              borderRadius: '6px',
+                                              border: '1px dashed #bae6fd'
+                                            }}>
+                                              <span style={{ fontWeight: '800', color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '3px' }}>
+                                                ID: {currentBoneMaterial.id}
+                                              </span>
+                                              <span style={{ fontWeight: '700', color: currentBoneMaterial.stock > 0 ? '#0284c7' : '#dc2626' }}>
+                                                Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Roll'}
+                                              </span>
+                                              {currentBoneMaterial.location && (
+                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                  <MapPin size={10} color="#0284c7" />
+                                                  {currentBoneMaterial.location}
+                                                </span>
+                                              )}
+                                              {(() => {
+                                                const rawImg = currentBoneMaterial.imageUrl || currentBoneMaterial.image || currentBoneMaterial.photo || currentBoneMaterial.imgUrl;
+                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                                return cleanImg ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPreviewPhotoUrl({
+                                                      url: cleanImg,
+                                                      title: currentBoneMaterial.name,
+                                                      code: currentBoneMaterial.id,
+                                                      stock: `${currentBoneMaterial.stock} ${currentBoneMaterial.unit || 'Roll'}`,
+                                                      location: currentBoneMaterial.location
+                                                    })}
+                                                    style={{
+                                                      border: 'none',
+                                                      background: '#0284c7',
+                                                      color: '#ffffff',
+                                                      fontSize: '9.5px',
+                                                      fontWeight: '800',
+                                                      padding: '1px 6px',
+                                                      borderRadius: '4px',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '3px'
+                                                    }}
+                                                    title="Click to zoom image"
+                                                  >
+                                                    🔍 View Photo
+                                                  </button>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : (
+                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                              Custom Name • Select item above to map inventory & details
+                                            </div>
                                           )}
                                         </div>
-                                      ) : (
-                                        <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                          Custom Name • Select item above to map inventory & details
-                                        </div>
-                                      )}
+                                      </div>
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
                                       Direct: {boneWeightKg || '0'} Kg
@@ -2967,6 +4113,239 @@ export default function ElasticIssueView({
                                       <div style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', marginTop: '2px' }}>
                                         Direct Floor Issue
                                       </div>
+                                    </td>
+                                  </tr>
+                                )}
+
+                                {/* OTHER ACCESSORIES ROW */}
+                                {materialMode === 'other' && (
+                                  <tr style={{ background: '#faf5ff' }}>
+                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f3e8ff', minWidth: '320px' }}>
+                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                        {/* Material Image Swatch Thumbnail */}
+                                        {(() => {
+                                          const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
+                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                          return (
+                                            <div
+                                              onClick={() => {
+                                                if (cleanImg) {
+                                                  setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentOtherMaterial?.name || otherMaterialName || 'Other Accessory',
+                                                    code: currentOtherMaterial?.id || currentOtherMaterial?.itemCode || '',
+                                                    stock: `${currentOtherMaterial?.stock || 0} ${currentOtherMaterial?.unit || otherUnit || 'Roll'}`,
+                                                    location: currentOtherMaterial?.location || ''
+                                                  });
+                                                }
+                                              }}
+                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this accessory item"}
+                                              style={{
+                                                width: '56px',
+                                                height: '56px',
+                                                borderRadius: '8px',
+                                                border: cleanImg ? '2px solid #7c3aed' : '1.5px dashed #cbd5e1',
+                                                background: cleanImg ? '#ffffff' : '#f8fafc',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                flexShrink: 0,
+                                                cursor: cleanImg ? 'zoom-in' : 'default',
+                                                overflow: 'hidden',
+                                                boxShadow: cleanImg ? '0 2px 6px rgba(124, 58, 237, 0.22)' : 'none',
+                                                position: 'relative',
+                                                transition: 'all 0.15s ease',
+                                                marginTop: '2px'
+                                              }}
+                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                            >
+                                              {cleanImg ? (
+                                                <>
+                                                  <img
+                                                    src={cleanImg}
+                                                    alt={currentOtherMaterial?.name || otherMaterialName || 'Accessory'}
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                  />
+                                                  <div style={{
+                                                    position: 'absolute',
+                                                    bottom: 0,
+                                                    left: 0,
+                                                    right: 0,
+                                                    background: 'rgba(124, 58, 237, 0.85)',
+                                                    color: '#ffffff',
+                                                    fontSize: '8px',
+                                                    fontWeight: '800',
+                                                    textAlign: 'center',
+                                                    padding: '1px 0',
+                                                    letterSpacing: '0.5px'
+                                                  }}>
+                                                    ZOOM
+                                                  </div>
+                                                </>
+                                              ) : (
+                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#7c3aed' }}>
+                                                  <Package size={20} />
+                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>Accessory</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                          );
+                                        })()}
+
+                                        {/* Right Controls: Name, Dropdown & Details */}
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          {/* Top: Bullet & Editable Material Name */}
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#7c3aed', flexShrink: 0 }}></span>
+                                            <div style={{ flex: 1, position: 'relative' }}>
+                                              <input
+                                                type="text"
+                                                value={otherMaterialName}
+                                                onChange={(e) => setOtherMaterialName(e.target.value)}
+                                                placeholder="Material Name (e.g. Drawcord, Zipper)..."
+                                                title="Click to edit accessory material name directly"
+                                                style={{
+                                                  width: '100%',
+                                                  boxSizing: 'border-box',
+                                                  padding: '5px 8px',
+                                                  paddingRight: '26px',
+                                                  borderRadius: '6px',
+                                                  border: '1.5px solid #d8b4fe',
+                                                  background: '#faf5ff',
+                                                  color: '#6b21a8',
+                                                  fontSize: '13px',
+                                                  fontWeight: '800',
+                                                  outline: 'none',
+                                                  transition: 'all 0.15s ease'
+                                                }}
+                                              />
+                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#7c3aed', opacity: 0.7 }}>
+                                                <Edit2 size={12} />
+                                              </span>
+                                            </div>
+                                          </div>
+
+                                          {/* Middle: Map to choose material dropdown */}
+                                          <div style={{ marginBottom: '6px' }}>
+                                            <select
+                                              value={selectedOtherMaterialId}
+                                              onChange={(e) => handleSelectOtherMaterial(e.target.value)}
+                                              title="Choose material from inventory to map stock & ID"
+                                              style={{
+                                                width: '100%',
+                                                padding: '5px 8px',
+                                                borderRadius: '6px',
+                                                border: '1px solid #cbd5e1',
+                                                background: '#ffffff',
+                                                fontSize: '11px',
+                                                fontWeight: '700',
+                                                color: '#0f172a',
+                                                outline: 'none',
+                                                cursor: 'pointer'
+                                              }}
+                                            >
+                                              <option value="">— Map to Store Material ({otherMaterials.length}) —</option>
+                                              {otherMaterials.map(m => (
+                                                <option key={m.id} value={m.id}>
+                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+
+                                          {/* Bottom: All material details according to issue */}
+                                          {currentOtherMaterial ? (
+                                            <div style={{
+                                              display: 'flex',
+                                              flexWrap: 'wrap',
+                                              gap: '4px',
+                                              alignItems: 'center',
+                                              fontSize: '10.5px',
+                                              background: '#f5f3ff',
+                                              padding: '5px 7px',
+                                              borderRadius: '6px',
+                                              border: '1px dashed #d8b4fe'
+                                            }}>
+                                              <span style={{ fontWeight: '800', color: '#6b21a8', background: '#ede9fe', padding: '1px 5px', borderRadius: '3px' }}>
+                                                ID: {currentOtherMaterial.id}
+                                              </span>
+                                              <span style={{ fontWeight: '700', color: currentOtherMaterial.stock > 0 ? '#059669' : '#dc2626' }}>
+                                                Stock: {currentOtherMaterial.stock} {currentOtherMaterial.unit || otherUnit || 'Roll'}
+                                              </span>
+                                              {currentOtherMaterial.location && (
+                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                  <MapPin size={10} color="#7c3aed" />
+                                                  {currentOtherMaterial.location}
+                                                </span>
+                                              )}
+                                              {(() => {
+                                                const rawImg = currentOtherMaterial.imageUrl || currentOtherMaterial.image || currentOtherMaterial.photo || currentOtherMaterial.imgUrl;
+                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                                return cleanImg ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => setPreviewPhotoUrl({
+                                                      url: cleanImg,
+                                                      title: currentOtherMaterial.name,
+                                                      code: currentOtherMaterial.id,
+                                                      stock: `${currentOtherMaterial.stock} ${currentOtherMaterial.unit || otherUnit || 'Roll'}`,
+                                                      location: currentOtherMaterial.location
+                                                    })}
+                                                    style={{
+                                                      border: 'none',
+                                                      background: '#7c3aed',
+                                                      color: '#ffffff',
+                                                      fontSize: '9.5px',
+                                                      fontWeight: '800',
+                                                      padding: '1px 6px',
+                                                      borderRadius: '4px',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '3px'
+                                                    }}
+                                                    title="Click to zoom image"
+                                                  >
+                                                    🔍 View Photo
+                                                  </button>
+                                                ) : null;
+                                              })()}
+                                            </div>
+                                          ) : (
+                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                              Custom Accessory • Select item above to map store inventory & details
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                      Direct ({otherRollCount || 1} {otherUnit || 'Roll'})
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'center' }}>
+                                      <code style={{ background: '#f3e8ff', color: '#7c3aed', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                        Direct Floor Issue
+                                      </code>
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '800', color: '#6b21a8' }}>
+                                      —
+                                    </td>
+                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                      {effPcs}
+                                    </td>
+                                    <td style={{ padding: '10px 14px', textAlign: 'right', background: '#f3e8ff' }}>
+                                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#6b21a8', lineHeight: '1.1' }}>
+                                        {otherRollCount || 1} <span style={{ fontSize: '13px', fontWeight: '800' }}>{otherUnit || 'Roll'}(s)</span>
+                                      </div>
+                                      <div style={{ fontSize: '11px', fontWeight: '700', color: '#7c3aed', marginTop: '2px' }}>
+                                        Direct Floor Handover
+                                      </div>
+                                      <span style={{ fontSize: '10px', background: '#7c3aed', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
+                                        Total Issue: {otherRollCount || 1} {otherUnit || 'Roll'}(s)
+                                      </span>
                                     </td>
                                   </tr>
                                 )}
@@ -3038,6 +4417,10 @@ export default function ElasticIssueView({
                                   <span style={{ color: '#0369a1' }}>
                                     {boneMaterialName || 'Bone'} {currentBoneMaterial ? `[${currentBoneMaterial.id}]` : ''}
                                   </span>
+                                ) : materialMode === 'other' ? (
+                                  <span style={{ color: '#7c3aed' }}>
+                                    {otherMaterialName || 'Other Accessory'} {currentOtherMaterial ? `[${currentOtherMaterial.id}]` : ''}
+                                  </span>
                                 ) : (
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                     <span style={{ color: '#047857' }}>{elasticMaterialName} {currentElasticMaterial ? `[${currentElasticMaterial.id}]` : ''}</span>
@@ -3079,1019 +4462,1164 @@ export default function ElasticIssueView({
                   </div>
                 )}
 
-            {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
-            <div style={{
-              marginTop: '28px',
-              paddingTop: '22px',
-              borderTop: '2px solid #e2e8f0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '18px',
-              flexWrap: 'wrap',
-              gap: '8px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{
-                  width: '28px', height: '28px', borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                  color: '#ffffff', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800',
-                  boxShadow: '0 2px 8px rgba(5, 150, 105, 0.35)'
-                }}>2</span>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                    Issue Details (Date, Issuer, Receiver & Supervisor)
-                  </h3>
-                  <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                    Fill date, issuer, receiver and review total requirement before generating original bill / PO
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
-
-              {/* LEFT COLUMN: ISSUER, RECEIVER, SUPERVISOR & DATE */}
-              <div style={{
-                padding: '18px 20px',
-                borderRadius: '12px',
-                background: '#f8fafc',
-                border: '1.5px solid #e2e8f0',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}>
-                <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                  <User size={16} color="#059669" />
-                  <span>Issue & Requisition Information:</span>
+                {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
+                <div style={{
+                  marginTop: '28px',
+                  paddingTop: '22px',
+                  borderTop: '2px solid #e2e8f0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '18px',
+                  flexWrap: 'wrap',
+                  gap: '8px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{
+                      width: '28px', height: '28px', borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                      color: '#ffffff', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800',
+                      boxShadow: '0 2px 8px rgba(5, 150, 105, 0.35)'
+                    }}>2</span>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                        Issue Details (Date, Issuer, Receiver & Supervisor)
+                      </h3>
+                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        Fill date, issuer, receiver and review total requirement before generating original bill / PO
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* ISSUER NAME */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <User size={14} color="#059669" />
-                    <span>Issuer Name (Store Staff / Prepared By):</span>
-                  </label>
-                  <SmartSelectWithManual
-                    value={issuerName}
-                    onChange={setIssuerName}
-                    options={['PARAS', 'RASHMI', 'STORE STAFF', 'ADMIN', 'STORE INCHARGE']}
-                    placeholder="Select Issuer or + Manual Entry"
-                    manualPlaceholder="Type custom issuer name..."
-                    manualLabel="+ Manual Entry (Store Staff)"
-                    localStorageKey="elastic_issuer_names"
-                    icon="user"
-                    theme="emerald"
-                  />
-                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px' }}>
 
-                {/* RECEIVER NAME */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <Scissors size={14} color="#059669" />
-                    <span>Receiver Name (Cutting Master / Received By):</span>
-                  </label>
-                  <SmartSelectWithManual
-                    value={receiverName}
-                    onChange={setReceiverName}
-                    options={['JAYBIR', 'ROHIT', 'MONU', 'CUTTING MASTER', 'SEWING MASTER']}
-                    placeholder="Select Receiver or + Manual Entry"
-                    manualPlaceholder="Type custom receiver name..."
-                    manualLabel="+ Manual Entry (Cutting Master)"
-                    localStorageKey="elastic_receiver_names"
-                    icon="scissors"
-                    theme="emerald"
-                  />
-                </div>
-
-                {/* SUPERVISOR NAME */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                    <ShieldCheck size={14} color="#059669" />
-                    <span>Supervisor / Floor Incharge Name:</span>
-                  </label>
-                  <SmartSelectWithManual
-                    value={supervisorName}
-                    onChange={setSupervisorName}
-                    options={['ROHIT / MONU', 'MOHIT SIR', 'MANISH', 'FLOOR SUPERVISOR', 'STORE INCHARGE']}
-                    placeholder="Select Supervisor or + Manual Entry"
-                    manualPlaceholder="Type custom supervisor name..."
-                    manualLabel="+ Manual Entry (Supervisor)"
-                    localStorageKey="elastic_supervisor_names"
-                    icon="shield"
-                    theme="emerald"
-                  />
-                </div>
-
-                {/* ELASTIC SPECIFICATION & MATERIAL MAPPING (3 TYPES: 1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23) */}
-                {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                  {/* LEFT COLUMN: ISSUER, RECEIVER, SUPERVISOR & DATE */}
                   <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '10px',
-                    background: '#f0fdf4',
-                    border: '1.5px solid #86efac',
+                    padding: '18px 20px',
+                    borderRadius: '12px',
+                    background: '#f8fafc',
+                    border: '1.5px solid #e2e8f0',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '10px'
+                    gap: '14px'
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Ruler size={14} color="#059669" />
-                        <span>Elastic Specification & Material Mapping:</span>
-                      </span>
-                      <span style={{
-                        fontSize: '10.5px',
-                        background: '#dcfce7',
-                        color: '#065f46',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontWeight: '800'
-                      }}>
-                        Divisor: ÷ {effectiveDivisor} ({effectiveWidth})
-                      </span>
+                    <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                      <User size={16} color="#059669" />
+                      <span>Issue & Requisition Information:</span>
                     </div>
 
-                    {/* 3 Standard Elastic Types Quick Selection */}
+                    {/* ISSUER NAME */}
                     <div>
-                      <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', display: 'block', marginBottom: '4px' }}>
-                        ELASTIC WIDTH TYPE (3 TYPES):
+                      <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <User size={14} color="#059669" />
+                        <span>Issuer Name (Store Staff / Prepared By):</span>
                       </label>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
-                        {[
-                          { label: '1 Inch', desc: '÷ 25 Formula', val: '1 Inch' },
-                          { label: '1.5 Inch', desc: '÷ 23 Formula', val: '1.5 Inch' },
-                          { label: '2 Inch', desc: '÷ 23 Formula', val: '2 Inch' }
-                        ].map(t => {
-                          const isActive = effectiveWidth.includes(t.val) || (t.val === '1 Inch' && (effectiveWidth.includes('Standard') || effectiveWidth === '1 Inch'));
-                          return (
-                            <button
-                              key={t.val}
-                              type="button"
-                              onClick={() => {
-                                setElasticWidth(t.val);
-                                const match = elasticMaterials.find(m => {
-                                  const n = (m.name || '').toLowerCase();
-                                  if (t.val === '1.5 Inch') return n.includes('1.5');
-                                  if (t.val === '2 Inch') return n.includes('2') && !n.includes('1.5');
-                                  return n.includes('1') && !n.includes('1.5');
-                                });
-                                if (match) setSelectedElasticMaterialId(match.id);
-                              }}
-                              style={{
-                                padding: '6px 4px',
-                                borderRadius: '8px',
-                                border: isActive ? '2px solid #059669' : '1px solid #cbd5e1',
-                                background: isActive ? '#dcfce7' : '#ffffff',
-                                color: isActive ? '#065f46' : '#334155',
-                                cursor: 'pointer',
-                                textAlign: 'center',
-                                transition: 'all 0.15s ease'
-                              }}
-                            >
-                              <div style={{ fontSize: '12px', fontWeight: '800' }}>{t.label}</div>
-                              <div style={{ fontSize: '10px', fontWeight: '700', color: isActive ? '#047857' : '#64748b' }}>
-                                {t.desc}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <SmartSelectWithManual
+                        value={issuerName}
+                        onChange={setIssuerName}
+                        options={['PARAS', 'RASHMI', 'STORE STAFF', 'ADMIN', 'STORE INCHARGE']}
+                        placeholder="Select Issuer or + Manual Entry"
+                        manualPlaceholder="Type custom issuer name..."
+                        manualLabel="+ Manual Entry (Store Staff)"
+                        localStorageKey="elastic_issuer_names"
+                        icon="user"
+                        theme="emerald"
+                      />
                     </div>
 
-                    {/* Mapped Elastic Inventory Material Dropdown (Elastic Category Only) */}
+                    {/* RECEIVER NAME */}
                     <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', margin: 0 }}>
-                          MATERIAL NAME MAPPING (ELASTIC CATEGORY):
-                        </label>
-                        <span style={{ fontSize: '10px', color: '#047857', fontWeight: '700' }}>
-                          {elasticMaterials.length} Items Available
-                        </span>
-                      </div>
-                      <select
-                        value={selectedElasticMaterialId}
-                        onChange={(e) => {
-                          const id = e.target.value;
-                          setSelectedElasticMaterialId(id);
-                          const mat = elasticMaterials.find(m => String(m.id) === String(id));
-                          if (mat) {
-                            const n = (mat.name || '').toLowerCase();
-                            if (n.includes('1.5')) setElasticWidth('1.5 Inch');
-                            else if (n.includes('2')) setElasticWidth('2 Inch');
-                            else setElasticWidth('1 Inch');
-                          }
-                        }}
-                        style={{
-                          width: '100%',
-                          padding: '7px 10px',
-                          borderRadius: '6px',
-                          border: '1px solid #86efac',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                          color: '#0f172a',
-                          background: '#ffffff',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="">— Select Elastic Inventory Item —</option>
-                        {elasticMaterials.map(m => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} ({m.id}) • Stock: {m.stock} {m.unit || 'Roll'} &bull; Divisor: {(m.name || '').includes('1.5') ? '÷ 23' : (m.name || '').includes('2') ? '÷ 23' : '÷ 25'}
-                          </option>
-                        ))}
-                      </select>
+                      <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <Scissors size={14} color="#059669" />
+                        <span>Receiver Name (Cutting Master / Received By):</span>
+                      </label>
+                      <SmartSelectWithManual
+                        value={receiverName}
+                        onChange={setReceiverName}
+                        options={['JAYBIR', 'ROHIT', 'MONU', 'CUTTING MASTER', 'SEWING MASTER']}
+                        placeholder="Select Receiver or + Manual Entry"
+                        manualPlaceholder="Type custom receiver name..."
+                        manualLabel="+ Manual Entry (Cutting Master)"
+                        localStorageKey="elastic_receiver_names"
+                        icon="scissors"
+                        theme="emerald"
+                      />
                     </div>
 
-                    {/* Roll Count Input & Live Division Formula */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'center' }}>
-                      <div>
-                        <label style={{ fontSize: '10.5px', fontWeight: '700', color: '#047857', display: 'block', marginBottom: '2px' }}>
-                          ROLLS (AUTO):
-                        </label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={rollCount || calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1}
-                          onChange={(e) => setRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                          style={{
-                            width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: '6px',
-                            border: '1.5px solid #059669', fontSize: '13px', fontWeight: '800',
-                            color: '#0f172a', background: '#ffffff', outline: 'none'
-                          }}
-                        />
-                      </div>
+                    {/* SUPERVISOR NAME */}
+                    <div>
+                      <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                        <ShieldCheck size={14} color="#059669" />
+                        <span>Supervisor / Floor Incharge Name:</span>
+                      </label>
+                      <SmartSelectWithManual
+                        value={supervisorName}
+                        onChange={setSupervisorName}
+                        options={['ROHIT / MONU', 'MOHIT SIR', 'MANISH', 'FLOOR SUPERVISOR', 'STORE INCHARGE']}
+                        placeholder="Select Supervisor or + Manual Entry"
+                        manualPlaceholder="Type custom supervisor name..."
+                        manualLabel="+ Manual Entry (Supervisor)"
+                        localStorageKey="elastic_supervisor_names"
+                        icon="shield"
+                        theme="emerald"
+                      />
+                    </div>
+
+                    {/* ELASTIC SPECIFICATION & MATERIAL MAPPING (3 TYPES: 1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23) */}
+                    {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
                       <div style={{
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        background: '#ffffff',
-                        border: '1px dashed #86efac',
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        color: '#047857',
-                        lineHeight: '1.3'
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: '#f0fdf4',
+                        border: '1.5px solid #86efac',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px'
                       }}>
-                        <div>Calculation: {calcResult.totalElasticMtr} Mtr ÷ {effectiveDivisor}</div>
-                        <div style={{ color: '#065f46', fontWeight: '800' }}>
-                          = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Ruler size={14} color="#059669" />
+                            <span>Elastic Specification & Material Mapping:</span>
+                          </span>
+                          <span style={{
+                            fontSize: '10.5px',
+                            background: '#dcfce7',
+                            color: '#065f46',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontWeight: '800'
+                          }}>
+                            Divisor: ÷ {effectiveDivisor} ({effectiveWidth})
+                          </span>
                         </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
-                {/* BONE SPECIFICATION & MATERIAL MAPPING (FOR BONE MODE) */}
-                {(materialMode === 'bone' || materialMode === 'all') && (
-                  <div style={{
-                    padding: '12px 14px',
-                    borderRadius: '10px',
-                    background: '#f0f9ff',
-                    border: '1.5px solid #bae6fd',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Scale size={14} color="#0284c7" />
-                        <span>Bone Specification & Material Mapping:</span>
-                      </span>
-                      <span style={{
-                        fontSize: '10.5px',
-                        background: '#e0f2fe',
-                        color: '#0369a1',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontWeight: '800'
-                      }}>
-                        {effectiveBoneWidth || '1.5 Inch'}
-                      </span>
-                    </div>
+                        {/* 3 Standard Elastic Types Quick Selection */}
+                        <div>
+                          <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', display: 'block', marginBottom: '4px' }}>
+                            ELASTIC WIDTH TYPE (3 TYPES):
+                          </label>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                            {[
+                              { label: '1 Inch', desc: '÷ 25 Formula', val: '1 Inch' },
+                              { label: '1.5 Inch', desc: '÷ 23 Formula', val: '1.5 Inch' },
+                              { label: '2 Inch', desc: '÷ 23 Formula', val: '2 Inch' }
+                            ].map(t => {
+                              const isActive = effectiveWidth.includes(t.val) || (t.val === '1 Inch' && (effectiveWidth.includes('Standard') || effectiveWidth === '1 Inch'));
+                              return (
+                                <button
+                                  key={t.val}
+                                  type="button"
+                                  onClick={() => {
+                                    setElasticWidth(t.val);
+                                    const match = elasticMaterials.find(m => {
+                                      const n = (m.name || '').toLowerCase();
+                                      if (t.val === '1.5 Inch') return n.includes('1.5');
+                                      if (t.val === '2 Inch') return n.includes('2') && !n.includes('1.5');
+                                      return n.includes('1') && !n.includes('1.5');
+                                    });
+                                    if (match) setSelectedElasticMaterialId(match.id);
+                                  }}
+                                  style={{
+                                    padding: '6px 4px',
+                                    borderRadius: '8px',
+                                    border: isActive ? '2px solid #059669' : '1px solid #cbd5e1',
+                                    background: isActive ? '#dcfce7' : '#ffffff',
+                                    color: isActive ? '#065f46' : '#334155',
+                                    cursor: 'pointer',
+                                    textAlign: 'center',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  <div style={{ fontSize: '12px', fontWeight: '800' }}>{t.label}</div>
+                                  <div style={{ fontSize: '10px', fontWeight: '700', color: isActive ? '#047857' : '#64748b' }}>
+                                    {t.desc}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
 
-                    {/* Mapped Bone Inventory Item Dropdown */}
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
-                        <label style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: 0 }}>
-                          MATERIAL NAME MAPPING (BONE CATEGORY):
-                        </label>
-                        <span style={{ fontSize: '10px', color: '#0284c7', fontWeight: '700' }}>
-                          {boneMaterials.length} Items Available
-                        </span>
-                      </div>
-                      <select
-                        value={selectedBoneMaterialId}
-                        onChange={(e) => handleSelectBoneMaterial(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '7px 10px',
-                          borderRadius: '6px',
-                          border: '1px solid #bae6fd',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                          color: '#0f172a',
-                          background: '#ffffff',
-                          outline: 'none'
-                        }}
-                      >
-                        <option value="">— Select Bone Inventory Item —</option>
-                        {boneMaterials.map(m => (
-                          <option key={m.id} value={m.id}>
-                            {m.name} ({m.id}) • Stock: {m.stock} Kg
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                {/* Issue Date & Remarks */}
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
-                  <div>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
-                      ISSUE DATE
-                    </span>
-                    <input
-                      type="date"
-                      value={issueDate}
-                      onChange={(e) => setIssueDate(e.target.value)}
-                      style={{
-                        width: '100%', padding: '8px', borderRadius: '8px',
-                        border: '1px solid #cbd5e1', background: '#ffffff',
-                        fontSize: '12.5px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
-                      REMARKS / INSTRUCTIONS
-                    </span>
-                    <input
-                      type="text"
-                      value={remarks}
-                      onChange={(e) => setRemarks(e.target.value)}
-                      placeholder="e.g. Elastic for waistband..."
-                      style={{
-                        width: '100%', padding: '8px 10px', borderRadius: '8px',
-                        border: '1px solid #cbd5e1', background: '#ffffff',
-                        fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                </div>
-
-
-
-              </div>
-
-              {/* RIGHT COLUMN: TOTAL REQUIREMENT LIVE SUMMARY */}
-              <div style={{
-                padding: '18px 20px',
-                borderRadius: '12px',
-                background: '#ffffff',
-                border: '1.5px solid #059669',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                boxShadow: '0 4px 14px rgba(5, 150, 105, 0.08)'
-              }}>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '14px' }}>
-                    <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Layers size={16} color="#059669" />
-                      <span>Total Requirement on Original Bill:</span>
-                    </div>
-                    <span style={{ fontSize: '11px', fontWeight: '800', color: '#059669', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>
-                      ORIGINAL BILL SPEC
-                    </span>
-                  </div>
-
-                  {/* Production Quick Details & Editable Issue Pcs */}
-                  {withoutLotActive ? (
-                    <div style={{
-                      background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1.5px solid #fed7aa',
-                      marginBottom: '12px',
-                      fontSize: '12.5px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}>
-                      <div>
-                        <span style={{ fontSize: '10.5px', color: '#c2410c', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
-                          ISSUE MODE & LOT
-                        </span>
-                        <strong style={{ color: '#9a3412', fontSize: '13.5px' }}>
-                          Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
-                        </strong>
-                      </div>
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: '800',
-                        background: '#ea580c',
-                        color: '#ffffff',
-                        padding: '3px 8px',
-                        borderRadius: '6px'
-                      }}>
-                        ⚡ DIRECT FLOOR ISSUE
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{
-                      background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      border: '1.5px solid #bfdbfe',
-                      marginBottom: '12px',
-                      fontSize: '12.5px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}>
-                      <div>
-                        <span style={{ fontSize: '10.5px', color: '#1d4ed8', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
-                          ISSUE MODE & LOT
-                        </span>
-                        <strong style={{ color: '#1e40af', fontSize: '13.5px' }}>
-                          With BOM — LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.style || lotDetails?.garmentType || withoutLotStyle || 'Lower / Tracksuit'})
-                        </strong>
-                      </div>
-                      <span style={{
-                        fontSize: '11px',
-                        fontWeight: '800',
-                        background: '#2563eb',
-                        color: '#ffffff',
-                        padding: '3px 8px',
-                        borderRadius: '6px'
-                      }}>
-                        🛡️ BOM APPROVED ({lotDetails?.quantity || issuePcs || 0} Pcs)
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Editable Issue Box: Direct Weight in Kgs for Bone, Pcs for Elastic & Tape */}
-                  {materialMode === 'bone' ? (
-                    <div style={{
-                      padding: '12px 14px',
-                      borderRadius: '10px',
-                      background: '#f0f9ff',
-                      border: '1.5px solid #0284c7',
-                      marginBottom: '14px',
-                      boxShadow: '0 2px 10px rgba(2, 132, 199, 0.08)'
-                    }}>
-                      <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Scale size={16} color="#0284c7" />
-                          <span>Direct Issue Weight (Editable):</span>
-                        </span>
-                        <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
-                          Kg-Wise Floor Issue
-                        </span>
-                      </label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          value={boneWeightKg}
-                          onChange={(e) => setBoneWeightKg(e.target.value)}
-                          placeholder="Enter Weight in Kg (e.g. 2.50)"
-                          style={{
-                            flex: 1,
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '2px solid #0284c7',
-                            background: '#ffffff',
-                            fontSize: '16px',
-                            fontWeight: '900',
-                            color: '#0f172a',
-                            outline: 'none'
-                          }}
-                        />
-                        <span style={{
-                          fontSize: '15px',
-                          fontWeight: '900',
-                          color: '#0369a1',
-                          background: '#e0f2fe',
-                          padding: '7px 14px',
-                          borderRadius: '8px',
-                          border: '1.5px solid #bae6fd'
-                        }}>
-                          Kgs
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
-                        {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
-                          <button
-                            key={w}
-                            type="button"
-                            onClick={() => setBoneWeightKg(w)}
-                            style={{
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              border: boneWeightKg === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                              background: boneWeightKg === w ? '#0284c7' : '#ffffff',
-                              color: boneWeightKg === w ? '#ffffff' : '#0369a1',
-                              fontSize: '11px',
-                              fontWeight: '800',
-                              cursor: 'pointer',
-                              transition: 'all 0.1s ease'
+                        {/* Mapped Elastic Inventory Material Dropdown (Elastic Category Only) */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#065f46', margin: 0 }}>
+                              MATERIAL NAME MAPPING (ELASTIC CATEGORY):
+                            </label>
+                            <span style={{ fontSize: '10px', color: '#047857', fontWeight: '700' }}>
+                              {elasticMaterials.length} Items Available
+                            </span>
+                          </div>
+                          <select
+                            value={selectedElasticMaterialId}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              setSelectedElasticMaterialId(id);
+                              const mat = elasticMaterials.find(m => String(m.id) === String(id));
+                              if (mat) {
+                                const n = (mat.name || '').toLowerCase();
+                                if (n.includes('1.5')) setElasticWidth('1.5 Inch');
+                                else if (n.includes('2')) setElasticWidth('2 Inch');
+                                else setElasticWidth('1 Inch');
+                              }
                             }}
-                          >
-                            {w} Kg
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      background: '#f0fdf4',
-                      border: '1.5px solid #86efac',
-                      marginBottom: '14px'
-                    }}>
-                      <label style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Scissors size={14} color="#059669" />
-                          <span>Issue Pcs (Editable):</span>
-                        </span>
-                        <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#047857', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
-                          Live Auto-Calculation
-                        </span>
-                      </label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="number"
-                          min="1"
-                          value={issuePcs}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '') {
-                              setIssuePcs('');
-                            } else {
-                              const parsed = parseInt(val, 10);
-                              setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
-                            }
-                          }}
-                          placeholder="Enter Issue Pcs"
-                          style={{
-                            flex: 1,
-                            padding: '7px 10px',
-                            borderRadius: '6px',
-                            border: '1.5px solid #059669',
-                            background: '#ffffff',
-                            fontSize: '15px',
-                            fontWeight: '800',
-                            color: '#0f172a',
-                            outline: 'none'
-                          }}
-                        />
-                        <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>Pcs</span>
-                        {!withoutLotActive && lotDetails?.quantity && (
-                          <button
-                            type="button"
-                            onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
                             style={{
-                              padding: '6px 9px',
+                              width: '100%',
+                              padding: '7px 10px',
                               borderRadius: '6px',
                               border: '1px solid #86efac',
-                              background: '#ffffff',
-                              color: '#047857',
-                              fontSize: '11px',
+                              fontSize: '12px',
                               fontWeight: '700',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Match Cutting ({lotDetails.quantity})
-                          </button>
-                        )}
-                      </div>
-                      {materialMode === 'all' && (
-                        <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #86efac', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', minWidth: '130px' }}>Bone Weight (Kg):</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            value={boneWeightKg}
-                            onChange={(e) => setBoneWeightKg(e.target.value)}
-                            placeholder="e.g. 2.50"
-                            style={{
-                              flex: 1,
-                              padding: '6px 10px',
-                              borderRadius: '6px',
-                              border: '1.5px solid #0284c7',
-                              background: '#ffffff',
-                              fontSize: '14px',
-                              fontWeight: '800',
                               color: '#0f172a',
+                              background: '#ffffff',
                               outline: 'none'
                             }}
-                          />
-                          <span style={{ fontSize: '13px', fontWeight: '900', color: '#0369a1' }}>Kgs</span>
+                          >
+                            <option value="">— Select Elastic Inventory Item —</option>
+                            {elasticMaterials.map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.id}) • Stock: {m.stock} {m.unit || 'Roll'} &bull; Divisor: {(m.name || '').includes('1.5') ? '÷ 23' : (m.name || '').includes('2') ? '÷ 23' : '÷ 25'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {/* Roll Count Input & Live Division Formula */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'center' }}>
+                          <div>
+                            <label style={{ fontSize: '10.5px', fontWeight: '700', color: '#047857', display: 'block', marginBottom: '2px' }}>
+                              ROLLS (AUTO):
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={rollCount || calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1}
+                              onChange={(e) => setRollCount(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              style={{
+                                width: '100%', boxSizing: 'border-box', padding: '6px 8px', borderRadius: '6px',
+                                border: '1.5px solid #059669', fontSize: '13px', fontWeight: '800',
+                                color: '#0f172a', background: '#ffffff', outline: 'none'
+                              }}
+                            />
+                          </div>
+                          <div style={{
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            background: '#ffffff',
+                            border: '1px dashed #86efac',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            color: '#047857',
+                            lineHeight: '1.3'
+                          }}>
+                            <div>Calculation: {calcResult.totalElasticMtr} Mtr ÷ {effectiveDivisor}</div>
+                            <div style={{ color: '#065f46', fontWeight: '800' }}>
+                              = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* BONE SPECIFICATION & MATERIAL MAPPING (FOR BONE MODE) */}
+                    {(materialMode === 'bone' || materialMode === 'all') && (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: '#f0f9ff',
+                        border: '1.5px solid #bae6fd',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Scale size={14} color="#0284c7" />
+                            <span>Bone Specification & Material Mapping:</span>
+                          </span>
+                          <span style={{
+                            fontSize: '10.5px',
+                            background: '#e0f2fe',
+                            color: '#0369a1',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontWeight: '800'
+                          }}>
+                            {effectiveBoneWidth || '1.5 Inch'}
+                          </span>
+                        </div>
+
+                        {/* Mapped Bone Inventory Item Dropdown */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: 0 }}>
+                              MATERIAL NAME MAPPING (BONE CATEGORY):
+                            </label>
+                            <span style={{ fontSize: '10px', color: '#0284c7', fontWeight: '700' }}>
+                              {boneMaterials.length} Items Available
+                            </span>
+                          </div>
+                          <select
+                            value={selectedBoneMaterialId}
+                            onChange={(e) => handleSelectBoneMaterial(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid #bae6fd',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              color: '#0f172a',
+                              background: '#ffffff',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="">— Select Bone Inventory Item —</option>
+                            {boneMaterials.map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.id}) • Stock: {m.stock} Kg
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* OTHER ACCESSORIES SPECIFICATION & MATERIAL MAPPING (FOR OTHER MODE) */}
+                    {materialMode === 'other' && (
+                      <div style={{
+                        padding: '12px 14px',
+                        borderRadius: '10px',
+                        background: '#faf5ff',
+                        border: '1.5px solid #d8b4fe',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Package size={14} color="#7c3aed" />
+                            <span>Other Accessory Specification & Material Mapping:</span>
+                          </span>
+                          <span style={{
+                            fontSize: '10.5px',
+                            background: '#f3e8ff',
+                            color: '#7c3aed',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontWeight: '800'
+                          }}>
+                            {otherUnit || 'Roll'}-Wise Floor Issue
+                          </span>
+                        </div>
+
+                        {/* Mapped Other Inventory Item Dropdown */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b21a8', margin: 0 }}>
+                              MATERIAL NAME MAPPING (ACCESSORIES):
+                            </label>
+                            <span style={{ fontSize: '10px', color: '#7c3aed', fontWeight: '700' }}>
+                              {otherMaterials.length} Items Available
+                            </span>
+                          </div>
+                          <select
+                            value={selectedOtherMaterialId}
+                            onChange={(e) => handleSelectOtherMaterial(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '7px 10px',
+                              borderRadius: '6px',
+                              border: '1.5px solid #d8b4fe',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              color: '#0f172a',
+                              background: '#ffffff',
+                              outline: 'none'
+                            }}
+                          >
+                            <option value="">— Select Accessory Inventory Item —</option>
+                            {otherMaterials.map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({m.id}) • Stock: {m.stock} {m.unit || otherUnit || 'Roll'}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Issue Date & Remarks */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                          ISSUE DATE
+                        </span>
+                        <input
+                          type="date"
+                          value={issueDate}
+                          onChange={(e) => setIssueDate(e.target.value)}
+                          style={{
+                            width: '100%', padding: '8px', borderRadius: '8px',
+                            border: '1px solid #cbd5e1', background: '#ffffff',
+                            fontSize: '12.5px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', display: 'block', marginBottom: '4px' }}>
+                          REMARKS / INSTRUCTIONS
+                        </span>
+                        <input
+                          type="text"
+                          value={remarks}
+                          onChange={(e) => setRemarks(e.target.value)}
+                          placeholder="e.g. Elastic for waistband..."
+                          style={{
+                            width: '100%', padding: '8px 10px', borderRadius: '8px',
+                            border: '1px solid #cbd5e1', background: '#ffffff',
+                            fontSize: '12px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+
+
+                  </div>
+
+                  {/* RIGHT COLUMN: TOTAL REQUIREMENT LIVE SUMMARY */}
+                  <div style={{
+                    padding: '18px 20px',
+                    borderRadius: '12px',
+                    background: '#ffffff',
+                    border: '1.5px solid #059669',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 4px 14px rgba(5, 150, 105, 0.08)'
+                  }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '14px' }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Layers size={16} color="#059669" />
+                          <span>Total Requirement on Original Bill:</span>
+                        </div>
+                        <span style={{ fontSize: '11px', fontWeight: '800', color: '#059669', background: '#dcfce7', padding: '3px 8px', borderRadius: '6px' }}>
+                          ORIGINAL BILL SPEC
+                        </span>
+                      </div>
+
+                      {/* Production Quick Details & Editable Issue Pcs */}
+                      {withoutLotActive ? (
+                        <div style={{
+                          background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #fed7aa',
+                          marginBottom: '12px',
+                          fontSize: '12.5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}>
+                          <div>
+                            <span style={{ fontSize: '10.5px', color: '#c2410c', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                              ISSUE MODE & LOT
+                            </span>
+                            <strong style={{ color: '#9a3412', fontSize: '13.5px' }}>
+                              Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
+                            </strong>
+                          </div>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            background: '#ea580c',
+                            color: '#ffffff',
+                            padding: '3px 8px',
+                            borderRadius: '6px'
+                          }}>
+                            ⚡ DIRECT FLOOR ISSUE
+                          </span>
+                        </div>
+                      ) : (
+                        <div style={{
+                          background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #bfdbfe',
+                          marginBottom: '12px',
+                          fontSize: '12.5px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between'
+                        }}>
+                          <div>
+                            <span style={{ fontSize: '10.5px', color: '#1d4ed8', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                              ISSUE MODE & LOT
+                            </span>
+                            <strong style={{ color: '#1e40af', fontSize: '13.5px' }}>
+                              With BOM — LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.style || lotDetails?.garmentType || withoutLotStyle || 'Lower / Tracksuit'})
+                            </strong>
+                          </div>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            background: '#2563eb',
+                            color: '#ffffff',
+                            padding: '3px 8px',
+                            borderRadius: '6px'
+                          }}>
+                            🛡️ BOM APPROVED ({lotDetails?.quantity || issuePcs || 0} Pcs)
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Editable Issue Box: Direct Weight in Kgs for Bone, Pcs for Elastic & Tape */}
+                      {materialMode === 'bone' ? (
+                        <div style={{
+                          padding: '12px 14px',
+                          borderRadius: '10px',
+                          background: '#f0f9ff',
+                          border: '1.5px solid #0284c7',
+                          marginBottom: '14px',
+                          boxShadow: '0 2px 10px rgba(2, 132, 199, 0.08)'
+                        }}>
+                          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Scale size={16} color="#0284c7" />
+                              <span>Direct Issue Weight (Editable):</span>
+                            </span>
+                            <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                              Kg-Wise Floor Issue
+                            </span>
+                          </label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={boneWeightKg}
+                              onChange={(e) => setBoneWeightKg(e.target.value)}
+                              placeholder="Enter Weight in Kg (e.g. 2.50)"
+                              style={{
+                                flex: 1,
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                border: '2px solid #0284c7',
+                                background: '#ffffff',
+                                fontSize: '16px',
+                                fontWeight: '900',
+                                color: '#0f172a',
+                                outline: 'none'
+                              }}
+                            />
+                            <span style={{
+                              fontSize: '15px',
+                              fontWeight: '900',
+                              color: '#0369a1',
+                              background: '#e0f2fe',
+                              padding: '7px 14px',
+                              borderRadius: '8px',
+                              border: '1.5px solid #bae6fd'
+                            }}>
+                              Kgs
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
+                            {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
+                              <button
+                                key={w}
+                                type="button"
+                                onClick={() => setBoneWeightKg(w)}
+                                style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  border: boneWeightKg === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                                  background: boneWeightKg === w ? '#0284c7' : '#ffffff',
+                                  color: boneWeightKg === w ? '#ffffff' : '#0369a1',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.1s ease'
+                                }}
+                              >
+                                {w} Kg
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          background: '#f0fdf4',
+                          border: '1.5px solid #86efac',
+                          marginBottom: '14px'
+                        }}>
+                          <label style={{ fontSize: '12px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <Scissors size={14} color="#059669" />
+                              <span>Issue Pcs (Editable):</span>
+                            </span>
+                            <span style={{ fontSize: '10.5px', background: '#dcfce7', color: '#047857', padding: '2px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                              Live Auto-Calculation
+                            </span>
+                          </label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <input
+                              type="number"
+                              min="1"
+                              value={issuePcs}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === '') {
+                                  setIssuePcs('');
+                                } else {
+                                  const parsed = parseInt(val, 10);
+                                  setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
+                                }
+                              }}
+                              placeholder="Enter Issue Pcs"
+                              style={{
+                                flex: 1,
+                                padding: '7px 10px',
+                                borderRadius: '6px',
+                                border: '1.5px solid #059669',
+                                background: '#ffffff',
+                                fontSize: '15px',
+                                fontWeight: '800',
+                                color: '#0f172a',
+                                outline: 'none'
+                              }}
+                            />
+                            <span style={{ fontSize: '13px', fontWeight: '800', color: '#334155' }}>Pcs</span>
+                            {!withoutLotActive && lotDetails?.quantity && (
+                              <button
+                                type="button"
+                                onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
+                                style={{
+                                  padding: '6px 9px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #86efac',
+                                  background: '#ffffff',
+                                  color: '#047857',
+                                  fontSize: '11px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Match Cutting ({lotDetails.quantity})
+                              </button>
+                            )}
+                          </div>
+                          {materialMode === 'all' && (
+                            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #86efac', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', minWidth: '130px' }}>Bone Weight (Kg):</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0.01"
+                                value={boneWeightKg}
+                                onChange={(e) => setBoneWeightKg(e.target.value)}
+                                placeholder="e.g. 2.50"
+                                style={{
+                                  flex: 1,
+                                  padding: '6px 10px',
+                                  borderRadius: '6px',
+                                  border: '1.5px solid #0284c7',
+                                  background: '#ffffff',
+                                  fontSize: '14px',
+                                  fontWeight: '800',
+                                  color: '#0f172a',
+                                  outline: 'none'
+                                }}
+                              />
+                              <span style={{ fontSize: '13px', fontWeight: '900', color: '#0369a1' }}>Kgs</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Material Requirement Highlights */}
+                      {(materialMode === 'elastic' || materialMode === 'both') && (() => {
+                        const effectiveRollsToIssue = withoutLotActive
+                          ? (Math.ceil((parseInt(issuePcs, 10) || 0) / effectiveDivisor) || 1)
+                          : (calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1);
+                        return (
+                          <div style={{
+                            padding: '14px 16px',
+                            borderRadius: '12px',
+                            background: '#f0fdf4',
+                            border: '2px solid #059669',
+                            marginBottom: materialMode === 'both' ? '12px' : '16px',
+                            boxShadow: '0 3px 12px rgba(5, 150, 105, 0.08)'
+                          }}>
+                            {/* Top: Material Name & Per Pc Details */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                                  <span style={{ fontSize: '11px', color: '#047857', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    {elasticMaterialName || 'Elastic'} Total Requirement
+                                  </span>
+                                  {currentElasticMaterial && (
+                                    <span style={{ fontSize: '10px', background: '#dcfce7', color: '#065f46', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                      ID: {currentElasticMaterial.id}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
+                                  {withoutLotActive ? (
+                                    <span>Rule: <strong>{issuePcs} Pcs ÷ {effectiveDivisor}</strong> ({effectiveWidth})</span>
+                                  ) : (
+                                    <span>Per Pc: <strong>{calcResult.elasticPerPcMtr} Mtr</strong> ({elasticSizeInput} {elasticUnit}) × <strong>{issuePcs} Pcs</strong></span>
+                                  )}
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                                  {withoutLotActive ? 'Issue Pcs' : 'Total Length'}
+                                </span>
+                                <span style={{ fontSize: '18px', fontWeight: '900', color: '#0f172a' }}>
+                                  {withoutLotActive ? `${issuePcs} Pcs` : `${calcResult.totalElasticMtr} Mtr`}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* HERO CALLOUT: TOTAL ISSUE (31 ROLLS) */}
+                            <div style={{
+                              background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                              borderRadius: '10px',
+                              padding: '12px 14px',
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div style={{
+                                  width: '38px', height: '38px', borderRadius: '8px',
+                                  background: 'rgba(255,255,255,0.2)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: '20px', fontWeight: '900'
+                                }}>
+                                  📦
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                    TOTAL ISSUE QUANTITY
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                    {withoutLotActive
+                                      ? `Formula: ${issuePcs} Pcs ÷ ${effectiveDivisor} (${effectiveWidth})`
+                                      : `Formula: ${calcResult.totalElasticMtr} Mtr ÷ ${effectiveDivisor} (${effectiveWidth})`}
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                                  = {effectiveRollsToIssue} <span style={{ fontSize: '18px', fontWeight: '800' }}>Roll(s)</span>
+                                </div>
+                                <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                                  {currentElasticMaterial ? `Stock in store: ${currentElasticMaterial.stock} Roll(s)` : 'Total to hand over'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {(materialMode === 'tape' || materialMode === 'both') && (() => {
+                        const effTapePcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                        const tapeExact = effTapePcs > 0 ? (effTapePcs / 45).toFixed(2) : '0';
+                        const tapeRolls = effTapePcs > 0 ? Math.ceil(effTapePcs / 45) : 0;
+
+                        return (
+                          <div style={{
+                            padding: '14px 16px',
+                            borderRadius: '12px',
+                            background: '#eff6ff',
+                            border: '2px solid #2563eb',
+                            marginBottom: '14px',
+                            boxShadow: '0 3px 12px rgba(37, 99, 235, 0.08)'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                                  <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                    {tapeMaterialName || 'Tape'} Total Requirement (Pcs ÷ 45)
+                                  </span>
+                                  {currentTapeMaterial && (
+                                    <span style={{ fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                      ID: {currentTapeMaterial.id}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
+                                  Formula: <strong>{effTapePcs} Pcs ÷ 45</strong> = <strong>{tapeExact} Rolls</strong>
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                                  Standard Rule
+                                </span>
+                                <span style={{ fontSize: '14px', fontWeight: '900', color: '#1d4ed8' }}>
+                                  1 Roll / 45 Pcs
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* HERO CALLOUT: TAPE TOTAL ISSUE */}
+                            <div style={{
+                              background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                              borderRadius: '10px',
+                              padding: '12px 14px',
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div style={{
+                                  width: '42px', height: '42px', borderRadius: '8px',
+                                  background: 'rgba(255,255,255,0.2)',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: '22px'
+                                }}>
+                                  📦
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                    TOTAL TAPE ISSUE QUANTITY
+                                  </div>
+                                  <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                    {effTapePcs} Pcs ÷ 45 = {tapeExact} → {tapeRolls} Roll(s)
+                                  </div>
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                                  {tapeRolls} <span style={{ fontSize: '16px', fontWeight: '800' }}>Roll(s)</span>
+                                </div>
+                                <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                                  {currentTapeMaterial ? `Stock in store: ${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Roll'}` : 'Total to issue'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Bone Roll Requirement Highlight */}
+                      {(materialMode === 'bone' || materialMode === 'all') && (
+                        <div style={{
+                          padding: '14px 16px',
+                          borderRadius: '12px',
+                          background: '#f0f9ff',
+                          border: '2px solid #0284c7',
+                          marginBottom: '14px',
+                          boxShadow: '0 3px 12px rgba(2, 132, 199, 0.08)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
+                                <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                  • {(boneMaterialName || 'BONE CHINESE (BEIGE)').toUpperCase()} REQUIREMENT
+                                </span>
+                                {(currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346') && (
+                                  <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                    ID: {currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346'}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '700', marginTop: '3px' }}>
+                                {!withoutLotActive ? 'With BOM Approved Floor Issue (Kg-Wise)' : 'Direct Floor Issue (Kg-Wise)'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                                ISSUE UNIT
+                              </span>
+                              <span style={{ fontSize: '14px', fontWeight: '800', color: '#0284c7' }}>
+                                Kilograms (Kg)
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* HERO CALLOUT: BONE TOTAL ISSUE */}
+                          <div style={{
+                            background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                            borderRadius: '10px',
+                            padding: '12px 14px',
+                            color: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{
+                                width: '38px', height: '38px', borderRadius: '8px',
+                                background: 'rgba(255,255,255,0.2)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '20px', fontWeight: '900'
+                              }}>
+                                📦
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                  TOTAL BONE ISSUE
+                                </div>
+                                <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                  {!withoutLotActive ? 'Approved BOM Floor Weight Issue (Kg-Wise)' : 'Direct Floor Weight Issue (Kg-Wise)'}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                                {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
+                              </div>
+                              <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                                Store stock: {currentBoneMaterial ? (currentBoneMaterial.stock ?? '15') : '15'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Other Accessories Requirement Highlight */}
+                      {materialMode === 'other' && (
+                        <div style={{
+                          padding: '14px 16px',
+                          borderRadius: '12px',
+                          background: '#faf5ff',
+                          border: '2px solid #7c3aed',
+                          marginBottom: '14px',
+                          boxShadow: '0 3px 12px rgba(124, 58, 237, 0.08)'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#7c3aed' }}></span>
+                                <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                  • {(otherMaterialName || 'OTHER ACCESSORY').toUpperCase()} REQUIREMENT
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '12px', color: '#6b21a8', fontWeight: '700', marginTop: '3px' }}>
+                                Manual Floor Issue for {issuePcs || lotDetails?.quantity || 0} Pcs
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                                ISSUE UNIT
+                              </span>
+                              <span style={{ fontSize: '14px', fontWeight: '800', color: '#7c3aed' }}>
+                                {otherUnit || 'Roll'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* HERO CALLOUT: OTHER ACCESSORIES TOTAL ISSUE */}
+                          <div style={{
+                            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                            borderRadius: '10px',
+                            padding: '12px 14px',
+                            color: '#ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            boxShadow: '0 4px 14px rgba(124, 58, 237, 0.3)'
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <div style={{
+                                width: '38px', height: '38px', borderRadius: '8px',
+                                background: 'rgba(255,255,255,0.2)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: '20px', fontWeight: '900'
+                              }}>
+                                📦
+                              </div>
+                              <div>
+                                <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                                  TOTAL ISSUE QUANTITY
+                                </div>
+                                <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                                  {otherMaterialName}: {otherRollCount || 1} {otherUnit || 'Roll'}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                                = {otherRollCount || 1} <span style={{ fontSize: '18px', fontWeight: '800' }}>{otherUnit || 'Roll'}(s)</span>
+                              </div>
+                              <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                                Direct Floor Handover
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Formula Note (Shown for Elastic, Tape & Other) */}
+                      {materialMode !== 'bone' && (
+                        <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
+                          Conversion Formula: <strong style={{ color: '#0f172a' }}>{materialMode === 'other' ? `Manual Material Issue: ${otherRollCount || 1} ${otherUnit || 'Roll'}(s) for ${issuePcs || 0} Pcs` : materialMode === 'tape' ? (calcResult.tapeFormula || `${issuePcs || lotDetails?.quantity || 0} Pcs ÷ 45 = ${calcResult.tapeRolls || Math.ceil((issuePcs || lotDetails?.quantity || 0) / 45)} Roll(s)`) : withoutLotActive ? `Without BOM: ${issuePcs || 0} Pcs ÷ ${effectiveDivisor} (${effectiveWidth}) = ${Math.ceil((parseInt(issuePcs, 10) || 0) / effectiveDivisor)} Roll(s)` : calcResult.formulaExplanation}</strong>
                         </div>
                       )}
                     </div>
-                  )}
 
-                  {/* Material Requirement Highlights */}
-                  {(materialMode === 'elastic' || materialMode === 'both') && (() => {
-                    const effectiveRollsToIssue = calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || 1;
-                    return (
-                      <div style={{
-                        padding: '14px 16px',
-                        borderRadius: '12px',
-                        background: '#f0fdf4',
-                        border: '2px solid #059669',
-                        marginBottom: materialMode === 'both' ? '12px' : '16px',
-                        boxShadow: '0 3px 12px rgba(5, 150, 105, 0.08)'
-                      }}>
-                        {/* Top: Material Name & Per Pc Details */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                              <span style={{ fontSize: '11px', color: '#047857', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                {elasticMaterialName || 'Elastic'} Total Requirement
-                              </span>
-                              {currentElasticMaterial && (
-                                <span style={{ fontSize: '10px', background: '#dcfce7', color: '#065f46', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
-                                  ID: {currentElasticMaterial.id}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
-                              Per Pc: <strong>{calcResult.elasticPerPcMtr} Mtr</strong> ({elasticSizeInput} {elasticUnit}) × <strong>{issuePcs} Pcs</strong>
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                              Total Length
-                            </span>
-                            <span style={{ fontSize: '18px', fontWeight: '900', color: '#0f172a' }}>
-                              {calcResult.totalElasticMtr} Mtr
-                            </span>
-                          </div>
-                        </div>
+                    <div style={{ fontSize: '12px', color: '#059669', fontWeight: '700', marginTop: '10px', textAlign: 'center' }}>
+                      ✓ All details verified & ready to print formal original bill / PO
+                    </div>
+                  </div>
 
-                        {/* HERO CALLOUT: TOTAL ISSUE (31 ROLLS) */}
-                        <div style={{
-                          background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                          borderRadius: '10px',
-                          padding: '12px 14px',
-                          color: '#ffffff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          boxShadow: '0 4px 14px rgba(5, 150, 105, 0.3)'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '38px', height: '38px', borderRadius: '8px',
-                              background: 'rgba(255,255,255,0.2)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '20px', fontWeight: '900'
-                            }}>
-                              📦
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
-                                TOTAL ISSUE QUANTITY
-                              </div>
-                              <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                                Formula: {calcResult.totalElasticMtr} Mtr ÷ {effectiveDivisor} ({effectiveWidth})
-                              </div>
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
-                              = {effectiveRollsToIssue} <span style={{ fontSize: '18px', fontWeight: '800' }}>Roll(s)</span>
-                            </div>
-                            <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                              {currentElasticMaterial ? `Stock in store: ${currentElasticMaterial.stock} Roll(s)` : 'Total to hand over'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
+                </div>
 
-                  {(materialMode === 'tape' || materialMode === 'both') && (() => {
-                    const effTapePcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
-                    const tapeExact = effTapePcs > 0 ? (effTapePcs / 45).toFixed(2) : '0';
-                    const tapeRolls = effTapePcs > 0 ? Math.ceil(effTapePcs / 45) : 0;
+                {/* ACTION: GENERATE BILL BUTTON */}
+                <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: '13px', color: '#64748b' }}>
+                    {withoutLotActive ? (
+                      <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Zap size={15} /> Without BOM Mode ({materialMode === 'other' ? 'Other Accessories' : materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total Issue: <strong style={{ color: '#ea580c' }}>{materialMode === 'other' ? `${otherRollCount || 1} ${otherUnit || 'Roll'}(s)` : materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / effectiveDivisor)} Roll(s) (${effectiveWidth})`}</strong>
+                      </span>
+                    ) : bomStatus === 'approved' ? (
+                      <span>
+                        Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
+                      </span>
+                    ) : (
+                      <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Lock size={15} /> Original Issue Bill / PO generation locked until BOM is created & approved
+                      </span>
+                    )}
+                  </div>
 
-                    return (
-                      <div style={{
-                        padding: '14px 16px',
-                        borderRadius: '12px',
-                        background: '#eff6ff',
-                        border: '2px solid #2563eb',
-                        marginBottom: '14px',
-                        boxShadow: '0 3px 12px rgba(37, 99, 235, 0.08)'
-                      }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                              <span style={{ fontSize: '11px', color: '#1d4ed8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                {tapeMaterialName || 'Tape'} Total Requirement (Pcs ÷ 45)
-                              </span>
-                              {currentTapeMaterial && (
-                                <span style={{ fontSize: '10px', background: '#dbeafe', color: '#1e40af', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
-                                  ID: {currentTapeMaterial.id}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '12px', color: '#334155', fontWeight: '600', marginTop: '3px' }}>
-                              Formula: <strong>{effTapePcs} Pcs ÷ 45</strong> = <strong>{tapeExact} Rolls</strong>
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                              Standard Rule
-                            </span>
-                            <span style={{ fontSize: '14px', fontWeight: '900', color: '#1d4ed8' }}>
-                              1 Roll / 45 Pcs
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* HERO CALLOUT: TAPE TOTAL ISSUE */}
-                        <div style={{
-                          background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                          borderRadius: '10px',
-                          padding: '12px 14px',
-                          color: '#ffffff',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                              width: '42px', height: '42px', borderRadius: '8px',
-                              background: 'rgba(255,255,255,0.2)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: '22px'
-                            }}>
-                              📦
-                            </div>
-                            <div>
-                              <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
-                                TOTAL TAPE ISSUE QUANTITY
-                              </div>
-                              <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                                {effTapePcs} Pcs ÷ 45 = {tapeExact} → {tapeRolls} Roll(s)
-                              </div>
-                            </div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
-                              {tapeRolls} <span style={{ fontSize: '16px', fontWeight: '800' }}>Roll(s)</span>
-                            </div>
-                            <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                              {currentTapeMaterial ? `Stock in store: ${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Roll'}` : 'Total to issue'}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Bone Roll Requirement Highlight */}
-                  {(materialMode === 'bone' || materialMode === 'all') && (
-                    <div style={{
-                      padding: '14px 16px',
+                  <button
+                    type="button"
+                    onClick={generateElasticIssueBill}
+                    disabled={generating || (!withoutLotActive && bomStatus !== 'approved')}
+                    title={(!withoutLotActive && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
+                    style={{
+                      padding: '12px 32px',
                       borderRadius: '12px',
-                      background: '#f0f9ff',
-                      border: '2px solid #0284c7',
-                      marginBottom: '14px',
-                      boxShadow: '0 3px 12px rgba(2, 132, 199, 0.08)'
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
-                            <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                              • {(boneMaterialName || 'BONE CHINESE (BEIGE)').toUpperCase()} REQUIREMENT
-                            </span>
-                            {(currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346') && (
-                              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
-                                ID: {currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346'}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '700', marginTop: '3px' }}>
-                            {!withoutLotActive ? 'With BOM Approved Floor Issue (Kg-Wise)' : 'Direct Floor Issue (Kg-Wise)'}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                            ISSUE UNIT
-                          </span>
-                          <span style={{ fontSize: '14px', fontWeight: '800', color: '#0284c7' }}>
-                            Kilograms (Kg)
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* HERO CALLOUT: BONE TOTAL ISSUE */}
-                      <div style={{
-                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                        borderRadius: '10px',
-                        padding: '12px 14px',
-                        color: '#ffffff',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{
-                            width: '38px', height: '38px', borderRadius: '8px',
-                            background: 'rgba(255,255,255,0.2)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '20px', fontWeight: '900'
-                          }}>
-                            📦
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
-                              TOTAL BONE ISSUE
-                            </div>
-                            <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                              {!withoutLotActive ? 'Approved BOM Floor Weight Issue (Kg-Wise)' : 'Direct Floor Weight Issue (Kg-Wise)'}
-                            </div>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
-                            {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
-                          </div>
-                          <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                            Store stock: {currentBoneMaterial ? (currentBoneMaterial.stock ?? '15') : '15'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Formula Note (Shown for Elastic & Tape only) */}
-                  {materialMode !== 'bone' && (
-                    <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
-                      Conversion Formula: <strong style={{ color: '#0f172a' }}>{materialMode === 'tape' ? (calcResult.tapeFormula || `${issuePcs || lotDetails?.quantity || 0} Pcs ÷ 45 = ${calcResult.tapeRolls || Math.ceil((issuePcs || lotDetails?.quantity || 0)/45)} Roll(s)`) : calcResult.formulaExplanation}</strong>
-                    </div>
-                  )}
+                      border: 'none',
+                      background: (withoutLotActive || bomStatus === 'approved')
+                        ? (withoutLotActive ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)')
+                        : '#94a3b8',
+                      color: '#ffffff',
+                      fontSize: '15px',
+                      fontWeight: '800',
+                      cursor: (generating || (!withoutLotActive && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
+                      boxShadow: (withoutLotActive || bomStatus === 'approved') ? (withoutLotActive ? '0 6px 18px rgba(234, 88, 12, 0.4)' : '0 6px 18px rgba(5, 150, 105, 0.4)') : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      opacity: (withoutLotActive || bomStatus === 'approved') ? 1 : 0.7
+                    }}
+                  >
+                    {generating ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (withoutLotActive || bomStatus === 'approved') ? (
+                      <Printer size={18} />
+                    ) : (
+                      <Lock size={18} />
+                    )}
+                    <span>
+                      {generating
+                        ? 'Generating Original Bill...'
+                        : withoutLotActive
+                          ? `Generate W/O BOM ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
+                          : 'Generate Original Issue Bill / PO'}
+                    </span>
+                  </button>
                 </div>
-
-                <div style={{ fontSize: '12px', color: '#059669', fontWeight: '700', marginTop: '10px', textAlign: 'center' }}>
-                  ✓ All details verified & ready to print formal original bill / PO
-                </div>
-              </div>
-
-            </div>
-
-            {/* ACTION: GENERATE BILL BUTTON */}
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '13px', color: '#64748b' }}>
-                {withoutLotActive ? (
-                  <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Zap size={15} /> Without BOM Mode ({materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong>
-                  </span>
-                ) : bomStatus === 'approved' ? (
-                  <span>
-                    Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
-                  </span>
-                ) : (
-                  <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Lock size={15} /> Original Issue Bill / PO generation locked until BOM is created & approved
-                  </span>
-                )}
-              </div>
-
-              <button
-                type="button"
-                onClick={generateElasticIssueBill}
-                disabled={generating || (!withoutLotActive && bomStatus !== 'approved')}
-                title={(!withoutLotActive && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
-                style={{
-                  padding: '12px 32px',
-                  borderRadius: '12px',
-                  border: 'none',
-                  background: (withoutLotActive || bomStatus === 'approved')
-                    ? (withoutLotActive ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)')
-                    : '#94a3b8',
-                  color: '#ffffff',
-                  fontSize: '15px',
-                  fontWeight: '800',
-                  cursor: (generating || (!withoutLotActive && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
-                  boxShadow: (withoutLotActive || bomStatus === 'approved') ? (withoutLotActive ? '0 6px 18px rgba(234, 88, 12, 0.4)' : '0 6px 18px rgba(5, 150, 105, 0.4)') : 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  opacity: (withoutLotActive || bomStatus === 'approved') ? 1 : 0.7
-                }}
-              >
-                {generating ? (
-                  <RefreshCw size={18} className="animate-spin" />
-                ) : (withoutLotActive || bomStatus === 'approved') ? (
-                  <Printer size={18} />
-                ) : (
-                  <Lock size={18} />
-                )}
-                <span>
-                  {generating
-                    ? 'Generating Original Bill...'
-                    : withoutLotActive
-                      ? `Generate W/O BOM ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
-                      : 'Generate Original Issue Bill / PO'}
-                </span>
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET AND NOT IN W/O PO MODE) */}
-      {!lotDetails && !isWithoutPo && (
-        <div className="panel" style={{
-          padding: '36px 24px',
-          borderRadius: '16px',
-          background: 'var(--bg-card, #ffffff)',
-          border: '1.5px dashed #cbd5e1',
-          textAlign: 'center',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '10px'
-        }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '12px',
-            background: '#f0fdf4',
-            color: '#059669',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}>
-            <Search size={22} />
+              </>
+            )}
           </div>
-          <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
-            Enter or Select a Lot Number Above
-          </h3>
-          <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-muted, #64748b)', fontWeight: '500', maxWidth: '440px' }}>
-            Search a Lot Number above or click an Approved Lot to verify BOM approval and open the Elastic / Tape calculation and issue form.
-          </p>
 
-          <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setIsWithoutLot(true);
-                setIsWithoutPo(true);
-                if (!lotDetails) {
-                  setLotDetails({
-                    lotNo: searchLotInput || '',
-                    style: withoutLotStyle || 'Floor Issue',
-                    quantity: issuePcs || 0,
-                    brand: 'Mohit Hosiery',
-                    garmentType: withoutLotStyle || 'LOWER',
-                    fabric: 'Cotton Poly Blend',
-                    shade: 'Standard'
-                  });
-                }
-                if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
-                  handleSearchLot(searchLotInput.trim());
-                }
-                showToast('⚡ Switched to Without BOM mode. Enter Lot Number to proceed!');
-              }}
-              style={{
-                padding: '9px 20px',
-                borderRadius: '10px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
-                color: '#ffffff',
-                fontSize: '13px',
-                fontWeight: '800',
-                cursor: 'pointer',
-                boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
+          {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET AND NOT IN W/O PO MODE) */}
+          {!lotDetails && !isWithoutPo && (
+            <div className="panel" style={{
+              padding: '36px 24px',
+              borderRadius: '16px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1.5px dashed #cbd5e1',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px'
+            }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '12px',
+                background: '#f0fdf4',
+                color: '#059669',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <Zap size={16} /> ⚡ Direct Issue Without BOM (No BOM Required)
-            </button>
-          </div>
-        </div>
-      )}
-    </>
+                justifyContent: 'center'
+              }}>
+                <Search size={22} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                Enter or Select a Lot Number Above
+              </h3>
+              <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-muted, #64748b)', fontWeight: '500', maxWidth: '440px' }}>
+                Search a Lot Number above or click an Approved Lot to verify BOM approval and open the Elastic / Tape calculation and issue form.
+              </p>
+
+              <div style={{ display: 'flex', gap: '8px', marginTop: '6px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWithoutLot(true);
+                    setIsWithoutPo(true);
+                    if (!lotDetails) {
+                      setLotDetails({
+                        lotNo: searchLotInput || '',
+                        style: withoutLotStyle || 'Floor Issue',
+                        quantity: issuePcs || 0,
+                        brand: 'Mohit Hosiery',
+                        garmentType: withoutLotStyle || 'LOWER',
+                        fabric: 'Cotton Poly Blend',
+                        shade: 'Standard'
+                      });
+                    }
+                    if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                      handleSearchLot(searchLotInput.trim());
+                    }
+                    showToast('⚡ Switched to Without BOM mode. Enter Lot Number to proceed!');
+                  }}
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px'
+                  }}
+                >
+                  <Zap size={16} /> ⚡ Direct Issue Without BOM (No BOM Required)
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       ) : (
         /* HISTORY TAB */
         <div className="panel" style={{
@@ -4101,57 +5629,174 @@ export default function ElasticIssueView({
           border: '1px solid var(--border-color, #dbeafe)',
           boxShadow: 'var(--shadow-card)'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
                 Elastic Issue Slips History
               </h3>
               <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                Records of internal elastic rolls issued to cutting and sewing departments
+                Sequence-tracked records of all material issue slips (Elastic, Tape, Bone & Standard)
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <div style={{ position: 'relative', width: '240px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Sequence Sort Mode Selector */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '3px', background: '#f1f5f9', padding: '3px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                <button
+                  type="button"
+                  onClick={() => setHistorySortMode('seq_asc')}
+                  style={{
+                    padding: '5px 9px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: historySortMode === 'seq_asc' ? '#0f172a' : 'transparent',
+                    color: historySortMode === 'seq_asc' ? '#ffffff' : '#475569',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                  title="Sort 1, 2, 3 sequence ascending (track in exact order)"
+                >
+                  🔢 1, 2, 3 Sequence
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistorySortMode('seq_desc')}
+                  style={{
+                    padding: '5px 9px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: historySortMode === 'seq_desc' ? '#0f172a' : 'transparent',
+                    color: historySortMode === 'seq_desc' ? '#ffffff' : '#475569',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                  title="Sort latest sequence descending"
+                >
+                  🔢 Latest Seq
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistorySortMode('date_desc')}
+                  style={{
+                    padding: '5px 9px',
+                    borderRadius: '6px',
+                    border: 'none',
+                    background: historySortMode === 'date_desc' ? '#0f172a' : 'transparent',
+                    color: historySortMode === 'date_desc' ? '#ffffff' : '#475569',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    cursor: 'pointer'
+                  }}
+                  title="Sort newest date first"
+                >
+                  📅 Date
+                </button>
+              </div>
+
+              {/* Search Box */}
+              <div style={{ position: 'relative', width: '220px' }}>
                 <input
                   type="text"
-                  placeholder="Search by Slip No / Lot No / Receiver..."
+                  placeholder="Search Slip / Lot / Receiver..."
                   value={historySearch}
                   onChange={(e) => setHistorySearch(e.target.value)}
                   style={{
-                    width: '100%', padding: '7px 12px 7px 32px', borderRadius: '8px',
-                    border: '1px solid #cbd5e1', fontSize: '12.5px', boxSizing: 'border-box'
+                    width: '100%', padding: '6px 10px 6px 30px', borderRadius: '8px',
+                    border: '1px solid #cbd5e1', fontSize: '12px', boxSizing: 'border-box'
                   }}
                 />
-                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                <Search size={13} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
               </div>
 
               <button
                 type="button"
                 onClick={loadIssueHistory}
                 style={{
-                  padding: '7px 12px', borderRadius: '8px', border: '1px solid #cbd5e1',
+                  padding: '6px 11px', borderRadius: '8px', border: '1px solid #cbd5e1',
                   background: '#ffffff', color: '#334155', cursor: 'pointer', fontSize: '12px', fontWeight: '600'
                 }}
+                title="Refresh History"
               >
                 <RefreshCw size={13} />
               </button>
             </div>
           </div>
 
+          {/* Line-Wise Filter Tabs */}
+          <div style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+            marginBottom: '16px',
+            flexWrap: 'wrap',
+            paddingBottom: '12px',
+            borderBottom: '1px solid #e2e8f0'
+          }}>
+            <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#64748b', marginRight: '4px' }}>
+              LINE WISE TRACK:
+            </span>
+            {[
+              { id: 'all', label: 'All Slips', count: historyLineCounts.all, color: '#0f172a', bg: '#f1f5f9' },
+              { id: 'elastic_wo', label: 'Elastic W/O (1, 2, 3...)', count: historyLineCounts.elastic_wo, color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+              { id: 'tape_wo', label: 'Tape W/O (1, 2, 3...)', count: historyLineCounts.tape_wo, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+              { id: 'bone_wo', label: 'Bone W/O (1, 2, 3...)', count: historyLineCounts.bone_wo, color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' },
+              { id: 'standard', label: 'With LOT (BOM)', count: historyLineCounts.standard, color: '#059669', bg: '#f0fdf4', border: '#bbf7d0' }
+            ].map(tab => {
+              const isActive = historyLineFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setHistoryLineFilter(tab.id)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: isActive ? `2px solid ${tab.color}` : '1px solid #cbd5e1',
+                    background: isActive ? tab.bg : '#ffffff',
+                    color: isActive ? tab.color : '#475569',
+                    fontSize: '12px',
+                    fontWeight: isActive ? '800' : '600',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    transition: 'all 0.15s ease',
+                    boxShadow: isActive ? '0 2px 4px rgba(0,0,0,0.06)' : 'none'
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: '800',
+                    background: isActive ? tab.color : '#e2e8f0',
+                    color: isActive ? '#ffffff' : '#475569',
+                    padding: '1px 6px',
+                    borderRadius: '10px'
+                  }}>
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           {/* History Table */}
-          {issueHistory.length === 0 ? (
+          {processedHistory.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
               <Layers size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-              <div style={{ fontSize: '14px', fontWeight: '700' }}>No Elastic Issue Slips generated yet.</div>
-              <div style={{ fontSize: '12px', marginTop: '4px' }}>Issue your first roll using the "New Elastic Issue" tab above.</div>
+              <div style={{ fontSize: '14px', fontWeight: '700' }}>No issue slips found for current filter.</div>
+              <div style={{ fontSize: '12px', marginTop: '4px' }}>Try selecting "All Slips" or clear your search term.</div>
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '800' }}>
+                    <th style={{ padding: '10px 12px' }}>SEQ #</th>
                     <th style={{ padding: '10px 12px' }}>BILL / SLIP NO</th>
+                    <th style={{ padding: '10px 12px' }}>LINE TYPE</th>
                     <th style={{ padding: '10px 12px' }}>DATE</th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
                     <th style={{ padding: '10px 12px' }}>ITEM / STYLE</th>
@@ -4164,32 +5809,58 @@ export default function ElasticIssueView({
                   </tr>
                 </thead>
                 <tbody>
-                  {issueHistory
-                    .filter(h => {
-                      if (!historySearch) return true;
-                      const q = historySearch.toLowerCase();
-                      return String(h.slipNo || '').toLowerCase().includes(q) ||
-                        String(h.lotNo || '').toLowerCase().includes(q) ||
-                        String(h.receiverName || '').toLowerCase().includes(q) ||
-                        String(h.issuerName || '').toLowerCase().includes(q);
-                    })
-                    .map((item, idx) => (
-                      <tr key={item.slipNo || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                  {processedHistory.map((item, idx) => {
+                    const meta = getSlipMeta(item.slipNo);
+                    return (
+                      <tr key={item.slipNo || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfcfd' }}>
+                        {/* Sequence Tracker */}
+                        <td style={{ padding: '10px 12px', fontWeight: '900', color: meta.color }}>
+                          <span style={{
+                            background: meta.bg,
+                            color: meta.color,
+                            border: `1px solid ${meta.border}`,
+                            padding: '2px 7px',
+                            borderRadius: '5px',
+                            fontSize: '11.5px',
+                            fontFamily: 'monospace',
+                            fontWeight: '800'
+                          }}>
+                            #{meta.seq > 0 ? meta.seq : idx + 1}
+                          </span>
+                        </td>
+
+                        {/* Slip No */}
                         <td style={{ padding: '10px 12px', fontWeight: '800' }}>
                           <span style={{
                             fontFamily: 'monospace',
                             fontSize: '12.5px',
                             fontWeight: '800',
-                            color: String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '#c2410c' : '#059669',
-                            background: String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '#fff7ed' : '#f0fdf4',
+                            color: meta.color,
+                            background: meta.bg,
                             padding: '3px 8px',
                             borderRadius: '6px',
-                            border: String(item.slipNo || '').toLowerCase().includes('-w/o-') ? '1px solid #fed7aa' : '1px solid #bbf7d0',
+                            border: `1px solid ${meta.border}`,
                             display: 'inline-block'
                           }}>
                             {item.slipNo}
                           </span>
                         </td>
+
+                        {/* Line Type Tag */}
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: '800',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: meta.bg,
+                            color: meta.color,
+                            border: `1px solid ${meta.border}`
+                          }}>
+                            {meta.badgeText}
+                          </span>
+                        </td>
+
                         <td style={{ padding: '10px 12px', color: '#64748b' }}>
                           {item.date}
                         </td>
@@ -4283,7 +5954,8 @@ export default function ElasticIssueView({
                           </button>
                         </td>
                       </tr>
-                    ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4611,6 +6283,108 @@ export default function ElasticIssueView({
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* HIGH-RES MATERIAL PHOTO ZOOM MODAL */}
+      {previewPhotoUrl && (
+        <div
+          onClick={() => setPreviewPhotoUrl(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999,
+            padding: '20px'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#ffffff',
+              borderRadius: '16px',
+              overflow: 'hidden',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              maxWidth: '540px',
+              width: '100%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              animation: 'scaleIn 0.2s ease-out'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '14px 18px',
+              background: '#0f172a',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px'
+            }}>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: '800', fontSize: '14px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {previewPhotoUrl.title || 'Material Photo Preview'}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', fontSize: '11px', color: '#94a3b8', marginTop: '3px', flexWrap: 'wrap' }}>
+                  {previewPhotoUrl.code && <span>ID: <strong style={{ color: '#60a5fa' }}>{previewPhotoUrl.code}</strong></span>}
+                  {previewPhotoUrl.stock && <span>Stock: <strong style={{ color: '#4ade80' }}>{previewPhotoUrl.stock}</strong></span>}
+                  {previewPhotoUrl.location && <span>Loc: {previewPhotoUrl.location}</span>}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewPhotoUrl(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.15)',
+                  border: 'none',
+                  color: '#ffffff',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Image Area */}
+            <div style={{
+              padding: '16px',
+              background: '#f8fafc',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              maxHeight: '75vh',
+              overflow: 'auto'
+            }}>
+              <img
+                src={previewPhotoUrl.url}
+                alt={previewPhotoUrl.title || 'Material'}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '70vh',
+                  objectFit: 'contain',
+                  borderRadius: '10px',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
+                }}
+              />
             </div>
           </div>
         </div>
