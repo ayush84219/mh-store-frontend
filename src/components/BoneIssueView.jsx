@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
-  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap
+  Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap,
+  Scale, MapPin, Edit2
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -20,8 +21,7 @@ export default function BoneIssueView({
 
   // Issue Method: With Lot vs Without Lot
   const [isWithoutLot, setIsWithoutLot] = useState(false);
-  const [materialMode, setMaterialMode] = useState('bone'); // 'bone' | 'tape' | 'elastic' (NO COMBOS)
-  const [withoutLotStyle, setWithoutLotStyle] = useState('Trouser / Pocketing');
+  const [withoutLotStyle, setWithoutLotStyle] = useState('Lower / Tracksuit');
 
   // Step 1: Search Lot State
   const [searchLotInput, setSearchLotInput] = useState(prefilledLotNo || '');
@@ -30,19 +30,19 @@ export default function BoneIssueView({
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
 
-  // Step 2: Simple Issue Details (Cutting Pcs & Editable Issue Pcs)
+  // Step 2: Simple Issue Details (Direct Issue Weight in Kg & Cutting Pcs)
+  const [boneWeightKg, setBoneWeightKg] = useState('2.50');
   const [issuePcs, setIssuePcs] = useState(0);
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
-  const [tapeWidth, setTapeWidth] = useState('0.5 Inch (Standard)');
-  const [customTapeWidth, setCustomTapeWidth] = useState('');
-  const [elasticWidth, setElasticWidth] = useState('1 Inch (Standard)');
-  const [customElasticWidth, setCustomElasticWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
-  
-  // Issuer & Receiver
-  const [issuerName, setIssuerName] = useState(currentUser?.name || '');
+  const effectiveWidth = boneWidth === 'Custom' ? (customWidth || '1.5 Inch') : boneWidth;
+  const materialMode = 'bone';
+
+  // Issuer, Receiver & Supervisor
+  const [issuerName, setIssuerName] = useState(currentUser?.name || 'paras');
   const [receiverName, setReceiverName] = useState('');
+  const [supervisorName, setSupervisorName] = useState('ROHIT / MONU');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [issueSlipNo, setIssueSlipNo] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -64,12 +64,67 @@ export default function BoneIssueView({
   const [bomDesign, setBomDesign] = useState(null);
   const [loadingDesigns, setLoadingDesigns] = useState(false);
 
+  // Inventory Materials & Mapped Bone Items
+  const [materials, setMaterials] = useState([]);
+  const [boneMaterialName, setBoneMaterialName] = useState('Bone Chinese (Beige)');
+  const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
+
   const searchInputRef = useRef(null);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Fetch materials to support mapping & inventory display
+  const fetchMaterials = async () => {
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/materials`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setMaterials(data);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch materials in BoneIssueView:', e);
+    }
+  };
+
+  // Filter materials to show Bone category
+  const boneMaterials = useMemo(() => {
+    return (materials || []).filter(m => 
+      (m.category || '').toLowerCase().includes('bone') || 
+      (m.name || '').toLowerCase().includes('bone')
+    );
+  }, [materials]);
+
+  // Active Selected Material Object from Inventory
+  const currentBoneMaterial = useMemo(() => {
+    return (boneMaterials || []).find(m => String(m.id) === String(selectedBoneMaterialId)) || null;
+  }, [boneMaterials, selectedBoneMaterialId]);
+
+  // Handler for selecting a Bone item
+  const handleSelectBoneMaterial = (id) => {
+    setSelectedBoneMaterialId(id);
+    const mat = boneMaterials.find(m => String(m.id) === String(id));
+    if (mat) {
+      setBoneMaterialName(mat.name);
+    }
+  };
+
+  // Auto-link bone material on load if not yet selected
+  useEffect(() => {
+    if (boneMaterials.length > 0 && !selectedBoneMaterialId) {
+      const firstBone = boneMaterials[0];
+      if (firstBone) {
+        setSelectedBoneMaterialId(firstBone.id);
+        if (!boneMaterialName || boneMaterialName === 'Bone Pocketing' || boneMaterialName === 'Bone Chinese (Beige)') {
+          setBoneMaterialName(firstBone.name);
+        }
+      }
+    }
+  }, [boneMaterials]);
 
   // Fetch designs to verify BOM existence and approval status
   const fetchDesigns = async () => {
@@ -148,6 +203,7 @@ export default function BoneIssueView({
     fetchNextIssueSlipNo();
     loadIssueHistory();
     fetchDesigns();
+    fetchMaterials();
   }, []);
 
   // Update slip number when isWithoutLot or materialMode changes
@@ -260,6 +316,11 @@ export default function BoneIssueView({
             slipNo: record.slipNo,
             lotNo: record.lotNo,
             issuePcs: record.issuePcs || record.quantity || 0,
+            boneWeightKg: record.boneWeightKg || '2.50',
+            weight: record.boneWeightKg || '2.50',
+            supervisorName: record.supervisorName || 'ROHIT / MONU',
+            selectedBoneMaterialId: record.selectedBoneMaterialId || '',
+            boneMaterialName: record.boneMaterialName || 'Bone Chinese (Beige)',
             issuerName: record.issuerName,
             receiverName: record.receiverName,
             issueDate: record.date,
@@ -287,12 +348,16 @@ export default function BoneIssueView({
             isReturn: false,
             category: 'BONE / POCKETING',
             volume: record.issuePcs || 0,
+            weightKg: record.boneWeightKg || '2.50',
+            supervisorName: record.supervisorName || 'ROHIT / MONU',
             personName: record.issuerName,
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
             date: record.date,
             materials: [{
-              name: 'Bone Pocketing Fabric',
+              name: record.boneMaterialName || 'Bone Chinese (Beige)',
+              materialId: record.selectedBoneMaterialId || '',
+              issueWeightKg: record.boneWeightKg || '2.50',
               issuePcs: record.issuePcs,
               cuttingQty: record.quantity,
               shade: record.shade
@@ -331,6 +396,14 @@ export default function BoneIssueView({
         setBomDesign(null);
       } else {
         setBomDesign(matched);
+        const boneBomRow = (matched.bom || []).find(b => (b.name || '').toLowerCase().includes('bone'));
+        if (boneBomRow && boneBomRow.materialId) {
+          setSelectedBoneMaterialId(boneBomRow.materialId);
+          const mappedBone = (materials || []).find(m => String(m.id) === String(boneBomRow.materialId));
+          if (mappedBone) {
+            setBoneMaterialName(mappedBone.name);
+          }
+        }
         const st = String(matched.status || '').trim().toLowerCase();
         if (st === 'approved') {
           setBomStatus('approved');
@@ -407,16 +480,15 @@ export default function BoneIssueView({
     }
   };
 
-  const effectiveWidth = boneWidth === 'Custom' ? (customWidth || '1.5 Inch') : boneWidth;
-  const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
-  const effectiveElasticWidth = elasticWidth === 'Custom' ? (customElasticWidth || '1 Inch') : elasticWidth;
-
   // ── Build Professional, High-Contrast Black & White Issue Voucher PDF ──────
   const createBoneIssuePDFDocument = async (data) => {
     const {
       slipNo,
       lotNo,
       issuePcs = 0,
+      boneWeightKg = '2.50',
+      boneMaterialName = 'Bone Chinese (Beige)',
+      supervisorName = 'ROHIT / MONU',
       issuerName,
       receiverName,
       date,
@@ -492,7 +564,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    doc.text(isWithoutLot ? `[ W/O BOM - ${modeLabel} ISSUE ]` : '[ ISSUED TO FLOOR ]', pw - im, y + 39, { align: 'right' });
+    doc.text(isWithoutLot ? `[ W/O BOM - ${modeLabel} ISSUE ]` : '[ BOM APPROVED ISSUE ]', pw - im, y + 39, { align: 'right' });
 
     y += 50;
 
@@ -537,7 +609,7 @@ export default function BoneIssueView({
     // Row specifications
     if (isWithoutLot) {
       drawSpec('Lot Number', `LOT #${lotNo || '—'}`, im, y);
-      drawSpec('Issue Quantity', `${issuePcs} Pcs`, im + halfW, y);
+      drawSpec('Issue Weight', `${boneWeightKg} Kg`, im + halfW, y);
       y += 18;
 
       drawSpec('Issue Mode', `WITHOUT BOM (${modeLabel} Floor Issue)`, im, y);
@@ -564,7 +636,7 @@ export default function BoneIssueView({
 
       // Row 3
       drawSpec('Garment Type', garmentType, im, y);
-      drawSpec('Fabric Type', fabric, im + halfW, y);
+      drawSpec('Supervisor Name', supervisorName || 'ROHIT / MONU', im + halfW, y);
       y += 18;
 
       // Row 4
@@ -574,7 +646,7 @@ export default function BoneIssueView({
 
       // Row 5
       drawSpec('Department', 'CUTTING FLOOR', im, y);
-      drawSpec('Issue Pcs Quantity', `${issuePcs} Pcs`, im + halfW, y);
+      drawSpec('Issue Weight', `${boneWeightKg} Kg (${issuePcs} Pcs)`, im + halfW, y);
       y += 24;
     }
 
@@ -607,9 +679,9 @@ export default function BoneIssueView({
     doc.text('#', im + 12, y + 15);
     doc.text('ITEM / MATERIAL DESCRIPTION', im + 40, y + 15);
     if (!isWithoutLot) {
-      doc.text('CUTTING PCS', im + 290, y + 15);
+      doc.text('CUTTING PCS', im + 270, y + 15);
     }
-    doc.text('ISSUE PCS', pw - im - 14, y + 15, { align: 'right' });
+    doc.text('ISSUE WEIGHT (KG)', pw - im - 14, y + 15, { align: 'right' });
     y += thH;
 
     // Data Row
@@ -625,17 +697,17 @@ export default function BoneIssueView({
       ? `Tape Roll (Drawcord Tape - ${tapeWidth || '0.5 Inch'})`
       : effectiveMaterialMode === 'elastic'
         ? `Elastic Waistband Roll (${elasticWidth || '1 Inch'})`
-        : `Bone Pocketing / Piping Fabric (${width || '1.5 Inch'})`;
+        : `${boneMaterialName || 'Bone Chinese (Beige)'} (${width || '1.5 Inch'})`;
     doc.text(itemDesc, im + 40, y + 17);
 
     if (!isWithoutLot) {
       doc.setFont('helvetica', 'normal');
-      doc.text(`${quantity || issuePcs || 0} Pcs`, im + 290, y + 17);
+      doc.text(`${quantity || issuePcs || 0} Pcs`, im + 270, y + 17);
     }
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
-    doc.text(`${issuePcs} Pcs`, pw - im - 14, y + 17, { align: 'right' });
+    doc.text(`${boneWeightKg || '2.50'} Kg`, pw - im - 14, y + 17, { align: 'right' });
     y += trH;
 
     // Row divider line
@@ -651,10 +723,10 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text(`TOTAL ISSUE QUANTITY (${modeLabel}):`, im + 12, y + 16);
+    doc.text(`TOTAL BONE ISSUE WEIGHT (${modeLabel}):`, im + 12, y + 16);
 
     doc.setFontSize(10.5);
-    doc.text(`${issuePcs} Pcs`, pw - im - 14, y + 16, { align: 'right' });
+    doc.text(`${boneWeightKg || '2.50'} Kg`, pw - im - 14, y + 16, { align: 'right' });
     y += totH;
 
     // Accounting double line at bottom of total
@@ -674,7 +746,7 @@ export default function BoneIssueView({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9.5);
     doc.setTextColor(50, 50, 50);
-    const remText = remarks || `Internal Bone pocketing issue for Lot ${lotNo} (${style}) - Issue Qty: ${issuePcs} Pcs.`;
+    const remText = remarks || `Internal Bone pocketing issue for Lot ${lotNo} (${style}) - Issue Weight: ${boneWeightKg} Kg.`;
     const splitRemarks = doc.splitTextToSize(remText, iw);
     doc.text(splitRemarks, im, y);
     y += Math.max(26, splitRemarks.length * 13 + 12);
@@ -683,67 +755,94 @@ export default function BoneIssueView({
     doc.setDrawColor(210, 210, 210);
     doc.setLineWidth(0.6);
     doc.line(im, y, pw - im, y);
-    y += 22;
+    y += 20;
 
-    // ── 5. Dual Signatures (Side-by-Side, NO SCANNER, NO BOXES) ───────────
+    // ── 5. Tri-Signatures (Issuer, Supervisor & Receiver) ─────────────────
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9.5);
     doc.setTextColor(0, 0, 0);
-    doc.text('4. VERIFICATION & DUAL SIGNATURES', im, y);
-    y += 18;
+    doc.text('4. VERIFICATION & FORMAL SIGNATURES', im, y);
+    y += 16;
 
-    const sigW = (iw - 50) / 2;
-    const xSig2 = im + sigW + 50;
+    const sigColW = (iw - 30) / 3;
+    const xSig1 = im;
+    const xSig2 = im + sigColW + 15;
+    const xSig3 = im + (sigColW * 2) + 30;
 
-    // Left: Issuer (Store Staff)
+    // Col 1: Issuer (Store Staff)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     doc.setTextColor(0, 0, 0);
-    doc.text('ISSUED BY (STORE STAFF)', im, y);
+    doc.text('ISSUED BY (STORE)', xSig1, y);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
+    doc.setFontSize(8.5);
     doc.setTextColor(70, 70, 70);
-    doc.text('Name:', im, y + 18);
+    doc.text('Name:', xSig1, y + 16);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
-    doc.text(issuerName || 'N/A', im + 44, y + 18);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(70, 70, 70);
-    doc.text('Date:', im, y + 34);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(date, im + 44, y + 34);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(0, 0, 0);
-    doc.text('Signature: __________________________', im, y + 60);
-
-    // Right: Receiver (Cutting Master)
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('RECEIVED BY (CUTTING MASTER)', xSig2, y);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(70, 70, 70);
-    doc.text('Name:', xSig2, y + 18);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(0, 0, 0);
-    doc.text(receiverName || 'N/A', xSig2 + 44, y + 18);
+    doc.text(issuerName || 'N/A', xSig1 + 34, y + 16);
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(70, 70, 70);
-    doc.text('Date:', xSig2, y + 34);
+    doc.text('Date:', xSig1, y + 30);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(0, 0, 0);
-    doc.text(date, xSig2 + 44, y + 34);
+    doc.text(date, xSig1 + 34, y + 30);
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(0, 0, 0);
-    doc.text('Signature: __________________________', xSig2, y + 60);
+    doc.text('Sig: _______________', xSig1, y + 54);
+
+    // Col 2: Supervisor (Floor Incharge)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.text('SUPERVISOR (FLOOR)', xSig2, y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(70, 70, 70);
+    doc.text('Name:', xSig2, y + 16);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(supervisorName || 'ROHIT / MONU', xSig2 + 34, y + 16);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(70, 70, 70);
+    doc.text('Date:', xSig2, y + 30);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(date, xSig2 + 34, y + 30);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('Sig: _______________', xSig2, y + 54);
+
+    // Col 3: Receiver (Cutting Master)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.text('RECEIVED BY (CUTTING)', xSig3, y);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(70, 70, 70);
+    doc.text('Name:', xSig3, y + 16);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(receiverName || 'N/A', xSig3 + 34, y + 16);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(70, 70, 70);
+    doc.text('Date:', xSig3, y + 30);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(0, 0, 0);
+    doc.text(date, xSig3 + 34, y + 30);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(0, 0, 0);
+    doc.text('Sig: _______________', xSig3, y + 54);
 
     // ── 6. Footer Notice ─────────────────────────────────────────────────
     doc.setFont('helvetica', 'normal');
@@ -780,16 +879,16 @@ export default function BoneIssueView({
       return;
     }
 
-    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT BOM MODE)
+    // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED
     if (!isWithoutLot && bomStatus !== 'approved') {
       if (bomStatus === 'not_created') {
-        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Create BOM in Design View first, or switch to "Without BOM" mode.', 'error');
+        showToast('Workflow Blocked: BOM (Bill of Materials) is not created for this Lot! Create BOM in Design View first.', 'error');
       } else if (bomStatus === 'pending') {
-        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue or switch to "Without BOM" mode.', 'error');
+        showToast('Workflow Blocked: BOM is Pending Approval! Approve in queue first.', 'error');
       } else if (bomStatus === 'rejected') {
-        showToast('Workflow Blocked: BOM was rejected by Admin! Revise in Design View or switch to "Without BOM" mode.', 'error');
+        showToast('Workflow Blocked: BOM was rejected by Admin! Revise in Design View.', 'error');
       } else {
-        showToast('Workflow Blocked: BOM must be created and Approved before issue, or switch to "Without BOM" mode.', 'error');
+        showToast('Workflow Blocked: BOM must be created and Approved before issue.', 'error');
       }
       return;
     }
@@ -811,6 +910,11 @@ export default function BoneIssueView({
         isWithoutLot,
         materialMode,
         issuePcs: effectivePcs,
+        boneWeightKg: boneWeightKg || '2.50',
+        weight: boneWeightKg || '2.50',
+        supervisorName: supervisorName || 'ROHIT / MONU',
+        selectedBoneMaterialId,
+        boneMaterialName: boneMaterialName || 'Bone Chinese (Beige)',
         width: effectiveWidth,
         tapeWidth: effectiveTapeWidth,
         elasticWidth: effectiveElasticWidth,
@@ -902,6 +1006,11 @@ export default function BoneIssueView({
         slipNo: item.slipNo,
         lotNo: (item.lotNo && item.lotNo !== 'W/O-LOT') ? item.lotNo : '—',
         issuePcs: effectivePcs,
+        boneWeightKg: item.boneWeightKg || item.weight || '2.50',
+        weight: item.boneWeightKg || item.weight || '2.50',
+        supervisorName: item.supervisorName || 'ROHIT / MONU',
+        boneMaterialName: item.boneMaterialName || 'Bone Chinese (Beige)',
+        selectedBoneMaterialId: item.selectedBoneMaterialId || '',
         width: item.width || '1.5 Inch (Standard)',
         tapeWidth: item.tapeWidth || '0.5 Inch (Standard)',
         elasticWidth: item.elasticWidth || '1 Inch (Standard)',
@@ -929,6 +1038,9 @@ export default function BoneIssueView({
         slipNo: item.slipNo,
         lotNo: item.lotNo,
         issuePcs: effectivePcs,
+        boneWeightKg: item.boneWeightKg || item.weight || '2.50',
+        supervisorName: item.supervisorName || 'ROHIT / MONU',
+        boneMaterialName: item.boneMaterialName || 'Bone Chinese (Beige)',
         width: item.width || '1.5 Inch (Standard)',
         shade: item.shade || 'Standard',
         issuerName: item.issuerName || 'Store Staff',
@@ -1051,24 +1163,24 @@ export default function BoneIssueView({
 
       {viewMode === 'generator' ? (
         <>
-          {/* ISSUE METHOD SELECTOR: WITH LOT vs WITHOUT LOT */}
+          {/* WORKFLOW MODE SELECTOR: WITH BOM VS WITHOUT BOM */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             flexWrap: 'wrap',
             gap: '12px',
+            background: 'var(--bg-card, #ffffff)',
             padding: '12px 18px',
             borderRadius: '14px',
-            background: isWithoutLot ? '#fff7ed' : '#f0f9ff',
-            border: isWithoutLot ? '1.5px solid #fdba74' : '1.5px solid #bae6fd',
-            marginBottom: '16px'
+            border: '1.5px solid var(--border-color, #dbeafe)',
+            boxShadow: 'var(--shadow-card)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '13px', fontWeight: '800', color: isWithoutLot ? '#9a3412' : '#0369a1' }}>
-                Select Issue Option:
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                Issue Workflow Mode:
               </span>
-              <div style={{ display: 'inline-flex', background: '#ffffff', padding: '4px', borderRadius: '10px', border: '1px solid #cbd5e1', gap: '4px' }}>
+              <div style={{ display: 'flex', gap: '6px', background: 'var(--bg-primary, #f0f7ff)', padding: '4px', borderRadius: '10px', border: '1px solid var(--border-color, #cbd5e1)' }}>
                 <button
                   type="button"
                   onClick={() => {
@@ -1103,10 +1215,10 @@ export default function BoneIssueView({
                     if (!lotDetails) {
                       setLotDetails({
                         lotNo: searchLotInput.trim() || '',
-                        style: withoutLotStyle || 'Floor Issue',
+                        style: withoutLotStyle || 'Lower / Tracksuit',
                         quantity: issuePcs || 0,
                         brand: 'Floor Issue',
-                        garmentType: withoutLotStyle || 'Floor Issue',
+                        garmentType: withoutLotStyle || 'Lower / Tracksuit',
                         fabric: 'Standard',
                         shade: 'Standard'
                       });
@@ -1114,7 +1226,7 @@ export default function BoneIssueView({
                     if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
                       handleSearchLot(searchLotInput.trim());
                     }
-                    showToast('⚡ Switched to "Without BOM" Mode. All BOM & PO restrictions removed!');
+                    showToast('⚡ Switched to "Without BOM" Mode. All BOM restrictions removed!');
                   }}
                   style={{
                     padding: '8px 18px',
@@ -1136,133 +1248,132 @@ export default function BoneIssueView({
               </div>
             </div>
 
-            <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0369a1' }}>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0284c7' }}>
               {isWithoutLot
                 ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
-                : '🏷️ With BOM: Search and verify Lot against approved BOM.'}
+                : '🛡️ With BOM: Search and verify Lot against approved BOM.'}
             </span>
           </div>
 
           {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT BOM VS WITH BOM */}
-          <div className="panel" style={{
-            padding: '22px 24px',
-            borderRadius: '16px',
-            background: 'var(--bg-card, #ffffff)',
-            border: '1px solid var(--border-color, #dbeafe)',
-            boxShadow: 'var(--shadow-card)'
-          }}>
-            {isWithoutLot ? (
-              <div style={{
-                padding: '16px 20px',
-                borderRadius: '12px',
-                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
-                border: '1.5px solid #fdba74',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '14px'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{
-                      width: '26px', height: '26px', borderRadius: '50%',
-                      background: '#ea580c', color: '#ffffff', display: 'flex',
-                      alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
-                    }}>1</span>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
-                      Direct Floor Movement Details (Without BOM)
-                    </h3>
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
-                    Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
-                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT BOM</span>
-                  </div>
+          {isWithoutLot ? (
+            <div className="panel" style={{
+              padding: '22px 24px',
+              borderRadius: '16px',
+              background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+              border: '1.5px solid #fdba74',
+              boxShadow: 'var(--shadow-card)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    width: '26px', height: '26px', borderRadius: '50%',
+                    background: '#ea580c', color: '#ffffff', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                  }}>1</span>
+                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
+                    Direct Floor Movement Details (Without BOM)
+                  </h3>
+                </div>
+                <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
+                  Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
+                  <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT BOM</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                {/* Lot Number (Required) */}
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                    LOT NUMBER (REQUIRED) <span style={{ color: '#dc2626' }}>*</span>:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter Lot # (e.g. 62114)"
+                    value={searchLotInput}
+                    onChange={(e) => setSearchLotInput(e.target.value)}
+                    required
+                    style={{
+                      width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1.5px solid #fdba74', background: '#ffffff',
+                      fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
+                    }}
+                  />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
-                  {/* Lot Number (Required) */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      LOT NUMBER (REQUIRED) <span style={{ color: '#dc2626' }}>*</span>:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter Lot # (e.g. 62114)"
-                      value={searchLotInput}
-                      onChange={(e) => setSearchLotInput(e.target.value)}
-                      required
-                      style={{
-                        width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
+                {/* Style / Garment Name */}
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                    STYLE / GARMENT ITEM:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Lower / Tracksuit..."
+                    value={withoutLotStyle}
+                    onChange={(e) => setWithoutLotStyle(e.target.value)}
+                    style={{
+                      width: '100%', padding: '9px 12px', borderRadius: '8px',
+                      border: '1.5px solid #fdba74', background: '#ffffff',
+                      fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                    }}
+                  />
+                </div>
 
-                  {/* Style / Garment Name */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      STYLE / GARMENT ITEM:
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Trouser, Tracksuit, Lower..."
-                      value={withoutLotStyle}
-                      onChange={(e) => setWithoutLotStyle(e.target.value)}
-                      style={{
-                        width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  {/* Quantity Pcs */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      TARGET CUTTING / ISSUE PCS:
-                    </label>
+                {/* Target Issue Weight (Kg) */}
+                <div>
+                  <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
+                    TARGET ISSUE WEIGHT (KGS):
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <input
                       type="number"
-                      min="1"
-                      placeholder="Enter Target Cutting Pcs"
-                      value={issuePcs}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === '') {
-                          setIssuePcs('');
-                        } else {
-                          const parsed = parseInt(val, 10);
-                          setIssuePcs(isNaN(parsed) ? '' : Math.max(1, parsed));
-                        }
-                      }}
+                      step="0.01"
+                      min="0.01"
+                      placeholder="Enter Weight in Kg (e.g. 2.50)"
+                      value={boneWeightKg}
+                      onChange={(e) => setBoneWeightKg(e.target.value)}
                       style={{
-                        width: '100%', padding: '9px 12px', borderRadius: '8px',
+                        flex: 1, padding: '9px 12px', borderRadius: '8px',
                         border: '1.5px solid #fdba74', background: '#ffffff',
                         fontSize: '14px', fontWeight: '800', color: '#0f172a', boxSizing: 'border-box'
                       }}
                     />
+                    <span style={{ fontSize: '13px', fontWeight: '900', color: '#c2410c', background: '#ffedd5', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fdba74' }}>
+                      Kgs
+                    </span>
                   </div>
                 </div>
-
-                <div style={{
-                  padding: '9px 14px',
-                  borderRadius: '8px',
-                  background: '#ffffff',
-                  border: '1px solid #fed7aa',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  color: '#c2410c',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}>
-                  <CheckCircle size={16} color="#ea580c" />
-                  <span>Unrestricted Mode: No BOM or PO required! Issue form is completely unlocked below.</span>
-                </div>
               </div>
-            ) : (
-              <>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+
+              <div style={{
+                padding: '9px 14px',
+                borderRadius: '8px',
+                background: '#ffffff',
+                border: '1px solid #fed7aa',
+                fontSize: '12px',
+                fontWeight: '700',
+                color: '#c2410c',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <CheckCircle size={16} color="#ea580c" />
+                <span>Unrestricted Mode: No BOM required! Direct floor issue unlocked below.</span>
+              </div>
+            </div>
+          ) : (
+            /* STEP 1: SEARCH LOT NUMBER (BOM APPROVED) */
+            <div className="panel" style={{
+              padding: '22px 24px',
+              borderRadius: '16px',
+              background: 'var(--bg-card, #ffffff)',
+              border: '1px solid var(--border-color, #dbeafe)',
+              boxShadow: 'var(--shadow-card)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{
                       width: '26px', height: '26px', borderRadius: '50%',
@@ -1467,8 +1578,6 @@ export default function BoneIssueView({
                     </div>
                   </div>
                 )}
-              </>
-            )}
 
             {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY - STRICTLY FOR WITH LOT MODE) */}
             {!isWithoutLot && (lotDetails || searchLotInput.trim().length >= 3) && (
@@ -1640,10 +1749,10 @@ export default function BoneIssueView({
               </div>
             )}
           </div>
+        )}
 
-          {/* STEP 2: SIMPLE INTERNAL ISSUE DETAILS (SHOWN AFTER LOT IS ENTERED & BOM APPROVED, OR IF WITHOUT LOT) */}
-          {(lotDetails || isWithoutLot) && (bomStatus === 'approved' || isWithoutLot) && (
-            <div className="panel" style={{
+        {/* STEP 2: ISSUE DETAILS (DATE, ISSUER, RECEIVER & SUPERVISOR) */}
+          <div className="panel" style={{
               padding: '22px 24px',
               borderRadius: '16px',
               background: 'var(--bg-card, #ffffff)',
@@ -1657,204 +1766,124 @@ export default function BoneIssueView({
                     background: '#0284c7', color: '#ffffff', display: 'flex',
                     alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
                   }}>2</span>
-                  <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                    Issue Details (Material, Quantity & Issuer / Receiver)
-                  </h3>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                      Issue Details (Date, Issuer, Receiver & Supervisor)
+                    </h3>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
+                      Fill date, issuer, receiver and review total requirement before generating original bill / PO
+                    </p>
+                  </div>
                 </div>
 
-                {/* Material Mode Switcher (Bone Only, Tape Only, Elastic Only - NO COMBOS) */}
-                <div style={{
-                  display: 'flex',
+                <span style={{
+                  fontSize: '11.5px',
+                  fontWeight: '800',
+                  color: '#0284c7',
+                  background: '#f0f9ff',
+                  border: '1.5px solid #bae6fd',
+                  padding: '5px 12px',
+                  borderRadius: '8px',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  background: '#f1f5f9',
-                  padding: '4px',
-                  borderRadius: '10px',
-                  border: '1.5px solid #cbd5e1'
+                  gap: '6px'
                 }}>
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('bone')}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'bone' ? '#0284c7' : 'transparent',
-                      color: materialMode === 'bone' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'bone' ? '0 2px 8px rgba(2, 132, 199, 0.35)' : 'none'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'bone' ? '#bae6fd' : '#0284c7' }}></span>
-                    Bone Only
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('tape')}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'tape' ? '#2563eb' : 'transparent',
-                      color: materialMode === 'tape' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'tape' ? '0 2px 8px rgba(37, 99, 235, 0.35)' : 'none'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'tape' ? '#bfdbfe' : '#2563eb' }}></span>
-                    Tape Only
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setMaterialMode('elastic')}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: materialMode === 'elastic' ? '#059669' : 'transparent',
-                      color: materialMode === 'elastic' ? '#ffffff' : '#475569',
-                      fontWeight: '800',
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      boxShadow: materialMode === 'elastic' ? '0 2px 8px rgba(5, 150, 105, 0.35)' : 'none'
-                    }}
-                  >
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: materialMode === 'elastic' ? '#a7f3d0' : '#059669' }}></span>
-                    Elastic Only
-                  </button>
-                </div>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
+                  Bone Pocketing Issue
+                </span>
               </div>
 
-              {/* Selected Material Width Specification Banner */}
+              {/* Bone Pocketing Width Specification Banner */}
               <div style={{
                 marginBottom: '16px',
                 padding: '12px 16px',
                 borderRadius: '10px',
-                background: materialMode === 'tape' ? '#eff6ff' : materialMode === 'elastic' ? '#f0fdf4' : '#f0f9ff',
-                border: `1.5px solid ${materialMode === 'tape' ? '#bfdbfe' : materialMode === 'elastic' ? '#bbf7d0' : '#bae6fd'}`,
+                background: '#f0f9ff',
+                border: '1.5px solid #bae6fd',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
                 gap: '12px'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '12.5px', fontWeight: '800', color: materialMode === 'tape' ? '#1d4ed8' : materialMode === 'elastic' ? '#15803d' : '#0369a1' }}>
-                    {materialMode === 'tape' ? 'Tape Width:' : materialMode === 'elastic' ? 'Elastic Width:' : 'Bone Pocketing Width:'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1' }}>
+                    Bone Pocketing Width:
                   </span>
-                  {materialMode === 'bone' && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {['1.5 Inch (Standard)', '1.0 Inch', '1.25 Inch', '2.0 Inch', 'Custom'].map(w => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => setBoneWidth(w)}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: boneWidth === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                            background: boneWidth === w ? '#0284c7' : '#ffffff',
-                            color: boneWidth === w ? '#ffffff' : '#334155',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {w}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {materialMode === 'tape' && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {['0.5 Inch (Standard)', '0.75 Inch', '1.0 Inch', 'Custom'].map(w => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => setTapeWidth(w)}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: tapeWidth === w ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
-                            background: tapeWidth === w ? '#2563eb' : '#ffffff',
-                            color: tapeWidth === w ? '#ffffff' : '#334155',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {w}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {materialMode === 'elastic' && (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {['1 Inch (Standard)', '1.25 Inch', '1.5 Inch', 'Custom'].map(w => (
-                        <button
-                          key={w}
-                          type="button"
-                          onClick={() => setElasticWidth(w)}
-                          style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            border: elasticWidth === w ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                            background: elasticWidth === w ? '#059669' : '#ffffff',
-                            color: elasticWidth === w ? '#ffffff' : '#334155',
-                            fontSize: '11px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          {w}
-                        </button>
-                      ))}
-                    </div>
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {['1.5 Inch (Standard)', '1.0 Inch', '1.25 Inch', '2.0 Inch', 'Custom'].map(w => (
+                      <button
+                        key={w}
+                        type="button"
+                        onClick={() => setBoneWidth(w)}
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          border: boneWidth === w ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          background: boneWidth === w ? '#0284c7' : '#ffffff',
+                          color: boneWidth === w ? '#ffffff' : '#334155',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {w}
+                      </button>
+                    ))}
+                  </div>
+                  {boneWidth === 'Custom' && (
+                    <input
+                      type="text"
+                      placeholder="e.g. 1.75 Inch"
+                      value={customWidth}
+                      onChange={(e) => setCustomWidth(e.target.value)}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '6px',
+                        border: '1.5px solid #0284c7',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        width: '110px',
+                        outline: 'none'
+                      }}
+                    />
                   )}
                 </div>
 
                 <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>
-                  Effective Width: <strong style={{ color: '#0f172a' }}>{materialMode === 'tape' ? effectiveTapeWidth : materialMode === 'elastic' ? effectiveElasticWidth : effectiveWidth}</strong>
+                  Effective Width: <strong style={{ color: '#0f172a' }}>{effectiveWidth}</strong>
                 </span>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
                 
-                {/* LEFT COLUMN: ISSUER & RECEIVER NAMES (STAFF DETAILS) */}
+                {/* LEFT COLUMN: ISSUER, RECEIVER & SUPERVISOR (STAFF DETAILS) */}
                 <div style={{
                   padding: '18px 20px',
                   borderRadius: '12px',
-                  background: '#f8fafc',
+                  background: '#ffffff',
                   border: '1.5px solid #e2e8f0',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '14px'
+                  gap: '14px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.03)'
                 }}>
+                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
+                    <User size={15} color="#0284c7" />
+                    <span>Issue & Requisition Information:</span>
+                  </div>
+
                   {/* ISSUER NAME */}
                   <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                      <User size={15} color="#0284c7" />
-                      <span>Issuer Name (Store Staff):</span>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <User size={14} color="#0284c7" />
+                      <span>Issuer Name (Store Staff / Prepared By):</span>
                     </label>
                     <SmartSelectWithManual
                       value={issuerName}
                       onChange={setIssuerName}
-                      options={['PARAS', 'RASHMI', 'STORE INCHARGE', 'ADMIN', 'STORE DISPATCH']}
+                      options={['paras', 'PARAS', 'RASHMI', 'STORE INCHARGE', 'ADMIN', 'STORE DISPATCH']}
                       placeholder="Select Issuer or + Manual Entry"
                       manualPlaceholder="Type custom store staff name..."
                       manualLabel="+ Manual Entry (Store Staff)"
@@ -1866,9 +1895,9 @@ export default function BoneIssueView({
 
                   {/* RECEIVER NAME */}
                   <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                      <Scissors size={15} color="#0284c7" />
-                      <span>Receiver Name (Cutting Master):</span>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <Scissors size={14} color="#0284c7" />
+                      <span>Receiver Name (Cutting Master / Received By):</span>
                     </label>
                     <SmartSelectWithManual
                       value={receiverName}
@@ -1882,6 +1911,89 @@ export default function BoneIssueView({
                       theme="blue"
                     />
                   </div>
+
+                  {/* SUPERVISOR / FLOOR INCHARGE NAME */}
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <ShieldCheck size={14} color="#0284c7" />
+                      <span>Supervisor / Floor Incharge Name:</span>
+                    </label>
+                    <SmartSelectWithManual
+                      value={supervisorName}
+                      onChange={setSupervisorName}
+                      options={['ROHIT / MONU', 'MOHIT SIR', 'MANISH', 'FLOOR SUPERVISOR', 'STORE INCHARGE']}
+                      placeholder="Select Supervisor or + Manual Entry"
+                      manualPlaceholder="Type custom supervisor name..."
+                      manualLabel="+ Manual Entry (Supervisor)"
+                      localStorageKey="bone_supervisor_names"
+                      icon="shield"
+                      theme="blue"
+                    />
+                  </div>
+
+                  {/* BONE SPECIFICATION & MATERIAL MAPPING CARD */}
+                  {materialMode === 'bone' && (
+                    <div style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: '#f0f9ff',
+                      border: '1.5px solid #bae6fd',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Scale size={14} color="#0284c7" />
+                          <span>Bone Specification & Material Mapping:</span>
+                        </span>
+                        <span style={{
+                          fontSize: '10.5px',
+                          background: '#e0f2fe',
+                          color: '#0369a1',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontWeight: '800'
+                        }}>
+                          {effectiveWidth}
+                        </span>
+                      </div>
+
+                      {/* Mapped Bone Inventory Item Dropdown */}
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: 0 }}>
+                            MATERIAL NAME MAPPING (BONE CATEGORY):
+                          </label>
+                          <span style={{ fontSize: '10px', color: '#0284c7', fontWeight: '700' }}>
+                            {boneMaterials.length} Items Available
+                          </span>
+                        </div>
+                        <select
+                          value={selectedBoneMaterialId}
+                          onChange={(e) => handleSelectBoneMaterial(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '7px 10px',
+                            borderRadius: '6px',
+                            border: '1px solid #bae6fd',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            color: '#0f172a',
+                            background: '#ffffff',
+                            outline: 'none'
+                          }}
+                        >
+                          <option value="">— Select Bone Inventory Item —</option>
+                          {boneMaterials.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.id}) • Stock: {m.stock} Kg
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Issue Date & Remarks */}
                   <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '10px' }}>
@@ -1908,7 +2020,7 @@ export default function BoneIssueView({
                         type="text"
                         value={remarks}
                         onChange={(e) => setRemarks(e.target.value)}
-                        placeholder="e.g. Bone rolls for pocketing..."
+                        placeholder="e.g. Elastic for waistband..."
                         style={{
                           width: '100%', padding: '7px 10px', borderRadius: '8px',
                           border: '1px solid #cbd5e1', background: '#ffffff',
@@ -1920,158 +2032,261 @@ export default function BoneIssueView({
 
                 </div>
 
-                {/* RIGHT COLUMN: QUANTITY DETAILS (CUTTING PCS & EDITABLE ISSUE PCS) */}
+                {/* RIGHT COLUMN: TOTAL REQUIREMENT ON ORIGINAL BILL */}
                 <div style={{
                   padding: '18px 20px',
                   borderRadius: '12px',
-                  background: '#f8fafc',
-                  border: '1.5px solid #e2e8f0',
+                  background: '#ffffff',
+                  border: '1.5px solid #0284c7',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '14px'
+                  justifyContent: 'space-between',
+                  boxShadow: '0 4px 14px rgba(2, 132, 199, 0.08)'
                 }}>
-                  <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px', borderBottom: '1px solid #e2e8f0', paddingBottom: '8px' }}>
-                    <Layers size={16} color="#0284c7" />
-                    <span>Quantity & Issue Pcs Details:</span>
-                  </div>
-
-                  {/* Cutting Pcs Matrix Reference Badge */}
-                  {isWithoutLot ? (
-                    <div style={{
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: '#fff7ed',
-                      border: '1.5px solid #fed7aa',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <div>
-                        <span style={{ fontSize: '11px', color: '#c2410c', fontWeight: '800', textTransform: 'uppercase', display: 'block' }}>
-                          ISSUE MODE & LOT
-                        </span>
-                        <strong style={{ fontSize: '13px', color: '#9a3412' }}>
-                          Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
-                        </strong>
-                      </div>
-                      <span style={{ fontSize: '11px', fontWeight: '800', background: '#ea580c', color: '#ffffff', padding: '3px 8px', borderRadius: '4px' }}>
-                        ⚡ DIRECT FLOOR ISSUE
-                      </span>
-                    </div>
-                  ) : (
-                    <div style={{
-                      padding: '10px 14px',
-                      borderRadius: '8px',
-                      background: '#f0f9ff',
-                      border: '1px solid #bae6fd',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <div>
-                        <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                          Cutting Pcs (Lot Matrix)
-                        </span>
-                        <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                          Lot #{lotDetails?.lotNo || searchLotInput || '—'}
-                        </span>
-                      </div>
-                      <strong style={{ fontSize: '16px', color: '#0284c7', fontWeight: '800' }}>
-                        {lotDetails?.quantity || 0} Pcs
-                      </strong>
-                    </div>
-                  )}
-
-                  {/* Editable Issue Pcs Input */}
                   <div>
-                    <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Scissors size={15} color="#0284c7" />
-                        <span>Issue Pcs (Editable):</span>
-                      </span>
-                      <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                        Direct Pcs Entry
-                      </span>
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <input
-                        type="number"
-                        min="1"
-                        value={issuePcs || ''}
-                        onChange={(e) => setIssuePcs(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                        placeholder="e.g. 600"
-                        style={{
-                          flex: 1,
-                          padding: '10px 14px',
-                          borderRadius: '8px',
-                          border: '2px solid #0284c7',
-                          background: '#ffffff',
-                          fontSize: '18px',
-                          fontWeight: '800',
-                          color: '#0f172a',
-                          outline: 'none',
-                          boxShadow: '0 2px 6px rgba(2, 132, 199, 0.12)'
-                        }}
-                      />
-                      <span style={{ fontSize: '14px', fontWeight: '800', color: '#475569' }}>
-                        Pcs
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px', marginBottom: '14px' }}>
+                      <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Layers size={16} color="#0284c7" />
+                        <span>Total Requirement on Original Bill:</span>
+                      </div>
+                      <span style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', background: '#e0f2fe', padding: '3px 8px', borderRadius: '6px' }}>
+                        ORIGINAL BILL SPEC
                       </span>
                     </div>
-                  </div>
 
-                  {/* Quick Presets for Issue Pcs */}
-                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {!isWithoutLot && lotDetails?.quantity && (
-                      <button
-                        key="same-cut"
-                        type="button"
-                        onClick={() => setIssuePcs(parseInt(lotDetails.quantity, 10))}
-                        style={{
-                          padding: '5px 10px',
-                          borderRadius: '6px',
-                          border: issuePcs === parseInt(lotDetails.quantity, 10) ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                          background: issuePcs === parseInt(lotDetails.quantity, 10) ? '#e0f2fe' : '#ffffff',
-                          color: issuePcs === parseInt(lotDetails.quantity, 10) ? '#0284c7' : '#334155',
-                          fontSize: '11.5px',
-                          fontWeight: '700',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        Same as Cutting ({lotDetails.quantity} Pcs)
-                      </button>
+                    {/* ISSUE MODE & LOT */}
+                    {!isWithoutLot ? (
+                      <div style={{
+                        background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #bfdbfe',
+                        marginBottom: '12px',
+                        fontSize: '12.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <div>
+                          <span style={{ fontSize: '10.5px', color: '#1d4ed8', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                            ISSUE MODE & LOT
+                          </span>
+                          <strong style={{ color: '#1e40af', fontSize: '13.5px' }}>
+                            With BOM — LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.style || lotDetails?.garmentType || withoutLotStyle || 'Lower / Tracksuit'})
+                          </strong>
+                        </div>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          background: '#2563eb',
+                          color: '#ffffff',
+                          padding: '3px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          🛡️ BOM APPROVED ({lotDetails?.quantity || issuePcs || 0} Pcs)
+                        </span>
+                      </div>
+                    ) : (
+                      <div style={{
+                        background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #fed7aa',
+                        marginBottom: '12px',
+                        fontSize: '12.5px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <div>
+                          <span style={{ fontSize: '10.5px', color: '#c2410c', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                            ISSUE MODE & LOT
+                          </span>
+                          <strong style={{ color: '#9a3412', fontSize: '13.5px' }}>
+                            Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Lower / Tracksuit'})
+                          </strong>
+                        </div>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          background: '#ea580c',
+                          color: '#ffffff',
+                          padding: '3px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          ⚡ DIRECT FLOOR ISSUE
+                        </span>
+                      </div>
                     )}
-                    {[500, 600, 800, 1000, 1200].filter(v => v !== parseInt(lotDetails?.quantity, 10)).map(cnt => (
-                      <button
-                        key={cnt}
-                        type="button"
-                        onClick={() => setIssuePcs(cnt)}
-                        style={{
-                          padding: '5px 10px',
-                          borderRadius: '6px',
-                          border: issuePcs === cnt ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                          background: issuePcs === cnt ? '#e0f2fe' : '#ffffff',
-                          color: issuePcs === cnt ? '#0284c7' : '#334155',
-                          fontSize: '11.5px',
-                          fontWeight: '700',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {cnt} Pcs
-                      </button>
-                    ))}
-                  </div>
 
-                  <div style={{
-                    fontSize: '12.5px',
-                    fontWeight: '700',
-                    color: isWithoutLot ? '#9a3412' : '#0369a1',
-                    background: isWithoutLot ? '#fff7ed' : '#e0f2fe',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    border: isWithoutLot ? '1px solid #fed7aa' : '1px solid #bae6fd',
-                    marginTop: '4px'
-                  }}>
-                    Issue Summary: <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} {isWithoutLot ? '(Direct Floor Issue - Without BOM)' : `for LOT #${lotDetails?.lotNo || searchLotInput || '—'}`}
+                    {/* Editable Issue Box: Direct Issue Weight in Kgs */}
+                    <div style={{
+                      padding: '12px 14px',
+                      borderRadius: '10px',
+                      background: '#f0f9ff',
+                      border: '1.5px solid #0284c7',
+                      marginBottom: '14px',
+                      boxShadow: '0 2px 10px rgba(2, 132, 199, 0.08)'
+                    }}>
+                      <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <Scale size={16} color="#0284c7" />
+                          <span>Direct Issue Weight (Editable):</span>
+                        </span>
+                        <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                          Kg-Wise Floor Issue
+                        </span>
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          value={boneWeightKg}
+                          onChange={(e) => setBoneWeightKg(e.target.value)}
+                          placeholder="Enter Weight in Kg (e.g. 2.50)"
+                          style={{
+                            flex: 1,
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '2px solid #0284c7',
+                            background: '#ffffff',
+                            fontSize: '16px',
+                            fontWeight: '900',
+                            color: '#0f172a',
+                            outline: 'none'
+                          }}
+                        />
+                        <span style={{
+                          fontSize: '15px',
+                          fontWeight: '900',
+                          color: '#0369a1',
+                          background: '#e0f2fe',
+                          padding: '7px 14px',
+                          borderRadius: '8px',
+                          border: '1.5px solid #bae6fd'
+                        }}>
+                          Kgs
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
+                        {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
+                          <button
+                            key={w}
+                            type="button"
+                            onClick={() => setBoneWeightKg(w)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              border: String(boneWeightKg) === String(w) ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                              background: String(boneWeightKg) === String(w) ? '#0284c7' : '#ffffff',
+                              color: String(boneWeightKg) === String(w) ? '#ffffff' : '#0369a1',
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              transition: 'all 0.1s ease'
+                            }}
+                          >
+                            {w} Kg
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Bone Requirement Highlight Card */}
+                    <div style={{
+                      padding: '14px 16px',
+                      borderRadius: '12px',
+                      background: '#f0f9ff',
+                      border: '2px solid #0284c7',
+                      marginBottom: '14px',
+                      boxShadow: '0 3px 12px rgba(2, 132, 199, 0.08)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
+                            <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              • {(boneMaterialName || 'BONE CHINESE (BEIGE)').toUpperCase()} REQUIREMENT
+                            </span>
+                            {(currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346') && (
+                              <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
+                                ID: {currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346'}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '700', marginTop: '3px' }}>
+                            {!isWithoutLot ? 'With BOM Approved Floor Issue (Kg-Wise)' : 'Direct Floor Issue (Kg-Wise)'}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
+                            ISSUE UNIT
+                          </span>
+                          <span style={{ fontSize: '14px', fontWeight: '800', color: '#0284c7' }}>
+                            Kilograms (Kg)
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* HERO CALLOUT: TOTAL BONE ISSUE */}
+                      <div style={{
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        borderRadius: '10px',
+                        padding: '12px 14px',
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <div style={{
+                            width: '38px', height: '38px', borderRadius: '8px',
+                            background: 'rgba(255,255,255,0.2)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '20px', fontWeight: '900'
+                          }}>
+                            📦
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
+                              TOTAL BONE ISSUE
+                            </div>
+                            <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
+                              {!isWithoutLot ? 'Approved BOM Floor Weight Issue (Kg-Wise)' : 'Direct Floor Weight Issue (Kg-Wise)'}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                            {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
+                          </div>
+                          <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
+                            {currentBoneMaterial ? `Store stock: ${currentBoneMaterial.stock || '15'}` : 'Store stock: 15'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Verified Status Note */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      color: '#059669',
+                      padding: '8px',
+                      background: '#f0fdf4',
+                      borderRadius: '8px',
+                      border: '1px solid #bbf7d0',
+                      marginTop: '6px'
+                    }}>
+                      <span>✓ All details verified & ready to print formal original bill / PO</span>
+                    </div>
                   </div>
                 </div>
 
@@ -2080,25 +2295,38 @@ export default function BoneIssueView({
               {/* ACTION: GENERATE BILL BUTTON */}
               <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '13px', color: '#64748b' }}>
-                  <span>
-                    Issuing <strong>{issuePcs} Pcs</strong> of {materialMode === 'tape' ? 'Tape' : materialMode === 'elastic' ? 'Elastic' : 'Bone Pocketing'} to <strong>{receiverName || 'Cutting Master'}</strong> {isWithoutLot ? '(Without BOM ✓)' : '(BOM Approved ✓)'}
-                  </span>
+                  {isWithoutLot ? (
+                    <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Zap size={15} /> Without BOM Mode &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{boneWeightKg} Kg</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (Supervisor: {supervisorName || 'ROHIT / MONU'})
+                    </span>
+                  ) : bomStatus === 'approved' ? (
+                    <span style={{ color: '#16a34a', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <ShieldCheck size={16} /> With BOM Mode &bull; LOT #{lotDetails?.lotNo || searchLotInput || '—'} &bull; Total: <strong style={{ color: '#0284c7' }}>{boneWeightKg} Kg ({lotDetails?.quantity || issuePcs || 0} Pcs)</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (BOM Approved ✓)
+                    </span>
+                  ) : (
+                    <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Lock size={15} /> Original Issue Bill / PO generation locked until Lot BOM is approved
+                    </span>
+                  )}
                 </div>
 
                 <button
                   type="button"
                   onClick={generateBoneIssueBill}
-                  disabled={generating}
+                  disabled={generating || (!isWithoutLot && bomStatus !== 'approved')}
+                  title={(!isWithoutLot && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
                   style={{
                     padding: '12px 32px',
                     borderRadius: '12px',
                     border: 'none',
-                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    background: (isWithoutLot || bomStatus === 'approved')
+                      ? (isWithoutLot ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)')
+                      : '#94a3b8',
                     color: '#ffffff',
                     fontSize: '15px',
                     fontWeight: '800',
-                    cursor: generating ? 'wait' : 'pointer',
-                    boxShadow: '0 6px 18px rgba(2, 132, 199, 0.4)',
+                    cursor: (generating || (!isWithoutLot && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
+                    boxShadow: (isWithoutLot || bomStatus === 'approved') ? '0 6px 18px rgba(2, 132, 199, 0.4)' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '10px'
@@ -2117,42 +2345,6 @@ export default function BoneIssueView({
                 </button>
               </div>
             </div>
-          )}
-
-          {/* EMPTY WAITING STATE (WHEN NO LOT HAS BEEN SEARCHED / ENTERED YET AND NOT IN WITHOUT LOT MODE) */}
-          {!lotDetails && !isWithoutLot && (
-            <div className="panel" style={{
-              padding: '36px 24px',
-              borderRadius: '16px',
-              background: 'var(--bg-card, #ffffff)',
-              border: '1.5px dashed #cbd5e1',
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px'
-            }}>
-              <div style={{
-                width: '46px',
-                height: '46px',
-                borderRadius: '12px',
-                background: '#f0f9ff',
-                color: '#0284c7',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <Search size={22} />
-              </div>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
-                Enter or Select a Lot Number Above
-              </h3>
-              <p style={{ margin: 0, fontSize: '12.5px', color: 'var(--text-muted, #64748b)', fontWeight: '500', maxWidth: '440px' }}>
-                Search a Lot Number above or click an Approved Lot to verify BOM approval and open the Bone Pocketing issue form.
-              </p>
-            </div>
-          )}
         </>
       ) : (
         /* HISTORY TAB */
@@ -2216,8 +2408,10 @@ export default function BoneIssueView({
                     <th style={{ padding: '10px 12px' }}>SLIP NO</th>
                     <th style={{ padding: '10px 12px' }}>DATE</th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
+                    <th style={{ padding: '10px 12px' }}>WEIGHT (KG)</th>
                     <th style={{ padding: '10px 12px' }}>ISSUE PCS</th>
                     <th style={{ padding: '10px 12px' }}>ISSUED BY</th>
+                    <th style={{ padding: '10px 12px' }}>SUPERVISOR</th>
                     <th style={{ padding: '10px 12px' }}>RECEIVED BY</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>ACTIONS</th>
                   </tr>
@@ -2230,7 +2424,8 @@ export default function BoneIssueView({
                       return String(h.slipNo || '').toLowerCase().includes(q) ||
                         String(h.lotNo || '').toLowerCase().includes(q) ||
                         String(h.receiverName || '').toLowerCase().includes(q) ||
-                        String(h.issuerName || '').toLowerCase().includes(q);
+                        String(h.issuerName || '').toLowerCase().includes(q) ||
+                        String(h.supervisorName || '').toLowerCase().includes(q);
                     })
                     .map((item, idx) => (
                       <tr key={item.slipNo || idx} style={{ borderBottom: '1px solid #f1f5f9' }}>
@@ -2276,11 +2471,17 @@ export default function BoneIssueView({
                             </span>
                           )}
                         </td>
+                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#0284c7' }}>
+                          {item.boneWeightKg || item.weight || '2.50'} Kg
+                        </td>
                         <td style={{ padding: '10px 12px', fontWeight: '800', color: '#059669' }}>
                           {item.issuePcs || item.quantity || item.rolls || 600} Pcs
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.issuerName || 'ADMIN'}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
+                          {item.supervisorName || 'ROHIT / MONU'}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '700' }}>
                           {item.receiverName || 'JAYBIR'}
@@ -2458,8 +2659,16 @@ export default function BoneIssueView({
                     </strong>
                   </div>
                   <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE WEIGHT (KG)</span>
+                    <strong style={{ color: '#0284c7', fontSize: '16px' }}>{generatedSlipData.boneWeightKg || '2.50'} Kg</strong>
+                  </div>
+                  <div>
                     <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>ISSUE QUANTITY (PCS)</span>
-                    <strong style={{ color: '#0284c7', fontSize: '16px' }}>{generatedSlipData.issuePcs} Pcs</strong>
+                    <strong style={{ color: '#0f172a', fontSize: '14px' }}>{generatedSlipData.issuePcs} Pcs</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>SUPERVISOR (FLOOR)</span>
+                    <strong style={{ color: '#0f172a' }}>{generatedSlipData.supervisorName || 'ROHIT / MONU'}</strong>
                   </div>
                   {!generatedSlipData.isWithoutLot && (
                     <div>

@@ -1,4 +1,5 @@
 import { getBackendUrl } from '../utils/api';
+import { getCleanImageUrl } from '../utils/designHelpers';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -6,20 +7,53 @@ import {
   FileText, Shield, ShieldAlert, ArrowRight, RotateCcw, Clock,
   Package, ChevronDown, CheckCircle, HelpCircle,
   TrendingUp, Sparkles, Filter, RefreshCw, Eye, BarChart3,
-  User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode
+  User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode,
+  Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
+// Standard Component Name Presets (Tag, Label, Tape, Elastic, etc.)
+const COMPONENT_PRESETS = [
+  'Label',
+  'Tag',
+  'Tape',
+  'Elastic',
+  'Zipper',
+  'Button',
+  'Drawcord',
+  'Pocketing',
+  'Thread',
+  'Interlining',
+  'Patch',
+  'Polybag'
+];
+
 // Reusable Searchable Material Select with Portal & Smart Positioning
-function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '' }) {
+function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '', categoryHint = '' }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showAllOverride, setShowAllOverride] = useState(false);
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 320, isAbove: false });
+  const [previewMaterial, setPreviewMaterial] = useState(null);
   const containerRef = useRef(null);
   const dropdownRef = useRef(null);
 
   const selectedMaterial = materials.find(m => String(m.id) === String(value));
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (previewMaterial) {
+          setPreviewMaterial(null);
+        } else if (isOpen) {
+          setIsOpen(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewMaterial, isOpen]);
 
   const updateCoords = () => {
     if (containerRef.current) {
@@ -47,6 +81,8 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         window.removeEventListener('resize', handleReposition);
         window.removeEventListener('scroll', handleReposition, true);
       };
+    } else {
+      setShowAllOverride(false);
     }
   }, [isOpen]);
 
@@ -97,18 +133,42 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
     return brandWords.some(w => mNameCompact.includes(w));
   };
 
+  // ─── Category / Component Smart Matching ──────────────────────────────────
+  const matchesCategory = (m) => {
+    if (!categoryHint || !categoryHint.trim()) return true;
+    const catTarget = categoryHint.toLowerCase().trim();
+    const targetRoot = catTarget.endsWith('s') ? catTarget.slice(0, -1) : catTarget;
+    const mCat = (m.category || '').toLowerCase().trim();
+    const mName = (m.name || '').toLowerCase().trim();
 
-  const filtered = (materials || [])
+    if (mCat.includes(catTarget) || mCat.includes(targetRoot)) return true;
+    if (mName.includes(catTarget) || mName.includes(targetRoot)) return true;
+
+    // Common synonyms
+    if (targetRoot === 'tap' && (mCat.includes('tape') || mName.includes('tape'))) return true;
+    if (targetRoot === 'zip' && (mCat.includes('zipper') || mName.includes('zipper'))) return true;
+    if (targetRoot === 'cord' && (mCat.includes('drawcord') || mName.includes('drawcord'))) return true;
+    if (targetRoot === 'pocket' && (mCat.includes('pocket') || mName.includes('pocket'))) return true;
+
+    return false;
+  };
+
+  const categoryMatchedList = (materials || []).filter(m => matchesCategory(m));
+  const hasCategoryFilter = Boolean(categoryHint && categoryHint.trim() && categoryMatchedList.length > 0 && !showAllOverride);
+  const activeMaterialsPool = hasCategoryFilter ? categoryMatchedList : (materials || []);
+
+  const filtered = activeMaterialsPool
     .filter(m => {
       if (Number(m.stock) <= 0) return false;
       const q = searchQuery.toLowerCase().trim();
       if (!q) return true;
+      const itemCodeStr = String(m.itemCode || m.item_code || m.materialCode || m.code || '').toLowerCase();
       const codeStr = String(m.id || '').toLowerCase();
       const nameStr = String(m.name || '').toLowerCase();
       const colorStr = String(m.color || '').toLowerCase();
       const catStr = String(m.category || '').toLowerCase();
       const locStr = String(m.location || '').toLowerCase();
-      return codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
+      return itemCodeStr.includes(q) || codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
     })
     .sort((a, b) => {
       const aMatch = isBrandMatch(a) ? 1 : 0;
@@ -158,6 +218,64 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         }}>
           {selectedMaterial ? (
             <>
+              {/* Photo thumbnail with zoom/verification */}
+              {(() => {
+                const rawImg = selectedMaterial.imageUrl || selectedMaterial.image || selectedMaterial.photo || selectedMaterial.imgUrl;
+                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                return cleanImg ? (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPreviewMaterial(selectedMaterial);
+                    }}
+                    title="Click to view & verify material photo"
+                    style={{
+                      position: 'relative',
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      cursor: 'zoom-in',
+                      border: '1.5px solid #cbd5e1',
+                      backgroundColor: '#f8fafc',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'transform 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.15)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                  >
+                    <img
+                      src={cleanImg}
+                      alt=""
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block'
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{
+                    width: '26px',
+                    height: '26px',
+                    borderRadius: '4px',
+                    backgroundColor: '#f1f5f9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #e2e8f0',
+                    flexShrink: 0,
+                    color: '#94a3b8'
+                  }}>
+                    <Package size={13} />
+                  </div>
+                );
+              })()}
               <span style={{
                 fontFamily: 'monospace',
                 fontWeight: '700',
@@ -169,7 +287,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 borderRadius: '4px',
                 flexShrink: 0
               }}>
-                {selectedMaterial.id}
+                {selectedMaterial.itemCode || selectedMaterial.item_code || selectedMaterial.materialCode || selectedMaterial.code || selectedMaterial.id}
               </span>
               <span style={{ fontWeight: '600', fontSize: '13px', color: '#0f172a' }}>
                 {selectedMaterial.name}
@@ -177,6 +295,22 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
               {selectedMaterial.color && selectedMaterial.color !== 'Default' && (
                 <span style={{ fontSize: '12px', color: '#64748b' }}>
                   ({selectedMaterial.color})
+                </span>
+              )}
+              {selectedMaterial.category && (
+                <span style={{
+                  fontSize: '9.5px',
+                  fontWeight: '700',
+                  letterSpacing: '0.04em',
+                  padding: '1px 5px',
+                  borderRadius: '3px',
+                  flexShrink: 0,
+                  textTransform: 'uppercase',
+                  backgroundColor: '#f1f5f9',
+                  color: '#475569',
+                  border: '1px solid #cbd5e1'
+                }}>
+                  {selectedMaterial.category}
                 </span>
               )}
               {selectedMaterial.stock !== undefined && (
@@ -266,6 +400,82 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
               }}
             />
           </div>
+
+          {/* Category Filter Banner */}
+          {hasCategoryFilter && (
+            <div style={{
+              padding: '6px 10px',
+              fontSize: '11px',
+              fontWeight: '700',
+              color: '#9a3412',
+              backgroundColor: '#fff7ed',
+              borderRadius: '6px',
+              border: '1px solid #fed7aa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '6px'
+            }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span>🎯</span>
+                <span>Filtered for: <strong style={{ color: '#c2410c' }}>"{categoryHint}"</strong> ({categoryMatchedList.length} items)</span>
+              </span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAllOverride(true);
+                }}
+                style={{
+                  background: '#ffffff',
+                  border: '1px solid #fdba74',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  fontWeight: '800',
+                  color: '#ea580c',
+                  cursor: 'pointer'
+                }}
+              >
+                Show All ({materials.length})
+              </button>
+            </div>
+          )}
+          {showAllOverride && categoryHint && categoryMatchedList.length > 0 && (
+            <div style={{
+              padding: '5px 10px',
+              fontSize: '11px',
+              color: '#64748b',
+              backgroundColor: '#f8fafc',
+              borderRadius: '6px',
+              border: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '6px'
+            }}>
+              <span>Showing all inventory materials</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAllOverride(false);
+                }}
+                style={{
+                  background: '#fff7ed',
+                  border: '1px solid #fdba74',
+                  borderRadius: '4px',
+                  padding: '2px 8px',
+                  fontSize: '10px',
+                  fontWeight: '800',
+                  color: '#c2410c',
+                  cursor: 'pointer'
+                }}
+              >
+                Filter to "{categoryHint}"
+              </button>
+            </div>
+          )}
 
           <div style={{
             maxHeight: '260px',
@@ -368,6 +578,87 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                          {/* Photo thumbnail with zoom-to-verify click */}
+                          {(() => {
+                            const rawImg = m.imageUrl || m.image || m.photo || m.imgUrl;
+                            const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                            return cleanImg ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPreviewMaterial(m);
+                                }}
+                                title="Click to view & verify photo"
+                                style={{
+                                  position: 'relative',
+                                  width: '34px',
+                                  height: '34px',
+                                  borderRadius: '6px',
+                                  overflow: 'hidden',
+                                  border: isSelected ? '1.5px solid #ffffff' : '1.5px solid #cbd5e1',
+                                  backgroundColor: '#f8fafc',
+                                  flexShrink: 0,
+                                  cursor: 'zoom-in',
+                                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1.12)';
+                                  e.currentTarget.style.boxShadow = '0 3px 8px rgba(0,0,0,0.25)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                }}
+                              >
+                                <img
+                                  src={cleanImg}
+                                  alt=""
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block'
+                                  }}
+                                />
+                                <div style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  right: 0,
+                                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                                  color: '#ffffff',
+                                  width: '12px',
+                                  height: '12px',
+                                  borderRadius: '3px 0 0 0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '8px',
+                                  pointerEvents: 'none'
+                                }}>
+                                  🔍
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '34px',
+                                height: '34px',
+                                borderRadius: '6px',
+                                backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#f1f5f9',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: isSelected ? 'none' : '1px solid #e2e8f0',
+                                flexShrink: 0,
+                                color: isSelected ? '#ffffff' : '#94a3b8'
+                              }}>
+                                <Package size={16} />
+                              </div>
+                            );
+                          })()}
                           <span style={{
                             fontFamily: 'monospace',
                             fontWeight: '700',
@@ -379,7 +670,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                             borderRadius: '4px',
                             flexShrink: 0
                           }}>
-                            {m.id}
+                            {m.itemCode || m.item_code || m.materialCode || m.code || m.id}
                           </span>
                           <span style={{
                             fontWeight: isSelected ? '700' : isBrand ? '700' : '600',
@@ -461,6 +752,255 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         </div>,
         document.body
       )}
+
+      {/* ─── Large Photo Verification Lightbox Modal ─────────────────── */}
+      {previewMaterial && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.78)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999999,
+            padding: '16px',
+            boxSizing: 'border-box',
+            animation: 'fadeIn 0.15s ease'
+          }}
+          onClick={() => setPreviewMaterial(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '560px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '92vh',
+              boxSizing: 'border-box'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#f8fafc'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🔍</span>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                    Material Photo Verification
+                  </h4>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px' }}>
+                    Verify label / trim photo & details before issuing
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewMaterial(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '8px',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '18px',
+                  fontWeight: '700',
+                  transition: 'background-color 0.15s'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e2e8f0'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Large Image Canvas */}
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#0f172a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '260px',
+              maxHeight: '420px',
+              position: 'relative'
+            }}>
+              {(() => {
+                const raw = previewMaterial.imageUrl || previewMaterial.image || previewMaterial.photo || previewMaterial.imgUrl;
+                const clean = raw ? getCleanImageUrl(raw) : '';
+                return clean ? (
+                  <img
+                    src={clean}
+                    alt={previewMaterial.name || 'Material photo'}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '380px',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.6)'
+                    }}
+                  />
+                ) : (
+                  <div style={{ color: '#94a3b8', textAlign: 'center', padding: '40px' }}>
+                    <Package size={48} style={{ opacity: 0.4, marginBottom: '8px' }} />
+                    <div style={{ fontSize: '13px' }}>No photo available for this material</div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Material Verification Details */}
+            <div style={{ padding: '16px 18px', backgroundColor: '#ffffff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                    <span style={{
+                      fontFamily: 'monospace',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      backgroundColor: '#e0e7ff',
+                      color: '#3730a3',
+                      padding: '2px 8px',
+                      borderRadius: '5px'
+                    }}>
+                      {previewMaterial.itemCode || previewMaterial.item_code || previewMaterial.materialCode || previewMaterial.code || previewMaterial.id}
+                    </span>
+                    {previewMaterial.category && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        backgroundColor: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        textTransform: 'uppercase'
+                      }}>
+                        {previewMaterial.category}
+                      </span>
+                    )}
+                    {previewMaterial.color && previewMaterial.color !== 'Default' && (
+                      <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
+                        • Color: <strong>{previewMaterial.color}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', wordBreak: 'break-word' }}>
+                    {previewMaterial.name}
+                  </div>
+                </div>
+
+                {/* Stock Badge */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-end',
+                  flexShrink: 0
+                }}>
+                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Available Stock</span>
+                  <span style={{
+                    fontSize: '14px',
+                    fontWeight: '900',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    backgroundColor: Number(previewMaterial.stock) <= 0 ? '#fef2f2' : '#ecfdf5',
+                    color: Number(previewMaterial.stock) <= 0 ? '#dc2626' : '#059669',
+                    border: `1.5px solid ${Number(previewMaterial.stock) <= 0 ? '#fca5a5' : '#a7f3d0'}`
+                  }}>
+                    {Number(previewMaterial.stock || 0).toLocaleString()} {previewMaterial.unit || 'Pcs'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Warehouse Location Info */}
+              {previewMaterial.location && (
+                <div style={{
+                  fontSize: '11.5px',
+                  color: '#0369a1',
+                  backgroundColor: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginBottom: '12px'
+                }}>
+                  <span>📍</span>
+                  <span>Storage Location: <strong>{previewMaterial.location}</strong></span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMaterial(null)}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #cbd5e1',
+                    backgroundColor: '#ffffff',
+                    color: '#475569',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close & Back to List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(previewMaterial.id);
+                    setPreviewMaterial(null);
+                    setIsOpen(false);
+                    setSearchQuery('');
+                  }}
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: '#16a34a',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)'
+                  }}
+                >
+                  ✓ Select & Use This Material
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -508,6 +1048,234 @@ export default function ExtraMaterialIssueView({
     setExpandedAuditLots(prev => ({ ...prev, [lotId]: !prev[lotId] }));
   };
   const [showAllBom, setShowAllBom] = useState(false);
+
+  // ── Without BOM Mode State & Handlers ─────────────────────────────────────
+  const [issueMethod, setIssueMethod] = useState('with_bom'); // 'with_bom' | 'without_bom'
+  const [woLotId, setWoLotId] = useState('');
+  const [woLotStyle, setWoLotStyle] = useState('Floor Issue');
+  const [woBrand, setWoBrand] = useState('Mohit Hosiery');
+  const [woCategory, setWoCategory] = useState('Floor Requisition');
+  const [woPieces, setWoPieces] = useState(100);
+  const [woReceiverName, setWoReceiverName] = useState('');
+  const [woReceiverDept, setWoReceiverDept] = useState('Cutting Floor');
+  const [showAddWoModal, setShowAddWoModal] = useState(false);
+  const [addWoInputName, setAddWoInputName] = useState('Label');
+  const [woItems, setWoItems] = useState([
+    {
+      id: 1,
+      componentName: 'Label',
+      materialId: '',
+      extraQty: '',
+      unit: 'Pcs',
+      reason: EXTRA_REASONS[0],
+      remarks: ''
+    }
+  ]);
+
+  const confirmAddWoItem = (compName = '') => {
+    const finalComp = (compName !== undefined && compName !== null ? String(compName) : '').trim();
+    setWoItems(prev => [
+      ...prev,
+      {
+        id: Date.now(),
+        componentName: finalComp,
+        materialId: '',
+        extraQty: '',
+        unit: 'Pcs',
+        reason: EXTRA_REASONS[0],
+        remarks: ''
+      }
+    ]);
+    setShowAddWoModal(false);
+    setAddWoInputName('Label');
+  };
+
+  const handleAddWoItem = () => {
+    setShowAddWoModal(true);
+  };
+
+  const handleRemoveWoItem = (id) => {
+    setWoItems(prev => prev.length > 1 ? prev.filter(it => it.id !== id) : prev);
+  };
+
+  const handleUpdateWoItem = (id, field, value) => {
+    setWoItems(prev => prev.map(it => {
+      if (it.id !== id) return it;
+      const updated = { ...it, [field]: value };
+      if (field === 'materialId') {
+        const mat = materials.find(m => String(m.id) === String(value));
+        if (mat) {
+          updated.unit = mat.unit || it.unit || 'Pcs';
+          if (!it.componentName || it.componentName === 'Label' || it.componentName === 'Tag' || it.componentName === 'Tape') {
+            const cat = (mat.category || '').toLowerCase();
+            const nm = (mat.name || '').toLowerCase();
+            if (cat.includes('tag') || nm.includes('tag')) updated.componentName = 'Tag';
+            else if (cat.includes('label') || nm.includes('label')) updated.componentName = 'Label';
+            else if (cat.includes('tape') || nm.includes('tape')) updated.componentName = 'Tape';
+            else if (cat.includes('elastic') || nm.includes('elastic')) updated.componentName = 'Elastic';
+            else if (cat.includes('zipper') || nm.includes('zipper')) updated.componentName = 'Zipper';
+            else if (cat.includes('button') || nm.includes('button')) updated.componentName = 'Button';
+            else if (cat.includes('drawcord') || cat.includes('cord') || nm.includes('drawcord')) updated.componentName = 'Drawcord';
+            else if (cat.includes('pocket') || nm.includes('pocket')) updated.componentName = 'Pocketing';
+            else if (mat.category) updated.componentName = mat.category;
+          }
+        }
+      }
+      return updated;
+    }));
+  };
+
+  const handleIssueWithoutBom = () => {
+    setFormError('');
+    setFormSuccess('');
+
+    if (!woLotId.trim()) {
+      setFormError('Please enter a Lot Number for this Without BOM extra issue.');
+      return;
+    }
+
+    if (!personName.trim()) {
+      setFormError('Please provide Issuer Person name.');
+      return;
+    }
+
+    if (!woReceiverName.trim()) {
+      setFormError('Please enter Receiver Person name.');
+      return;
+    }
+
+    if (!woReceiverDept.trim()) {
+      setFormError('Please enter Receiver Department / Line.');
+      return;
+    }
+
+    if (woItems.length === 0) {
+      setFormError('Please add at least one material to issue.');
+      return;
+    }
+
+    for (let i = 0; i < woItems.length; i++) {
+      const it = woItems[i];
+      if (!it.componentName || !it.componentName.trim()) {
+        setFormError(`Please enter or select a Component Name (e.g. Tag, Label, Tape) for Row #${i + 1}.`);
+        return;
+      }
+      if (!it.materialId) {
+        setFormError(`Please select an Inventory Material for Row #${i + 1}.`);
+        return;
+      }
+      const qty = parseFloat(it.extraQty);
+      if (!qty || isNaN(qty) || qty <= 0) {
+        setFormError(`Please enter a valid Extra Quantity (> 0) for Row #${i + 1}.`);
+        return;
+      }
+      const mat = materials.find(m => String(m.id) === String(it.materialId));
+      if (!mat) {
+        setFormError(`Selected material not found for Row #${i + 1}.`);
+        return;
+      }
+      const currentStock = parseFloat(mat.stock || mat.totalStock || 0);
+      if (currentStock < qty) {
+        setFormError(`Insufficient stock for "${mat.name}". Available: ${currentStock} ${mat.unit || 'Pcs'}, Requested: ${qty}.`);
+        return;
+      }
+    }
+
+    const voucherId = `EMI-WO-${Date.now().toString().slice(-6)}`;
+    const issueDateStr = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+    const issuedPayloadItems = woItems.map(it => {
+      const mat = materials.find(m => String(m.id) === String(it.materialId));
+      const matCode = mat.itemCode || mat.item_code || mat.materialCode || mat.code || mat.id;
+      const compName = (it.componentName || '').trim() || mat.category || 'Accessory';
+      return {
+        materialId: mat.id,
+        materialCode: matCode,
+        itemCode: matCode,
+        materialName: mat.color && mat.color !== 'Default' ? `${mat.name} (${mat.color})` : mat.name,
+        bomItemName: compName,
+        bomItemDetail: `Direct Extra Issue (Without BOM) - [${compName}]`,
+        totalRequired: parseFloat(it.extraQty),
+        unit: mat.unit || it.unit || 'Pcs',
+        reason: it.reason + (it.remarks ? ` - ${it.remarks}` : ''),
+        previouslyIssued: 0,
+        receiverDept: woReceiverDept.trim(),
+        receiverName: woReceiverName.trim()
+      };
+    });
+
+    if (onIssueMaterials) {
+      onIssueMaterials(
+        woLotId.trim(),
+        parseInt(woPieces, 10) || 100,
+        issuedPayloadItems,
+        true, // isReissue
+        personName.trim(),
+        woReceiverName.trim(),
+        woReceiverDept.trim(),
+        true // isWithoutBom
+      );
+    }
+
+    saveExtraMaterialIssueToDb({
+      voucherId,
+      lotId: woLotId.trim(),
+      style: woLotStyle.trim() || 'Floor Issue',
+      brand: woBrand.trim() || 'Mohit Hosiery',
+      category: woCategory.trim() || 'Floor Requisition',
+      season: 'Current',
+      pieces: parseInt(woPieces, 10) || 100,
+      personName: personName.trim(),
+      receiverName: woReceiverName.trim(),
+      receiverDept: woReceiverDept.trim(),
+      issueDate: issueDateStr,
+      status: 'Issued',
+      isWithoutBom: true,
+      items: issuedPayloadItems.map(it => ({
+        ...it,
+        baseQty: 0,
+        issuePercentage: 100,
+        maxAllowedQty: 0,
+        excessQty: it.totalRequired,
+        exceedsLimit: false
+      }))
+    });
+
+    setPrintSlipData({
+      voucherId,
+      issueDate: issueDateStr,
+      lotId: woLotId.trim(),
+      design: {
+        id: woLotId.trim(),
+        style: woLotStyle.trim() || 'Floor Issue',
+        brand: woBrand.trim() || 'Mohit Hosiery',
+        category: woCategory.trim() || 'Floor Requisition'
+      },
+      pieces: parseInt(woPieces, 10) || 100,
+      personName: personName.trim(),
+      receiverName: woReceiverName.trim(),
+      receiverDept: woReceiverDept.trim(),
+      items: issuedPayloadItems,
+      isWithoutBom: true
+    });
+
+    setFormSuccess(`Successfully issued ${issuedPayloadItems.length} extra material item(s) Without BOM for Lot #${woLotId.trim()}! Voucher: ${voucherId}`);
+
+    setWoItems([
+      {
+        id: Date.now(),
+        componentName: 'Label',
+        materialId: '',
+        extraQty: '',
+        unit: 'Pcs',
+        reason: EXTRA_REASONS[0],
+        remarks: ''
+      }
+    ]);
+    setWoLotId('');
+    setWoReceiverName('');
+    setTimeout(() => setFormSuccess(''), 6000);
+  };
 
   // ── Barcode Scanner State & Handlers ─────────────────────────────────────
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -1403,12 +2171,15 @@ export default function ExtraMaterialIssueView({
     doc.text('G-PDMS Secure Systems — Garment Product Data Management', 14, 25);
 
     // Title Badge
-    doc.setFillColor(99, 102, 241);
+    doc.setFillColor(data.isWithoutBom ? 234 : 99, data.isWithoutBom ? 88 : 102, data.isWithoutBom ? 12 : 241);
     doc.roundedRect(14, 30, 182, 10, 2, 2, 'F');
     doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(255, 255, 255);
-    doc.text('EXTRA MATERIAL REQUISITION & ISSUE VOUCHER', 16, 37);
+    const slipTitle = data.isWithoutBom
+      ? 'EXTRA MATERIAL ISSUE VOUCHER (WITHOUT BOM - DIRECT FLOOR)'
+      : 'EXTRA MATERIAL REQUISITION & ISSUE VOUCHER';
+    doc.text(slipTitle, 16, 37);
 
     // Info Grid
     doc.setFontSize(9);
@@ -1430,12 +2201,18 @@ export default function ExtraMaterialIssueView({
     doc.setFont('helvetica', 'bold');
     doc.text(`Lot Number:`, 18, 59);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Lot ${data.design?.id || '—'} ${data.design?.lotNo2 ? `(${data.design.lotNo2})` : ''}`, 44, 59);
+    const lotLabel = data.isWithoutBom
+      ? `Lot #${data.lotId || data.design?.id || '—'} [WITHOUT BOM]`
+      : `Lot ${data.design?.id || '—'} ${data.design?.lotNo2 ? `(${data.design.lotNo2})` : ''}`;
+    doc.text(lotLabel, 44, 59);
 
     doc.setFont('helvetica', 'bold');
-    doc.text(`Category:`, 110, 59);
+    doc.text(`Category / Style:`, 110, 59);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${data.design?.category || '—'} [${data.design?.brand || 'Generic'}]`, 135, 59);
+    const catLabel = data.isWithoutBom
+      ? `${data.design?.style || data.style || 'Floor Issue'} [${data.design?.brand || data.brand || 'Mohit Hosiery'}]`
+      : `${data.design?.category || '—'} [${data.design?.brand || 'Generic'}]`;
+    doc.text(catLabel, 135, 59);
 
     doc.setFont('helvetica', 'bold');
     doc.text(`Issued By:`, 18, 67);
@@ -1456,24 +2233,24 @@ export default function ExtraMaterialIssueView({
     doc.text(`Issue Type:`, 110, 74);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(220, 38, 38);
-    doc.text('EXTRA / WASTAGE REQUISITION', 135, 74);
+    doc.text(data.isWithoutBom ? 'WITHOUT BOM FLOOR ISSUE' : 'EXTRA / WASTAGE REQUISITION', 135, 74);
 
     // Items Table
     const tableRows = (data.items || []).map((item, idx) => [
       idx + 1,
-      item.bomItemName || '—',
-      `[${item.materialId}] ${item.materialName}`,
-      item.previouslyIssued ? `${item.previouslyIssued} ${item.unit}` : '0 Pcs',
+      item.bomItemName || (data.isWithoutBom ? item.materialName : '—'),
+      `[${item.itemCode || item.materialCode || item.materialId}] ${item.materialName}`,
+      item.previouslyIssued ? `${item.previouslyIssued} ${item.unit}` : (data.isWithoutBom ? 'N/A' : '0 Pcs'),
       `${item.totalRequired} ${item.unit}`,
       item.reason || 'Extra Issue'
     ]);
 
     autoTable(doc, {
       startY: 82,
-      head: [['#', 'BOM Component', 'Inventory Material Code & Name', 'Prev Issued', 'Extra Issued', 'Reason / Remarks']],
+      head: [['#', data.isWithoutBom ? 'Item Description' : 'BOM Component', 'Inventory Material Code & Name', 'Prev Issued', 'Extra Issued', 'Reason / Remarks']],
       body: tableRows,
       theme: 'grid',
-      headStyles: { fillColor: [30, 41, 59], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+      headStyles: { fillColor: data.isWithoutBom ? [194, 65, 12] : [30, 41, 59], textColor: 255, fontSize: 8, fontStyle: 'bold' },
       bodyStyles: { fontSize: 8, textColor: [15, 23, 42] },
       columnStyles: {
         0: { cellWidth: 8, halign: 'center' },
@@ -1509,7 +2286,7 @@ export default function ExtraMaterialIssueView({
     doc.setFont('helvetica', 'bold');
     doc.text('Store / Production Sign', 140, finalY + 10);
 
-    doc.save(`EXTRA_MATERIAL_SLIP_${data.voucherId}_LOT_${data.design?.id}.pdf`);
+    doc.save(`EXTRA_MATERIAL_SLIP_${data.voucherId}_LOT_${data.lotId || data.design?.id || 'DIRECT'}.pdf`);
   };
 
   // Browser print trigger
@@ -2003,14 +2780,84 @@ export default function ExtraMaterialIssueView({
 
       {/* SUB TAB 1: ISSUE EXTRA MATERIAL */}
       {activeSubTab === 'issue' && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '280px minmax(0, 1fr)',
-          gap: '16px',
-          alignItems: 'start',
-          width: '100%',
-          minWidth: 0
-        }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', width: '100%' }}>
+          {/* Issue Method Selector: With BOM vs Without BOM */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+            padding: '12px 18px',
+            borderRadius: '14px',
+            background: issueMethod === 'without_bom' ? '#fff7ed' : '#f0f9ff',
+            border: issueMethod === 'without_bom' ? '1.5px solid #fdba74' : '1.5px solid #bae6fd',
+            marginBottom: '4px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: issueMethod === 'without_bom' ? '#9a3412' : '#0369a1' }}>
+                Select Issue Method:
+              </span>
+              <div style={{ display: 'inline-flex', background: '#ffffff', padding: '4px', borderRadius: '10px', border: '1px solid #cbd5e1', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={() => setIssueMethod('with_bom')}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    background: issueMethod === 'with_bom' ? 'linear-gradient(135deg, #4f46e5 0%, #4338ca 100%)' : 'transparent',
+                    color: issueMethod === 'with_bom' ? '#ffffff' : '#64748b',
+                    boxShadow: issueMethod === 'with_bom' ? '0 2px 8px rgba(79, 70, 229, 0.3)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Shield size={15} /> With BOM (From Issued Lots)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIssueMethod('without_bom')}
+                  style={{
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    background: issueMethod === 'without_bom' ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'transparent',
+                    color: issueMethod === 'without_bom' ? '#ffffff' : '#64748b',
+                    boxShadow: issueMethod === 'without_bom' ? '0 2px 8px rgba(234, 88, 12, 0.35)' : 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Zap size={15} /> Without BOM (Direct Floor Extra Issue)
+                </button>
+              </div>
+            </div>
+
+            <span style={{ fontSize: '12px', fontWeight: '700', color: issueMethod === 'without_bom' ? '#c2410c' : '#0369a1' }}>
+              {issueMethod === 'without_bom'
+                ? '⚡ Without BOM: Issue any material directly without pre-approved BOM restrictions.'
+                : '🏷️ With BOM: Select an issued production lot to issue extra mapped BOM components.'}
+            </span>
+          </div>
+
+          {issueMethod === 'with_bom' ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '280px minmax(0, 1fr)',
+              gap: '16px',
+              alignItems: 'start',
+              width: '100%',
+              minWidth: 0
+            }}>
           
           {/* Left Column: Approved Lots Browser with Search Bar */}
           <div style={{
@@ -2238,6 +3085,27 @@ export default function ExtraMaterialIssueView({
                 <p style={{ margin: 0, fontSize: '13px', maxWidth: '420px', lineHeight: '1.5' }}>
                   Please select an already-issued production lot from the left sidebar to view BOM components and generate extra material requisitions.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setIssueMethod('without_bom')}
+                  style={{
+                    marginTop: '8px',
+                    padding: '8px 18px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #fdba74',
+                    background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                    color: '#c2410c',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(234, 88, 12, 0.12)'
+                  }}
+                >
+                  <Zap size={14} /> Need to issue without BOM? Click Here to Issue Extra Material (Without BOM)
+                </button>
               </div>
             ) : (
               <>
@@ -2644,7 +3512,7 @@ export default function ExtraMaterialIssueView({
                           </th>
                           <th style={{ width: '160px', minWidth: '160px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>BOM Component</th>
                           <th style={{ minWidth: '280px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Assigned Inventory Item Map</th>
-                          <th style={{ width: '90px', minWidth: '90px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Stock</th>
+                          <th style={{ width: '115px', minWidth: '115px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Stock</th>
                           <th style={{ width: '100px', minWidth: '100px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Prev Issued</th>
                           <th style={{ width: '150px', minWidth: '150px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Extra Qty</th>
                           <th style={{ width: '180px', minWidth: '180px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Reason / Remarks</th>
@@ -2743,21 +3611,36 @@ export default function ExtraMaterialIssueView({
                                 </td>
 
                                 {/* Stock Badge */}
-                                <td style={{ textAlign: 'center', padding: '12px 8px', verticalAlign: 'middle' }}>
-                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                                <td style={{ textAlign: 'center', padding: '12px 8px', verticalAlign: 'middle', width: '115px', minWidth: '115px' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
                                     <span style={{
                                       fontWeight: '800',
-                                      fontSize: '13px',
-                                      padding: '3px 8px',
-                                      borderRadius: '6px',
-                                      backgroundColor: stock <= 0 ? '#fef2f2' : stock < 50 ? '#fffbebf' : '#ecfdf5',
+                                      fontSize: '12.5px',
+                                      padding: '4px 10px',
+                                      borderRadius: '8px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      whiteSpace: 'nowrap',
+                                      lineHeight: '1.2',
+                                      backgroundColor: stock <= 0 ? '#fef2f2' : stock < 50 ? '#fffbeb' : '#ecfdf5',
                                       color: stock <= 0 ? '#dc2626' : stock < 50 ? '#d97706' : '#059669',
-                                      border: `1px solid ${stock <= 0 ? '#fca5a5' : stock < 50 ? '#fde68a' : '#a7f3d0'}`
+                                      border: `1.5px solid ${stock <= 0 ? '#fca5a5' : stock < 50 ? '#fde68a' : '#a7f3d0'}`,
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                                     }}>
-                                      {stock} {item.unit}
+                                      <span style={{
+                                        width: '6px',
+                                        height: '6px',
+                                        borderRadius: '50%',
+                                        backgroundColor: stock <= 0 ? '#ef4444' : stock < 50 ? '#f59e0b' : '#10b981',
+                                        display: 'inline-block',
+                                        flexShrink: 0
+                                      }} />
+                                      <span>{Number(stock || 0).toLocaleString()}</span>
+                                      <span style={{ fontSize: '11px', fontWeight: '700', opacity: 0.85 }}>{item.unit}</span>
                                     </span>
                                     {isStockShortage && (
-                                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#dc2626', backgroundColor: '#fee2e2', padding: '2px 5px', borderRadius: '4px', marginTop: '3px' }}>
+                                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#dc2626', backgroundColor: '#fee2e2', padding: '2px 5px', borderRadius: '4px', marginTop: '2px', whiteSpace: 'nowrap' }}>
                                         Low Stock
                                       </span>
                                     )}
@@ -2793,13 +3676,13 @@ export default function ExtraMaterialIssueView({
                                         placeholder="0"
                                         className="form-input"
                                         style={{
-                                          width: '64px',
-                                          height: '34px',
+                                          width: '78px',
+                                          height: '36px',
                                           textAlign: 'center',
                                           fontWeight: '800',
                                           fontSize: '13.5px',
-                                          padding: '2px 4px',
-                                          borderRadius: '6px',
+                                          padding: '2px 6px',
+                                          borderRadius: '7px',
                                           border: '1.5px solid',
                                           borderColor: isStockShortage
                                             ? '#ef4444'
@@ -2909,6 +3792,559 @@ export default function ExtraMaterialIssueView({
               </>
             )}
           </div>
+        </div>
+          ) : (
+            /* WITHOUT BOM DIRECT EXTRA MATERIAL REQUISITION PANEL */
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              width: '100%'
+            }}>
+              {/* Header Banner */}
+              <div style={{
+                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                borderRadius: '14px',
+                border: '1.5px solid #fdba74',
+                padding: '18px 22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                boxShadow: '0 2px 8px rgba(234, 88, 12, 0.06)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    backgroundColor: '#ea580c',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 10px rgba(234, 88, 12, 0.3)'
+                  }}>
+                    <Zap size={22} />
+                  </div>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#9a3412' }}>
+                      Direct Extra Material Requisition (Without BOM)
+                    </h2>
+                    <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#c2410c', fontWeight: '600' }}>
+                      Issue any inventory trims or accessories directly to cutting/production floor without requiring a pre-approved BOM.
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    backgroundColor: '#ffffff',
+                    color: '#ea580c',
+                    padding: '6px 14px',
+                    borderRadius: '8px',
+                    border: '1px solid #fed7aa',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                  }}>
+                    ⚡ UNRESTRICTED FLOOR ISSUE
+                  </span>
+                </div>
+              </div>
+
+              {/* Floor Details Card */}
+              <div style={{
+                backgroundColor: 'var(--bg-primary, #ffffff)',
+                borderRadius: '14px',
+                border: '1.5px solid var(--border-color, #cbd5e1)',
+                padding: '20px 22px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+              }}>
+                <h3 style={{ margin: '0 0 14px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <FileText size={16} style={{ color: '#ea580c' }} />
+                  <span>1. Production & Floor Movement Details</span>
+                </h3>
+
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '14px'
+                }}>
+                  {/* Lot Number */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      LOT NUMBER (REQUIRED) <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 62116, LOT-104..."
+                      value={woLotId}
+                      onChange={(e) => setWoLotId(e.target.value)}
+                      className="form-input"
+                      list="recent-lots-list"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                    <datalist id="recent-lots-list">
+                      {designs.map(d => (
+                        <option key={d.id} value={d.id}>{d.name || d.style || d.category}</option>
+                      ))}
+                    </datalist>
+                  </div>
+
+                  {/* Style / Garment Name */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      STYLE / GARMENT ITEM
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Lower, Tracksuit, T-Shirt..."
+                      value={woLotStyle}
+                      onChange={(e) => setWoLotStyle(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Brand */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      BUYER / BRAND
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Mohit Hosiery, Hermes..."
+                      value={woBrand}
+                      onChange={(e) => setWoBrand(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Order Pieces */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      BATCH CUTTING VOLUME (PCS)
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="100"
+                      value={woPieces}
+                      onChange={(e) => setWoPieces(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Issuer Person */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      ISSUER PERSON <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Store Incharge"
+                      value={personName}
+                      onChange={(e) => setPersonName(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Receiver Person */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      RECEIVER PERSON <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Rohit (Cutting Master)"
+                      value={woReceiverName}
+                      onChange={(e) => setWoReceiverName(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  {/* Receiver Department */}
+                  <div>
+                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
+                      RECEIVER DEPT / LINE <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Cutting Floor, Finishing..."
+                      value={woReceiverDept}
+                      onChange={(e) => setWoReceiverDept(e.target.value)}
+                      className="form-input"
+                      style={{
+                        width: '100%',
+                        height: '38px',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Material Items Requisition Table Card */}
+              <div style={{
+                backgroundColor: 'var(--bg-primary, #ffffff)',
+                borderRadius: '14px',
+                border: '1.5px solid var(--border-color, #cbd5e1)',
+                padding: '20px 22px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                  <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Package size={16} style={{ color: '#ea580c' }} />
+                    <span>2. Materials to Issue ({woItems.length} Item{woItems.length > 1 ? 's' : ''})</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={handleAddWoItem}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '7px 14px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #fdba74',
+                      background: '#fff7ed',
+                      color: '#c2410c',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                    }}
+                  >
+                    <Plus size={14} /> Add Another Material Row
+                  </button>
+                </div>
+
+                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+                  <table style={{ width: '100%', minWidth: '1080px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                    <thead>
+                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '38px', minWidth: '38px' }}>#</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'left', minWidth: '160px' }}>Component Name *</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '280px' }}>Inventory Material *</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Stock Available</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Issue Qty *</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', whiteSpace: 'nowrap' }}>Unit</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '180px' }}>Reason for Issue *</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>Remarks</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '45px', minWidth: '45px' }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {woItems.map((item, idx) => {
+                        const selectedMat = materials.find(m => String(m.id) === String(item.materialId));
+                        const currentStock = selectedMat ? parseFloat(selectedMat.stock || selectedMat.totalStock || 0) : null;
+                        const qtyNum = parseFloat(item.extraQty) || 0;
+                        const isStockLow = currentStock !== null && qtyNum > currentStock;
+
+                        return (
+                          <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: '800', color: '#64748b', verticalAlign: 'middle' }}>
+                              {idx + 1}
+                            </td>
+                            <td style={{ padding: '10px 10px', verticalAlign: 'middle' }}>
+                              <input
+                                type="text"
+                                list={`comp-types-${item.id}`}
+                                placeholder="e.g. Label, Tape, Tag..."
+                                value={item.componentName || ''}
+                                onChange={(e) => handleUpdateWoItem(item.id, 'componentName', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '7px 10px',
+                                  borderRadius: '7px',
+                                  border: !item.componentName?.trim() ? '1.5px solid #fdba74' : '1.5px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  fontSize: '13px',
+                                  fontWeight: '700',
+                                  color: '#0f172a',
+                                  boxSizing: 'border-box'
+                                }}
+                              />
+                              <datalist id={`comp-types-${item.id}`}>
+                                {COMPONENT_PRESETS.map(c => (
+                                  <option key={c} value={c} />
+                                ))}
+                              </datalist>
+                            </td>
+                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                              <SearchableMaterialSelect
+                                materials={materials}
+                                value={item.materialId}
+                                onChange={(val) => handleUpdateWoItem(item.id, 'materialId', val)}
+                                placeholder={item.componentName?.trim() ? `-- Select ${item.componentName} Material --` : "-- Search & Select Inventory Material --"}
+                                categoryHint={item.componentName}
+                              />
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', verticalAlign: 'middle' }}>
+                              {selectedMat ? (
+                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                  <div style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '5px',
+                                    fontSize: '12.5px',
+                                    fontWeight: '800',
+                                    padding: '5px 12px',
+                                    borderRadius: '8px',
+                                    whiteSpace: 'nowrap',
+                                    lineHeight: '1.2',
+                                    background: currentStock <= 0 ? '#fef2f2' : currentStock < 20 ? '#fffbeb' : '#f0fdf4',
+                                    color: currentStock <= 0 ? '#dc2626' : currentStock < 20 ? '#d97706' : '#16a34a',
+                                    border: `1.5px solid ${currentStock <= 0 ? '#fecaca' : currentStock < 20 ? '#fde68a' : '#86efac'}`,
+                                    boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                                  }}>
+                                    <span style={{
+                                      width: '7px',
+                                      height: '7px',
+                                      borderRadius: '50%',
+                                      backgroundColor: currentStock <= 0 ? '#ef4444' : currentStock < 20 ? '#f59e0b' : '#16a34a',
+                                      display: 'inline-block',
+                                      flexShrink: 0
+                                    }} />
+                                    <span style={{ fontSize: '13px', fontWeight: '900' }}>
+                                      {Number(currentStock).toLocaleString()}
+                                    </span>
+                                    <span style={{ fontSize: '11px', fontWeight: '700', opacity: 0.85 }}>
+                                      {selectedMat.unit || 'Pcs'}
+                                    </span>
+                                  </div>
+                                  {currentStock <= 0 && (
+                                    <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                      Out of Stock
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
+                                  <input
+                                    type="number"
+                                    min="0.01"
+                                    step="any"
+                                    placeholder="0.00"
+                                    value={item.extraQty}
+                                    onChange={(e) => handleUpdateWoItem(item.id, 'extraQty', e.target.value)}
+                                    style={{
+                                      width: '100%',
+                                      height: '38px',
+                                      padding: '6px 10px',
+                                      borderRadius: '8px',
+                                      border: isStockLow ? '2px solid #ef4444' : (parseFloat(item.extraQty) > 0 ? '2px solid #ea580c' : '1.5px solid #cbd5e1'),
+                                      background: isStockLow ? '#fef2f2' : '#ffffff',
+                                      fontSize: '14px',
+                                      fontWeight: '800',
+                                      textAlign: 'center',
+                                      color: isStockLow ? '#dc2626' : (parseFloat(item.extraQty) > 0 ? '#c2410c' : '#0f172a'),
+                                      boxSizing: 'border-box',
+                                      outline: 'none',
+                                      boxShadow: isStockLow
+                                        ? '0 0 0 2px rgba(239, 68, 68, 0.15)'
+                                        : (parseFloat(item.extraQty) > 0 ? '0 0 0 2px rgba(234, 88, 12, 0.15)' : 'none'),
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  />
+                                </div>
+                                {isStockLow && (
+                                  <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', marginTop: '1px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                    ⚠ Exceeds stock!
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', verticalAlign: 'middle' }}>
+                              <span style={{
+                                fontSize: '12px',
+                                fontWeight: '800',
+                                color: '#475569',
+                                background: '#f1f5f9',
+                                border: '1px solid #e2e8f0',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                display: 'inline-block',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                {item.unit || selectedMat?.unit || 'Pcs'}
+                              </span>
+                            </td>
+                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                              <select
+                                value={item.reason}
+                                onChange={(e) => handleUpdateWoItem(item.id, 'reason', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '7px 10px',
+                                  borderRadius: '7px',
+                                  border: '1.5px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  fontSize: '12.5px',
+                                  fontWeight: '600',
+                                  boxSizing: 'border-box'
+                                }}
+                              >
+                                {EXTRA_REASONS.map(r => (
+                                  <option key={r} value={r}>{r}</option>
+                                ))}
+                              </select>
+                            </td>
+                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                              <input
+                                type="text"
+                                placeholder="e.g. Floor request..."
+                                value={item.remarks}
+                                onChange={(e) => handleUpdateWoItem(item.id, 'remarks', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '7px 10px',
+                                  borderRadius: '7px',
+                                  border: '1.5px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  fontSize: '12px',
+                                  boxSizing: 'border-box'
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '45px', minWidth: '45px', verticalAlign: 'middle' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveWoItem(item.id)}
+                                disabled={woItems.length <= 1}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: woItems.length <= 1 ? '#cbd5e1' : '#ef4444',
+                                  cursor: woItems.length <= 1 ? 'not-allowed' : 'pointer',
+                                  padding: '4px'
+                                }}
+                                title="Remove item"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Bottom Bar */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: '16px',
+                  paddingTop: '16px',
+                  borderTop: '1.5px solid #f1f5f9',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}>
+                  <div style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600' }}>
+                    Configured Items: <strong style={{ color: '#0f172a' }}>{woItems.filter(i => i.materialId && parseFloat(i.extraQty) > 0).length}</strong> of <strong>{woItems.length}</strong> items ready to issue
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleIssueWithoutBom}
+                    style={{
+                      padding: '11px 26px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                      color: '#ffffff',
+                      fontSize: '13.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <Zap size={16} /> Issue Extra Material (Without BOM) & Generate Slip
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4183,9 +5619,9 @@ export default function ExtraMaterialIssueView({
                 }}>
                   <div><strong>Voucher No:</strong> {printSlipData.voucherId}</div>
                   <div><strong>Issue Date:</strong> {printSlipData.issueDate}</div>
-                  <div><strong>Lot Number:</strong> Lot {printSlipData.design?.id} {printSlipData.design?.lotNo2 ? `(${printSlipData.design.lotNo2})` : ''}</div>
-                  <div><strong>Brand:</strong> {printSlipData.design?.brand || '—'}</div>
-                  <div><strong>Garment Type:</strong> {printSlipData.design?.category || '—'}</div>
+                  <div><strong>Lot Number:</strong> Lot {printSlipData.lotId || printSlipData.design?.id || '—'} {printSlipData.isWithoutBom ? <span style={{ marginLeft: '4px', padding: '1px 5px', background: '#fff7ed', color: '#c2410c', borderRadius: '4px', fontWeight: '800', border: '1px solid #fdba74', fontSize: '10px' }}>WITHOUT BOM</span> : (printSlipData.design?.lotNo2 ? `(${printSlipData.design.lotNo2})` : '')}</div>
+                  <div><strong>Brand:</strong> {printSlipData.design?.brand || printSlipData.brand || 'Mohit Hosiery'}</div>
+                  <div><strong>Garment Type:</strong> {printSlipData.design?.category || printSlipData.design?.style || printSlipData.style || 'Floor Issue'}</div>
                   <div><strong>Order Volume:</strong> {(printSlipData.pieces || 0).toLocaleString()} Units</div>
                   <div><strong>Issued By:</strong> {printSlipData.personName}</div>
                   <div><strong>Received By:</strong> {printSlipData.receiverName}</div>
@@ -4197,7 +5633,7 @@ export default function ExtraMaterialIssueView({
                   <thead>
                     <tr style={{ backgroundColor: '#e2e8f0', borderBottom: '1.5px solid #000000' }}>
                       <th style={{ padding: '6px', textAlign: 'center', width: '30px' }}>#</th>
-                      <th style={{ padding: '6px', textAlign: 'left' }}>BOM Component</th>
+                      <th style={{ padding: '6px', textAlign: 'left' }}>Component Name</th>
                       <th style={{ padding: '6px', textAlign: 'left' }}>Material Description</th>
                       <th style={{ padding: '6px', textAlign: 'center', width: '90px' }}>Extra Qty</th>
                       <th style={{ padding: '6px', textAlign: 'left' }}>Reason / Cause</th>
@@ -4207,8 +5643,25 @@ export default function ExtraMaterialIssueView({
                     {(printSlipData.items || []).map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
                         <td style={{ padding: '6px', textAlign: 'center' }}>{idx + 1}</td>
-                        <td style={{ padding: '6px', fontWeight: '700' }}>{item.bomItemName}</td>
-                        <td style={{ padding: '6px' }}>{item.materialName}</td>
+                        <td style={{ padding: '6px', fontWeight: '700' }}>
+                          <span style={{
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: '#fff7ed',
+                            color: '#c2410c',
+                            border: '1px solid #fed7aa',
+                            fontSize: '11px',
+                            fontWeight: '800'
+                          }}>
+                            {item.bomItemName}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: '700', marginRight: '6px', color: '#475569' }}>
+                            [{item.itemCode || item.materialCode || item.materialId}]
+                          </span>
+                          {item.materialName}
+                        </td>
                         <td style={{ padding: '6px', textAlign: 'center', fontWeight: '800', color: '#b91c1c' }}>
                           {item.totalRequired} {item.unit}
                         </td>
@@ -4287,9 +5740,9 @@ export default function ExtraMaterialIssueView({
                 }}>
                   <div><strong>Voucher No:</strong> {printSlipData.voucherId}</div>
                   <div><strong>Issue Date:</strong> {printSlipData.issueDate}</div>
-                  <div><strong>Lot Number:</strong> Lot {printSlipData.design?.id} {printSlipData.design?.lotNo2 ? `(${printSlipData.design.lotNo2})` : ''}</div>
-                  <div><strong>Brand:</strong> {printSlipData.design?.brand || '—'}</div>
-                  <div><strong>Garment Type:</strong> {printSlipData.design?.category || '—'}</div>
+                  <div><strong>Lot Number:</strong> Lot {printSlipData.lotId || printSlipData.design?.id || '—'} {printSlipData.isWithoutBom ? <span style={{ marginLeft: '4px', padding: '1px 5px', background: '#fff7ed', color: '#c2410c', borderRadius: '4px', fontWeight: '800', border: '1px solid #fdba74', fontSize: '10px' }}>WITHOUT BOM</span> : (printSlipData.design?.lotNo2 ? `(${printSlipData.design.lotNo2})` : '')}</div>
+                  <div><strong>Brand:</strong> {printSlipData.design?.brand || printSlipData.brand || 'Mohit Hosiery'}</div>
+                  <div><strong>Garment Type:</strong> {printSlipData.design?.category || printSlipData.design?.style || printSlipData.style || 'Floor Issue'}</div>
                   <div><strong>Order Volume:</strong> {(printSlipData.pieces || 0).toLocaleString()} Units</div>
                   <div><strong>Issued By:</strong> {printSlipData.personName}</div>
                   <div><strong>Received By:</strong> {printSlipData.receiverName}</div>
@@ -4301,7 +5754,7 @@ export default function ExtraMaterialIssueView({
                   <thead>
                     <tr style={{ backgroundColor: '#e2e8f0', borderBottom: '1.5px solid #000000' }}>
                       <th style={{ padding: '6px', textAlign: 'center', width: '30px' }}>#</th>
-                      <th style={{ padding: '6px', textAlign: 'left' }}>BOM Component</th>
+                      <th style={{ padding: '6px', textAlign: 'left' }}>Component Name</th>
                       <th style={{ padding: '6px', textAlign: 'left' }}>Material Description</th>
                       <th style={{ padding: '6px', textAlign: 'center', width: '90px' }}>Extra Qty</th>
                       <th style={{ padding: '6px', textAlign: 'left' }}>Reason / Cause</th>
@@ -4311,8 +5764,25 @@ export default function ExtraMaterialIssueView({
                     {(printSlipData.items || []).map((item, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid #cbd5e1' }}>
                         <td style={{ padding: '6px', textAlign: 'center' }}>{idx + 1}</td>
-                        <td style={{ padding: '6px', fontWeight: '700' }}>{item.bomItemName}</td>
-                        <td style={{ padding: '6px' }}>{item.materialName}</td>
+                        <td style={{ padding: '6px', fontWeight: '700' }}>
+                          <span style={{
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            backgroundColor: '#fff7ed',
+                            color: '#c2410c',
+                            border: '1px solid #fed7aa',
+                            fontSize: '11px',
+                            fontWeight: '800'
+                          }}>
+                            {item.bomItemName}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: '700', marginRight: '6px', color: '#475569' }}>
+                            [{item.itemCode || item.materialCode || item.materialId}]
+                          </span>
+                          {item.materialName}
+                        </td>
                         <td style={{ padding: '6px', textAlign: 'center', fontWeight: '800', color: '#b91c1c' }}>
                           {item.totalRequired} {item.unit}
                         </td>
@@ -5011,6 +6481,185 @@ export default function ExtraMaterialIssueView({
                   Submit for Admin Approval
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal - Ask Material / Component Name to Add */}
+      {showAddWoModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.7)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10050,
+          padding: '16px'
+        }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            borderRadius: '16px',
+            maxWidth: '520px',
+            width: '100%',
+            padding: '24px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.28)',
+            border: '2px solid #fdba74',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  backgroundColor: '#fff7ed',
+                  color: '#ea580c',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1.5px solid #fdba74'
+                }}>
+                  <Package size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '17px', fontWeight: '800', color: '#0f172a' }}>
+                    Select / Enter Material Name
+                  </h3>
+                  <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#64748b', fontWeight: '500' }}>
+                    Which component or material do you want to issue?
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddWoModal(false)}
+                style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '24px', lineHeight: 1 }}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Quick 1-Click Preset Buttons */}
+            <div style={{ marginBottom: '18px' }}>
+              <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', display: 'block', marginBottom: '8px', letterSpacing: '0.04em' }}>
+                Quick Click Presets:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                {[
+                  { label: '🏷️ Label', val: 'Label' },
+                  { label: '🔖 Tag', val: 'Tag' },
+                  { label: '🎗️ Tape', val: 'Tape' },
+                  { label: '🧵 Elastic', val: 'Elastic' },
+                  { label: '🤐 Zipper', val: 'Zipper' },
+                  { label: '🔘 Button', val: 'Button' },
+                  { label: '👖 Pocketing', val: 'Pocketing' },
+                  { label: '🧵 Drawcord', val: 'Drawcord' },
+                  { label: '📦 All / Generic', val: '' }
+                ].map(chip => (
+                  <button
+                    key={chip.val}
+                    type="button"
+                    onClick={() => confirmAddWoItem(chip.val)}
+                    style={{
+                      padding: '10px 8px',
+                      borderRadius: '8px',
+                      border: (addWoInputName.toLowerCase() === chip.val.toLowerCase() && chip.val !== '') ? '2px solid #ea580c' : '1.5px solid #e2e8f0',
+                      background: (addWoInputName.toLowerCase() === chip.val.toLowerCase() && chip.val !== '') ? '#fff7ed' : '#f8fafc',
+                      color: (addWoInputName.toLowerCase() === chip.val.toLowerCase() && chip.val !== '') ? '#c2410c' : '#1e293b',
+                      fontSize: '12.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Free Text Input */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px' }}>
+                Or Custom Material Name:
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder="e.g. Label, Tape, Tag, Bone, Thread..."
+                  value={addWoInputName}
+                  onChange={(e) => setAddWoInputName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      confirmAddWoItem(addWoInputName);
+                    }
+                  }}
+                  autoFocus
+                  style={{
+                    flex: 1,
+                    height: '42px',
+                    padding: '8px 14px',
+                    fontSize: '14px',
+                    fontWeight: '700',
+                    borderRadius: '8px',
+                    border: '2px solid #ea580c',
+                    outline: 'none',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => confirmAddWoItem(addWoInputName)}
+                  style={{
+                    padding: '0 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(234, 88, 12, 0.25)',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  + Add Row
+                </button>
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '6px' }}>
+                Tip: If you choose <strong>"Label"</strong>, the new row will automatically filter and show only <strong>Label</strong> materials in the dropdown!
+              </div>
+            </div>
+
+            {/* Cancel Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setShowAddWoModal(false)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '7px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#64748b',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
             </div>
           </div>
         </div>

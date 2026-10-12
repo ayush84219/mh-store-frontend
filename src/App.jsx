@@ -43,6 +43,7 @@ const WarehouseLocationView = lazy(() => import('./components/WarehouseLocationV
 const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
+const ElasticTapeIssueView = lazy(() => import('./components/ElasticTapeIssueView'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -72,6 +73,7 @@ const hasTabAccess = (tabName, role) => {
       'bone_po',
       'elastic_issue',
       'elastic_po',
+      'elastic_tape_issue',
       'generate_po',
       'history',
       'scanner_logs',
@@ -105,6 +107,7 @@ const hasTabAccess = (tabName, role) => {
       'bone_po',
       'elastic_issue',
       'elastic_po',
+      'elastic_tape_issue',
       'generate_po',
       'history',
       'scanner_logs',
@@ -138,6 +141,7 @@ const hasTabAccess = (tabName, role) => {
       'bone_po',
       'elastic_issue',
       'elastic_po',
+      'elastic_tape_issue',
       'only_cutting',
       'item_codes'
     ].includes(tabName);
@@ -161,6 +165,7 @@ const TAB_ROUTES = {
   bone_po: '/bone-issue',
   elastic_issue: '/elastic-issue',
   elastic_po: '/elastic-issue',
+  elastic_tape_issue: '/elastic-tape-issue',
   material_details: '/material-details',
   reports_history: '/reports-history',
   settings: '/settings',
@@ -189,6 +194,8 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/bone_po': 'bone_issue',
   '/elastic-po': 'elastic_issue',
   '/elastic_po': 'elastic_issue',
+  '/elastic-tape-issue': 'elastic_tape_issue',
+  '/elastic_tape_issue': 'elastic_tape_issue',
   '/reports/daily-fabric-issue': 'reports_history',
   '/reports/daily-report': 'reports_history',
   '/daily-fabric-issue': 'reports_history'
@@ -531,6 +538,7 @@ export default function App() {
       bone_po: 'Bone Issue',
       elastic_issue: 'Elastic Issue',
       elastic_po: 'Elastic Issue',
+      elastic_tape_issue: 'Elastic & Tape Issue',
       generate_po: 'Generate PO',
       history: 'Production Work',
       scanner_logs: 'Scanner Log',
@@ -1166,16 +1174,19 @@ export default function App() {
   };
 
 
-  // Helper to sync material stock updates to backend (must be defined before handlers that use it)
+  // Helper to sync material stock updates to backend (safeguarded against mass requests)
   const syncMaterialsToDb = async (updatedMaterials) => {
+    if (!Array.isArray(updatedMaterials) || updatedMaterials.length === 0) return;
     try {
+      // Safety guard: if an entire catalog (>50 items) is mistakenly passed, slice it to prevent freezing
+      const batch = updatedMaterials.slice(0, 50);
       await Promise.all(
-        updatedMaterials.map(m =>
+        batch.map(m =>
           fetch(`${getBackendUrl()}/api/materials/${m.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(m)
-          })
+          }).catch(err => console.warn(`PUT material ${m?.id} error:`, err))
         )
       );
     } catch (err) {
@@ -1217,27 +1228,41 @@ export default function App() {
     }).catch(err => console.error('Failed to save issue log to DB:', err));
   };
 
-  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '') => {
+  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '', isWithoutBom = false) => {
     const design = designs.find(d => String(d.id).trim().toLowerCase() === String(lotId).trim().toLowerCase());
 
-    // Strict BOM validation: If design has required BOM components, only deduct & log mapped materials
+    // Strict BOM validation: If design has required BOM components:
+    // - For mapped components, ensure only mapped materials are issued
+    // - For unmapped components, allow them to issue and log without inventory stock deduction
     let validatedItems = issuedItems;
-    if (design && Array.isArray(design.bom) && design.bom.some(b => String(b.status).toLowerCase() === 'yes')) {
+    if (!isWithoutBom && design && Array.isArray(design.bom) && design.bom.some(b => String(b.status).toLowerCase() === 'yes')) {
       const mappedMaterialIds = new Set(
         design.bom
           .filter(b => String(b.status).toLowerCase() === 'yes' && b.materialId)
           .map(b => String(b.materialId))
       );
-      validatedItems = issuedItems.filter(item => mappedMaterialIds.has(String(item.materialId)));
+      validatedItems = issuedItems.filter(item => {
+        // If the item has a materialId, ensure it is valid
+        if (item.materialId) {
+          const origBom = design.bom.find(b => (b.name || '').toLowerCase() === (item.bomItemName || '').toLowerCase());
+          // If the component was originally unmapped in design BOM, allow the user's chosen material
+          if (origBom && !origBom.materialId) {
+            return true;
+          }
+          return mappedMaterialIds.has(String(item.materialId));
+        }
+        // If it's an unmapped component without a materialId, allow it to issue
+        return true;
+      });
       if (validatedItems.length === 0) {
-        console.warn(`[handleIssueMaterials] Blocked issue: No materials match mapped BOM components for Lot ${lotId}.`);
+        console.warn(`[handleIssueMaterials] Blocked issue: No valid components selected for Lot ${lotId}.`);
         return;
       }
     }
 
-    // 1. Deduct materials stock counts
+    // 1. Deduct materials stock counts (only for items with a valid inventory materialId)
     const updatedMaterials = materials.map(m => {
-      const issued = validatedItems.find(item => item.materialId === m.id);
+      const issued = validatedItems.find(item => item.materialId && String(item.materialId) === String(m.id));
       if (issued) {
         return {
           ...m,
@@ -1248,7 +1273,7 @@ export default function App() {
     });
     setMaterials(updatedMaterials);
     // Sync deducted stock to DB
-    syncMaterialsToDb(updatedMaterials.filter(m => validatedItems.find(i => i.materialId === m.id)));
+    syncMaterialsToDb(updatedMaterials.filter(m => validatedItems.find(i => i.materialId && String(i.materialId) === String(m.id))));
 
     // 2. Add audit trail log entry
     const newLog = {
@@ -2088,6 +2113,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_issue'); }} title="Elastic Issue">
                       <span className="sidebar-text">Elastic Issue</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_tape_issue'); }} title="Elastic & Tape Issue">
+                      <span className="sidebar-text">Elastic & Tape Issue</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
@@ -2142,6 +2170,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'barcode_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('barcode_material_issue')} title="Barcode Material Issue">
                       <span className="sidebar-text">⚡ Barcode Material Issue</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
+                      <span className="sidebar-text">Elastic & Tape Issue</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                       <span className="sidebar-text">Extra Material Issue</span>
@@ -2219,6 +2250,10 @@ export default function App() {
                   <Sliders size={18} />
                   <span className="sidebar-text">Elastic Issue</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_tape_issue'); }} title="Elastic & Tape Issue">
+                  <FileText size={18} />
+                  <span className="sidebar-text">Elastic & Tape Issue</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
@@ -2286,6 +2321,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_issue')} title="Elastic Issue">
                   <Sliders size={18} />
                   <span className="sidebar-text">Elastic Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
+                  <FileText size={18} />
+                  <span className="sidebar-text">Elastic & Tape Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                   <Sparkles size={18} />
@@ -2437,6 +2476,7 @@ export default function App() {
                 {activeTab === 'dori_po' && 'Dori Purcharge Orders'}
                 {(activeTab === 'bone_issue' || activeTab === 'bone_po') && 'Bone Issue'}
                 {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && 'Elastic Issue'}
+                {activeTab === 'elastic_tape_issue' && 'Elastic & Tape Issue'}
                 {activeTab === 'generate_po' && 'Generate PO'}
                 {activeTab === 'item_codes' && 'Item Code Generator & Master Registry'}
                 {activeTab === 'history' && 'Production Work'}
@@ -2858,6 +2898,20 @@ export default function App() {
                   setPrefilledLotNo={setPrefilledLotNo}
                   currentUser={currentUser}
                   currencySymbol={currencySymbol}
+                  onNavigate={setActiveTab}
+                />
+              )}
+
+              {activeTab === 'elastic_tape_issue' && (
+                <ElasticTapeIssueView
+                  materials={materials}
+                  onIssueMaterials={handleIssueMaterials}
+                  onUpdateMaterial={handleUpdateMaterial}
+                  syncMaterialsToDb={syncMaterialsToDb}
+                  currentUser={currentUser}
+                  currencySymbol={currencySymbol}
+                  designs={designs}
+                  prefilledLotNo={prefilledLotNo}
                   onNavigate={setActiveTab}
                 />
               )}

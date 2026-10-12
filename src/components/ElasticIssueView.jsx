@@ -74,7 +74,7 @@ export default function ElasticIssueView({
   const effectiveDivisor = (String(effectiveWidth).includes('1.5') || String(effectiveWidth).includes('2')) ? 23 : 25;
 
   // Issuer, Receiver & Supervisor
-  const [issuerName, setIssuerName] = useState(currentUser?.name || '');
+  const [issuerName, setIssuerName] = useState(currentUser?.name || 'paras');
   const [receiverName, setReceiverName] = useState('');
   const [supervisorName, setSupervisorName] = useState('ROHIT / MONU');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -104,8 +104,8 @@ export default function ElasticIssueView({
   const [selectedElasticMaterialId, setSelectedElasticMaterialId] = useState('');
   const [tapeMaterialName, setTapeMaterialName] = useState('Tape');
   const [selectedTapeMaterialId, setSelectedTapeMaterialId] = useState('');
-  const [boneMaterialName, setBoneMaterialName] = useState('Bone Pocketing');
-  const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('');
+  const [boneMaterialName, setBoneMaterialName] = useState('Bone Chinese (Beige)');
+  const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
 
   // Fetch materials to support mapping & inventory display
   const fetchMaterials = async () => {
@@ -3340,6 +3340,70 @@ export default function ElasticIssueView({
                   </div>
                 )}
 
+                {/* BONE SPECIFICATION & MATERIAL MAPPING (FOR BONE MODE) */}
+                {(materialMode === 'bone' || materialMode === 'all') && (
+                  <div style={{
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    background: '#f0f9ff',
+                    border: '1.5px solid #bae6fd',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Scale size={14} color="#0284c7" />
+                        <span>Bone Specification & Material Mapping:</span>
+                      </span>
+                      <span style={{
+                        fontSize: '10.5px',
+                        background: '#e0f2fe',
+                        color: '#0369a1',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontWeight: '800'
+                      }}>
+                        {effectiveBoneWidth || '1.5 Inch'}
+                      </span>
+                    </div>
+
+                    {/* Mapped Bone Inventory Item Dropdown */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
+                        <label style={{ fontSize: '11px', fontWeight: '700', color: '#0369a1', margin: 0 }}>
+                          MATERIAL NAME MAPPING (BONE CATEGORY):
+                        </label>
+                        <span style={{ fontSize: '10px', color: '#0284c7', fontWeight: '700' }}>
+                          {boneMaterials.length} Items Available
+                        </span>
+                      </div>
+                      <select
+                        value={selectedBoneMaterialId}
+                        onChange={(e) => handleSelectBoneMaterial(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          border: '1px solid #bae6fd',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          color: '#0f172a',
+                          background: '#ffffff',
+                          outline: 'none'
+                        }}
+                      >
+                        <option value="">— Select Bone Inventory Item —</option>
+                        {boneMaterials.map(m => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.id}) • Stock: {m.stock} Kg
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
                 {/* Issue Date & Remarks */}
                 <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px' }}>
                   <div>
@@ -3434,19 +3498,35 @@ export default function ElasticIssueView({
                       </span>
                     </div>
                   ) : (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px', fontSize: '12.5px' }}>
-                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>LOT & ITEM</span>
-                        <strong style={{ color: '#0f172a' }}>LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.garmentType || lotDetails?.style || 'LOWER'})</strong>
-                      </div>
-                      <div style={{ background: '#f8fafc', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
-                        <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '700' }}>
-                          {materialMode === 'bone' ? 'ISSUE WEIGHT (KG)' : 'CUTTING MATRIX PCS'}
+                    <div style={{
+                      background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                      padding: '10px 14px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #bfdbfe',
+                      marginBottom: '12px',
+                      fontSize: '12.5px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '10.5px', color: '#1d4ed8', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                          ISSUE MODE & LOT
                         </span>
-                        <strong style={{ color: '#059669', fontSize: '13.5px' }}>
-                          {materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${lotDetails?.quantity || issuePcs || '—'} Pcs`}
+                        <strong style={{ color: '#1e40af', fontSize: '13.5px' }}>
+                          With BOM — LOT #{lotDetails?.lotNo || searchLotInput || '—'} ({lotDetails?.style || lotDetails?.garmentType || withoutLotStyle || 'Lower / Tracksuit'})
                         </strong>
                       </div>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        background: '#2563eb',
+                        color: '#ffffff',
+                        padding: '3px 8px',
+                        borderRadius: '6px'
+                      }}>
+                        🛡️ BOM APPROVED ({lotDetails?.quantity || issuePcs || 0} Pcs)
+                      </span>
                     </div>
                   )}
 
@@ -3797,21 +3877,21 @@ export default function ElasticIssueView({
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7' }}></span>
                             <span style={{ fontSize: '11px', color: '#0369a1', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                              {boneMaterialName || 'Bone'} Requirement
+                              • {(boneMaterialName || 'BONE CHINESE (BEIGE)').toUpperCase()} REQUIREMENT
                             </span>
-                            {currentBoneMaterial && (
+                            {(currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346') && (
                               <span style={{ fontSize: '10px', background: '#e0f2fe', color: '#0369a1', padding: '1px 5px', borderRadius: '3px', fontWeight: '800' }}>
-                                ID: {currentBoneMaterial.id}
+                                ID: {currentBoneMaterial?.id || selectedBoneMaterialId || 'ST00346'}
                               </span>
                             )}
                           </div>
                           <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: '700', marginTop: '3px' }}>
-                            Direct Floor Issue (Kg-Wise)
+                            {!withoutLotActive ? 'With BOM Approved Floor Issue (Kg-Wise)' : 'Direct Floor Issue (Kg-Wise)'}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                            Issue Unit
+                            ISSUE UNIT
                           </span>
                           <span style={{ fontSize: '14px', fontWeight: '800', color: '#0284c7' }}>
                             Kilograms (Kg)
@@ -3844,7 +3924,7 @@ export default function ElasticIssueView({
                               TOTAL BONE ISSUE
                             </div>
                             <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                              Direct Floor Weight Issue (Kg-Wise)
+                              {!withoutLotActive ? 'Approved BOM Floor Weight Issue (Kg-Wise)' : 'Direct Floor Weight Issue (Kg-Wise)'}
                             </div>
                           </div>
                         </div>
@@ -3853,7 +3933,7 @@ export default function ElasticIssueView({
                             {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
                           </div>
                           <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                            {currentBoneMaterial ? `Store stock: ${currentBoneMaterial.stock || 'Available'}` : 'Weight-wise direct floor issue'}
+                            Store stock: {currentBoneMaterial ? (currentBoneMaterial.stock ?? '15') : '15'}
                           </div>
                         </div>
                       </div>

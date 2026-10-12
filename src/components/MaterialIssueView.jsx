@@ -1,7 +1,8 @@
 import { getBackendUrl } from '../utils/api';
+import { getCleanImageUrl } from '../utils/designHelpers';
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check, User, Users, Download, Building } from 'lucide-react';
+import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check, User, Users, Download, Building, Package, Sparkles } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import BarcodeMaterialIssueView from './BarcodeMaterialIssueView';
@@ -51,14 +52,32 @@ const playFeedbackSound = (type = 'success') => {
   }
 };
 
-function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '' }) {
+function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '', componentHint = '', recommendedMaterials = [] }) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [coords, setCoords] = useState({ top: 0, left: 0, width: 320, isAbove: false });
+  const [previewMaterial, setPreviewMaterial] = useState(null);
   const containerRef = useRef(null);
   const dropdownRef = useRef(null);
 
+  const recIdSet = useMemo(() => new Set((recommendedMaterials || []).map(m => String(m.id))), [recommendedMaterials]);
+  const isRecommended = (m) => recIdSet.has(String(m.id));
+
   const selectedMaterial = materials.find(m => String(m.id) === String(value));
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (previewMaterial) {
+          setPreviewMaterial(null);
+        } else if (isOpen) {
+          setIsOpen(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewMaterial, isOpen]);
 
   const updateCoords = () => {
     if (containerRef.current) {
@@ -150,10 +169,17 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
       return itemCodeStr.includes(q) || codeStr.includes(q) || nameStr.includes(q) || colorStr.includes(q) || catStr.includes(q) || locStr.includes(q);
     })
     .sort((a, b) => {
-      // Brand-matched items always float to the top
+      // 1. Recommended items for this component float to the very top (UPPER)
+      const aRec = isRecommended(a) ? 1 : 0;
+      const bRec = isRecommended(b) ? 1 : 0;
+      if (bRec !== aRec) return bRec - aRec;
+
+      // 2. Brand-matched items float next
       const aMatch = isBrandMatch(a) ? 1 : 0;
       const bMatch = isBrandMatch(b) ? 1 : 0;
-      return bMatch - aMatch;
+      if (bMatch !== aMatch) return bMatch - aMatch;
+
+      return (Number(b.stock) || 0) - (Number(a.stock) || 0);
     });
 
   return (
@@ -198,6 +224,64 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         }}>
           {selectedMaterial ? (
             <>
+              {/* Photo thumbnail with zoom/verification */}
+              {(() => {
+                const rawImg = selectedMaterial.imageUrl || selectedMaterial.image || selectedMaterial.photo || selectedMaterial.imgUrl;
+                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                return cleanImg ? (
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPreviewMaterial(selectedMaterial);
+                    }}
+                    title="Click to view & verify material photo"
+                    style={{
+                      position: 'relative',
+                      width: '26px',
+                      height: '26px',
+                      borderRadius: '4px',
+                      overflow: 'hidden',
+                      flexShrink: 0,
+                      cursor: 'zoom-in',
+                      border: '1.5px solid #cbd5e1',
+                      backgroundColor: '#f8fafc',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'transform 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.15)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                  >
+                    <img
+                      src={cleanImg}
+                      alt=""
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        display: 'block'
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '4px',
+                    backgroundColor: '#f1f5f9',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: '1px solid #e2e8f0',
+                    flexShrink: 0,
+                    color: '#94a3b8'
+                  }}>
+                    <Package size={13} />
+                  </div>
+                );
+              })()}
               <span style={{
                 fontFamily: 'monospace',
                 fontWeight: '800',
@@ -209,7 +293,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 borderRadius: '4px',
                 flexShrink: 0
               }}>
-                {selectedMaterial.itemCode || selectedMaterial.id}
+                {selectedMaterial.itemCode || selectedMaterial.item_code || selectedMaterial.materialCode || selectedMaterial.id}
               </span>
               <span style={{ fontWeight: '600', color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {selectedMaterial.name}
@@ -338,8 +422,30 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
               </div>
             ) : (
               <>
+                {/* Upper Recommended Component Header */}
+                {filtered.some(m => isRecommended(m)) && (
+                  <div style={{
+                    padding: '6px 10px',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    color: '#3730a3',
+                    backgroundColor: '#eef2ff',
+                    borderRadius: '5px',
+                    border: '1px solid #c7d2fe',
+                    marginBottom: '4px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.02em'
+                  }}>
+                    <Sparkles size={13} style={{ color: '#4f46e5' }} />
+                    <span>RECOMMENDED FOR: <strong style={{ color: '#312e81', fontWeight: '800' }}>{componentHint || 'THIS COMPONENT'}</strong></span>
+                  </div>
+                )}
+
                 {/* Special Green Brand-match section header */}
-                {brandKeyword && filtered.some(m => isBrandMatch(m)) && (
+                {brandKeyword && !filtered.some(m => isRecommended(m)) && filtered.some(m => isBrandMatch(m)) && (
                   <div style={{
                     padding: '6px 10px',
                     fontSize: '11px',
@@ -368,13 +474,19 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                 )}
                 {filtered.map((m, mIdx) => {
                   const isSelected = String(m.id) === String(value);
+                  const isRec = isRecommended(m);
                   const isBrand = isBrandMatch(m);
+
+                  // Show separator between recommended items and other items
+                  const prevIsRec = mIdx > 0 ? isRecommended(filtered[mIdx - 1]) : false;
+                  const showRecSeparator = mIdx > 0 && !isRec && prevIsRec;
+
                   // Show separator between brand matches and others
                   const prevIsBrand = mIdx > 0 ? isBrandMatch(filtered[mIdx - 1]) : false;
-                  const showSeparator = brandKeyword && mIdx > 0 && !isBrand && prevIsBrand;
+                  const showBrandSeparator = !showRecSeparator && brandKeyword && mIdx > 0 && !isBrand && prevIsBrand;
                   return (
                     <React.Fragment key={m.id}>
-                      {showSeparator && (
+                      {showRecSeparator && (
                         <div style={{
                           padding: '6px 10px 3px 10px',
                           fontSize: '10px',
@@ -383,7 +495,23 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                           textTransform: 'uppercase',
                           letterSpacing: '0.04em',
                           borderTop: '1px solid #e2e8f0',
-                          marginTop: '4px'
+                          marginTop: '4px',
+                          marginBottom: '2px'
+                        }}>
+                          All Other Materials
+                        </div>
+                      )}
+                      {showBrandSeparator && (
+                        <div style={{
+                          padding: '6px 10px 3px 10px',
+                          fontSize: '10px',
+                          fontWeight: '700',
+                          color: '#64748b',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.04em',
+                          borderTop: '1px solid #e2e8f0',
+                          marginTop: '4px',
+                          marginBottom: '2px'
                         }}>
                           Other Materials
                         </div>
@@ -404,29 +532,114 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                           justifyContent: 'space-between',
                           backgroundColor: isSelected
                             ? '#6366f1'
+                            : isRec
+                            ? 'rgba(99, 102, 241, 0.07)'
                             : isBrand
                             ? 'rgba(16, 185, 129, 0.05)'
                             : 'transparent',
                           color: isSelected ? '#ffffff' : '#0f172a',
-                          fontWeight: isSelected ? '700' : '400',
+                          fontWeight: isSelected || isRec ? '700' : '400',
                           transition: 'background-color 0.15s ease',
                           gap: '10px',
                           border: isSelected 
                             ? '1px solid #6366f1' 
+                            : isRec
+                            ? '1px solid #c7d2fe'
                             : isBrand 
                             ? '1px solid #d1fae5' 
                             : '1px solid #f1f5f9',
-                          borderLeft: isBrand && !isSelected ? '3px solid #10b981' : undefined,
+                          borderLeft: isRec && !isSelected ? '3px solid #6366f1' : (isBrand && !isSelected ? '3px solid #10b981' : undefined),
                           marginBottom: '1px'
                         }}
                         onMouseEnter={(e) => {
-                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? '#f0fdf4' : 'var(--bg-secondary, #f1f5f9)';
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isRec ? '#eef2ff' : (isBrand ? '#f0fdf4' : 'var(--bg-secondary, #f1f5f9)');
                         }}
                         onMouseLeave={(e) => {
-                          if (!isSelected) e.currentTarget.style.backgroundColor = isBrand ? 'rgba(16, 185, 129, 0.05)' : 'transparent';
+                          if (!isSelected) e.currentTarget.style.backgroundColor = isRec ? 'rgba(99, 102, 241, 0.07)' : (isBrand ? 'rgba(16, 185, 129, 0.05)' : 'transparent');
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+                          {/* Photo thumbnail with zoom-to-verify click */}
+                          {(() => {
+                            const rawImg = m.imageUrl || m.image || m.photo || m.imgUrl;
+                            const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                            return cleanImg ? (
+                              <div
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPreviewMaterial(m);
+                                }}
+                                title="Click to view & verify photo"
+                                style={{
+                                  position: 'relative',
+                                  width: '34px',
+                                  height: '34px',
+                                  borderRadius: '6px',
+                                  overflow: 'hidden',
+                                  border: isSelected ? '1.5px solid #ffffff' : '1.5px solid #cbd5e1',
+                                  backgroundColor: '#f8fafc',
+                                  flexShrink: 0,
+                                  cursor: 'zoom-in',
+                                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1.12)';
+                                  e.currentTarget.style.boxShadow = '0 3px 8px rgba(0,0,0,0.25)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                  e.currentTarget.style.boxShadow = 'none';
+                                }}
+                              >
+                                <img
+                                  src={cleanImg}
+                                  alt=""
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  style={{
+                                    width: '100%',
+                                    height: '100%',
+                                    objectFit: 'cover',
+                                    display: 'block'
+                                  }}
+                                />
+                                <div style={{
+                                  position: 'absolute',
+                                  bottom: 0,
+                                  right: 0,
+                                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                                  color: '#ffffff',
+                                  width: '12px',
+                                  height: '12px',
+                                  borderRadius: '3px 0 0 0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '8px',
+                                  pointerEvents: 'none'
+                                }}>
+                                  🔍
+                                </div>
+                              </div>
+                            ) : (
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '5px',
+                                backgroundColor: isSelected ? 'rgba(255,255,255,0.2)' : '#f1f5f9',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: isSelected ? 'none' : '1px solid #e2e8f0',
+                                flexShrink: 0,
+                                color: isSelected ? '#ffffff' : '#94a3b8'
+                              }}>
+                                <Package size={16} />
+                              </div>
+                            );
+                          })()}
                           <span style={{
                             fontFamily: 'monospace',
                             fontWeight: '700',
@@ -438,7 +651,7 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                             borderRadius: '4px',
                             flexShrink: 0
                           }}>
-                            {m.itemCode || m.id}
+                            {m.itemCode || m.item_code || m.materialCode || m.id}
                           </span>
                           <span style={{
                             fontWeight: isSelected ? '700' : isBrand ? '700' : '600',
@@ -468,7 +681,23 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
                               {m.category}
                             </span>
                           )}
-                          {isBrand && !isSelected && (
+                          {isRec && !isSelected && (
+                            <span style={{
+                              fontSize: '9px',
+                              fontWeight: '800',
+                              color: '#4338ca',
+                              backgroundColor: '#e0e7ff',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              flexShrink: 0,
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                              border: '1px solid #c7d2fe'
+                            }}>
+                              ✨ RECOMMENDED
+                            </span>
+                          )}
+                          {isBrand && !isRec && !isSelected && (
                             <span style={{
                               fontSize: '9px',
                               fontWeight: '800',
@@ -517,6 +746,255 @@ function SearchableMaterialSelect({ materials = [], value, onChange, disabled = 
         </div>,
         document.body
       )}
+
+      {/* ─── Large Photo Verification Lightbox Modal ─────────────────── */}
+      {previewMaterial && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.78)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 999999999,
+            padding: '16px',
+            boxSizing: 'border-box',
+            animation: 'fadeIn 0.15s ease'
+          }}
+          onClick={() => setPreviewMaterial(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              width: '100%',
+              maxWidth: '560px',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(0, 0, 0, 0.08)',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              maxHeight: '92vh',
+              boxSizing: 'border-box'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: '#f8fafc'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>🔍</span>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                    Material Photo Verification
+                  </h4>
+                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: '1px' }}>
+                    Verify trim / accessory photo & details before issuing
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewMaterial(null)}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '8px',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  fontSize: '18px',
+                  fontWeight: '700',
+                  transition: 'background-color 0.15s'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#e2e8f0'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#f1f5f9'; }}
+                title="Close (Esc)"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Large Image Canvas */}
+            <div style={{
+              padding: '20px',
+              backgroundColor: '#0f172a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minHeight: '260px',
+              maxHeight: '420px',
+              position: 'relative'
+            }}>
+              {(() => {
+                const raw = previewMaterial.imageUrl || previewMaterial.image || previewMaterial.photo || previewMaterial.imgUrl;
+                const clean = raw ? getCleanImageUrl(raw) : '';
+                return clean ? (
+                  <img
+                    src={clean}
+                    alt={previewMaterial.name || 'Material photo'}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '380px',
+                      objectFit: 'contain',
+                      borderRadius: '8px',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.6)'
+                    }}
+                  />
+                ) : (
+                  <div style={{ color: '#94a3b8', textAlign: 'center', padding: '40px' }}>
+                    <Package size={48} style={{ opacity: 0.4, marginBottom: '8px' }} />
+                    <div style={{ fontSize: '13px' }}>No photo available for this material</div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Material Verification Details */}
+            <div style={{ padding: '16px 18px', backgroundColor: '#ffffff' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '10px' }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                    <span style={{
+                      fontFamily: 'monospace',
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      backgroundColor: '#e0e7ff',
+                      color: '#3730a3',
+                      padding: '2px 8px',
+                      borderRadius: '5px'
+                    }}>
+                      {previewMaterial.itemCode || previewMaterial.item_code || previewMaterial.materialCode || previewMaterial.code || previewMaterial.id}
+                    </span>
+                    {previewMaterial.category && (
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        backgroundColor: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        textTransform: 'uppercase'
+                      }}>
+                        {previewMaterial.category}
+                      </span>
+                    )}
+                    {previewMaterial.color && previewMaterial.color !== 'Default' && (
+                      <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
+                        • Color: <strong>{previewMaterial.color}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', wordBreak: 'break-word' }}>
+                    {previewMaterial.name}
+                  </div>
+                </div>
+
+                {/* Stock Badge */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-end',
+                  flexShrink: 0
+                }}>
+                  <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase' }}>Available Stock</span>
+                  <span style={{
+                    fontSize: '14px',
+                    fontWeight: '900',
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    backgroundColor: Number(previewMaterial.stock) <= 0 ? '#fef2f2' : '#ecfdf5',
+                    color: Number(previewMaterial.stock) <= 0 ? '#dc2626' : '#059669',
+                    border: `1.5px solid ${Number(previewMaterial.stock) <= 0 ? '#fca5a5' : '#a7f3d0'}`
+                  }}>
+                    {Number(previewMaterial.stock || 0).toLocaleString()} {previewMaterial.unit || 'Pcs'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Warehouse Location Info */}
+              {previewMaterial.location && (
+                <div style={{
+                  fontSize: '11.5px',
+                  color: '#0369a1',
+                  backgroundColor: '#f0f9ff',
+                  border: '1px solid #bae6fd',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginBottom: '12px'
+                }}>
+                  <span>📍</span>
+                  <span>Storage Location: <strong>{previewMaterial.location}</strong></span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMaterial(null)}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #cbd5e1',
+                    backgroundColor: '#ffffff',
+                    color: '#475569',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Close & Back to List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(previewMaterial.id);
+                    setPreviewMaterial(null);
+                    setIsOpen(false);
+                    setSearchQuery('');
+                  }}
+                  style={{
+                    padding: '9px 20px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: '#16a34a',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)'
+                  }}
+                >
+                  ✓ Select & Use This Material
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
@@ -560,6 +1038,7 @@ export default function MaterialIssueView({
   const [barcodeInput, setBarcodeInput] = useState('');
   const [scanTargetIdx, setScanTargetIdx] = useState(null); // null = auto-match / next unmapped
   const [scanNotice, setScanNotice] = useState(null); // { type: 'success' | 'error', text: '' }
+  const [editingMappingIdx, setEditingMappingIdx] = useState(null);
   const barcodeInputRef = useRef(null);
 
   // Lock refs to prevent re-fetching or resetting form when background polling occurs
@@ -838,9 +1317,11 @@ export default function MaterialIssueView({
         bomItemDetail: bomItem.description || 'Required',
         materialId: isMapped ? matchedMaterialId : '',
         ratePerPiece: defaultRate,
-        issued: isMapped && !wasAlreadyIssued, // ONLY mapped components are eligible for issue!
+        issued: !wasAlreadyIssued, // Both mapped and unmapped components are eligible for issue!
         alreadyIssued: wasAlreadyIssued,
-        isMapped: isMapped
+        isMapped: isMapped,
+        isOrigBomMapped: isMapped,
+        bomUnit: bomItem.unit || 'pcs'
       };
     });
 
@@ -966,6 +1447,65 @@ export default function MaterialIssueView({
     }
   };
 
+  // Smart Recommendation engine for BOM components (especially unmapped ones)
+  const getComponentRecommendations = useMemo(() => {
+    return (bomItemName = '', bomItemDetail = '') => {
+      if (!materials || materials.length === 0) return [];
+      const cleanStr = (s = '') => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const rawWords = cleanStr(`${bomItemName} ${bomItemDetail}`).split(' ').filter(w => w.length >= 2);
+      if (rawWords.length === 0) return [];
+
+      const expanded = new Set(rawWords);
+      if (expanded.has('zip') || expanded.has('zipper')) { expanded.add('zip'); expanded.add('zipper'); expanded.add('chain'); expanded.add('fly'); }
+      if (expanded.has('baju')) { expanded.add('baju'); expanded.add('shirt'); expanded.add('fabric'); expanded.add('cloth'); expanded.add('denim'); }
+      if (expanded.has('nara') || expanded.has('drawstring')) { expanded.add('nara'); expanded.add('drawstring'); expanded.add('cord'); expanded.add('string'); expanded.add('rope'); }
+      if (expanded.has('label') || expanded.has('sticker')) { expanded.add('label'); expanded.add('sticker'); expanded.add('tag'); expanded.add('care'); expanded.add('brand'); }
+      if (expanded.has('fusing') || expanded.has('interlining')) { expanded.add('fusing'); expanded.add('interlining'); expanded.add('buckram'); expanded.add('canvas'); }
+      if (expanded.has('pocket') || expanded.has('pocketing')) { expanded.add('pocket'); expanded.add('pocketing'); expanded.add('lining'); expanded.add('twill'); }
+      if (expanded.has('thread')) { expanded.add('thread'); expanded.add('spool'); expanded.add('yarn'); expanded.add('stitch'); }
+      if (expanded.has('button')) { expanded.add('button'); expanded.add('snap'); expanded.add('shank'); expanded.add('rivet'); }
+      if (expanded.has('elastic')) { expanded.add('elastic'); expanded.add('tape'); expanded.add('webbing'); }
+
+      const keywords = Array.from(expanded);
+      const lotBrand = cleanStr(selectedDesign?.brand || '');
+      const brandWords = lotBrand.split(' ').filter(w => w.length >= 2);
+
+      return materials
+        .map(m => {
+          let score = 0;
+          const mName = cleanStr(m.name);
+          const mCat = cleanStr(m.category || '');
+          const mCode = cleanStr(`${m.itemCode || ''} ${m.stCode || ''} ${m.id || ''}`);
+          const mDetail = cleanStr(m.description || '');
+
+          keywords.forEach(kw => {
+            if (mName.includes(kw)) score += 12;
+            if (mCat.includes(kw)) score += 9;
+            if (mCode.includes(kw)) score += 7;
+            if (mDetail.includes(kw)) score += 5;
+          });
+
+          brandWords.forEach(bkw => {
+            if (mName.includes(bkw) || mCat.includes(bkw)) score += 6;
+          });
+
+          const inStock = Number(m.stock) > 0;
+          if (inStock) score += 4;
+
+          return { material: m, score };
+        })
+        .filter(entry => entry.score >= 7)
+        .sort((a, b) => {
+          const aStock = Number(a.material.stock) > 0 ? 1 : 0;
+          const bStock = Number(b.material.stock) > 0 ? 1 : 0;
+          if (bStock !== aStock) return bStock - aStock;
+          return b.score - a.score;
+        })
+        .slice(0, 4)
+        .map(entry => entry.material);
+    };
+  }, [materials, selectedDesign]);
+
   // Perform stock validation check
   const getValidationDetails = () => {
     let hasShortage = false;
@@ -973,7 +1513,9 @@ export default function MaterialIssueView({
       const material = materials.find(m => m.id === mapping.materialId);
       const totalRequired = Math.round(pieces * mapping.ratePerPiece * 100) / 100;
       const currentStock = material ? material.stock : 0;
-      const isShortage = totalRequired > currentStock;
+      // Only mapped materials deduct inventory and can cause an inventory shortage.
+      // Unmapped components issue without inventory stock deduction.
+      const isShortage = mapping.materialId ? (totalRequired > currentStock) : false;
 
       if (isShortage && mapping.issued) {
         hasShortage = true;
@@ -981,8 +1523,8 @@ export default function MaterialIssueView({
 
       return {
         ...mapping,
-        materialName: material ? (material.color && material.color !== 'Default' ? `${material.name} (${material.color})` : material.name) : 'Unknown Material',
-        unit: material ? material.unit : 'pcs',
+        materialName: material ? (material.color && material.color !== 'Default' ? `${material.name} (${material.color})` : material.name) : (mapping.isMapped ? 'Unknown Material' : `${mapping.bomItemName} (Unmapped)`),
+        unit: material ? material.unit : (mapping.bomUnit || 'pcs'),
         currentStock,
         totalRequired,
         isShortage
@@ -994,7 +1536,7 @@ export default function MaterialIssueView({
 
   const { computedItems, hasShortage } = getValidationDetails();
 
-  const shortageItems = computedItems.filter(item => item.issued && (item.currentStock - item.totalRequired < 0)).map(item => {
+  const shortageItems = computedItems.filter(item => item.issued && item.materialId && (item.currentStock - item.totalRequired < 0)).map(item => {
     const shortageQty = Math.abs(item.currentStock - item.totalRequired);
     return {
       name: item.bomItemName,
@@ -1115,16 +1657,13 @@ export default function MaterialIssueView({
       setFormError('Please select at least one component to issue.');
       return;
     }
-    const unmappedItem = itemsToIssue.find(item => !item.materialId || !item.isMapped);
-    if (unmappedItem) {
-      setFormError(`❌ Component "${unmappedItem.bomItemName}" is NOT mapped in the BOM! Only mapped BOM materials can be issued.`);
-      return;
-    }
 
-    // Strictly enforce that each item's materialId matches the designer's BOM mapping for this lot
+    // Strictly enforce that each item's materialId matches the designer's BOM mapping for this lot (for mapped materials)
     const mismatchedItem = itemsToIssue.find(item => {
+      if (!item.materialId) return false; // Unmapped components issue directly without inventory deduction
       const origBom = selectedDesign.bom?.find(b => b.name.toLowerCase() === item.bomItemName.toLowerCase());
-      return !origBom || !origBom.materialId || String(origBom.materialId) !== String(item.materialId);
+      if (origBom && !origBom.materialId) return false; // Store user chose a material for originally unmapped component
+      return origBom && origBom.materialId && String(origBom.materialId) !== String(item.materialId);
     });
     if (mismatchedItem) {
       setFormError(`❌ Component "${mismatchedItem.bomItemName}" does not match the material mapped in Lot ${selectedDesign.id}'s BOM! Only the exact mapped materials can be issued.`);
@@ -2111,7 +2650,7 @@ export default function MaterialIssueView({
           )}
 
       {/* ── TOP SECTION: MANUFACTURING BATCH SETUP CARD ────────────────────── */}
-      <div className="panel" style={{ marginBottom: '20px', padding: '18px 22px' }}>
+      <div className="panel" style={{ marginBottom: '20px', padding: '18px 22px', position: 'relative', zIndex: 40 }}>
         <div className="panel-header" style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid var(--border-color)' }}>
           <h3 className="panel-title" style={{ fontSize: '16px', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
             <ClipboardList size={19} className="text-accent" />
@@ -2147,7 +2686,7 @@ export default function MaterialIssueView({
             alignItems: 'start'
           }}>
             {/* Search & Select Approved Lot */}
-            <div className="form-group" style={{ margin: 0 }}>
+            <div className="form-group" style={{ margin: 0, position: 'relative', zIndex: 60 }}>
               <label className="form-label" style={{ fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
                 Search &amp; Select Approved Lot
               </label>
@@ -2170,8 +2709,41 @@ export default function MaterialIssueView({
                     setSearchQuery('');
                   }}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{ paddingRight: '32px', height: '38px', fontSize: '13px' }}
+                  style={{
+                    paddingRight: selectedDesign ? '46px' : '30px',
+                    height: '38px',
+                    fontSize: '13px'
+                  }}
                 />
+
+                {/* Clear selection button */}
+                {selectedDesign && !isFocused && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedDesignId('');
+                      setSearchQuery('');
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: '26px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      fontSize: '12px'
+                    }}
+                    title="Clear selected lot"
+                  >
+                    ✕
+                  </button>
+                )}
 
                 {/* Custom dropdown caret indicator */}
                 <div
@@ -2201,7 +2773,7 @@ export default function MaterialIssueView({
                         left: 0,
                         right: 0,
                         bottom: 0,
-                        zIndex: 40,
+                        zIndex: 90,
                         background: 'transparent'
                       }}
                       onClick={(e) => {
@@ -2212,7 +2784,19 @@ export default function MaterialIssueView({
                     />
 
                     {/* Scrollable floating dropdown menu list */}
-                    <div className="custom-dropdown-menu" style={{ maxHeight: '280px' }}>
+                    <div
+                      className="custom-dropdown-menu"
+                      style={{
+                        position: 'absolute',
+                        top: '100%',
+                        left: 0,
+                        right: 0,
+                        marginTop: '4px',
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        zIndex: 100
+                      }}
+                    >
                       {filteredDesigns.length === 0 ? (
                         <div style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>
                           No matching lots found
@@ -2235,7 +2819,7 @@ export default function MaterialIssueView({
                                 }
                               }}
                               style={{
-                                padding: '10px 14px',
+                                padding: '8px 12px',
                                 fontSize: '13px',
                                 cursor: isSelectionDisabled ? 'not-allowed' : 'pointer',
                                 opacity: isSelectionDisabled ? 0.5 : 1,
@@ -2246,6 +2830,7 @@ export default function MaterialIssueView({
                                 display: 'flex',
                                 justifyContent: 'space-between',
                                 alignItems: 'center',
+                                gap: '8px',
                                 borderBottom: '1px solid var(--border-color)',
                                 transition: 'background-color 0.15s ease'
                               }}
@@ -2260,13 +2845,13 @@ export default function MaterialIssueView({
                                 }
                               }}
                             >
-                              <div>
+                              <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 <strong>Lot {design.id}</strong>
-                                <span style={{ marginLeft: '8px', fontSize: '11px', opacity: 0.8 }}>
+                                <span style={{ marginLeft: '6px', fontSize: '12px', color: isSelected ? 'rgba(255,255,255,0.9)' : 'var(--text-muted)' }}>
                                   ({design.category}) &mdash; {design.brand || 'No Brand'}
                                 </span>
                               </div>
-                              <>
+                              <div style={{ flexShrink: 0 }}>
                                 {lotStatus === 'completed' && (
                                   <span className="status-badge rejected" style={{ fontSize: '10px', padding: '2px 6px' }}>
                                     Already Issued
@@ -2282,7 +2867,7 @@ export default function MaterialIssueView({
                                     Ready
                                   </span>
                                 )}
-                              </>
+                              </div>
                             </div>
                           );
                         })
@@ -2512,14 +3097,14 @@ export default function MaterialIssueView({
                     <ShoppingCart size={16} style={{ color: '#2563eb' }} />
                     <span>Issue Cart:</span>
                     <span style={{
-                      backgroundColor: computedItems.filter(i => i.issued && i.materialId).length === computedItems.filter(i => i.issued).length && computedItems.length > 0 ? '#10b981' : '#f59e0b',
+                      backgroundColor: computedItems.filter(i => i.issued).length > 0 ? '#10b981' : '#64748b',
                       color: '#ffffff',
                       padding: '2px 9px',
                       borderRadius: '12px',
                       fontSize: '11.5px',
                       fontWeight: '800'
                     }}>
-                      {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Mapped
+                      {computedItems.filter(i => i.issued).length} / {computedItems.length} Selected
                     </span>
                   </div>
                 </div>
@@ -2641,19 +3226,19 @@ export default function MaterialIssueView({
                         type="checkbox"
                         checked={
                           computedItems.length > 0 &&
-                          computedItems.filter(item => !item.alreadyIssued && item.materialId).length > 0 &&
-                          computedItems.filter(item => !item.alreadyIssued && item.materialId).every(item => item.issued)
+                          computedItems.filter(item => !item.alreadyIssued).length > 0 &&
+                          computedItems.filter(item => !item.alreadyIssued).every(item => item.issued)
                         }
                         onChange={(e) => {
                           const allChecked = e.target.checked;
                           const updated = bomMappings.map(m => {
-                            if (m.alreadyIssued || !m.materialId) return m;
+                            if (m.alreadyIssued) return m;
                             return { ...m, issued: allChecked };
                           });
                           setBomMappings(updated);
                         }}
                         style={{ cursor: 'pointer', width: '16px', height: '16px' }}
-                        title="Select / Deselect All Mapped Components"
+                        title="Select / Deselect All Components"
                       />
                     </th>
                     <th style={{ width: '180px', padding: '12px 10px', fontSize: '13px' }}>BOM Component</th>
@@ -2688,11 +3273,11 @@ export default function MaterialIssueView({
                         <td style={{ textAlign: 'center', padding: '12px 8px' }}>
                           <input
                             type="checkbox"
-                            checked={!!item.issued && isMapped}
+                            checked={!!item.issued}
                             onChange={(e) => handleMappingChange(idx, 'issued', e.target.checked)}
-                            disabled={item.alreadyIssued || !isMapped}
-                            style={{ cursor: (item.alreadyIssued || !isMapped) ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
-                            title={!isMapped ? "Cannot issue unmapped BOM component. Map material first." : (item.alreadyIssued ? "Already issued" : "Select to issue")}
+                            disabled={item.alreadyIssued}
+                            style={{ cursor: item.alreadyIssued ? 'not-allowed' : 'pointer', width: '16px', height: '16px' }}
+                            title={item.alreadyIssued ? "Already issued" : (isMapped ? "Select to issue mapped material" : "Select to issue unmapped component")}
                           />
                         </td>
                         <td style={{ padding: '12px 10px' }}>
@@ -2707,7 +3292,7 @@ export default function MaterialIssueView({
                             {!isMapped && !item.alreadyIssued && (
                               <div style={{ marginTop: '3px' }}>
                                 <span style={{ fontSize: '10px', padding: '2px 6px', backgroundColor: '#fef3c7', color: '#b45309', borderRadius: '4px', fontWeight: '700' }}>
-                                  ⚠️ Unmapped (Excluded)
+                                  ⚠️ Unmapped
                                 </span>
                               </div>
                             )}
@@ -2727,10 +3312,10 @@ export default function MaterialIssueView({
                             )}
                           </div>
                         </td>
-                        <td style={{ padding: '12px 10px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div style={{ flex: 1 }}>
-                              {item.isMapped && item.materialId ? (
+                        <td style={{ padding: '10px 10px', minWidth: '340px' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              {item.isMapped && item.materialId && editingMappingIdx !== idx ? (
                                 (() => {
                                   const mat = materials.find(m => String(m.id) === String(item.materialId));
                                   return (
@@ -2738,13 +3323,13 @@ export default function MaterialIssueView({
                                       display: 'flex',
                                       alignItems: 'center',
                                       gap: '8px',
-                                      padding: '5px 10px',
+                                      padding: '6px 10px',
                                       borderRadius: '6px',
                                       backgroundColor: 'rgba(59, 130, 246, 0.04)',
                                       border: '1px solid #bfdbfe'
                                     }}>
                                       {mat?.imageUrl && (
-                                        <div style={{ width: '26px', height: '26px', borderRadius: '4px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
+                                        <div style={{ width: '28px', height: '28px', borderRadius: '4px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0 }}>
                                           <img src={mat.imageUrl} alt={mat.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                                         </div>
                                       )}
@@ -2759,34 +3344,121 @@ export default function MaterialIssueView({
                                           <span style={{ color: '#475569' }}>
                                             • 📁 {mat?.category || 'Accessory'}
                                           </span>
+                                          {mat?.stock !== undefined && (
+                                            <span style={{ color: '#059669', fontWeight: '700' }}>
+                                              • 📦 Stock: {mat.stock} {mat.unit || 'pcs'}
+                                            </span>
+                                          )}
                                         </div>
                                       </div>
-                                      <span style={{
-                                        fontSize: '10px',
-                                        fontWeight: '700',
-                                        color: '#059669',
-                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                        border: '1px solid rgba(16, 185, 129, 0.25)',
-                                        padding: '2px 6px',
-                                        borderRadius: '4px',
-                                        whiteSpace: 'nowrap'
-                                      }}>
-                                        🔒 BOM Mapped
-                                      </span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                        <span style={{
+                                          fontSize: '10px',
+                                          fontWeight: '700',
+                                          color: item.isOrigBomMapped ? '#059669' : '#2563eb',
+                                          backgroundColor: item.isOrigBomMapped ? 'rgba(16, 185, 129, 0.1)' : 'rgba(37, 99, 235, 0.1)',
+                                          border: item.isOrigBomMapped ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(37, 99, 235, 0.25)',
+                                          padding: '2px 6px',
+                                          borderRadius: '4px',
+                                          whiteSpace: 'nowrap'
+                                        }}>
+                                          {item.isOrigBomMapped ? '🔒 BOM Mapped' : '✓ Store Mapped'}
+                                        </span>
+                                        {!item.alreadyIssued && (
+                                          <>
+                                            <button
+                                              type="button"
+                                              onClick={() => setEditingMappingIdx(idx)}
+                                              style={{
+                                                padding: '3px 7px',
+                                                fontSize: '10.5px',
+                                                fontWeight: '600',
+                                                color: '#334155',
+                                                backgroundColor: '#f1f5f9',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                whiteSpace: 'nowrap'
+                                              }}
+                                              title="Choose a different inventory material"
+                                            >
+                                              Change
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => handleMappingChange(idx, 'materialId', '')}
+                                              style={{
+                                                padding: '3px 7px',
+                                                fontSize: '10.5px',
+                                                fontWeight: '600',
+                                                color: '#dc2626',
+                                                backgroundColor: '#fef2f2',
+                                                border: '1px solid #fecaca',
+                                                borderRadius: '4px',
+                                                cursor: 'pointer',
+                                                whiteSpace: 'nowrap'
+                                              }}
+                                              title="Unmap this material to issue directly without inventory deduction"
+                                            >
+                                              ✕ Unmap
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
                                     </div>
                                   );
                                 })()
                               ) : (
-                                <div style={{
-                                  padding: '6px 10px',
-                                  borderRadius: '6px',
-                                  backgroundColor: '#fffbeb',
-                                  border: '1px dashed #f59e0b',
-                                  color: '#b45309',
-                                  fontSize: '11px',
-                                  fontWeight: '600'
-                                }}>
-                                  ⚠️ Unmapped in BOM (Excluded from issue)
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <SearchableMaterialSelect
+                                      materials={materials}
+                                      value={item.materialId || ''}
+                                      onChange={(val) => {
+                                        handleMappingChange(idx, 'materialId', val);
+                                        setEditingMappingIdx(null);
+                                      }}
+                                      disabled={item.alreadyIssued}
+                                      placeholder="🔍 Choose Inventory Material to Map..."
+                                      brandHint={selectedDesign?.brand || ''}
+                                      componentHint={item.bomItemName}
+                                      recommendedMaterials={getComponentRecommendations(item.bomItemName, item.bomItemDetail)}
+                                    />
+                                  </div>
+                                  {editingMappingIdx === idx && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingMappingIdx(null)}
+                                      style={{
+                                        padding: '5px 8px',
+                                        fontSize: '11px',
+                                        backgroundColor: '#f1f5f9',
+                                        color: '#475569',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontWeight: '600',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                  {!item.materialId && (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      backgroundColor: '#fffbeb',
+                                      padding: '4px 7px',
+                                      borderRadius: '5px',
+                                      color: '#92400e',
+                                      fontWeight: '700',
+                                      border: '1px dashed #f59e0b',
+                                      whiteSpace: 'nowrap',
+                                      flexShrink: 0
+                                    }}>
+                                      Direct Issue
+                                    </span>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2842,7 +3514,7 @@ export default function MaterialIssueView({
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: '600', color: (item.issued && !item.alreadyIssued) ? 'inherit' : 'var(--text-muted)', padding: '12px 10px', fontSize: '13px' }}>
-                          {item.currentStock} {item.unit}
+                          {item.materialId ? `${item.currentStock} ${item.unit}` : <span style={{ color: '#94a3b8', fontSize: '12px' }}>— (Unmapped)</span>}
                         </td>
                         <td style={{ textAlign: 'center', padding: '12px 10px' }}>
                           {item.alreadyIssued ? (
@@ -2850,24 +3522,43 @@ export default function MaterialIssueView({
                               Already Issued
                             </span>
                           ) : item.issued ? (
-                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px', verticalAlign: 'middle' }}>
+                            item.materialId ? (
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px', verticalAlign: 'middle' }}>
+                                <span
+                                  className={`status-badge ${isShortage ? 'rejected' : 'verified'}`}
+                                  style={{
+                                    display: 'inline-flex',
+                                    gap: '4px',
+                                    alignItems: 'center',
+                                    fontWeight: 'bold',
+                                    fontSize: '12px',
+                                    padding: '3px 8px'
+                                  }}
+                                >
+                                  {isShortage
+                                    ? `${afterIssue} ${item.unit} (Short)`
+                                    : `${afterIssue} ${item.unit}`
+                                  }
+                                </span>
+                              </div>
+                            ) : (
                               <span
-                                className={`status-badge ${isShortage ? 'rejected' : 'verified'}`}
+                                className="status-badge"
                                 style={{
                                   display: 'inline-flex',
                                   gap: '4px',
                                   alignItems: 'center',
                                   fontWeight: 'bold',
                                   fontSize: '12px',
-                                  padding: '3px 8px'
+                                  padding: '3px 8px',
+                                  backgroundColor: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe'
                                 }}
                               >
-                                {isShortage
-                                  ? `${afterIssue} ${item.unit} (Short)`
-                                  : `${afterIssue} ${item.unit}`
-                                }
+                                ✓ Direct Issue
                               </span>
-                            </div>
+                            )
                           ) : (
                             <span className="status-badge" style={{ backgroundColor: 'var(--border-color)', color: 'var(--text-muted)', fontWeight: 'bold', fontSize: '12px', padding: '3px 8px' }}>
                               Skipped
@@ -2898,7 +3589,12 @@ export default function MaterialIssueView({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <ShoppingCart size={20} style={{ color: '#2563eb' }} />
                   <strong style={{ fontSize: '15px' }}>
-                    Ready to Issue: {computedItems.filter(i => i.issued && i.materialId).length} / {computedItems.filter(i => i.issued).length} Materials Mapped
+                    Ready to Issue: {computedItems.filter(i => i.issued).length} / {computedItems.length} Components Selected
+                    {computedItems.filter(i => i.issued && !i.materialId).length > 0 && (
+                      <span style={{ fontSize: '12px', color: '#b45309', fontWeight: '600', marginLeft: '6px' }}>
+                        ({computedItems.filter(i => i.issued && !i.materialId).length} unmapped)
+                      </span>
+                    )}
                   </strong>
                 </div>
                 <div style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '3px' }}>
