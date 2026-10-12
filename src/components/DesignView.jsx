@@ -518,52 +518,47 @@ export const findMatchingMaterialId = (bomItem, materials) => {
   const nameLower = (bomItem.name || '').toLowerCase();
 
   // Determine description: use description field, or if empty, check if detail is a text string (not numeric)
-  const descLower = (bomItem.description || '').trim().toLowerCase() ||
+  const rawDesc = (bomItem.description || '').trim().toLowerCase() ||
     (!/^\d+(\.\d+)?$/.test(detailLower.trim()) ? detailLower.trim() : '');
 
-  if (!descLower) return "";
+  // Strip common generic words that lead to false positives (e.g. "Pocket required" matching any item with "required")
+  const stopWords = new Set(['required', 'yes', 'no', 'need', 'needed', 'item', 'items', 'accessory', 'accessories']);
+  const descWords = rawDesc.split(/[\s,/-]+/).filter(w => w && !stopWords.has(w) && w.length > 2);
+  const descClean = descWords.join(' ');
+
+  if (!descClean && !nameLower) return "";
 
   let bestMaterial = null;
   let highestScore = 0;
 
   materials.forEach(m => {
-    const mName = m.name.toLowerCase().replace(/[^a-z0-9\s]/g, '');
+    const mName = (m.name || '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
+    const mCategory = (m.category || '').toLowerCase().replace(/[^a-z0-9\s]/g, '');
     const bName = nameLower.replace(/[^a-z0-9\s]/g, '');
-    const bDesc = descLower.replace(/[^a-z0-9\s]/g, '');
 
     let score = 0;
 
-    // Clean alphanumeric matches (ignoring spaces/special chars entirely)
-    const cleanStr = str => str.replace(/\s+/g, '');
-    const mClean = cleanStr(mName);
-    const bDescClean = cleanStr(bDesc);
-
-    if (mClean && bDescClean) {
-      if (mClean === bDescClean) {
-        score += 100; // Perfect match on description (e.g. "buttonnew1" vs "buttonnew1")
-      } else if (mClean.includes(bDescClean) || bDescClean.includes(mClean)) {
-        score += 80;
-      }
+    // Direct clean alphanumeric match on meaningful description
+    if (descClean && mName.includes(descClean)) {
+      score += 80;
     }
 
     // Word-by-word overlap match for description
-    const mWords = mName.split(/\s+/).filter(Boolean);
-    const bDescWords = bDesc.split(/\s+/).filter(Boolean);
-    if (mWords.length > 0 && bDescWords.length > 0) {
+    if (descWords.length > 0) {
       let matchedDescWords = 0;
-      bDescWords.forEach(w => {
+      descWords.forEach(w => {
         if (mName.includes(w)) {
           matchedDescWords++;
         }
       });
       if (matchedDescWords > 0) {
-        score += (matchedDescWords / bDescWords.length) * 50;
+        score += (matchedDescWords / descWords.length) * 50;
       }
     }
 
-    // Base matching on standard BOM item category/name (e.g. "button" or "zip")
-    if (bName && mName.includes(bName)) {
-      score += 10;
+    // Category or base name alignment (e.g. "zip" or "elastic")
+    if (bName && (mName.includes(bName) || mCategory.includes(bName))) {
+      score += 20;
     }
 
     if (score > highestScore) {
@@ -572,8 +567,8 @@ export const findMatchingMaterialId = (bomItem, materials) => {
     }
   });
 
-  // Set mapped material if score is significant (e.g. score >= 15)
-  if (highestScore >= 15 && bestMaterial) {
+  // Only consider confident matches (score >= 60)
+  if (highestScore >= 60 && bestMaterial) {
     return bestMaterial.id;
   }
 
@@ -1023,7 +1018,6 @@ export default function DesignView({
     }
     setAccessoryError('');
     const newItem = { name, status: 'Yes', detail: '1', description: `${name} required`, materialId: '' };
-    newItem.materialId = findMatchingMaterialId(newItem, materials);
     setBomItems([...bomItems, newItem]);
     setNewInlineName('');
     setShowAddInline(false);
@@ -1052,9 +1046,7 @@ export default function DesignView({
       } else if (value === 'Yes') {
         if (!newItems[index].detail) newItems[index].detail = '1';
         if (!newItems[index].description) newItems[index].description = `${newItems[index].name} required`;
-        if (!newItems[index].materialId) {
-          newItems[index].materialId = findMatchingMaterialId(newItems[index], materials);
-        }
+        // By default, item is NOT mapped. Only mapped when person chooses and selects a material.
       }
     } else if (field === 'detail') {
       newItems[index][field] = value.replace(/\D/g, '');
@@ -1062,11 +1054,7 @@ export default function DesignView({
       newItems[index].materialId = value;
     } else if (field === 'description') {
       newItems[index].description = value;
-      // If not yet mapped to any material, attempt auto-match with the new description
-      if (!newItems[index].materialId) {
-        const autoMat = findMatchingMaterialId(newItems[index], materials);
-        if (autoMat) newItems[index].materialId = autoMat;
-      }
+      // Do not auto-map material on description typing.
     } else {
       newItems[index][field] = value;
     }
@@ -1227,12 +1215,9 @@ export default function DesignView({
           status: isYes ? 'Yes' : 'No',
           detail,
           description,
-          materialId: ''
+          materialId: '' // By default item is NOT mapped. Only mapped when person chooses and selects a material.
         };
 
-        if (isYes) {
-          item.materialId = findMatchingMaterialId(item, materials);
-        }
         return item;
       });
 

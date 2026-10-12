@@ -3345,3 +3345,44 @@ body.dark-theme .custom-dropdown-menu {
     margin-bottom: 4px !important;
   }
 }
+
+/* Scoped rules for Without-BOM Material Issue & Item Issue Challan / Bill Printing */
+body.print-without-bom-mode .sidebar,
+body.print-without-bom-mode .top-header,
+body.print-without-bom-mode .animate-fade > *:not(.without-bom-print-container),
+body.print-without-bom-mode .main-content > *:not(.without-bom-print-container),
+body.print-without-bom-mode .modal-overlay:not(.without-bom-modal-overlay),
+body.print-without-bom-mode .page-container > *:not(.without-bom-print-container),
+body.print-without-bom-mode .without-bom-container > *:not(.without-bom-print-container) {
+  display: none !important;
+}
+
+.without-bom-print-container {
+  display: none;
+}
+
+@media print {
+  body.print-without-bom-mode .without-bom-print-container {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: 999999 !important;
+  }
+
+  body.print-without-bom-mode .without-bom-challan-sheet {
+    background: #ffffff !important;
+    color: #000000 !important;
+    border: 2px solid #000000 !important;
+    border-radius: 6px !important;
+    padding: 18px 22px !important;
+    margin-bottom: 24px !important;
+    box-sizing: border-box !important;
+    page-break-inside: avoid !important;
+  }
+}

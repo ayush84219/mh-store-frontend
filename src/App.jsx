@@ -44,6 +44,7 @@ const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
 const ElasticTapeIssueView = lazy(() => import('./components/ElasticTapeIssueView'));
+const WithoutBomMaterialIssueView = lazy(() => import('./components/WithoutBomMaterialIssueView'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -81,6 +82,7 @@ const hasTabAccess = (tabName, role) => {
       'manually_weight_capture',
       'material_issue',
       'barcode_material_issue',
+      'without_bom_material_issue',
       'extra_material_issue',
       'return_material',
       'material_details',
@@ -108,6 +110,7 @@ const hasTabAccess = (tabName, role) => {
       'elastic_issue',
       'elastic_po',
       'elastic_tape_issue',
+      'without_bom_material_issue',
       'generate_po',
       'history',
       'scanner_logs',
@@ -126,6 +129,7 @@ const hasTabAccess = (tabName, role) => {
       'manually_weight_capture',
       'material_issue',
       'barcode_material_issue',
+      'without_bom_material_issue',
       'extra_material_issue',
       'return_material',
       'material_details',
@@ -155,6 +159,7 @@ const TAB_ROUTES = {
   material_verification: '/material-verification',
   material_issue: '/material-issue',
   barcode_material_issue: '/barcode-material-issue',
+  without_bom_material_issue: '/without-bom-material-issue',
   extra_material_issue: '/extra-material-issue',
   return_material: '/return-material',
   generate_po: '/generate-po',
@@ -198,7 +203,10 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/elastic_tape_issue': 'elastic_tape_issue',
   '/reports/daily-fabric-issue': 'reports_history',
   '/reports/daily-report': 'reports_history',
-  '/daily-fabric-issue': 'reports_history'
+  '/daily-fabric-issue': 'reports_history',
+  '/without-bom-material-issue': 'without_bom_material_issue',
+  '/material-issue-without-bom': 'without_bom_material_issue',
+  '/without-bom': 'without_bom_material_issue'
 });
 
 export default function App() {
@@ -545,6 +553,7 @@ export default function App() {
       weight_capture: 'Material Add',
       material_issue: 'Material Issue',
       barcode_material_issue: 'Barcode Material Issue',
+      without_bom_material_issue: 'Without BOM Material Issue',
       extra_material_issue: 'Extra Material Issue',
       return_material: 'Return Material',
       material_details: 'Material Detail',
@@ -1228,7 +1237,7 @@ export default function App() {
     }).catch(err => console.error('Failed to save issue log to DB:', err));
   };
 
-  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '', isWithoutBom = false) => {
+  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '', isWithoutBom = false, customId = null) => {
     const design = designs.find(d => String(d.id).trim().toLowerCase() === String(lotId).trim().toLowerCase());
 
     // Strict BOM validation: If design has required BOM components:
@@ -1277,11 +1286,12 @@ export default function App() {
 
     // 2. Add audit trail log entry
     const newLog = {
-      id: `${isReissue ? 'RI' : 'MI'}${Math.floor(1300 + Math.random() * 8000)}`,
-      lotId,
+      id: customId || `${isWithoutBom ? 'WO-MI-' : (isReissue ? 'RI' : 'MI')}${Math.floor(1300 + Math.random() * 8000)}`,
+      lotId: lotId || 'DIRECT-ITEM',
       isReissue,
-      category: design ? design.category : 'Unknown',
-      volume,
+      isWithoutBom: Boolean(isWithoutBom),
+      category: design ? design.category : (isWithoutBom ? 'Without BOM Floor Issue' : 'Unknown'),
+      volume: volume || 0,
       personName,
       receiverName: receiverName || '',
       receiverDept: receiverDept || '',
@@ -2137,7 +2147,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'barcode_material_issue', 'without_bom_material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2170,6 +2180,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'barcode_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('barcode_material_issue')} title="Barcode Material Issue">
                       <span className="sidebar-text">⚡ Barcode Material Issue</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'without_bom_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('without_bom_material_issue')} title="Material Issue (Without BOM)">
+                      <span className="sidebar-text">⚡ Without BOM Issue</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
                       <span className="sidebar-text">Elastic & Tape Issue</span>
@@ -2313,6 +2326,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'barcode_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('barcode_material_issue')} title="Barcode Material Issue">
                   <Scan size={18} />
                   <span className="sidebar-text">Barcode Material Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'without_bom_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('without_bom_material_issue')} title="Material Issue (Without BOM)">
+                  <Zap size={18} />
+                  <span className="sidebar-text">Without BOM Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'bone_issue' || activeTab === 'bone_po' ? 'active' : ''}`} onClick={() => handleTabClick('bone_issue')} title="Bone Issue">
                   <Layers size={18} />
@@ -2484,6 +2501,8 @@ export default function App() {
                 {activeTab === 'weight_capture' && 'Material Add (Scale Inward)'}
                 {activeTab === 'manually_weight_capture' && 'Manual Material Inward Entry'}
                 {activeTab === 'material_issue' && 'Material Issue'}
+                {activeTab === 'barcode_material_issue' && 'Barcode Material Issue'}
+                {activeTab === 'without_bom_material_issue' && 'Without BOM Material Issue'}
                 {activeTab === 'extra_material_issue' && 'Extra Material Issue'}
                 {activeTab === 'return_material' && 'Return Material'}
                 {activeTab === 'material_details' && 'Material Detail'}
@@ -2823,6 +2842,19 @@ export default function App() {
                   issueLogs={issueLogs}
                   currencySymbol={currencySymbol}
                   currentUser={currentUser}
+                  onRedirectToTab={(tab) => handleTabClick(tab)}
+                />
+              )}
+
+              {activeTab === 'without_bom_material_issue' && (
+                <WithoutBomMaterialIssueView
+                  materials={materials}
+                  designs={designs}
+                  onIssueMaterials={handleIssueMaterials}
+                  issueLogs={issueLogs}
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onSwitchToWithBom={() => handleTabClick('material_issue')}
                   onRedirectToTab={(tab) => handleTabClick(tab)}
                 />
               )}

@@ -2,10 +2,11 @@ import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import React, { useState, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check, User, Users, Download, Building, Package, Sparkles } from 'lucide-react';
+import { ClipboardList, AlertTriangle, CheckCircle, ArrowRight, Layers, HelpCircle, Printer, Trash2, Plus, RotateCcw, X, PrinterCheck, Shield, Send, ChevronDown, Search, FileText, Eye, Info, CheckCircle2, History, TrendingUp, BarChart3, Scan, Barcode, ShoppingCart, Check, User, Users, Download, Building, Package, Sparkles, Zap } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import BarcodeMaterialIssueView from './BarcodeMaterialIssueView';
+import WithoutBomMaterialIssueView from './WithoutBomMaterialIssueView';
 
 // Sound feedback helper using Web Audio API
 const playFeedbackSound = (type = 'success') => {
@@ -2568,7 +2569,7 @@ export default function MaterialIssueView({
         marginBottom: '20px',
         boxShadow: 'var(--shadow-sm)'
       }}>
-        <div style={{ display: 'flex', gap: '6px' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={() => setIssueWorkflowMode('lot_bom')}
@@ -2584,11 +2585,35 @@ export default function MaterialIssueView({
               fontWeight: '700',
               fontSize: '13px',
               cursor: 'pointer',
-              transition: 'all 0.2s'
+              transition: 'all 0.2s',
+              boxShadow: issueWorkflowMode === 'lot_bom' ? '0 2px 8px rgba(2, 132, 199, 0.3)' : 'none'
             }}
           >
             <Layers size={16} />
             <span>📦 Standard Lot BOM Issue</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIssueWorkflowMode('without_bom')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '9px 18px',
+              borderRadius: '8px',
+              border: 'none',
+              background: issueWorkflowMode === 'without_bom' ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'transparent',
+              color: issueWorkflowMode === 'without_bom' ? '#ffffff' : 'var(--text-muted, #64748b)',
+              fontWeight: '700',
+              fontSize: '13px',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+              boxShadow: issueWorkflowMode === 'without_bom' ? '0 2px 8px rgba(234, 88, 12, 0.3)' : 'none'
+            }}
+          >
+            <Zap size={16} />
+            <span>⚡ Without BOM Issue</span>
           </button>
 
           <button
@@ -2606,7 +2631,8 @@ export default function MaterialIssueView({
               fontWeight: '700',
               fontSize: '13px',
               cursor: 'pointer',
-              transition: 'all 0.2s'
+              transition: 'all 0.2s',
+              boxShadow: issueWorkflowMode === 'barcode_scan' ? '0 2px 8px rgba(2, 132, 199, 0.3)' : 'none'
             }}
           >
             <Scan size={16} />
@@ -2615,7 +2641,21 @@ export default function MaterialIssueView({
         </div>
       </div>
 
-      {issueWorkflowMode === 'barcode_scan' ? (
+      {issueWorkflowMode === 'without_bom' ? (
+        <WithoutBomMaterialIssueView
+          materials={materials}
+          designs={designs}
+          onIssueMaterials={onIssueMaterials}
+          issueLogs={issueLogs}
+          currencySymbol={currencySymbol}
+          currentUser={currentUser}
+          onSwitchToWithBom={() => setIssueWorkflowMode('lot_bom')}
+          onRedirectToTab={(tab) => {
+            if (tab === 'material_issue') setIssueWorkflowMode('lot_bom');
+            else if (onRedirectToTab) onRedirectToTab(tab);
+          }}
+        />
+      ) : issueWorkflowMode === 'barcode_scan' ? (
         <BarcodeMaterialIssueView
           materials={materials}
           designs={designs}
@@ -2656,6 +2696,27 @@ export default function MaterialIssueView({
             <ClipboardList size={19} className="text-accent" />
             <span>Start Production Batch Setup</span>
           </h3>
+          <button
+            type="button"
+            onClick={() => setIssueWorkflowMode('without_bom')}
+            style={{
+              padding: '6px 14px',
+              borderRadius: '8px',
+              border: '1.5px solid #fed7aa',
+              background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+              color: '#c2410c',
+              fontSize: '12.5px',
+              fontWeight: '700',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 1px 3px rgba(234, 88, 12, 0.15)'
+            }}
+          >
+            <Zap size={14} style={{ color: '#ea580c' }} />
+            <span>⚡ Issue Material Without BOM (Only Item / Bill)</span>
+          </button>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -2984,9 +3045,36 @@ export default function MaterialIssueView({
         </div>
 
         {!selectedDesign ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>
-            <HelpCircle size={48} strokeWidth={1} style={{ marginBottom: '12px' }} />
-            <p style={{ fontSize: '14px', fontWeight: '500' }}>Select an approved design lot in the batch setup above to analyze production material needs.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '220px', padding: '24px', color: 'var(--text-muted)', textAlign: 'center', gap: '8px' }}>
+            <HelpCircle size={44} strokeWidth={1.2} style={{ marginBottom: '4px', opacity: 0.6 }} />
+            <p style={{ fontSize: '14px', fontWeight: '600', margin: 0, color: 'var(--text-main)' }}>
+              Select an approved design lot in the batch setup above to analyze production material needs.
+            </p>
+            <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', margin: '0 0 12px 0', maxWidth: '480px' }}>
+              Or if this production lot has no approved BOM, switch to Direct Without-BOM Material Issue to issue raw materials directly to the floor.
+            </p>
+            <button
+              type="button"
+              onClick={() => setIssueWorkflowMode('without_bom')}
+              style={{
+                padding: '9px 20px',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
+                transition: 'all 0.2s'
+              }}
+            >
+              <Zap size={16} />
+              <span>⚡ Issue Materials Without BOM (Direct Floor Movement)</span>
+            </button>
           </div>
         ) : isLoadingPieces ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '220px', color: 'var(--text-muted)', textAlign: 'center' }}>

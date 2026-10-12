@@ -160,7 +160,7 @@ export default function BoneIssueView({
         if (!isNaN(n) && n > max) max = n;
       }
     });
-    return `${prefix}${String(max + 1).padStart(2, '0')}`;
+    return `${prefix}${max + 1}`;
   };
 
   // Fetch next Issue Slip Number from backend or local sequence
@@ -1188,7 +1188,6 @@ export default function BoneIssueView({
                     setLotDetails(null);
                     setSearchLotInput('');
                     setBomStatus('idle');
-                    showToast('Switched to "With BOM" Mode (BOM verification active).');
                   }}
                   style={{
                     padding: '8px 18px',
@@ -1226,7 +1225,6 @@ export default function BoneIssueView({
                     if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
                       handleSearchLot(searchLotInput.trim());
                     }
-                    showToast('⚡ Switched to "Without BOM" Mode. All BOM restrictions removed!');
                   }}
                   style={{
                     padding: '8px 18px',

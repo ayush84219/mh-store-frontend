@@ -802,49 +802,137 @@ export default function ElasticTapeIssueView({
           idUpper.startsWith('ELASTIC') ||
           idUpper.startsWith('TAPE') ||
           idUpper.startsWith('BONE') ||
+          idUpper.startsWith('REAL-MI-') ||
           catUpper.includes('ELASTIC') ||
-          catUpper.includes('BONE')
+          catUpper.includes('BONE') ||
+          catUpper.includes('TAPE')
         ) {
-          // If not in elastics, add as synthetic record
+          // If not in elastics or bones, add as synthetic record
           if (!elastics.some(e => (e.slipNo || e.slip_no) === l.id) && !bones.some(b => (b.slipNo || b.slip_no) === l.id)) {
             let mats = [];
             try {
               mats = typeof l.materials === 'string' ? JSON.parse(l.materials) : (l.materials || []);
             } catch (_) {}
             const firstMat = mats[0] || {};
+            const matBomUpper = String(firstMat.bomItemName || '').toUpperCase();
+            const matNameUpper = String(firstMat.name || '').toUpperCase();
+            const matBillUpper = String(firstMat.billNo || '').toUpperCase();
 
-            if (idUpper.startsWith('BONE') || catUpper.includes('BONE')) {
+            const isBone = idUpper.includes('BONE') || catUpper.includes('BONE') || matBomUpper.includes('BONE') || matNameUpper.includes('BONE') || matBillUpper.includes('BONE');
+            const isTape = idUpper.includes('TAPE') || catUpper.includes('TAPE') || matBomUpper.includes('TAPE') || matNameUpper.includes('TAPE') || matBillUpper.includes('TAPE');
+            const isOther = idUpper.includes('OTHER') || catUpper.includes('OTHER') || matBomUpper.includes('OTHER');
+
+            const deductedItems = Array.isArray(mats) ? mats.map(m => ({
+              materialName: m.name || m.materialName || 'Store Material',
+              materialId: m.materialId || '',
+              bomItemName: m.bomItemName || '',
+              totalRequired: m.qty ?? m.totalRequired ?? 1,
+              unit: m.unit || 'Roll',
+              location: m.location || 'Main Store'
+            })) : [];
+
+            if (isBone) {
+              const bRolls = firstMat.unit?.toLowerCase().includes('roll')
+                ? (parseFloat(firstMat.qty) || 1)
+                : (l.volume && l.volume <= 100 ? l.volume : 1);
+              const bWeight = firstMat.unit?.toLowerCase().includes('kg')
+                ? firstMat.qty
+                : (firstMat.weight || (parseFloat(bRolls) * 2.5).toFixed(2));
+
+              // Fallback piece detection: from volume or regex from id/billNo
+              const fallbackPcsMatch = String(l.id).match(/-w\/o-(\d+)/i) || String(firstMat.billNo || '').match(/-w\/o-(\d+)/i);
+              const volNum = parseInt(l.volume || 0, 10);
+              const qtyPcs = volNum > 100 ? volNum : (fallbackPcsMatch ? parseInt(fallbackPcsMatch[1], 10) : (volNum > 0 ? volNum : 0));
+
               bones.push({
                 id: l.id,
                 slipNo: l.id,
-                lotNo: l.lotId,
+                lotNo: l.lotId || 'Direct Floor',
                 date: l.date,
-                rolls: l.volume || 1,
+                rolls: bRolls,
                 issuerName: l.personName,
                 receiverName: l.receiverName,
                 remarks: '',
                 payload: JSON.stringify({
-                  boneWeightKg: firstMat.qty || '2.50',
-                  rolls: l.volume || 1,
-                  boneWidth: firstMat.width || '1.5 Inch'
+                  boneWeightKg: bWeight,
+                  rolls: bRolls,
+                  boneRolls: bRolls,
+                  boneWidth: firstMat.width || '1.5 Inch (Standard)',
+                  boneMaterialName: firstMat.name || 'Bone Chinese (Beige)',
+                  selectedBoneMaterialId: firstMat.materialId || 'ST00346',
+                  location: firstMat.location || 'Main Store - RACK 208',
+                  quantity: qtyPcs,
+                  issuePcs: qtyPcs,
+                  deductedItems
+                })
+              });
+            } else if (isTape) {
+              const tRolls = firstMat.unit?.toLowerCase().includes('roll') ? (parseFloat(firstMat.qty) || 1) : Math.ceil((l.volume || 1) / 45);
+              const tMtr = firstMat.unit?.toLowerCase().includes('mtr') ? (parseFloat(firstMat.qty) || 0) : (firstMat.totalTapeMtr || 0);
+              const fallbackPcsMatch = String(l.id).match(/-w\/o-(\d+)/i) || String(firstMat.billNo || '').match(/-w\/o-(\d+)/i);
+              const volNum = parseInt(l.volume || 0, 10);
+              const qtyPcs = volNum > 100 ? volNum : (fallbackPcsMatch ? parseInt(fallbackPcsMatch[1], 10) : (volNum > 0 ? volNum : 0));
+
+              elastics.push({
+                id: l.id,
+                slipNo: l.id,
+                lotNo: l.lotId || 'Direct Floor',
+                date: l.date,
+                rolls: tRolls,
+                issuerName: l.personName,
+                receiverName: l.receiverName,
+                remarks: '',
+                payload: JSON.stringify({
+                  materialMode: 'tape',
+                  tapeWidth: firstMat.width || '0.5 Inch (Standard)',
+                  tapeRolls: tRolls,
+                  totalTapeMtr: tMtr,
+                  quantity: qtyPcs,
+                  issuePcs: qtyPcs,
+                  deductedItems
+                })
+              });
+            } else if (isOther) {
+              const oRolls = parseFloat(firstMat.qty || l.volume || 1);
+              elastics.push({
+                id: l.id,
+                slipNo: l.id,
+                lotNo: l.lotId || 'Direct Floor',
+                date: l.date,
+                rolls: oRolls,
+                issuerName: l.personName,
+                receiverName: l.receiverName,
+                remarks: '',
+                payload: JSON.stringify({
+                  materialMode: 'other',
+                  otherMaterialName: firstMat.name || 'Other Accessory',
+                  otherUnit: firstMat.unit || 'Roll',
+                  otherRollCount: oRolls,
+                  quantity: parseInt(l.volume || 0, 10),
+                  issuePcs: parseInt(l.volume || 0, 10),
+                  deductedItems
                 })
               });
             } else {
               elastics.push({
                 id: l.id,
                 slipNo: l.id,
-                lotNo: l.lotId,
+                lotNo: l.lotId || 'Direct Floor',
                 date: l.date,
                 rolls: l.volume || firstMat.rolls || 1,
                 issuerName: l.personName,
                 receiverName: l.receiverName,
                 remarks: '',
                 payload: JSON.stringify({
-                  totalElasticMtr: firstMat.totalElasticMtr || 0,
+                  materialMode: 'elastic',
+                  totalElasticMtr: firstMat.totalElasticMtr || (firstMat.unit?.toLowerCase().includes('mtr') ? firstMat.qty : 0),
                   elasticPerPcMtr: firstMat.elasticPerPcMtr || 0,
                   elasticWidth: firstMat.width || '1 Inch',
                   shade: firstMat.shade || '',
-                  selectedElasticMaterialId: firstMat.materialId || ''
+                  selectedElasticMaterialId: firstMat.materialId || '',
+                  quantity: parseInt(l.volume || 0, 10),
+                  issuePcs: parseInt(l.volume || 0, 10),
+                  deductedItems
                 })
               });
             }
@@ -894,13 +982,15 @@ export default function ElasticTapeIssueView({
 
       // 1. Check in realIssuedMap (localStorage & live state)
       if (realIssuedMap[bKey] && realIssuedMap[bKey].isIssued) {
+        const item = realIssuedMap[bKey];
         return {
           isIssued: true,
-          issuedAt: realIssuedMap[bKey].issuedAt,
-          issuedBy: realIssuedMap[bKey].issuedBy,
-          issuedMat: realIssuedMap[bKey].issuedMaterialName,
-          deductedQty: realIssuedMap[bKey].deductedQty,
-          unit: realIssuedMap[bKey].unit
+          issuedAt: item.issuedAt,
+          issuedBy: item.issuedBy,
+          issuedMat: item.issuedMaterialName,
+          deductedQty: item.deductedQty,
+          unit: item.unit,
+          deductedItems: item.deductedItems || []
         };
       }
 
@@ -912,7 +1002,8 @@ export default function ElasticTapeIssueView({
           issuedBy: payloadObj.issuedBy,
           issuedMat: payloadObj.issuedMaterialName,
           deductedQty: payloadObj.deductedQty,
-          unit: payloadObj.unit
+          unit: payloadObj.unit,
+          deductedItems: payloadObj.deductedItems || []
         };
       }
 
@@ -922,7 +1013,8 @@ export default function ElasticTapeIssueView({
           isIssued: true,
           issuedAt: 'Completed',
           issuedBy: 'Store Incharge',
-          issuedMat: 'Real Inventory Stock Deducted'
+          issuedMat: 'Real Inventory Stock Deducted',
+          deductedItems: payloadObj?.deductedItems || []
         };
       }
 
@@ -933,11 +1025,38 @@ export default function ElasticTapeIssueView({
          (Array.isArray(l.materials) && l.materials.some(m => String(m.billNo || '').toUpperCase() === String(billNo).toUpperCase())))
       );
       if (realLog) {
+        let mats = [];
+        try {
+          mats = typeof realLog.materials === 'string' ? JSON.parse(realLog.materials) : (realLog.materials || []);
+        } catch (_) {}
+        const deductedItems = Array.isArray(mats) ? mats.map(m => ({
+          materialName: m.name || m.materialName || 'Store Material',
+          materialId: m.materialId || '',
+          bomItemName: m.bomItemName || '',
+          totalRequired: m.qty ?? m.totalRequired ?? 1,
+          unit: m.unit || 'Roll',
+          location: m.location || 'Main Store'
+        })) : [];
+
         return {
           isIssued: true,
           issuedAt: realLog.date,
           issuedBy: realLog.personName,
-          issuedMat: Array.isArray(realLog.materials) ? realLog.materials.map(m => m.name).join(', ') : 'Stock Deducted'
+          issuedMat: deductedItems.length > 0
+            ? deductedItems.map(m => `${m.materialName} (${m.totalRequired} ${m.unit})`).join(', ')
+            : (Array.isArray(realLog.materials) ? realLog.materials.map(m => m.name).join(', ') : 'Stock Deducted'),
+          deductedItems
+        };
+      }
+
+      // 5. If this record itself IS a REAL-MI- record, it is already deducted!
+      if (String(billNo || '').toUpperCase().startsWith('REAL-MI-')) {
+        return {
+          isIssued: true,
+          issuedAt: payloadObj?.issuedAt || 'Completed',
+          issuedBy: payloadObj?.issuedBy || 'Store Incharge',
+          issuedMat: payloadObj?.issuedMaterialName || 'Real Inventory Stock Deducted',
+          deductedItems: payloadObj?.deductedItems || []
         };
       }
 
@@ -956,6 +1075,8 @@ export default function ElasticTapeIssueView({
 
       if (slipUpper.includes('BONE') || mMode === 'bone') {
         billType = 'bone';
+      } else if (slipUpper.includes('OTHER') || mMode === 'other') {
+        billType = 'other';
       } else if (slipUpper.startsWith('ELASTIC') || mMode === 'elastic') {
         // If bill number starts with ELASTIC (e.g. elastic-w/o-34) or mode was elastic, it is ONLY ELASTIC!
         billType = 'elastic';
@@ -973,6 +1094,9 @@ export default function ElasticTapeIssueView({
       }
 
       const issueStatus = checkRealMaterialIssueStatus(billNo, payload, rec.remarks);
+      const parsedQty = parseInt(rec.quantity || payload.quantity || payload.issuePcs || payload.cuttingQty || 0, 10);
+      const fallbackPcsMatch = String(billNo).match(/-w\/o-(\d+)/i);
+      const finalQty = parsedQty > 0 ? parsedQty : (fallbackPcsMatch ? parseInt(fallbackPcsMatch[1], 10) : 0);
 
       list.push({
         id: `elastic_${rec.id || billNo}`,
@@ -984,12 +1108,20 @@ export default function ElasticTapeIssueView({
         lotNo: rec.lotNo || rec.lot_no || 'Direct Floor',
         isWithoutLot: !rec.lotNo || String(rec.lotNo).toLowerCase().includes('direct') || String(billNo).includes('-w/o-'),
         billType,
-        typeLabel: billType === 'tape' ? 'Tape Issue' : billType === 'both' ? 'Elastic & Tape' : 'Elastic Issue',
+        typeLabel: billType === 'bone'
+          ? 'Bone Issue'
+          : billType === 'other'
+            ? 'Other Accessory'
+            : billType === 'tape'
+              ? 'Tape Issue'
+              : billType === 'both'
+                ? 'Elastic & Tape'
+                : 'Elastic Issue',
         style: rec.style || payload.style || 'Lower / Tracksuit',
         brand: rec.brand || payload.brand || 'Mohit Hosiery',
         garmentType: rec.garmentType || rec.garment_type || payload.garmentType || 'Lower',
         fabric: rec.fabric || payload.fabric || '—',
-        quantity: parseInt(rec.quantity || payload.quantity || 0, 10),
+        quantity: finalQty,
         shade: rec.shade || payload.shade || '—',
         size: rec.size || payload.size || '—',
         // Elastic specific
@@ -1005,6 +1137,16 @@ export default function ElasticTapeIssueView({
         tapePerPcMtr: parseFloat(rec.tapePerPcMtr ?? rec.tape_per_pc_mtr ?? payload.tapePerPcMtr ?? 0),
         totalTapeMtr: billType === 'elastic' ? 0 : parseFloat(rec.totalTapeMtr ?? rec.total_tape_mtr ?? payload.totalTapeMtr ?? 0),
         tapeRolls: billType === 'elastic' ? 0 : parseInt(payload.tapeRolls || 1, 10),
+        // Bone specific
+        boneWidth: payload.boneWidth || payload.width || rec.boneWidth || rec.width || '1.5 Inch (Standard)',
+        boneWeightKg: payload.boneWeightKg || payload.weight || rec.boneWeightKg || rec.weight || '2.50',
+        boneRolls: parseInt(payload.boneRolls || payload.rolls || rec.rolls || 1, 10),
+        boneMaterialName: payload.boneMaterialName || 'Bone Chinese (Beige)',
+        selectedBoneMaterialId: payload.selectedBoneMaterialId || 'ST00346',
+        // Other specific
+        otherMaterialName: payload.otherMaterialName || rec.otherMaterialName || 'Other Accessory',
+        otherRollCount: parseFloat(payload.otherRollCount || rec.otherRollCount || payload.rolls || 1),
+        otherUnit: payload.otherUnit || rec.otherUnit || 'Roll',
 
         // People
         issuerName: rec.issuerName || rec.issuer_name || 'Store Incharge',
@@ -1022,6 +1164,9 @@ export default function ElasticTapeIssueView({
       const payload = parsePayload(rec.payload);
       const billNo = rec.slipNo || rec.slip_no || `BONE-${rec.id}`;
       const issueStatus = checkRealMaterialIssueStatus(billNo, payload, rec.remarks);
+      const parsedQty = parseInt(rec.quantity || payload.quantity || payload.issuePcs || payload.cuttingQty || 0, 10);
+      const fallbackPcsMatch = String(billNo).match(/-w\/o-(\d+)/i);
+      const finalQty = parsedQty > 0 ? parsedQty : (fallbackPcsMatch ? parseInt(fallbackPcsMatch[1], 10) : 0);
 
       list.push({
         id: `bone_${rec.id || billNo}`,
@@ -1038,13 +1183,13 @@ export default function ElasticTapeIssueView({
         brand: rec.brand || payload.brand || 'Mohit Hosiery',
         garmentType: rec.garmentType || rec.garment_type || payload.garmentType || 'Lower',
         fabric: rec.fabric || payload.fabric || '—',
-        quantity: parseInt(rec.quantity || payload.quantity || payload.issuePcs || 0, 10),
+        quantity: finalQty,
         shade: rec.shade || payload.shade || '—',
         size: rec.size || payload.size || '—',
         // Bone specific
-        boneWidth: payload.boneWidth || payload.width || '1.5 Inch (Standard)',
-        boneWeightKg: payload.boneWeightKg || payload.weight || rec.weight || '2.50',
-        boneRolls: parseInt(rec.rolls || payload.rolls || 1, 10),
+        boneWidth: payload.boneWidth || payload.width || rec.boneWidth || rec.width || '1.5 Inch (Standard)',
+        boneWeightKg: payload.boneWeightKg || payload.weight || rec.boneWeightKg || rec.weight || '2.50',
+        boneRolls: parseInt(payload.boneRolls || payload.rolls || rec.rolls || 1, 10),
         boneMaterialName: payload.boneMaterialName || 'Bone Chinese (Beige)',
         selectedBoneMaterialId: payload.selectedBoneMaterialId || 'ST00346',
         // People
@@ -1094,6 +1239,16 @@ export default function ElasticTapeIssueView({
 
       return true;
     }).sort((a, b) => {
+      if (sortBy === 'seq_asc') {
+        const numA = parseInt(String(a.billNo).match(/\d+/)?.[0] || '0', 10);
+        const numB = parseInt(String(b.billNo).match(/\d+/)?.[0] || '0', 10);
+        return (numA - numB) || String(a.billNo).localeCompare(String(b.billNo), undefined, { numeric: true });
+      }
+      if (sortBy === 'seq_desc') {
+        const numA = parseInt(String(a.billNo).match(/\d+/)?.[0] || '0', 10);
+        const numB = parseInt(String(b.billNo).match(/\d+/)?.[0] || '0', 10);
+        return (numB - numA) || String(b.billNo).localeCompare(String(a.billNo), undefined, { numeric: true });
+      }
       if (sortBy === 'newest') {
         return (new Date(b.date || 0)) - (new Date(a.date || 0)) || String(b.billNo).localeCompare(String(a.billNo));
       }
@@ -1101,10 +1256,10 @@ export default function ElasticTapeIssueView({
         return (new Date(a.date || 0)) - (new Date(b.date || 0)) || String(a.billNo).localeCompare(String(b.billNo));
       }
       if (sortBy === 'bill_no') {
-        return String(b.billNo).localeCompare(String(a.billNo));
+        return String(a.billNo).localeCompare(String(b.billNo), undefined, { numeric: true });
       }
       if (sortBy === 'lot_no') {
-        return String(b.lotNo).localeCompare(String(a.lotNo));
+        return String(a.lotNo).localeCompare(String(b.lotNo), undefined, { numeric: true });
       }
       return 0;
     });
@@ -1521,7 +1676,21 @@ export default function ElasticTapeIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(70, 70, 70);
-      doc.text(`ISSUE CATEGORY: ${bill.typeLabel.toUpperCase()}`, margin + 12, y + 63);
+      const isBone = bill.billType === 'bone' || String(bill.billNo || '').toLowerCase().includes('bone');
+      const isTape = bill.billType === 'tape' || String(bill.billNo || '').toLowerCase().includes('tape');
+      const isOther = bill.billType === 'other' || String(bill.billNo || '').toLowerCase().includes('other');
+      const isBoth = bill.billType === 'both';
+
+      const categoryHeader = isBone
+        ? 'BONE ISSUE'
+        : isOther
+          ? 'OTHER ACCESSORIES ISSUE'
+          : isTape
+            ? 'TAPE ISSUE'
+            : isBoth
+              ? 'ELASTIC & TAPE ISSUE'
+              : (bill.typeLabel || 'ELASTIC ISSUE').toUpperCase();
+      doc.text(`ISSUE CATEGORY: ${categoryHeader}`, margin + 12, y + 63);
 
       // Right Section: Challan Number & Metadata (Cleanly spaced, NO truncation, NO overflow)
       const colLabelX = headerSplitX + 8;
@@ -1544,11 +1713,11 @@ export default function ElasticTapeIssueView({
       doc.setFont('helvetica', 'bold');
       doc.text('LOT / MODE:', colLabelX, y + 46);
       doc.setFont('helvetica', 'normal');
-      doc.text(bill.isWithoutLot ? 'Direct Floor (W/O PO)' : `LOT #${bill.lotNo}`, colValX, y + 46);
+      doc.text(bill.isWithoutLot ? (bill.lotNo && bill.lotNo !== 'Direct Floor' && !String(bill.lotNo).toLowerCase().includes('direct') ? `LOT #${bill.lotNo} (Direct Floor)` : 'Direct Floor (W/O PO)') : `LOT #${bill.lotNo}`, colValX, y + 46);
 
       doc.setFont('helvetica', 'bold');
       doc.text('STATUS:', colLabelX, y + 60);
-      const isIssued = bill.issueStatus?.isIssued;
+      const isIssued = bill.issueStatus?.isIssued || String(bill.billNo || '').toUpperCase().startsWith('REAL-MI-');
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(7.5);
       doc.text(isIssued ? '[ REAL STOCK DEDUCTED ]' : '[ PENDING FLOOR ISSUE ]', colValX, y + 60);
@@ -1566,13 +1735,47 @@ export default function ElasticTapeIssueView({
       doc.setFontSize(7.5);
       doc.setTextColor(0, 0, 0);
       const statusText = isIssued
-        ? `STORE STATUS: REAL MATERIAL ISSUED & STOCK DEDUCTED   |   REF: ${bill.issueStatus.issuedAt || bill.date}   |   BY: ${bill.issueStatus.issuedBy || bill.issuerName}`
+        ? `STORE STATUS: REAL MATERIAL ISSUED & STOCK DEDUCTED   |   REF: ${bill.issueStatus?.issuedAt || bill.date}   |   BY: ${bill.issueStatus?.issuedBy || bill.issuerName}`
         : `STORE STATUS: PENDING STORE INVENTORY DEDUCTION (CUTTING FLOOR REQUISITION SLIP)`;
       doc.text(statusText, margin + 10, y + 13);
 
       y += 20;
 
       // ── SECTION 1: PRODUCTION & LOT SPECIFICATIONS ───────────────────────
+      const cuttingQtyDisplay = (() => {
+        const qty = bill.quantity || bill.payload?.quantity || bill.payload?.issuePcs || bill.payload?.cuttingQty || 0;
+        if (isBone) {
+          const r = bill.boneRolls || bill.payload?.boneRolls || bill.payload?.rolls || 1;
+          const w = bill.boneWeightKg || bill.payload?.boneWeightKg || bill.payload?.weight || (parseFloat(r) * 2.5).toFixed(2);
+          if (qty > 0) {
+            return `${qty} Pcs • ${r} Roll(s) (${w} Kg)`;
+          }
+          return `${r} Roll(s) (${w} Kg)`;
+        }
+        if (isTape) {
+          const r = bill.tapeRolls || bill.payload?.tapeRolls || bill.payload?.rolls || (qty > 0 ? Math.ceil(qty / 45) : 1);
+          const m = bill.totalTapeMtr || bill.payload?.totalTapeMtr || 0;
+          if (qty > 0) {
+            return `${qty} Pcs • ${r} Roll(s)${m > 0 ? ` (${m} Mtrs)` : ''}`;
+          }
+          return `${r} Roll(s)${m > 0 ? ` (${m} Mtrs)` : ''}`;
+        }
+        if (isOther) {
+          const r = bill.otherRollCount || bill.payload?.otherRollCount || bill.payload?.rolls || 1;
+          const u = bill.otherUnit || bill.payload?.otherUnit || 'Roll';
+          if (qty > 0) {
+            return `${qty} Pcs • ${r} ${u}(s)`;
+          }
+          return `${r} ${u}(s)`;
+        }
+        const r = bill.elasticRolls || bill.payload?.elasticRolls || bill.payload?.rolls || 1;
+        const m = bill.totalElasticMtr || bill.payload?.totalElasticMtr || 0;
+        if (qty > 0) {
+          return `${qty} Pcs • ${r} Roll(s)${m > 0 ? ` (${m} Mtrs)` : ''}`;
+        }
+        return `${r} Roll(s)${m > 0 ? ` (${m} Mtrs)` : ''}`;
+      })();
+
       autoTable(doc, {
         startY: y,
         margin: { left: margin, right: margin },
@@ -1583,9 +1786,9 @@ export default function ElasticTapeIssueView({
         body: [
           [
             { content: 'Lot Number:', styles: { fontStyle: 'bold', cellWidth: 90 } },
-            { content: bill.isWithoutLot ? 'Direct Floor Issue (W/O PO)' : `LOT #${bill.lotNo}`, styles: { cellWidth: 175 } },
-            { content: 'Cutting Quantity:', styles: { fontStyle: 'bold', cellWidth: 95 } },
-            { content: `${bill.quantity} Pcs`, styles: { fontStyle: 'bold', cellWidth: 179 } }
+            { content: bill.isWithoutLot ? (bill.lotNo && bill.lotNo !== 'Direct Floor' && !String(bill.lotNo).toLowerCase().includes('direct') ? `LOT #${bill.lotNo} (Direct Floor Issue)` : 'Direct Floor Issue (W/O PO)') : `LOT #${bill.lotNo}`, styles: { cellWidth: 175 } },
+            { content: bill.isWithoutLot ? 'Requisition / Cutting Qty:' : 'Cutting Quantity:', styles: { fontStyle: 'bold', cellWidth: 105 } },
+            { content: cuttingQtyDisplay, styles: { fontStyle: 'bold', cellWidth: 169 } }
           ],
           [
             { content: 'Style / Design:', styles: { fontStyle: 'bold' } },
@@ -1621,66 +1824,176 @@ export default function ElasticTapeIssueView({
       // ── SECTION 2: MATERIAL BILL PARTICULARS & ACTUAL STORE DEDUCTION ────
       const matRows = [];
       let srNum = 1;
-      const deductedItems = bill.issueStatus?.deductedItems || [];
+      const deductedItems = (bill.issueStatus?.deductedItems && bill.issueStatus.deductedItems.length > 0)
+        ? bill.issueStatus.deductedItems
+        : (bill.payload?.deductedItems || []);
 
       // 1. Elastic
-      if (bill.billType === 'elastic' || bill.billType === 'both') {
+      if ((bill.billType === 'elastic' || isBoth) && !isBone && !isTape) {
         const deducted = deductedItems.find(i => (i.bomItemName || '').toLowerCase().includes('elastic') || (i.materialName || '').toLowerCase().includes('elastic'));
         const matchedMat = getBestElasticMaterial(bill.elasticWidth);
+        const eWidth = bill.elasticWidth || bill.payload?.elasticWidth || '1 Inch (Standard)';
+        const eCut = bill.elasticSizeInput || bill.payload?.elasticSizeInput || 0;
+        const eUnit = bill.unitType || bill.payload?.unitType || 'inch';
+        let eRolls = bill.elasticRolls || bill.payload?.elasticRolls || bill.payload?.rolls || 1;
+        let eMtrs = bill.totalElasticMtr || bill.payload?.totalElasticMtr || 0;
+        const ePcs = bill.quantity || bill.payload?.issuePcs || bill.payload?.quantity || 0;
+        let ePerPc = bill.elasticPerPcMtr || bill.payload?.elasticPerPcMtr || 0;
+
+        if (deducted) {
+          if (String(deducted.unit).toLowerCase().includes('roll')) {
+            eRolls = deducted.totalRequired || eRolls;
+          } else if (String(deducted.unit).toLowerCase().includes('mtr')) {
+            eMtrs = deducted.totalRequired || eMtrs;
+          }
+        }
+        if (!eMtrs && ePcs > 0 && ePerPc > 0) {
+          eMtrs = (ePcs * ePerPc).toFixed(2);
+        }
+        if (!eRolls && eMtrs > 0) {
+          const div = String(eWidth).includes('1.5') || String(eWidth).includes('2') ? 23 : 25;
+          eRolls = Math.ceil(eMtrs / div);
+        }
+
         const realStockText = deducted
-          ? `${deducted.materialName} (-${deducted.totalRequired} ${deducted.unit})`
+          ? `${deducted.materialName} (ID: ${deducted.materialId || ''})\n[Deducted: ${deducted.totalRequired} ${deducted.unit}]`
           : (matchedMat ? `${matchedMat.name} (ID: ${matchedMat.id})` : 'Elastic Store Stock');
         const locText = deducted?.location || matchedMat?.location || 'RACK 212';
 
         matRows.push([
           `0${srNum++}`,
           'Elastic Waistband',
-          `Width: ${bill.elasticWidth}\nCut: ${bill.elasticSizeInput} ${bill.unitType}`,
-          `${bill.elasticPerPcMtr} m/pc`,
-          `${bill.elasticRolls} Roll(s)\n(${bill.totalElasticMtr} Meters)`,
+          `Width: ${eWidth}\nCut: ${eCut} ${eUnit}${ePcs > 0 ? `\nTarget Qty: ${ePcs} Pcs` : ''}`,
+          ePerPc > 0 ? `${ePerPc} m/pc` : `${eRolls} Roll(s)`,
+          `${eRolls} Roll(s)\n(${eMtrs > 0 ? `${eMtrs} Meters` : ''}${ePcs > 0 ? ` • ${ePcs} Pcs` : ''})`,
           realStockText,
           locText
         ]);
       }
 
       // 2. Tape
-      if (bill.billType === 'tape' || bill.billType === 'both') {
+      if ((bill.billType === 'tape' || isBoth || isTape) && !isBone) {
         const deducted = deductedItems.find(i => (i.bomItemName || '').toLowerCase().includes('tape') || (i.materialName || '').toLowerCase().includes('tape'));
         const matchedMat = getBestTapeMaterial(bill.tapeWidth);
+        const tWidth = bill.tapeWidth || bill.payload?.tapeWidth || '0.5 Inch (Standard)';
+        const tCut = bill.tapeSizeInput || bill.payload?.tapeSizeInput || '—';
+        let tRolls = bill.tapeRolls || bill.payload?.tapeRolls || bill.payload?.rolls || 1;
+        let tMtrs = bill.totalTapeMtr || bill.payload?.totalTapeMtr || 0;
+        const tPcs = bill.quantity || bill.payload?.issuePcs || bill.payload?.quantity || 0;
+        let tPerPc = bill.tapePerPcMtr || bill.payload?.tapePerPcMtr || 0;
+
+        if (deducted) {
+          if (String(deducted.unit).toLowerCase().includes('roll')) {
+            tRolls = deducted.totalRequired || tRolls;
+          } else if (String(deducted.unit).toLowerCase().includes('mtr')) {
+            tMtrs = deducted.totalRequired || tMtrs;
+          }
+        }
+        if (!tMtrs && tPcs > 0 && tPerPc > 0) {
+          tMtrs = (tPcs * tPerPc).toFixed(2);
+        }
+        if (!tRolls && tPcs > 0) {
+          tRolls = Math.ceil(tPcs / 45);
+        }
+
         const realStockText = deducted
-          ? `${deducted.materialName} (-${deducted.totalRequired} ${deducted.unit})`
+          ? `${deducted.materialName} (ID: ${deducted.materialId || ''})\n[Deducted: ${deducted.totalRequired} ${deducted.unit}]`
           : (matchedMat ? `${matchedMat.name} (ID: ${matchedMat.id})` : 'Tape Store Stock');
         const locText = deducted?.location || matchedMat?.location || 'Main Store';
 
         matRows.push([
           `0${srNum++}`,
-          'Tape / Lace',
-          `Width: ${bill.tapeWidth}\nCut: ${bill.tapeSizeInput || '—'} CM`,
-          `${bill.tapePerPcMtr} m/pc`,
-          `${bill.totalTapeMtr} Meters\n(${bill.tapeRolls || 1} Roll)`,
+          'Tape / Drawcord / Lace',
+          `Width: ${tWidth}\nCut: ${tCut} CM${tPcs > 0 ? `\nTarget Qty: ${tPcs} Pcs` : ''}`,
+          tPerPc > 0 ? `${tPerPc} m/pc` : '1 Roll / 45 Pcs',
+          `${tRolls} Roll(s)\n(${tMtrs > 0 ? `${tMtrs} Meters` : ''}${tPcs > 0 ? ` • ${tPcs} Pcs` : ''})`,
           realStockText,
           locText
         ]);
       }
 
       // 3. Bone
-      if (bill.billType === 'bone') {
-        const deducted = deductedItems.find(i => (i.bomItemName || '').toLowerCase().includes('bone') || (i.materialName || '').toLowerCase().includes('bone'));
+      if (isBone) {
+        const deducted = deductedItems.find(i => (i.bomItemName || '').toLowerCase().includes('bone') || (i.materialName || '').toLowerCase().includes('bone')) || deductedItems[0];
         const matchedMat = getBestBoneMaterial();
+        const bWidth = bill.boneWidth || bill.payload?.boneWidth || bill.payload?.width || '1.5 Inch (Standard)';
+        let bRolls = bill.boneRolls || bill.payload?.boneRolls || bill.payload?.rolls || bill.rolls;
+        let bWeight = bill.boneWeightKg || bill.payload?.boneWeightKg || bill.payload?.weight || bill.weight;
+
+        if (deducted) {
+          if (String(deducted.unit).toLowerCase().includes('roll')) {
+            bRolls = deducted.totalRequired || bRolls || 1;
+            if (!bWeight || bWeight === '2.50' || bWeight === 'undefined') {
+              bWeight = (parseFloat(bRolls) * 2.5).toFixed(2);
+            }
+          } else if (String(deducted.unit).toLowerCase().includes('kg')) {
+            bWeight = deducted.totalRequired || bWeight || '2.50';
+            if (!bRolls || bRolls === 'undefined') {
+              bRolls = Math.max(1, Math.round(parseFloat(bWeight) / 2.5));
+            }
+          }
+        }
+        if (!bRolls || isNaN(bRolls) || bRolls === 'undefined') bRolls = 1;
+        if (!bWeight || bWeight === 'undefined' || isNaN(parseFloat(bWeight))) bWeight = (parseFloat(bRolls) * 2.5).toFixed(2);
+
+        const bPcs = bill.quantity || bill.payload?.issuePcs || bill.payload?.quantity || bill.payload?.cuttingQty || 0;
+
         const realStockText = deducted
-          ? `${deducted.materialName} (-${deducted.totalRequired} ${deducted.unit})`
-          : (bill.boneMaterialName || (matchedMat ? `${matchedMat.name} (ID: ${matchedMat.id})` : 'Bone Chinese'));
-        const locText = deducted?.location || matchedMat?.location || 'RACK 208';
+          ? `${deducted.materialName} (ID: ${deducted.materialId || 'ST00346'})\n[Deducted: ${deducted.totalRequired} ${deducted.unit}]`
+          : (bill.boneMaterialName ? `${bill.boneMaterialName} (ID: ${bill.selectedBoneMaterialId || 'ST00346'})` : (matchedMat ? `${matchedMat.name} (ID: ${matchedMat.id})` : 'Bone Chinese (Beige) (ID: ST00346)'));
+        const locText = deducted?.location || bill.location || matchedMat?.location || 'Main Store - RACK 208';
+
+        const specText = `Width: ${bWidth}\nWeight: ${bWeight} Kg\nRolls: ${bRolls} Roll(s)`;
+        const perPcText = bPcs > 0 ? `${(parseFloat(bWeight) * 1000 / bPcs).toFixed(1)} g/pc` : `${(parseFloat(bWeight) / bRolls).toFixed(2)} Kg/roll`;
+        const totalReqText = `${bRolls} Roll(s)\n(${bWeight} Kg${bPcs > 0 ? ` • ${bPcs} Pcs` : ''})`;
 
         matRows.push([
           `0${srNum++}`,
-          'Bone / Piping',
-          `Width: ${bill.boneWidth}\nWeight: ${bill.boneWeightKg} Kg`,
-          `—`,
-          `${bill.boneRolls} Roll(s)\n(${bill.boneWeightKg} Kg)`,
+          'Bone / Piping Pocketing',
+          specText,
+          perPcText,
+          totalReqText,
           realStockText,
           locText
         ]);
+      }
+
+      // 4. Other Accessories or Fallback from deductedItems / bill
+      if (isOther || matRows.length === 0) {
+        if (deductedItems.length > 0) {
+          deductedItems.forEach((d) => {
+            const dName = d.bomItemName || d.materialName || 'Accessory Item';
+            const dQty = d.totalRequired || d.qty || 1;
+            const dUnit = d.unit || 'Roll';
+            const dLoc = d.location || 'Main Store';
+            const pcs = bill.quantity || bill.payload?.issuePcs || 0;
+
+            matRows.push([
+              `0${srNum++}`,
+              dName,
+              `Deducted Item\nUnit: ${dUnit}${pcs > 0 ? `\nTarget Qty: ${pcs} Pcs` : ''}`,
+              pcs > 0 ? `${(dQty / pcs).toFixed(3)} ${dUnit}/pc` : 'Direct Issue',
+              `${dQty} ${dUnit}${pcs > 0 ? `\n(For ${pcs} Pcs)` : ''}`,
+              `${d.materialName || dName} (ID: ${d.materialId || '—'})`,
+              dLoc
+            ]);
+          });
+        } else {
+          const oName = bill.otherMaterialName || bill.payload?.otherMaterialName || 'Other Accessory';
+          const oUnit = bill.otherUnit || bill.payload?.otherUnit || 'Roll';
+          const oQty = bill.otherRollCount || bill.payload?.otherRollCount || bill.quantity || 1;
+          const pcs = bill.quantity || bill.payload?.issuePcs || 0;
+
+          matRows.push([
+            `0${srNum++}`,
+            oName,
+            `Category: Other Accessory\nUnit: ${oUnit}${pcs > 0 ? `\nTarget Qty: ${pcs} Pcs` : ''}`,
+            'Direct Issue',
+            `${oQty} ${oUnit}${pcs > 0 ? `\n(For ${pcs} Pcs)` : ''}`,
+            oName,
+            'Main Store'
+          ]);
+        }
       }
 
       autoTable(doc, {
@@ -2904,8 +3217,10 @@ export default function ElasticTapeIssueView({
               cursor: 'pointer'
             }}
           >
-            <option value="newest">Sort: Newest First</option>
-            <option value="oldest">Sort: Oldest First</option>
+            <option value="seq_asc">Sort: Sequence (Ascending)</option>
+            <option value="seq_desc">Sort: Latest Series (Descending)</option>
+            <option value="newest">Sort: Newest Date First</option>
+            <option value="oldest">Sort: Oldest Date First</option>
             <option value="bill_no">Sort: Bill No</option>
             <option value="lot_no">Sort: Lot No</option>
           </select>
@@ -2958,6 +3273,7 @@ export default function ElasticTapeIssueView({
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <th style={{ padding: '14px 14px', fontWeight: '700', width: '55px' }}>SR #</th>
                   <th style={{ padding: '14px 18px', fontWeight: '700' }}>Bill / Slip No</th>
                   <th style={{ padding: '14px 16px', fontWeight: '700' }}>Date</th>
                   <th style={{ padding: '14px 16px', fontWeight: '700' }}>Type</th>
@@ -2986,6 +3302,9 @@ export default function ElasticTapeIssueView({
                     typeBadgeColor = '#7e22ce';
                   }
 
+                  const seriesNumMatch = String(item.billNo).match(/\d+/);
+                  const seriesNum = seriesNumMatch ? parseInt(seriesNumMatch[0], 10) : 0;
+
                   return (
                     <tr
                       key={item.id || idx}
@@ -2997,6 +3316,22 @@ export default function ElasticTapeIssueView({
                       onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
                       onMouseLeave={(e) => e.currentTarget.style.background = !isIssued ? '#fffdf7' : 'transparent'}
                     >
+                      {/* Column 0: Serial Number (1, 2, 3, 4...) */}
+                      <td style={{ padding: '14px 14px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          background: '#f8fafc',
+                          border: '1px solid #cbd5e1',
+                          color: '#0f172a',
+                          padding: '3px 7px',
+                          borderRadius: '5px',
+                          fontSize: '11.5px',
+                          fontFamily: 'monospace',
+                          fontWeight: '800'
+                        }}>
+                          #{idx + 1}
+                        </span>
+                      </td>
+
                       {/* Column 1: Bill No */}
                       <td style={{ padding: '14px 18px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -3008,10 +3343,25 @@ export default function ElasticTapeIssueView({
                             background: '#f1f5f9',
                             padding: '4px 8px',
                             borderRadius: '6px',
-                            border: '1px solid #e2e8f0'
+                            border: '1px solid #e2e8f0',
+                            whiteSpace: 'nowrap'
                           }}>
                             {item.billNo}
                           </span>
+                          {seriesNum > 0 && (
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '700',
+                              color: '#64748b',
+                              background: '#f8fafc',
+                              border: '1px solid #e2e8f0',
+                              padding: '2px 5px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              Series #{seriesNum}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -3059,10 +3409,16 @@ export default function ElasticTapeIssueView({
                         {item.billType === 'bone' ? (
                           <div>
                             <div style={{ fontWeight: '700', color: '#b45309' }}>
-                              {item.boneWeightKg} Kg • {item.boneRolls} Roll(s)
+                              {item.boneRolls || 1} Roll(s) • {item.boneWeightKg || '2.50'} Kg
                             </div>
                             <div style={{ fontSize: '11px', color: '#78350f', marginTop: '2px' }}>
-                              Width: {item.boneWidth}
+                              Width: {item.boneWidth || '1.5 Inch (Standard)'}
+                            </div>
+                          </div>
+                        ) : item.billType === 'other' ? (
+                          <div>
+                            <div style={{ fontWeight: '700', color: '#0d9488' }}>
+                              {item.otherMaterialName || 'Other Accessory'}: {item.otherRollCount || 1} {item.otherUnit || 'Roll'}
                             </div>
                           </div>
                         ) : (
@@ -3359,10 +3715,17 @@ export default function ElasticTapeIssueView({
               <div style={{ background: '#f8fafc', padding: '14px 16px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
                 {selectedBill.billType === 'bone' ? (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                    <div><strong>Bone Width:</strong> {selectedBill.boneWidth}</div>
-                    <div><strong>Total Weight:</strong> {selectedBill.boneWeightKg} Kg</div>
-                    <div><strong>Rolls:</strong> {selectedBill.boneRolls} Roll(s)</div>
-                    <div><strong>Material:</strong> {selectedBill.boneMaterialName || 'Bone Chinese'}</div>
+                    <div><strong>Bone Width:</strong> {selectedBill.boneWidth || '1.5 Inch (Standard)'}</div>
+                    <div><strong>Total Weight:</strong> {selectedBill.boneWeightKg || '2.50'} Kg</div>
+                    <div><strong>Rolls:</strong> {selectedBill.boneRolls || 1} Roll(s)</div>
+                    <div><strong>Material:</strong> {selectedBill.boneMaterialName || 'Bone Chinese (Beige)'}</div>
+                    {selectedBill.quantity > 0 && <div><strong>Requisition Qty:</strong> {selectedBill.quantity} Pcs</div>}
+                  </div>
+                ) : selectedBill.billType === 'other' ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+                    <div><strong>Accessory:</strong> {selectedBill.otherMaterialName || 'Other Accessory'}</div>
+                    <div><strong>Quantity:</strong> {selectedBill.otherRollCount || 1} {selectedBill.otherUnit || 'Roll'}</div>
+                    {selectedBill.quantity > 0 && <div><strong>Requisition Qty:</strong> {selectedBill.quantity} Pcs</div>}
                   </div>
                 ) : (
                   <div>

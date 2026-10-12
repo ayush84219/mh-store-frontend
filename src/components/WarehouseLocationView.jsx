@@ -7,6 +7,7 @@ import {
   Warehouse, Box, LayoutGrid, List, Filter, RefreshCw, Package,
   ArrowRight, Grid, Send
 } from 'lucide-react';
+import SearchableWarehouseSlotSelect from './SearchableWarehouseSlotSelect';
 
 export default function WarehouseLocationView({
   racks = [],
@@ -836,7 +837,17 @@ export default function WarehouseLocationView({
         (loc.code && loc.code.toLowerCase().includes(query)) ||
         (loc.rack && loc.rack.toLowerCase().includes(query)) ||
         (loc.materialName && loc.materialName.toLowerCase().includes(query)) ||
-        (loc.warehouse && loc.warehouse.toLowerCase().includes(query))
+        (loc.warehouse && loc.warehouse.toLowerCase().includes(query)) ||
+        (loc.status && loc.status.toLowerCase().includes(query)) ||
+        (loc.poNumber && loc.poNumber.toLowerCase().includes(query)) ||
+        (loc.lotNumber && loc.lotNumber.toLowerCase().includes(query)) ||
+        (Array.isArray(loc.materialDetailsList) && loc.materialDetailsList.some(item =>
+          (item.name && item.name.toLowerCase().includes(query)) ||
+          (item.category && item.category.toLowerCase().includes(query)) ||
+          (item.poNumber && item.poNumber.toLowerCase().includes(query)) ||
+          (item.itemCode && String(item.itemCode).toLowerCase().includes(query)) ||
+          (item.id && String(item.id).toLowerCase().includes(query))
+        ))
       );
     });
   }, [locations, searchQuery, selectedWarehouse, selectedStatus]);
@@ -2403,22 +2414,14 @@ export default function WarehouseLocationView({
                     <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', marginBottom: '6px', color: '#0f172a' }}>
                       Source Warehouse Rack *
                     </label>
-                    <select
-                      className="form-input"
-                      style={{ borderRadius: '10px', fontWeight: '700', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
+                    <SearchableWarehouseSlotSelect
+                      slots={locations}
                       value={transferSourceLoc}
-                      onChange={(e) => handleTransferSourceChange(e.target.value)}
+                      onChange={handleTransferSourceChange}
+                      placeholder="— Select Source Warehouse Rack —"
+                      isSource={true}
                       required
-                    >
-                      {locations.map((loc) => {
-                        const hasItems = loc.materialDetailsList && loc.materialDetailsList.length > 0;
-                        return (
-                          <option key={loc.code} value={loc.code}>
-                            {loc.code} {hasItems ? `(${loc.currentPackets} Pkts stored)` : '— (Empty Rack)'}
-                          </option>
-                        );
-                      })}
-                    </select>
+                    />
                   </div>
 
                   {/* 2. Material Selection at Source */}
@@ -2541,22 +2544,15 @@ export default function WarehouseLocationView({
                     <label className="form-label" style={{ fontWeight: '700', fontSize: '12px', marginBottom: '6px', color: '#0f172a' }}>
                       Destination Warehouse Rack / Bay *
                     </label>
-                    <select
-                      className="form-input"
-                      style={{ borderRadius: '10px', fontWeight: '600', backgroundColor: '#ffffff', color: '#0f172a', border: '1.5px solid #cbd5e1' }}
+                    <SearchableWarehouseSlotSelect
+                      slots={locations}
                       value={transferTargetLoc}
-                      onChange={(e) => setTransferTargetLoc(e.target.value)}
+                      onChange={setTransferTargetLoc}
+                      placeholder="— Select Target Destination Slot —"
+                      excludeSlotCode={transferSourceLoc}
+                      isSource={false}
                       required
-                    >
-                      <option value="">— Select Target Destination Slot —</option>
-                      {locations
-                        .filter(l => l.code.toLowerCase().trim() !== (transferSourceLoc || '').toLowerCase().trim())
-                        .map(l => (
-                          <option key={l.code} value={l.code}>
-                            🏢 {l.code} — {l.status} ({l.currentPackets}/{l.capacity} Pkts • {Math.max(0, l.capacity - l.currentPackets)} Free)
-                          </option>
-                        ))}
-                    </select>
+                    />
                   </div>
 
                   {/* Action Buttons */}

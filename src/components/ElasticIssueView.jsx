@@ -71,11 +71,19 @@ export default function ElasticIssueView({
   const [tapeWidth, setTapeWidth] = useState('0.5 Inch (Standard)');
   const [customTapeWidth, setCustomTapeWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
+  const [customDivisor, setCustomDivisor] = useState('');
+  const [tapeDivisor, setTapeDivisor] = useState('');
 
   const effectiveWidth = elasticWidth === 'Custom' ? (customWidth || '1 Inch') : elasticWidth;
   const effectiveTapeWidth = tapeWidth === 'Custom' ? (customTapeWidth || '0.5 Inch') : tapeWidth;
   const effectiveBoneWidth = boneWidth === 'Custom' ? (customBoneWidth || '1.5 Inch') : boneWidth;
-  const effectiveDivisor = (String(effectiveWidth).includes('1.5') || String(effectiveWidth).includes('2')) ? 23 : 25;
+  const defaultElasticDivisor = (String(effectiveWidth).includes('1.5') || String(effectiveWidth).includes('2')) ? 23 : 25;
+  const effectiveDivisor = (customDivisor !== '' && !isNaN(parseFloat(customDivisor)) && parseFloat(customDivisor) > 0)
+    ? parseFloat(customDivisor)
+    : defaultElasticDivisor;
+  const effectiveTapeDivisor = (tapeDivisor !== '' && !isNaN(parseFloat(tapeDivisor)) && parseFloat(tapeDivisor) > 0)
+    ? parseFloat(tapeDivisor)
+    : 45;
 
   // Issuer, Receiver & Supervisor
   const [issuerName, setIssuerName] = useState(currentUser?.name || 'paras');
@@ -154,22 +162,28 @@ export default function ElasticIssueView({
 
       if (historySortMode === 'seq_asc') {
         if (historyLineFilter === 'all') {
-          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, standard: 4 };
+          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, other_wo: 4, standard: 5 };
           const pA = priority[metaA.line] || 99;
           const pB = priority[metaB.line] || 99;
           if (pA !== pB) return pA - pB;
         }
-        return metaA.seq - metaB.seq;
+        return (metaA.seq - metaB.seq) || String(a.slipNo).localeCompare(String(b.slipNo), undefined, { numeric: true });
       }
 
       if (historySortMode === 'seq_desc') {
         if (historyLineFilter === 'all') {
-          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, standard: 4 };
+          const priority = { elastic_wo: 1, tape_wo: 2, bone_wo: 3, other_wo: 4, standard: 5 };
           const pA = priority[metaA.line] || 99;
           const pB = priority[metaB.line] || 99;
           if (pA !== pB) return pA - pB;
         }
-        return metaB.seq - metaA.seq;
+        return (metaB.seq - metaA.seq) || String(b.slipNo).localeCompare(String(a.slipNo), undefined, { numeric: true });
+      }
+
+      if (historySortMode === 'date_asc') {
+        const dateA = new Date(a.date || a.issueDate || 0).getTime();
+        const dateB = new Date(b.date || b.issueDate || 0).getTime();
+        return dateA - dateB;
       }
 
       // Date desc (newest first)
@@ -431,7 +445,7 @@ export default function ElasticIssueView({
         if (!isNaN(n) && n > max) max = n;
       }
     });
-    return `${prefix}${String(max + 1).padStart(2, '0')}`;
+    return `${prefix}${max + 1}`;
   };
 
   // Fetch next Issue Slip Number from backend or local sequence
@@ -507,6 +521,17 @@ export default function ElasticIssueView({
     }
   }, [prefilledLotNo]);
 
+  const normalizeSlipNo = (s) => {
+    const str = String(s || '').trim();
+    if (str === 'elastic-w/o-20') return 'elastic-w/o-1';
+    if (str === 'elastic-w/o-34') return 'elastic-w/o-2';
+    if (str === 'elastic-w/o-43') return 'elastic-w/o-3';
+    if (str === 'elastic-w/o-62') return 'elastic-w/o-4';
+    if (str === 'bone-w/o-40') return 'bone-w/o-1';
+    if (str === 'tape-w/o-01') return 'tape-w/o-1';
+    return str;
+  };
+
   // Load Issue History from backend and localStorage
   const loadIssueHistory = async () => {
     setLoadingHistory(true);
@@ -514,7 +539,12 @@ export default function ElasticIssueView({
       const localSaved = localStorage.getItem('gpdms_elastic_issue_history');
       let localList = [];
       if (localSaved) {
-        try { localList = JSON.parse(localSaved); } catch (_) { }
+        try {
+          const parsed = JSON.parse(localSaved);
+          if (Array.isArray(parsed)) {
+            localList = parsed.map(p => ({ ...p, slipNo: normalizeSlipNo(p.slipNo) }));
+          }
+        } catch (_) { }
       }
 
       // 1. Fetch from Dedicated elastic_issue Table
@@ -523,8 +553,9 @@ export default function ElasticIssueView({
         if (res.ok) {
           const records = await res.json();
           if (Array.isArray(records) && records.length > 0) {
-            setIssueHistory(records);
-            localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(records.slice(0, 100)));
+            const normalized = records.map(r => ({ ...r, slipNo: normalizeSlipNo(r.slipNo) }));
+            setIssueHistory(normalized);
+            localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(normalized.slice(0, 100)));
             setLoadingHistory(false);
             return;
           }
@@ -540,7 +571,7 @@ export default function ElasticIssueView({
             String(l.id || '').toUpperCase().includes('ELASTIC') ||
             String(l.category || '').toUpperCase().includes('ELASTIC')
           ).map(l => ({
-            slipNo: l.id,
+            slipNo: normalizeSlipNo(l.id),
             lotNo: l.lotId,
             date: l.date,
             rolls: l.volume || 1,
@@ -549,13 +580,19 @@ export default function ElasticIssueView({
             remarks: l.materials ? (typeof l.materials === 'string' ? l.materials : JSON.stringify(l.materials)) : ''
           }));
 
-          const combined = [...localList];
+          const combined = [];
           elasticLogs.forEach(el => {
             if (!combined.some(c => c.slipNo === el.slipNo)) {
               combined.push(el);
             }
           });
+          localList.forEach(item => {
+            if (!combined.some(c => c.slipNo === item.slipNo)) {
+              combined.push(item);
+            }
+          });
           setIssueHistory(combined);
+          localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(combined.slice(0, 100)));
           setLoadingHistory(false);
           return;
         }
@@ -593,12 +630,13 @@ export default function ElasticIssueView({
         return;
       }
 
-      // Without BOM Mode: direct piece allocation by width divisor (1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23)
+      // Without BOM Mode: direct piece allocation by width divisor (1" ÷ 25, 1.5" ÷ 23, 2" ÷ 23, or user-edited divisor)
       if (withoutLotActive) {
-        const currentDiv = (String(eWidth).includes('1.5') || String(eWidth).includes('2')) ? 23 : 25;
+        const currentDiv = (div && parseFloat(div) > 0) ? parseFloat(div) : ((String(eWidth).includes('1.5') || String(eWidth).includes('2')) ? 23 : 25);
         const woRolls = pcs > 0 ? Math.ceil(pcs / currentDiv) : 0;
         const exactRolls = pcs > 0 ? (pcs / currentDiv).toFixed(2) : '0';
-        const tapeRolls = pcs > 0 ? Math.ceil(pcs / 45) : 0;
+        const currentTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 0) ? parseFloat(effectiveTapeDivisor) : 45;
+        const tapeRolls = pcs > 0 ? Math.ceil(pcs / currentTapeDiv) : 0;
         setCalcResult(prev => ({
           ...prev,
           totalElasticMtr: 0,
@@ -606,7 +644,7 @@ export default function ElasticIssueView({
           recommendedRolls: woRolls,
           tapeRolls: tapeRolls,
           elasticFormula: `${pcs} Pcs ÷ ${currentDiv} (${eWidth}) = ${exactRolls} Rolls ➔ TOTAL = ${woRolls} Roll(s)`,
-          tapeFormula: `${pcs} Pcs ÷ 45 = ${pcs > 0 ? (pcs / 45).toFixed(2) : 0} Rolls ➔ TOTAL = ${tapeRolls} Roll(s)`,
+          tapeFormula: `${pcs} Pcs ÷ ${currentTapeDiv} = ${pcs > 0 ? (pcs / currentTapeDiv).toFixed(2) : 0} Rolls ➔ TOTAL = ${tapeRolls} Roll(s)`,
           formulaExplanation: `Without BOM: ${pcs} Pcs ÷ ${currentDiv} (${eWidth}) = ${exactRolls} Rolls ➔ TOTAL = ${woRolls} Roll(s)`
         }));
         setRollCount(woRolls);
@@ -642,10 +680,10 @@ export default function ElasticIssueView({
     }
   };
 
-  // Re-calculate automatically when size, unit, tape, lot, issue pcs, elasticWidth, or withoutLotActive changes
+  // Re-calculate automatically when size, unit, tape, lot, issue pcs, elasticWidth, effectiveDivisor, or withoutLotActive changes
   useEffect(() => {
-    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth);
-  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, withoutLotActive]);
+    triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, effectiveDivisor);
+  }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, effectiveDivisor, effectiveTapeDivisor, withoutLotActive]);
 
   // Save new issue to history & database table
   const saveToHistory = async (record) => {
@@ -1213,16 +1251,24 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.text(boneWidth || '1.5 Inch (Standard)', im + 180, y + 15);
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Direct Weight Issue', im + 290, y + 15);
+      const effBoneRollsVal = data.boneRolls || boneRolls || 1;
+      const effBoneWeightVal = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${(parseFloat(effBoneRollsVal) * 2.5).toFixed(2)} Kg`);
+      const effBoneWeightStr = String(effBoneWeightVal).includes('Kg') ? effBoneWeightVal : `${effBoneWeightVal} Kg`;
+      const bPcs = quantity || data.issuePcs || 0;
 
-      doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
+      doc.setFont('helvetica', 'bold');
+      if (bPcs > 0) {
+        const bGramStr = ((parseFloat(effBoneWeightVal) * 1000) / bPcs).toFixed(1);
+        doc.text(`${bGramStr} g/pc`, im + 290, y + 15);
+        doc.text(`${bPcs} Pcs`, im + 375, y + 15);
+      } else {
+        doc.text('Direct Issue', im + 290, y + 15);
+        doc.text('—', im + 375, y + 15);
+      }
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(9);
-      const effBoneWeightVal = data.boneWeightKg || boneWeightKg || (String(boneRolls).includes('Kg') ? boneRolls : `${boneRolls || 1} Kg`);
-      const effBoneWeightStr = String(effBoneWeightVal).includes('Kg') ? effBoneWeightVal : `${effBoneWeightVal} Kg`;
-      doc.text(effBoneWeightStr, pw - im - 10, y + 15, { align: 'right' });
+      doc.text(`${effBoneRollsVal} Roll(s) (${effBoneWeightStr})`, pw - im - 10, y + 15, { align: 'right' });
       y += rowH;
     }
 
@@ -1573,7 +1619,7 @@ export default function ElasticIssueView({
       }
       const currentLotNo = enteredLotNo.toUpperCase();
       const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
-      const calculatedTapeRolls = Math.ceil(currentQuantity / 45) || 1;
+      const calculatedTapeRolls = Math.ceil(currentQuantity / effectiveTapeDivisor) || 1;
       const calculatedElasticRolls = withoutLotActive
         ? (Math.ceil(currentQuantity / effectiveDivisor) || 1)
         : (calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor) || rollCount || 1);
@@ -1889,7 +1935,6 @@ export default function ElasticIssueView({
                       setLotDetails(null);
                       setSearchLotInput('');
                       setBomStatus('idle');
-                      showToast('Switched to "With BOM" Mode (BOM verification active).');
                     }}
                     style={{
                       padding: '8px 18px',
@@ -1931,7 +1976,6 @@ export default function ElasticIssueView({
                       if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
                         handleSearchLot(searchLotInput.trim());
                       }
-                      showToast('⚡ Switched to "Without BOM" Mode. All BOM & PO restrictions removed!');
                     }}
                     style={{
                       padding: '8px 18px',
@@ -3184,34 +3228,72 @@ export default function ElasticIssueView({
                               </div>
                             </div>
 
-                            {/* 2. Inch Width & Divisor */}
+                            {/* 2. Inch Width & Divisor (Editable) */}
                             <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                2. INCH DIVISOR ({effectiveWidth}):
-                              </span>
-                              <div style={{ fontSize: '18px', fontWeight: '900', color: '#047857' }}>
-                                ÷ {effectiveDivisor} <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
+                                <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
+                                  2. INCH DIVISOR ({effectiveWidth}):
+                                </span>
+                                <span style={{ fontSize: '9px', background: '#dcfce7', color: '#047857', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                  Editable
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
+                                <span style={{ fontSize: '20px', fontWeight: '900', color: '#047857', lineHeight: '1' }}>÷</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="any"
+                                  value={customDivisor !== '' ? customDivisor : defaultElasticDivisor}
+                                  onChange={(e) => setCustomDivisor(e.target.value)}
+                                  title="Click to edit divisor number directly (e.g. 25, 23, 20...)"
+                                  style={{
+                                    width: '68px',
+                                    boxSizing: 'border-box',
+                                    padding: '3px 6px',
+                                    borderRadius: '6px',
+                                    border: '2px solid #059669',
+                                    background: '#ffffff',
+                                    fontSize: '18px',
+                                    fontWeight: '900',
+                                    color: '#047857',
+                                    textAlign: 'center',
+                                    outline: 'none',
+                                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.15)'
+                                  }}
+                                />
+                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
                               </div>
                               <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
-                                {['1 Inch', '1.5 Inch', '2 Inch'].map(w => (
-                                  <button
-                                    key={w}
-                                    type="button"
-                                    onClick={() => setElasticWidth(w)}
-                                    style={{
-                                      padding: '1px 6px',
-                                      fontSize: '9.5px',
-                                      fontWeight: '800',
-                                      borderRadius: '4px',
-                                      border: effectiveWidth.includes(w) ? '1px solid #059669' : '1px solid #cbd5e1',
-                                      background: effectiveWidth.includes(w) ? '#dcfce7' : '#f8fafc',
-                                      color: effectiveWidth.includes(w) ? '#047857' : '#64748b',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    {w} ({w === '1 Inch' ? '÷25' : '÷23'})
-                                  </button>
-                                ))}
+                                {[
+                                  { label: '1 Inch', div: 25 },
+                                  { label: '1.5 Inch', div: 23 },
+                                  { label: '2 Inch', div: 23 }
+                                ].map(item => {
+                                  const isSelected = effectiveWidth.includes(item.label) && Number(effectiveDivisor) === item.div;
+                                  return (
+                                    <button
+                                      key={item.label}
+                                      type="button"
+                                      onClick={() => {
+                                        setElasticWidth(item.label);
+                                        setCustomDivisor(String(item.div));
+                                      }}
+                                      style={{
+                                        padding: '1px 6px',
+                                        fontSize: '9.5px',
+                                        fontWeight: '800',
+                                        borderRadius: '4px',
+                                        border: isSelected ? '1px solid #059669' : '1px solid #cbd5e1',
+                                        background: isSelected ? '#dcfce7' : '#f8fafc',
+                                        color: isSelected ? '#047857' : '#64748b',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {item.label} (÷{item.div})
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </div>
 
@@ -3365,13 +3447,41 @@ export default function ElasticIssueView({
                               </div>
                             </div>
 
-                            {/* 2. Divisor 45 */}
+                            {/* 2. Divisor 45 (Editable) */}
                             <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                2. STANDARD DIVISOR:
-                              </span>
-                              <div style={{ fontSize: '18px', fontWeight: '900', color: '#1d4ed8' }}>
-                                ÷ 45 <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
+                                <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
+                                  2. STANDARD DIVISOR:
+                                </span>
+                                <span style={{ fontSize: '9px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                  Editable
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
+                                <span style={{ fontSize: '20px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1' }}>÷</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="any"
+                                  value={tapeDivisor !== '' ? tapeDivisor : 45}
+                                  onChange={(e) => setTapeDivisor(e.target.value)}
+                                  title="Click to edit tape divisor (default: 45)"
+                                  style={{
+                                    width: '68px',
+                                    boxSizing: 'border-box',
+                                    padding: '3px 6px',
+                                    borderRadius: '6px',
+                                    border: '2px solid #2563eb',
+                                    background: '#ffffff',
+                                    fontSize: '18px',
+                                    fontWeight: '900',
+                                    color: '#1d4ed8',
+                                    textAlign: 'center',
+                                    outline: 'none',
+                                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.15)'
+                                  }}
+                                />
+                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
                               </div>
                             </div>
 
@@ -3381,10 +3491,10 @@ export default function ElasticIssueView({
                                 3. TAPE AMOUNT TO ISSUE:
                               </span>
                               <div style={{ fontSize: '22px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
-                                {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
+                                {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveTapeDivisor)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
                               </div>
                               <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
-                                ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ 45 = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / 45).toFixed(2)} Rolls)
+                                ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ {effectiveTapeDivisor} = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveTapeDivisor).toFixed(2)} Rolls)
                               </div>
                             </div>
                           </div>
@@ -3411,8 +3521,8 @@ export default function ElasticIssueView({
                             const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
                             const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
 
-                            const tapeExactRolls = effPcs > 0 ? parseFloat((effPcs / 45).toFixed(2)) : 0;
-                            const tapeCalculatedRolls = effPcs > 0 ? Math.ceil(effPcs / 45) : 0;
+                            const tapeExactRolls = effPcs > 0 ? parseFloat((effPcs / effectiveTapeDivisor).toFixed(2)) : 0;
+                            const tapeCalculatedRolls = effPcs > 0 ? Math.ceil(effPcs / effectiveTapeDivisor) : 0;
 
                             return (
                               <>
@@ -4613,6 +4723,8 @@ export default function ElasticIssueView({
                                   type="button"
                                   onClick={() => {
                                     setElasticWidth(t.val);
+                                    const dVal = t.val === '1 Inch' ? '25' : '23';
+                                    setCustomDivisor(dVal);
                                     const match = elasticMaterials.find(m => {
                                       const n = (m.name || '').toLowerCase();
                                       if (t.val === '1.5 Inch') return n.includes('1.5');
@@ -5597,7 +5709,6 @@ export default function ElasticIssueView({
                     if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
                       handleSearchLot(searchLotInput.trim());
                     }
-                    showToast('⚡ Switched to Without BOM mode. Enter Lot Number to proceed!');
                   }}
                   style={{
                     padding: '9px 20px',
@@ -5655,9 +5766,9 @@ export default function ElasticIssueView({
                     fontWeight: '800',
                     cursor: 'pointer'
                   }}
-                  title="Sort 1, 2, 3 sequence ascending (track in exact order)"
+                  title="Sort sequence ascending (track in exact order)"
                 >
-                  🔢 1, 2, 3 Sequence
+                  🔢 Sequence
                 </button>
                 <button
                   type="button"
@@ -5739,9 +5850,9 @@ export default function ElasticIssueView({
             </span>
             {[
               { id: 'all', label: 'All Slips', count: historyLineCounts.all, color: '#0f172a', bg: '#f1f5f9' },
-              { id: 'elastic_wo', label: 'Elastic W/O (1, 2, 3...)', count: historyLineCounts.elastic_wo, color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
-              { id: 'tape_wo', label: 'Tape W/O (1, 2, 3...)', count: historyLineCounts.tape_wo, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
-              { id: 'bone_wo', label: 'Bone W/O (1, 2, 3...)', count: historyLineCounts.bone_wo, color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' },
+              { id: 'elastic_wo', label: 'Elastic W/O', count: historyLineCounts.elastic_wo, color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
+              { id: 'tape_wo', label: 'Tape W/O', count: historyLineCounts.tape_wo, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
+              { id: 'bone_wo', label: 'Bone W/O', count: historyLineCounts.bone_wo, color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' },
               { id: 'standard', label: 'With LOT (BOM)', count: historyLineCounts.standard, color: '#059669', bg: '#f0fdf4', border: '#bbf7d0' }
             ].map(tab => {
               const isActive = historyLineFilter === tab.id;
@@ -5794,10 +5905,32 @@ export default function ElasticIssueView({
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', textAlign: 'left', color: '#475569', fontSize: '11.5px', fontWeight: '800' }}>
-                    <th style={{ padding: '10px 12px' }}>SEQ #</th>
+                    <th
+                      style={{ padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => setHistorySortMode(prev => prev === 'seq_asc' ? 'seq_desc' : 'seq_asc')}
+                      title="Click to toggle sequence 1, 2, 3, 4 series sort"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>SEQ #</span>
+                        <span style={{ fontSize: '10px', color: '#2563eb' }}>
+                          {historySortMode === 'seq_asc' ? '▲ 1-2-3' : historySortMode === 'seq_desc' ? '▼ Latest' : '↕'}
+                        </span>
+                      </div>
+                    </th>
                     <th style={{ padding: '10px 12px' }}>BILL / SLIP NO</th>
                     <th style={{ padding: '10px 12px' }}>LINE TYPE</th>
-                    <th style={{ padding: '10px 12px' }}>DATE</th>
+                    <th
+                      style={{ padding: '10px 12px', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => setHistorySortMode(prev => prev === 'date_desc' ? 'date_asc' : 'date_desc')}
+                      title="Click to toggle date sort"
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>DATE</span>
+                        <span style={{ fontSize: '10px', color: '#64748b' }}>
+                          {historySortMode === 'date_desc' ? '▼' : historySortMode === 'date_asc' ? '▲' : '↕'}
+                        </span>
+                      </div>
+                    </th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
                     <th style={{ padding: '10px 12px' }}>ITEM / STYLE</th>
                     <th style={{ padding: '10px 12px' }}>PCS</th>
@@ -5813,37 +5946,55 @@ export default function ElasticIssueView({
                     const meta = getSlipMeta(item.slipNo);
                     return (
                       <tr key={item.slipNo || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fcfcfd' }}>
-                        {/* Sequence Tracker */}
-                        <td style={{ padding: '10px 12px', fontWeight: '900', color: meta.color }}>
+                        {/* Sequence Tracker - Proper 1, 2, 3, 4 Format */}
+                        <td style={{ padding: '10px 12px', fontWeight: '900' }}>
                           <span style={{
-                            background: meta.bg,
-                            color: meta.color,
-                            border: `1px solid ${meta.border}`,
-                            padding: '2px 7px',
-                            borderRadius: '5px',
-                            fontSize: '11.5px',
+                            background: '#f8fafc',
+                            color: '#0f172a',
+                            border: '1px solid #cbd5e1',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
                             fontFamily: 'monospace',
-                            fontWeight: '800'
+                            fontWeight: '800',
+                            display: 'inline-block'
                           }}>
-                            #{meta.seq > 0 ? meta.seq : idx + 1}
+                            #{idx + 1}
                           </span>
                         </td>
 
-                        {/* Slip No */}
+                        {/* Slip No with Series Indicator */}
                         <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                          <span style={{
-                            fontFamily: 'monospace',
-                            fontSize: '12.5px',
-                            fontWeight: '800',
-                            color: meta.color,
-                            background: meta.bg,
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            border: `1px solid ${meta.border}`,
-                            display: 'inline-block'
-                          }}>
-                            {item.slipNo}
-                          </span>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' }}>
+                            <span style={{
+                              fontFamily: 'monospace',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              color: meta.color,
+                              background: meta.bg,
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              border: `1px solid ${meta.border}`,
+                              display: 'inline-block',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              {item.slipNo}
+                            </span>
+                            {meta.seq > 0 && (
+                              <span style={{
+                                fontSize: '10.5px',
+                                fontWeight: '700',
+                                color: '#475569',
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                padding: '1px 5px',
+                                borderRadius: '4px',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                Series #{meta.seq}
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         {/* Line Type Tag */}
