@@ -6,7 +6,7 @@ import {
   Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
   Scissors, AlertCircle, AlertTriangle, ExternalLink, RefreshCw, BarChart3, Activity, 
   PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package,
-  QrCode, ShieldCheck, CheckCircle, Check, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock, Sparkles, Filter
+  QrCode, ShieldCheck, CheckCircle, Check, CheckSquare, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock, Sparkles, Filter
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -264,6 +264,7 @@ export default function ReportsHistoryView({
   const [bomNotIssuedSort, setBomNotIssuedSort] = useState('latest');
   const [selectedBomLotModal, setSelectedBomLotModal] = useState(null);
   const [expandedBomLotIds, setExpandedBomLotIds] = useState(new Set());
+  const [selectedBomLotIds, setSelectedBomLotIds] = useState(new Set());
 
   // RGP Pass Register states
   const [rgpList, setRgpList] = useState([]);
@@ -6694,6 +6695,391 @@ export default function ReportsHistoryView({
           document.body.removeChild(link);
         };
 
+        // Complete Print All Details (Multi-lot BOM Specification Document)
+        const generatePrintAllDetailHtml = (lotsToPrint) => {
+          const totalLots = lotsToPrint.length;
+          const totalPieces = lotsToPrint.reduce((sum, l) => sum + (Number(l.targetPieces) || 0), 0);
+          const totalMatLines = lotsToPrint.reduce((sum, l) => sum + (Array.isArray(l.materialsRequired) ? l.materialsRequired.length : (l.materialsCount || 0)), 0);
+          const datePrinted = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+          return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta charset="utf-8" />
+              <title>MOHIT HOSIERY - COMPLETE BOM DETAILS REPORT (${totalLots} Lots)</title>
+              <style>
+                @page {
+                  size: A4 portrait;
+                  margin: 8mm 8mm;
+                }
+                * { box-sizing: border-box; }
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                  margin: 0;
+                  padding: 12px;
+                  color: #0f172a;
+                  background: #ffffff;
+                  font-size: 11px;
+                }
+                .report-header {
+                  border-bottom: 2px solid #0f172a;
+                  padding-bottom: 8px;
+                  margin-bottom: 12px;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: flex-start;
+                }
+                .brand-title {
+                  margin: 0;
+                  font-size: 18px;
+                  font-weight: 900;
+                  letter-spacing: 0.5px;
+                  color: #0f172a;
+                }
+                .brand-dept {
+                  font-size: 9.5px;
+                  font-weight: 700;
+                  color: #475569;
+                  margin-top: 1px;
+                }
+                .report-badge {
+                  display: inline-block;
+                  background: #dc2626;
+                  color: #ffffff;
+                  font-weight: 900;
+                  font-size: 11px;
+                  padding: 3px 8px;
+                  border-radius: 4px;
+                  margin-top: 4px;
+                  letter-spacing: 0.5px;
+                }
+                .report-meta {
+                  text-align: right;
+                  font-size: 10px;
+                }
+                .kpi-grid {
+                  display: grid;
+                  grid-template-columns: repeat(4, 1fr);
+                  gap: 8px;
+                  background: #f8fafc;
+                  border: 1px solid #cbd5e1;
+                  border-radius: 6px;
+                  padding: 8px 12px;
+                  margin-bottom: 14px;
+                  text-align: center;
+                }
+                .kpi-lbl {
+                  font-size: 9px;
+                  color: #64748b;
+                  font-weight: 700;
+                  text-transform: uppercase;
+                  display: block;
+                }
+                .kpi-val {
+                  font-size: 14px;
+                  font-weight: 900;
+                  color: #0f172a;
+                  margin-top: 2px;
+                }
+                .lot-card {
+                  border: 1.5px solid #0f172a;
+                  border-radius: 6px;
+                  margin-bottom: 14px;
+                  page-break-inside: avoid;
+                  background: #ffffff;
+                  overflow: hidden;
+                }
+                .lot-card-header {
+                  background: #0f172a;
+                  color: #ffffff;
+                  padding: 6px 10px;
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  font-size: 11px;
+                  font-weight: 700;
+                }
+                .lot-badge {
+                  background: #dc2626;
+                  color: #ffffff;
+                  padding: 2px 7px;
+                  border-radius: 4px;
+                  font-size: 12px;
+                  font-weight: 900;
+                  font-family: monospace;
+                }
+                .lot-meta-grid {
+                  display: grid;
+                  grid-template-columns: repeat(4, 1fr);
+                  gap: 6px;
+                  padding: 8px 10px;
+                  background: #f8fafc;
+                  border-bottom: 1px solid #e2e8f0;
+                  font-size: 10.5px;
+                }
+                .lot-meta-field {
+                  line-height: 1.3;
+                }
+                .lot-meta-lbl {
+                  font-size: 9px;
+                  font-weight: 700;
+                  color: #64748b;
+                  display: block;
+                  text-transform: uppercase;
+                }
+                .mat-table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  font-size: 10px;
+                }
+                .mat-table th {
+                  background: #f1f5f9;
+                  border-bottom: 1px solid #0f172a;
+                  border-top: 1px solid #0f172a;
+                  padding: 5px 8px;
+                  text-align: left;
+                  font-size: 9px;
+                  font-weight: 800;
+                  text-transform: uppercase;
+                  color: #0f172a;
+                }
+                .mat-table td {
+                  border-bottom: 1px solid #e2e8f0;
+                  padding: 4px 8px;
+                  vertical-align: middle;
+                }
+                .mat-table tbody tr:nth-child(even) {
+                  background: #fafafa;
+                }
+                .no-mat-note {
+                  padding: 10px;
+                  text-align: center;
+                  color: #64748b;
+                  font-style: italic;
+                }
+                .signatures {
+                  display: grid;
+                  grid-template-columns: repeat(3, 1fr);
+                  gap: 16px;
+                  margin-top: 20px;
+                  padding-top: 12px;
+                  border-top: 1px solid #cbd5e1;
+                  text-align: center;
+                  font-size: 9.5px;
+                  page-break-inside: avoid;
+                }
+                .sig-line {
+                  height: 24px;
+                  border-bottom: 1px solid #0f172a;
+                  width: 70%;
+                  margin: 0 auto 4px auto;
+                }
+                .print-btn-bar {
+                  text-align: center;
+                  padding: 10px;
+                  background: #f1f5f9;
+                  margin-bottom: 12px;
+                  border-radius: 6px;
+                }
+                .btn-print {
+                  background: #ea580c;
+                  color: #ffffff;
+                  border: none;
+                  padding: 8px 24px;
+                  font-size: 13px;
+                  font-weight: bold;
+                  border-radius: 6px;
+                  cursor: pointer;
+                }
+                @media print {
+                  body { padding: 0; }
+                  .print-btn-bar { display: none !important; }
+                  .lot-card { page-break-inside: avoid; }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="print-btn-bar">
+                <button class="btn-print" onclick="window.print()">🖨️ Print Complete Report</button>
+              </div>
+
+              <div class="report-header">
+                <div>
+                  <div class="brand-title">MOHIT HOSIERY</div>
+                  <div class="brand-dept">CENTRAL STORE & FACTORY PRODUCTION MANAGEMENT</div>
+                  <div class="report-badge">PENDING MATERIAL ISSUE — COMPLETE BOM DETAIL REPORT</div>
+                </div>
+                <div class="report-meta">
+                  <div><strong>PRINT DATE:</strong> ${datePrinted}</div>
+                  <div><strong>REPORT SCOPE:</strong> ${totalLots} Lot(s)</div>
+                  <div style="color: #dc2626; font-weight: bold; margin-top: 2px;">STATUS: PENDING STORE ISSUE</div>
+                </div>
+              </div>
+
+              <div class="kpi-grid">
+                <div>
+                  <span class="kpi-lbl">Total Lots</span>
+                  <div class="kpi-val">${totalLots}</div>
+                </div>
+                <div>
+                  <span class="kpi-lbl">Total Garment Pieces</span>
+                  <div class="kpi-val">${totalPieces.toLocaleString()} Pcs</div>
+                </div>
+                <div>
+                  <span class="kpi-lbl">BOM Materials Lines</span>
+                  <div class="kpi-val">${totalMatLines} Items</div>
+                </div>
+                <div>
+                  <span class="kpi-lbl">Store Status</span>
+                  <div class="kpi-val" style="color: #dc2626;">0% Issued</div>
+                </div>
+              </div>
+
+              ${lotsToPrint.map((lot) => {
+                const matItems = Array.isArray(lot.materialsRequired) ? lot.materialsRequired : [];
+                return `
+                  <div class="lot-card">
+                    <div class="lot-card-header">
+                      <div>
+                        <span class="lot-badge">LOT #${lot.lotNo || lot.id}</span>
+                        <span style="margin-left: 8px;">${lot.style || '—'}</span>
+                        ${lot.brand ? `<span style="opacity: 0.8; font-weight: normal; margin-left: 6px;">(${lot.brand})</span>` : ''}
+                      </div>
+                      <div>
+                        <span>BOM #${lot.id} &bull; ${(Number(lot.targetPieces) || 0).toLocaleString()} Pcs</span>
+                      </div>
+                    </div>
+
+                    <div class="lot-meta-grid">
+                      <div class="lot-meta-field">
+                        <span class="lot-meta-lbl">Fabric & Garment</span>
+                        <strong>${lot.fabricType || '—'}</strong> (${lot.garmentType || 'Garment'})
+                      </div>
+                      <div class="lot-meta-field">
+                        <span class="lot-meta-lbl">BOM Created Date</span>
+                        <span>${formatDateTime(lot.bomDate)}</span>
+                      </div>
+                      <div class="lot-meta-field">
+                        <span class="lot-meta-lbl">Designer / In-charge</span>
+                        <span>${lot.designer || 'Designer'}</span>
+                      </div>
+                      <div class="lot-meta-field">
+                        <span class="lot-meta-lbl">Material Requirement</span>
+                        <strong style="color: #ea580c;">${matItems.length} Accessories Items</strong>
+                      </div>
+                    </div>
+
+                    ${matItems.length > 0 ? `
+                      <table class="mat-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 25px; text-align: center;">#</th>
+                            <th style="width: 110px;">Component</th>
+                            <th>Material / Accessory Description</th>
+                            <th style="width: 80px;">Color/Shade</th>
+                            <th style="width: 70px; text-align: right;">Per Pc Req</th>
+                            <th style="width: 90px; text-align: right;">Total Required</th>
+                            <th style="width: 60px;">Unit</th>
+                            <th style="width: 85px; text-align: center;">Store Check</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${matItems.map((m, mIdx) => {
+                            const name = m.name || m.itemDesc || m.materialName || 'Material Item';
+                            const comp = m.componentType || m.category || m.type || 'Accessory';
+                            const color = m.color || m.shade || '—';
+                            const perPc = m.perPcReq || m.consumption || m.requiredPerPc || '-';
+                            const totalReq = m.requiredQty || m.totalRequired || m.qty || '-';
+                            const unit = m.unit || 'Pcs';
+                            return `
+                              <tr>
+                                <td style="text-align: center; color: #64748b; font-weight: bold;">${mIdx + 1}</td>
+                                <td><strong>${comp}</strong></td>
+                                <td>${name}</td>
+                                <td>${color}</td>
+                                <td style="text-align: right;">${perPc}</td>
+                                <td style="text-align: right; font-weight: bold; color: #ea580c;">${totalReq}</td>
+                                <td>${unit}</td>
+                                <td style="text-align: center; color: #94a3b8;">[  ] Pending</td>
+                              </tr>
+                            `;
+                          }).join('')}
+                        </tbody>
+                      </table>
+                    ` : `
+                      <div class="no-mat-note">No itemized materials found in this BOM specification.</div>
+                    `}
+                  </div>
+                `;
+              }).join('')}
+
+              <div class="signatures">
+                <div>
+                  <div class="sig-line"></div>
+                  <strong>Prepared By (Store Staff)</strong>
+                  <div>Name & Date</div>
+                </div>
+                <div>
+                  <div class="sig-line"></div>
+                  <strong>Verified By (Cutting / Production)</strong>
+                  <div>Master Sign</div>
+                </div>
+                <div>
+                  <div class="sig-line"></div>
+                  <strong>Approved By (Factory Manager)</strong>
+                  <div>Sign & Stamp</div>
+                </div>
+              </div>
+            </body>
+            </html>
+          `;
+        };
+
+        const handlePrintAllDetails = (selectedOnly = false) => {
+          const lotsToPrint = selectedOnly
+            ? filtered.filter(l => selectedBomLotIds.has(String(l.id)))
+            : filtered;
+
+          if (!lotsToPrint || lotsToPrint.length === 0) {
+            alert(selectedOnly ? 'Please select at least one lot using the checkboxes.' : 'No pending lots available to print.');
+            return;
+          }
+
+          const htmlContent = generatePrintAllDetailHtml(lotsToPrint);
+
+          let iframe = document.getElementById('bom-not-issued-print-frame');
+          if (iframe) {
+            try { document.body.removeChild(iframe); } catch (e) {}
+          }
+          iframe = document.createElement('iframe');
+          iframe.id = 'bom-not-issued-print-frame';
+          iframe.style.position = 'fixed';
+          iframe.style.right = '0';
+          iframe.style.bottom = '0';
+          iframe.style.width = '0';
+          iframe.style.height = '0';
+          iframe.style.border = 'none';
+          iframe.style.visibility = 'hidden';
+          document.body.appendChild(iframe);
+
+          const doc = iframe.contentWindow.document;
+          doc.open();
+          doc.write(htmlContent);
+          doc.close();
+
+          setTimeout(() => {
+            try {
+              if (iframe.contentWindow) {
+                iframe.contentWindow.focus();
+                iframe.contentWindow.print();
+              }
+            } catch (err) {
+              console.warn('Iframe print error:', err);
+            }
+          }, 250);
+        };
+
         return (
           <div className="animate-scale" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {/* Top Header Card */}
@@ -6792,12 +7178,25 @@ export default function ReportsHistoryView({
 
                 <button
                   type="button"
-                  onClick={() => window.print()}
+                  onClick={() => handlePrintAllDetails(selectedBomLotIds.size > 0)}
                   className="btn btn-secondary btn-sm"
-                  style={{ display: 'flex', alignItems: 'center', gap: '6px', height: '36px', fontSize: '12px' }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    height: '36px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    backgroundColor: '#0f172a',
+                    color: '#ffffff',
+                    border: '1.5px solid #0f172a',
+                    borderRadius: '7px',
+                    boxShadow: '0 2px 5px rgba(15, 23, 42, 0.25)'
+                  }}
+                  title="Print complete BOM materials specification and details"
                 >
-                  <Printer size={13} />
-                  <span>Print Report</span>
+                  <Printer size={14} style={{ color: '#fb923c' }} />
+                  <span>{selectedBomLotIds.size > 0 ? `🖨️ Print Details (${selectedBomLotIds.size} Selected)` : `🖨️ Print All Details (${filtered.length} Lots)`}</span>
                 </button>
               </div>
             </div>
@@ -6925,6 +7324,124 @@ export default function ReportsHistoryView({
               </div>
             </div>
 
+            {/* Multiple Selection & Batch Actions Bar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '10px 16px',
+              backgroundColor: selectedBomLotIds.size > 0 ? '#eff6ff' : '#f8fafc',
+              border: selectedBomLotIds.size > 0 ? '1.5px solid #bfdbfe' : '1px solid #e2e8f0',
+              borderRadius: '10px',
+              flexWrap: 'wrap',
+              gap: '12px',
+              transition: 'all 0.2s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: '700',
+                  color: selectedBomLotIds.size > 0 ? '#1d4ed8' : '#475569'
+                }}>
+                  <CheckSquare size={16} />
+                  <span>{selectedBomLotIds.size} of {filtered.length} Lot(s) Selected</span>
+                </span>
+
+                {selectedBomLotIds.size > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBomLotIds(new Set())}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#64748b',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Clear Selection
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBomLotIds(new Set(filtered.map(l => String(l.id))))}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#334155',
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: '600',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Select All ({filtered.length})
+                  </button>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Print Selected Details */}
+                {selectedBomLotIds.size > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handlePrintAllDetails(true)}
+                    style={{
+                      height: '32px',
+                      padding: '0 14px',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      borderRadius: '6px',
+                      border: '1px solid #1d4ed8',
+                      background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 4px rgba(37, 99, 235, 0.25)'
+                    }}
+                    title="Print complete BOM requirements for selected lots"
+                  >
+                    <Printer size={14} />
+                    <span>🖨️ Print Selected Details ({selectedBomLotIds.size})</span>
+                  </button>
+                )}
+
+                {/* Print All Details */}
+                <button
+                  type="button"
+                  onClick={() => handlePrintAllDetails(false)}
+                  style={{
+                    height: '32px',
+                    padding: '0 14px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    borderRadius: '6px',
+                    border: '1.5px solid #0f172a',
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(15, 23, 42, 0.2)'
+                  }}
+                  title="Print complete BOM requirements breakdown for all lots in this view"
+                >
+                  <Printer size={14} style={{ color: '#fb923c' }} />
+                  <span>🖨️ Print All Details ({filtered.length} Lots)</span>
+                </button>
+              </div>
+            </div>
+
             {/* Complete Lot Detail Table */}
             <div className="panel" style={{ overflowX: 'auto', padding: 0, backgroundColor: 'var(--bg-secondary)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
               {loadingBomNotIssued ? (
@@ -6943,44 +7460,85 @@ export default function ReportsHistoryView({
                   </p>
                 </div>
               ) : (
-                <table className="table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                <table className="table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, textAlign: 'left', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-primary)' }}>
-                      <th style={{ padding: '12px 16px', fontWeight: '800', width: '140px' }}>Lot Number</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Style &amp; Brand</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Fabric &amp; Garment</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'right', width: '110px' }}>Target Pcs</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>BOM Date &amp; Designer</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800' }}>Materials Required In BOM</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'center', width: '170px' }}>Floor Issue Status</th>
-                      <th style={{ padding: '12px 16px', fontWeight: '800', textAlign: 'center', width: '260px' }}>Direct Actions</th>
+                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ width: '42px', textAlign: 'center', padding: '12px 10px', borderBottom: '2px solid #e2e8f0' }}>
+                        <input
+                          type="checkbox"
+                          checked={filtered.length > 0 && selectedBomLotIds.size === filtered.length}
+                          ref={(el) => {
+                            if (el) el.indeterminate = selectedBomLotIds.size > 0 && selectedBomLotIds.size < filtered.length;
+                          }}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedBomLotIds(new Set(filtered.map(l => String(l.id))));
+                            } else {
+                              setSelectedBomLotIds(new Set());
+                            }
+                          }}
+                          style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#2563eb' }}
+                          title={selectedBomLotIds.size === filtered.length ? "Deselect All" : "Select All"}
+                        />
+                      </th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', width: '130px', borderBottom: '2px solid #e2e8f0' }}>Lot Number</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', minWidth: '160px', borderBottom: '2px solid #e2e8f0' }}>Style &amp; Brand</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', minWidth: '140px', borderBottom: '2px solid #e2e8f0' }}>Fabric &amp; Garment</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', textAlign: 'right', width: '100px', borderBottom: '2px solid #e2e8f0' }}>Target Pcs</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', width: '145px', borderBottom: '2px solid #e2e8f0' }}>BOM Date &amp; Designer</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', minWidth: '190px', borderBottom: '2px solid #e2e8f0' }}>Materials In BOM</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', textAlign: 'center', width: '160px', borderBottom: '2px solid #e2e8f0' }}>Floor Issue Status</th>
+                      <th style={{ padding: '12px 14px', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: '#475569', textAlign: 'center', width: '260px', borderBottom: '2px solid #e2e8f0' }}>Direct Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.map((lot, idx) => {
                       const matItems = Array.isArray(lot.materialsRequired) ? lot.materialsRequired : [];
                       const matCount = lot.materialsCount || matItems.length;
+                      const isSelected = selectedBomLotIds.has(String(lot.id));
 
                       return (
                         <tr
                           key={lot.id || idx}
                           style={{
-                            borderBottom: '1px solid var(--border-color)',
-                            transition: 'background-color 0.15s'
+                            borderBottom: '1px solid #e2e8f0',
+                            backgroundColor: isSelected ? '#eff6ff' : (idx % 2 === 0 ? '#ffffff' : '#fcfcfd'),
+                            transition: 'background-color 0.15s ease'
                           }}
                           className="table-row-hover"
                         >
+                          {/* Row Checkbox */}
+                          <td style={{ width: '42px', textAlign: 'center', padding: '12px 10px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                setSelectedBomLotIds(prev => {
+                                  const next = new Set(prev);
+                                  const k = String(lot.id);
+                                  if (e.target.checked) next.add(k);
+                                  else next.delete(k);
+                                  return next;
+                                });
+                              }}
+                              style={{ cursor: 'pointer', width: '16px', height: '16px', accentColor: '#2563eb' }}
+                            />
+                          </td>
                           {/* Lot Number */}
-                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
+                          <td style={{ padding: '12px 14px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={{
-                                display: 'inline-block',
+                                display: 'inline-flex',
+                                alignItems: 'center',
                                 padding: '3px 8px',
-                                backgroundColor: 'rgba(220, 38, 38, 0.12)',
-                                color: '#b91c1c',
+                                backgroundColor: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
                                 borderRadius: '6px',
-                                fontWeight: '800',
-                                fontSize: '13px'
+                                fontWeight: '700',
+                                fontSize: '12.5px',
+                                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                letterSpacing: '0.3px'
                               }}>
                                 #{lot.lotNo || lot.id}
                               </span>
@@ -6989,33 +7547,39 @@ export default function ReportsHistoryView({
                                 onClick={(e) => handleCopyDoc(e, lot.lotNo || lot.id)}
                                 title="Copy Lot Number"
                                 style={{
-                                  border: 'none', background: 'transparent', cursor: 'pointer',
-                                  color: copiedDocNo === (lot.lotNo || lot.id) ? '#16a34a' : 'var(--text-muted)',
-                                  padding: '2px', display: 'flex', alignItems: 'center'
+                                  border: 'none',
+                                  background: 'transparent',
+                                  cursor: 'pointer',
+                                  color: copiedDocNo === (lot.lotNo || lot.id) ? '#16a34a' : '#94a3b8',
+                                  padding: '2px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  transition: 'color 0.15s ease'
                                 }}
                               >
-                                {copiedDocNo === (lot.lotNo || lot.id) ? <Check size={12} /> : <Copy size={12} />}
+                                {copiedDocNo === (lot.lotNo || lot.id) ? <Check size={13} /> : <Copy size={13} />}
                               </button>
                             </div>
-                            <span style={{ display: 'block', fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            <span style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginTop: '3px', fontWeight: '500' }}>
                               BOM #{lot.id}
                             </span>
                           </td>
 
                           {/* Style & Brand */}
-                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                            <strong style={{ color: 'var(--text-main)', fontSize: '13.5px', display: 'block' }}>
+                          <td style={{ padding: '12px 14px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ color: '#0f172a', fontSize: '13px', fontWeight: '700', lineHeight: 1.3 }}>
                               {lot.style || '—'}
-                            </strong>
-                            {lot.brand && (
+                            </div>
+                            {lot.brand && lot.brand !== '--' && (
                               <span style={{
                                 display: 'inline-block',
                                 marginTop: '4px',
                                 fontSize: '11px',
-                                fontWeight: '700',
+                                fontWeight: '600',
                                 background: '#f1f5f9',
                                 color: '#475569',
-                                padding: '1px 6px',
+                                border: '1px solid #e2e8f0',
+                                padding: '1.5px 6px',
                                 borderRadius: '4px'
                               }}>
                                 {lot.brand}
@@ -7024,43 +7588,47 @@ export default function ReportsHistoryView({
                           </td>
 
                           {/* Fabric & Garment */}
-                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                            <div style={{ fontWeight: '700', color: 'var(--text-main)' }}>
+                          <td style={{ padding: '12px 14px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ fontWeight: '700', color: '#1e293b', fontSize: '12.5px', lineHeight: 1.3 }}>
                               {lot.fabricType || '—'}
                             </div>
-                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.3px', marginTop: '3px' }}>
                               {lot.garmentType || 'Garment'}
                             </span>
                           </td>
 
                           {/* Target Pcs */}
-                          <td style={{ padding: '12px 16px', textAlign: 'right', verticalAlign: 'top' }}>
-                            <div style={{ fontSize: '15px', fontWeight: '900', color: 'var(--text-main)' }}>
-                              {(Number(lot.targetPieces) || 0).toLocaleString()}
+                          <td style={{ padding: '12px 14px', textAlign: 'right', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'baseline', gap: '4px' }}>
+                              <span style={{ fontSize: '14.5px', fontWeight: '800', color: '#0f172a' }}>
+                                {(Number(lot.targetPieces) || 0).toLocaleString()}
+                              </span>
+                              <span style={{ fontSize: '11px', fontWeight: '600', color: '#64748b' }}>
+                                Pcs
+                              </span>
                             </div>
-                            <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Pcs</span>
                           </td>
 
                           {/* BOM Date & Designer */}
-                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                            <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main)' }}>
+                          <td style={{ padding: '12px 14px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ fontSize: '12px', fontWeight: '600', color: '#334155', lineHeight: 1.3 }}>
                               {formatDateTime(lot.bomDate)}
                             </div>
-                            <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', marginTop: '3px', fontWeight: '500' }}>
                               By: {lot.designer || 'Designer'}
                             </span>
                           </td>
 
                           {/* Materials Required in BOM */}
-                          <td style={{ padding: '12px 16px', verticalAlign: 'top' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', marginBottom: '6px' }}>
+                          <td style={{ padding: '12px 14px', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', alignItems: 'center', marginBottom: '5px' }}>
                               {matItems.slice(0, 3).map((m, mIdx) => (
                                 <span
                                   key={mIdx}
                                   style={{
-                                    fontSize: '10.5px',
-                                    fontWeight: '700',
-                                    padding: '2px 6px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    padding: '2px 7px',
                                     borderRadius: '4px',
                                     background: '#f8fafc',
                                     border: '1px solid #e2e8f0',
@@ -7071,7 +7639,15 @@ export default function ReportsHistoryView({
                                 </span>
                               ))}
                               {matCount > 3 && (
-                                <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700' }}>
+                                <span style={{
+                                  fontSize: '10.5px',
+                                  color: '#64748b',
+                                  fontWeight: '700',
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  background: '#f1f5f9',
+                                  border: '1px solid #e2e8f0'
+                                }}>
                                   +{matCount - 3} more
                                 </span>
                               )}
@@ -7082,47 +7658,50 @@ export default function ReportsHistoryView({
                               style={{
                                 border: 'none',
                                 background: 'transparent',
-                                color: 'var(--accent-color, #2563eb)',
-                                fontSize: '11px',
+                                color: '#2563eb',
+                                fontSize: '11.5px',
                                 fontWeight: '700',
                                 cursor: 'pointer',
                                 padding: 0,
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '3px',
-                                textDecoration: 'underline'
+                                gap: '4px',
+                                transition: 'color 0.15s ease'
                               }}
                             >
                               <Eye size={12} />
-                              View Complete BOM ({matCount} Items)
+                              <span>View Complete BOM ({matCount} Items)</span>
                             </button>
                           </td>
 
                           {/* Floor Issue Status */}
-                          <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              padding: '4px 10px',
-                              borderRadius: '20px',
-                              fontSize: '11px',
-                              fontWeight: '800',
-                              backgroundColor: '#fee2e2',
-                              color: '#b91c1c',
-                              border: '1px solid #fca5a5'
-                            }}>
-                              <AlertCircle size={12} />
-                              NOT ISSUED (0%)
-                            </span>
-                            <span style={{ display: 'block', fontSize: '10px', color: '#dc2626', marginTop: '3px', fontWeight: '700' }}>
-                              ⚠️ Pending Material Issue
-                            </span>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                backgroundColor: '#fef2f2',
+                                color: '#dc2626',
+                                border: '1px solid #fecaca',
+                                letterSpacing: '0.2px'
+                              }}>
+                                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ef4444', display: 'inline-block' }}></span>
+                                NOT ISSUED (0%)
+                              </span>
+                              <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '600' }}>
+                                Pending Material Issue
+                              </span>
+                            </div>
                           </td>
 
                           {/* Direct Actions */}
-                          <td style={{ padding: '12px 16px', textAlign: 'center', verticalAlign: 'top' }}>
-                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                          <td style={{ padding: '12px 14px', textAlign: 'center', verticalAlign: 'middle', borderBottom: '1px solid #e2e8f0' }}>
+                            <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', alignItems: 'center' }}>
                               {/* 1. Direct Issue Material (Trims / BOM Issue) */}
                               <button
                                 type="button"
@@ -7133,20 +7712,26 @@ export default function ReportsHistoryView({
                                     window.location.href = `/material-issue?lotNo=${encodeURIComponent(lot.lotNo || lot.id)}`;
                                   }
                                 }}
-                                className="btn btn-primary btn-sm"
                                 style={{
-                                  padding: '5px 10px',
-                                  fontSize: '11px',
-                                  fontWeight: '800',
+                                  height: '30px',
+                                  padding: '0 11px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '700',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '4px',
+                                  gap: '5px',
                                   borderRadius: '6px',
-                                  backgroundColor: '#2563eb'
+                                  border: '1px solid #1d4ed8',
+                                  background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                                  color: '#ffffff',
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  boxShadow: '0 1px 3px rgba(37, 99, 235, 0.25)',
+                                  transition: 'all 0.15s ease'
                                 }}
                                 title="Issue materials & accessories for this lot"
                               >
-                                <ExternalLink size={12} />
+                                <ExternalLink size={13} />
                                 <span>Issue Material</span>
                               </button>
 
@@ -7160,21 +7745,26 @@ export default function ReportsHistoryView({
                                     window.location.href = `/elastic-issue?lotNo=${encodeURIComponent(lot.lotNo || lot.id)}`;
                                   }
                                 }}
-                                className="btn btn-secondary btn-sm"
                                 style={{
-                                  padding: '5px 9px',
-                                  fontSize: '11px',
-                                  fontWeight: '800',
+                                  height: '30px',
+                                  padding: '0 10px',
+                                  fontSize: '11.5px',
+                                  fontWeight: '700',
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '4px',
+                                  gap: '5px',
                                   borderRadius: '6px',
-                                  backgroundColor: '#059669',
-                                  color: '#ffffff'
+                                  border: '1px solid #047857',
+                                  background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                                  color: '#ffffff',
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap',
+                                  boxShadow: '0 1px 3px rgba(5, 150, 105, 0.25)',
+                                  transition: 'all 0.15s ease'
                                 }}
                                 title="Issue elastic, tape, or bone for this lot"
                               >
-                                <Package size={12} />
+                                <Package size={13} />
                                 <span>Issue Elastic</span>
                               </button>
 
@@ -7182,15 +7772,24 @@ export default function ReportsHistoryView({
                               <button
                                 type="button"
                                 onClick={() => setSelectedBomLotModal(lot)}
-                                className="btn btn-secondary btn-sm"
                                 style={{
-                                  padding: '5px 8px',
-                                  fontSize: '11px',
-                                  borderRadius: '6px'
+                                  height: '30px',
+                                  width: '30px',
+                                  padding: 0,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  borderRadius: '6px',
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#475569',
+                                  cursor: 'pointer',
+                                  boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
+                                  transition: 'all 0.15s ease'
                                 }}
                                 title="View full lot specification & BOM items"
                               >
-                                <Eye size={12} />
+                                <Eye size={13} />
                               </button>
                             </div>
                           </td>

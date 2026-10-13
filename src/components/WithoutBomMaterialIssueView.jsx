@@ -871,6 +871,7 @@ export default function WithoutBomMaterialIssueView({
   // Barcode quick-input
   const [barcodeInput, setBarcodeInput] = useState('');
   const barcodeInputRef = useRef(null);
+  const lotNoInputRef = useRef(null);
 
   // Material Line Items
   const [items, setItems] = useState([
@@ -1126,6 +1127,7 @@ export default function WithoutBomMaterialIssueView({
 
   // Generate Official PDF Document
   const generatePDFVoucher = (issueData) => {
+    const isDirect = issueData?.issueMode === 'item_only' || String(issueData?.lotId || '').toLowerCase().includes('direct');
     const doc = new jsPDF('p', 'mm', 'a4');
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
@@ -1489,10 +1491,25 @@ export default function WithoutBomMaterialIssueView({
       const pdfUrl = URL.createObjectURL(pdfBlob);
 
       playFeedbackSound('success');
-      setPreviewModal({ doc, pdfUrl, voucherId, issueData, isPreviewOnly: false });
-      setFormSuccess(`✓ Successfully issued ${validItems.length} material item(s)! Challan / Bill No: ${voucherId}`);
 
-      // Reset form items
+      // Do NOT block screen with preview modal on confirm; keep the reset form visible for the next bill
+      setPreviewModal(null);
+      setFormError('');
+      setFormSuccess(`✓ Bill #${voucherId} (Lot #${effectiveLot}) confirmed & stock deducted. Printing window opened. Form is reset & ready for next bill.`);
+
+      // Automatically launch the printing window directly
+      setTimeout(() => {
+        handleDirectPrintWindow(issueData, voucherId);
+      }, 100);
+
+      // Process complete: refill and reset all columns/inputs back to clean state for next bill
+      setLotNo('');
+      setReceiverName('');
+      setReceiverDept('Cutting');
+      setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
+      setPieces(1);
+      setRemarks('');
+      setBarcodeInput('');
       setItems([
         {
           id: Date.now(),
@@ -1512,10 +1529,13 @@ export default function WithoutBomMaterialIssueView({
           totalQty: 1
         }
       ]);
-      setRemarks('');
-      if (issueMode === 'item_only') {
-        setLotNo('');
-      }
+
+      // Focus Lot Number input so user can type the next bill immediately
+      setTimeout(() => {
+        if (lotNoInputRef.current) {
+          lotNoInputRef.current.focus();
+        }
+      }, 350);
     } catch (err) {
       console.error('Issue error:', err);
       playFeedbackSound('error');
@@ -1523,6 +1543,38 @@ export default function WithoutBomMaterialIssueView({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Clear and refill all form columns/inputs for a fresh issue
+  const handleResetForm = () => {
+    setLotNo('');
+    setReceiverName('');
+    setReceiverDept('Cutting');
+    setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
+    setPieces(1);
+    setRemarks('');
+    setBarcodeInput('');
+    setFormError('');
+    setFormSuccess('');
+    setItems([
+      {
+        id: Date.now(),
+        componentType: 'DORI',
+        customComponentType: '',
+        isCustomType: false,
+        entryMode: 'choose',
+        materialId: '',
+        materialName: '',
+        itemCode: '',
+        color: '',
+        unit: 'Mtr',
+        availableStock: 0,
+        location: '',
+        calcMode: 'direct',
+        perPcReq: 0,
+        totalQty: 1
+      }
+    ]);
   };
 
   // Helper to build issueData from a history log
@@ -1866,21 +1918,12 @@ export default function WithoutBomMaterialIssueView({
         </div>
 
         ${renderChallanCopy('DUPLICATE - RECEIVER / FLOOR COPY')}
-
-        <script>
-          window.onload = function() {
-            setTimeout(function() {
-              window.focus();
-              window.print();
-            }, 250);
-          };
-        </script>
       </body>
       </html>
     `;
   };
 
-  // Dedicated Print Window Function (Instant, Clean & Foolproof)
+  // Dedicated Print Window Function (Instant, Clean & Foolproof via Hidden Iframe)
   const handleDirectPrintWindow = (issueData, customVoucherId) => {
     if (!issueData) return;
     const vid = customVoucherId || issueData.voucherId || nextVoucherId;
@@ -1889,19 +1932,48 @@ export default function WithoutBomMaterialIssueView({
 
     try {
       const printHtml = generatePrintHtml(payload);
-      const printWindow = window.open('', '_blank', 'width=920,height=960,menubar=no,toolbar=no,status=no');
-      if (printWindow) {
-        printWindow.document.open();
-        printWindow.document.write(printHtml);
-        printWindow.document.close();
-        return;
-      }
-    } catch (e) {
-      console.warn('Popup window blocked, falling back to on-page print:', e);
-    }
 
-    // Fallback if popup blocked
-    handlePrintChallan();
+      // Clean up previous print iframe if existing
+      const oldFrame = document.getElementById('without-bom-print-iframe');
+      if (oldFrame) {
+        try { document.body.removeChild(oldFrame); } catch (e) {}
+      }
+
+      // Create invisible iframe to trigger native browser print window without popup blocking
+      const printFrame = document.createElement('iframe');
+      printFrame.id = 'without-bom-print-iframe';
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+      printFrame.style.visibility = 'hidden';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow.document;
+      frameDoc.open();
+      frameDoc.write(printHtml);
+      frameDoc.close();
+
+      // Trigger the browser's native print window directly
+      setTimeout(() => {
+        try {
+          if (printFrame.contentWindow) {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+          }
+        } catch (err) {
+          console.warn('Iframe print failed:', err);
+        }
+      }, 250);
+
+      return true;
+    } catch (e) {
+      console.warn('Direct print frame failed, falling back to on-page print:', e);
+      handlePrintChallan();
+      return false;
+    }
   };
 
   // Direct 1-Click Print from the Main Form
@@ -2197,6 +2269,7 @@ export default function WithoutBomMaterialIssueView({
                 </label>
                 <div style={{ position: 'relative' }}>
                   <input
+                    ref={lotNoInputRef}
                     type="text"
                     list="existing-lots-list"
                     className="form-input"
@@ -2952,6 +3025,29 @@ export default function WithoutBomMaterialIssueView({
               >
                 <Zap size={18} />
                 <span>{submitting ? 'Issuing & Generating Challan...' : '⚡ Confirm Issue & Give Challan / Bill'}</span>
+              </button>
+
+              {/* Reset / Clear Form */}
+              <button
+                type="button"
+                onClick={handleResetForm}
+                style={{
+                  padding: '11px 16px',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  color: '#475569',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                title="Clear and refill all columns for a fresh issue"
+              >
+                <RefreshCw size={15} />
+                <span>Reset Form</span>
               </button>
             </div>
           </div>
