@@ -50,8 +50,21 @@ export default function SearchableWarehouseSlotSelect({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedWarehouse, setSelectedWarehouse] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All'); // 'All', 'Empty', 'Picking', 'Occupied'
+  const [dropUp, setDropUp] = useState(false);
   const containerRef = useRef(null);
   const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      if (spaceBelow < 350 && rect.top > spaceBelow) {
+        setDropUp(true);
+      } else {
+        setDropUp(false);
+      }
+    }
+  }, [isOpen]);
 
   // Normalize raw slot items into standard structured objects
   const normalizedSlots = useMemo(() => {
@@ -300,30 +313,9 @@ export default function SearchableWarehouseSlotSelect({
           <Building2 size={16} style={{ color: value ? '#4f46e5' : '#94a3b8', flexShrink: 0 }} />
 
           {currentSlot ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexWrap: 'wrap' }}>
-              <span style={{ fontWeight: '800', color: '#0f172a' }}>
-                🏢 {currentSlot.code}
-              </span>
-
-              {/* Status & Capacity Pill in trigger */}
-              {(() => {
-                const badge = getStatusBadgeStyle(currentSlot.status, currentSlot.currentPackets, currentSlot.capacity);
-                return (
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: '700',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    backgroundColor: badge.bg,
-                    color: badge.color,
-                    border: `1px solid ${badge.border}`,
-                    whiteSpace: 'nowrap'
-                  }}>
-                    {badge.label} ({currentSlot.currentPackets}/{currentSlot.capacity} Pkts • {currentSlot.freePackets} Free)
-                  </span>
-                );
-              })()}
-            </div>
+            <span style={{ fontWeight: '700', color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentSlot.code}
+            </span>
           ) : (
             <span style={{ color: '#64748b', fontWeight: '600', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {placeholder}
@@ -399,10 +391,11 @@ export default function SearchableWarehouseSlotSelect({
         <div
           style={{
             position: 'absolute',
-            top: 'calc(100% + 6px)',
+            top: dropUp ? 'auto' : 'calc(100% + 6px)',
+            bottom: dropUp ? 'calc(100% + 6px)' : 'auto',
             left: 0,
             right: 0,
-            minWidth: '320px',
+            width: '100%',
             backgroundColor: '#ffffff',
             border: '1.5px solid #e2e8f0',
             borderRadius: '14px',
@@ -411,7 +404,7 @@ export default function SearchableWarehouseSlotSelect({
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            maxHeight: '380px',
+            maxHeight: '340px',
             animation: 'fadeIn 0.15s ease'
           }}
         >
@@ -511,7 +504,7 @@ export default function SearchableWarehouseSlotSelect({
                       transition: 'all 0.15s ease'
                     }}
                   >
-                    {wh === 'All' ? '🏢 All Halls' : wh}
+                    {wh === 'All' ? 'All Halls' : wh}
                   </button>
                 ))}
               </div>
@@ -723,7 +716,7 @@ export default function SearchableWarehouseSlotSelect({
                   >
                     {/* Left: Slot name & Info */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
-                      <span style={{ fontSize: '14px', flexShrink: 0 }}>🏢</span>
+                      <Building2 size={15} style={{ color: isSelected ? '#4f46e5' : '#64748b', flexShrink: 0 }} />
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{
                           fontSize: '12.5px',

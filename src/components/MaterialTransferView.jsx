@@ -381,7 +381,8 @@ export default function MaterialTransferView({
   currentUser,
   racks: propRacks = [],
   halls: propHalls = [],
-  materials: propMaterials = []
+  materials: propMaterials = [],
+  onUpdateMaterial
 }) {
   const [materials, setMaterials] = useState(() => (Array.isArray(propMaterials) && propMaterials.length > 0 ? propMaterials : []));
   const [warehouseLocations, setWarehouseLocations] = useState([]);
@@ -514,6 +515,26 @@ export default function MaterialTransferView({
     setLastTransferSuccess(null);
   };
 
+  // Robust slot matcher to prevent case or warehouse prefix mismatch
+  const normalizeLocName = (str) => {
+    if (!str) return '';
+    return String(str).toLowerCase().replace(/\(\d+\s*pkts?\)/gi, '').replace(/\s+/g, ' ').trim();
+  };
+
+  const isSameSlot = (locA, locB) => {
+    if (!locA || !locB) return false;
+    const a = normalizeLocName(locA);
+    const b = normalizeLocName(locB);
+    if (a === b) return true;
+    const cleanA = a.replace(/^(hall|warehouse|main store|store)\s*\d*\s*[-–]?\s*/i, '').trim();
+    const cleanB = b.replace(/^(hall|warehouse|main store|store)\s*\d*\s*[-–]?\s*/i, '').trim();
+    if (cleanA && cleanB && cleanA === cleanB) return true;
+    const rackA = a.match(/rack\s*(\d+[a-z]?|\w+)/i) || a.match(/bay\s*(\d+[a-z]?|\w+)/i);
+    const rackB = b.match(/rack\s*(\d+[a-z]?|\w+)/i) || b.match(/bay\s*(\d+[a-z]?|\w+)/i);
+    if (rackA && rackB && rackA[1] === rackB[1]) return true;
+    return false;
+  };
+
   // Robust case-insensitive location parser
   const parseLocationString = (locStr, packetsTotal = 1) => {
     if (!locStr) return [{ location: 'Main Store', count: packetsTotal }];
@@ -568,7 +589,7 @@ export default function MaterialTransferView({
     setSourceLocations(parsed);
     if (parsed.length > 0) {
       setFromLoc(parsed[0].location);
-      setTransferQty(1);
+      setTransferQty(parsed[0].count || 1);
     }
   }, [selectedMaterialId, materials]);
 
@@ -590,12 +611,12 @@ export default function MaterialTransferView({
       showNotification('Please specify a destination rack or slot.', 'error');
       return;
     }
-    if (fromLoc.trim().toLowerCase() === toLoc.trim().toLowerCase()) {
+    if (isSameSlot(fromLoc, toLoc.trim())) {
       showNotification('Source and destination rack cannot be the same.', 'error');
       return;
     }
 
-    const sourceGroup = sourceLocations.find(g => g.location === fromLoc);
+    const sourceGroup = sourceLocations.find(g => isSameSlot(g.location, fromLoc));
     if (!sourceGroup) {
       showNotification('Invalid source location selected.', 'error');
       return;
@@ -619,23 +640,32 @@ export default function MaterialTransferView({
 
     setSubmitting(true);
     try {
-      // 1. Calculate updated locations list
+      const totalMatPkts = Math.max(1, Number(selectedMaterial.packets) || 1);
+
+      // 1. Calculate updated locations list with robust slot matching
       let updatedGroups = sourceLocations.map(g => {
-        if (g.location === fromLoc) {
+        if (isSameSlot(g.location, fromLoc)) {
           return { ...g, count: g.count - qty };
         }
         return g;
       });
 
+      // Filter out 0 count groups - removes source rack completely when emptied!
+      updatedGroups = updatedGroups.filter(g => g.count > 0);
+
       // Add to destination location group
-      const destIndex = updatedGroups.findIndex(g => g.location.toLowerCase() === toLoc.trim().toLowerCase());
+      const destIndex = updatedGroups.findIndex(g => isSameSlot(g.location, toLoc.trim()));
       if (destIndex !== -1) {
         updatedGroups[destIndex].count += qty;
       } else {
         updatedGroups.push({ location: toLoc.trim(), count: qty });
       }
 
-      updatedGroups = updatedGroups.filter(g => g.count > 0);
+      // If only 1 group remains, ensure count matches total packets
+      if (updatedGroups.length === 1) {
+        updatedGroups[0].count = totalMatPkts;
+      }
+
       const newLocSummary = serializeLocations(updatedGroups);
 
       // 2. PUT request to update material's location
@@ -670,6 +700,12 @@ export default function MaterialTransferView({
       });
 
       if (!logRes.ok) throw new Error('Failed to log transfer history');
+
+      // Update parent callback & local state immediately
+      if (typeof onUpdateMaterial === 'function') {
+        onUpdateMaterial(updatedMaterial);
+      }
+      setMaterials(prev => (prev || []).map(m => m.id === selectedMaterialId ? updatedMaterial : m));
 
       // Completed transfer metadata
       const completedTransfer = {
@@ -1043,7 +1079,7 @@ export default function MaterialTransferView({
   };
 
   // Helper calculations for quantity card
-  const maxAvailable = sourceLocations.find(g => g.location === fromLoc)?.count || 1;
+  const maxAvailable = sourceLocations.find(g => isSameSlot(g.location, fromLoc))?.count || 1;
   const totalPkts = selectedMaterial?.packets || maxAvailable;
   const approxPcsPerPkt = selectedMaterial ? Math.round(Number(selectedMaterial.stock || 0) / Math.max(1, totalPkts)) : 0;
   const movingPcs = (Number(transferQty) || 0) * approxPcsPerPkt;

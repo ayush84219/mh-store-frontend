@@ -15,7 +15,8 @@ export default function WarehouseLocationView({
   halls = [],
   onNavigate,
   currentUser,
-  allowWarehouseAddRack = false
+  allowWarehouseAddRack = false,
+  onUpdateMaterial
 }) {
   const [localAllowAdd, setLocalAllowAdd] = useState(() => {
     if (allowWarehouseAddRack) return true;
@@ -338,7 +339,7 @@ export default function WarehouseLocationView({
 
         const norm1 = normalizeSlotCode(pureLoc)?.toLowerCase();
         const norm2 = pureLoc.toLowerCase();
-        const cleanTarget = pureLoc.toLowerCase().replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
+        const cleanTarget = pureLoc.toLowerCase().replace(/^(hall|warehouse|main store|store)\s*\d*\s*[-–]?\s*/i, '').trim();
         const norm3 = cleanTarget ? `rack ${cleanTarget}` : '';
 
         [norm1, norm2, cleanTarget, norm3].filter(Boolean).forEach(k => {
@@ -358,7 +359,7 @@ export default function WarehouseLocationView({
       if (!cLoc) return;
       const norm1 = normalizeSlotCode(cLoc)?.toLowerCase();
       const norm2 = cLoc.toLowerCase();
-      const cleanTarget = cLoc.toLowerCase().replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
+      const cleanTarget = cLoc.toLowerCase().replace(/^(hall|warehouse|main store|store)\s*\d*\s*[-–]?\s*/i, '').trim();
       const norm3 = cleanTarget ? `rack ${cleanTarget}` : '';
 
       [norm1, norm2, cleanTarget, norm3].filter(Boolean).forEach(k => {
@@ -374,7 +375,7 @@ export default function WarehouseLocationView({
       const capacity = slot.capacity || 20;
       const cleanSlot = String(code).toLowerCase().trim();
       const normSlotKey = normalizeSlotCode(code)?.toLowerCase();
-      const cleanTarget = cleanSlot.replace(/^(hall|warehouse)\s*\d*\s*[-–]?\s*/i, '').trim();
+      const cleanTarget = cleanSlot.replace(/^(hall|warehouse|main store|store)\s*\d*\s*[-–]?\s*/i, '').trim();
 
       const seenMatIds = new Set();
       const matchedMaterialsEntries = [];
@@ -561,10 +562,10 @@ export default function WarehouseLocationView({
 
     if (specificMaterial) {
       setTransferMaterial(specificMaterial);
-      setTransferPkts(Math.min(specificMaterial.packets || 1, 1));
+      setTransferPkts(Number(specificMaterial.packets) || 1);
     } else if (targetLocObj && targetLocObj.materialDetailsList && targetLocObj.materialDetailsList.length > 0) {
       setTransferMaterial(targetLocObj.materialDetailsList[0]);
-      setTransferPkts(Math.min(targetLocObj.materialDetailsList[0].packets || 1, 1));
+      setTransferPkts(Number(targetLocObj.materialDetailsList[0].packets) || 1);
     } else {
       setTransferMaterial(null);
       setTransferPkts(1);
@@ -585,7 +586,7 @@ export default function WarehouseLocationView({
       locations.find(l => isLocMatch(l.code, newSourceCode));
     if (locObj && locObj.materialDetailsList && locObj.materialDetailsList.length > 0) {
       setTransferMaterial(locObj.materialDetailsList[0]);
-      setTransferPkts(Math.min(locObj.materialDetailsList[0].packets || 1, 1));
+      setTransferPkts(Number(locObj.materialDetailsList[0].packets) || 1);
     } else {
       setTransferMaterial(null);
       setTransferPkts(1);
@@ -659,56 +660,67 @@ export default function WarehouseLocationView({
         const match = trimmed.match(/^(.+?)\s*\(\s*(\d+)\s*pkts?\s*\)$/i);
         if (match) {
           groups.push({
-            location: match[1].trim(),
+            location: canonicalizeLocation(match[1].trim()),
             count: parseInt(match[2], 10) || 1
           });
         } else {
           groups.push({
-            location: trimmed,
+            location: canonicalizeLocation(trimmed),
             count: totalPkts
           });
         }
       });
 
       if (groups.length === 0) {
-        groups.push({ location: transferSourceLoc, count: totalPkts });
+        groups.push({ location: canonicalizeLocation(transferSourceLoc), count: totalPkts });
       }
+
+      // Deduplicate groups by canonical match if previously duplicated
+      const mergedGroups = [];
+      groups.forEach(g => {
+        const existing = mergedGroups.find(m => isLocMatch(m.location, g.location));
+        if (existing) {
+          existing.count += g.count;
+        } else {
+          mergedGroups.push({ ...g });
+        }
+      });
+      groups = mergedGroups;
 
       // 2. Deduct from source group
-      let remainingToMove = qtyToMove;
-      let sourceIndex = groups.findIndex(g => g.location.toLowerCase().trim() === transferSourceLoc.toLowerCase().trim());
-
-      if (sourceIndex === -1) {
-        sourceIndex = groups.findIndex(g => isLocMatch(g.location, transferSourceLoc));
-      }
-
-      if (sourceIndex === -1 && groups.length > 0) {
+      let sourceIndex = groups.findIndex(g => isLocMatch(g.location, transferSourceLoc));
+      if (sourceIndex === -1 && groups.length === 1) {
         sourceIndex = 0;
       }
 
       if (sourceIndex !== -1) {
         const availableAtSource = groups[sourceIndex].count;
-        const deduct = Math.min(availableAtSource, remainingToMove);
+        const deduct = Math.min(availableAtSource, qtyToMove);
         groups[sourceIndex].count -= deduct;
-        remainingToMove -= deduct;
       }
 
-      // Filter out 0 count groups
+      // Filter out 0 count groups - removes source rack completely when emptied!
       groups = groups.filter(g => g.count > 0);
 
       // 3. Add to destination group
-      const destIndex = groups.findIndex(g => g.location.toLowerCase().trim() === transferTargetLoc.toLowerCase().trim());
+      const targetCanon = canonicalizeLocation(transferTargetLoc.trim());
+      const destIndex = groups.findIndex(g => isLocMatch(g.location, targetCanon));
       if (destIndex !== -1) {
         groups[destIndex].count += qtyToMove;
       } else {
-        groups.push({ location: transferTargetLoc.trim(), count: qtyToMove });
+        groups.push({ location: targetCanon, count: qtyToMove });
+      }
+
+      // If only 1 group remains, ensure count equals material's total packets
+      if (groups.length === 1) {
+        groups[0].count = totalPkts;
       }
 
       // 4. Serialize back
       let newLocationSummary = 'Main Store';
-      if (groups.length === 1 && groups[0].count === 1) {
-        newLocationSummary = groups[0].location;
-      } else if (groups.length > 0) {
+      if (groups.length === 1) {
+        newLocationSummary = groups[0].count === 1 ? groups[0].location : `${groups[0].location} (${groups[0].count} Pkts)`;
+      } else if (groups.length > 1) {
         newLocationSummary = groups.map(g => `${g.location} (${g.count} Pkts)`).join(', ');
       }
 
@@ -736,20 +748,43 @@ export default function WarehouseLocationView({
         body: JSON.stringify({
           materialCode: matObj.id,
           materialName: matObj.name,
-          fromLocation: transferSourceLoc,
-          toLocation: transferTargetLoc.trim(),
+          fromLocation: canonicalizeLocation(transferSourceLoc),
+          toLocation: targetCanon,
           quantity: qtyToMove,
           transferType: 'packet',
           operator: currentUser?.name || 'Warehouse Store Team'
         })
       }).catch(err => console.warn('Transfer log error:', err));
 
-      // 7. Update local state immediately & refetch live data
+      // 7. Update parent & local state immediately & refetch live data
+      if (typeof onUpdateMaterial === 'function') {
+        onUpdateMaterial(updatedMaterial);
+      }
+
       setDbMaterials(prev => {
         return (prev || []).map(m => String(m.id) === String(matObj.id) ? updatedMaterial : m);
       });
 
-      setTransferSuccess(`Successfully transferred ${qtyToMove} Pkt(s) of "${matObj.name}" to ${transferTargetLoc}!`);
+      // Update current drawer selectedLocation immediately so moved material disappears/decrements right away!
+      setSelectedLocation(prev => {
+        if (!prev) return null;
+        const updatedList = (prev.materialDetailsList || [])
+          .map(m => {
+            if (String(m.id) === String(matObj.id)) {
+              const rem = (m.packets || 1) - qtyToMove;
+              return rem > 0 ? { ...m, packets: rem } : null;
+            }
+            return m;
+          })
+          .filter(Boolean);
+        return {
+          ...prev,
+          materialDetailsList: updatedList,
+          packets: Math.max(0, (prev.packets || 0) - qtyToMove)
+        };
+      });
+
+      setTransferSuccess(`Successfully transferred ${qtyToMove} Pkt(s) of "${matObj.name}" to ${targetCanon}!`);
 
       await fetchLiveLocations();
 
@@ -758,7 +793,7 @@ export default function WarehouseLocationView({
         setIsDrawerOpen(false);
         setSelectedLocation(null);
         setTransferSuccess('');
-      }, 1200);
+      }, 1000);
 
     } catch (err) {
       console.error('Transfer execution error:', err);
@@ -2316,7 +2351,8 @@ export default function WarehouseLocationView({
                   boxShadow: '0 25px 60px -10px rgba(0,0,0,0.5)',
                   border: '1px solid #e2e8f0',
                   position: 'relative',
-                  zIndex: 20001
+                  zIndex: 20001,
+                  overflow: 'visible'
                 }}
               >
                 {/* Modal Header */}
@@ -2528,10 +2564,38 @@ export default function WarehouseLocationView({
                                 display: 'block'
                               }}
                             />
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginTop: '6px', fontWeight: '600' }}>
-                              <span>1 Pkt</span>
-                              {maxPkts > 1 && <span>Scroll slider to adjust (1 — {maxPkts})</span>}
-                              <span>{maxPkts} Pkts</span>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#94a3b8', marginTop: '8px', fontWeight: '600' }}>
+                              <button
+                                type="button"
+                                onClick={() => setTransferPkts(1)}
+                                style={{
+                                  padding: '2px 8px', borderRadius: '4px', border: '1px solid #cbd5e1',
+                                  backgroundColor: currentPkts === 1 ? '#4f46e5' : '#ffffff',
+                                  color: currentPkts === 1 ? '#ffffff' : '#64748b',
+                                  fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                                }}
+                              >
+                                1 Pkt
+                              </button>
+                              {maxPkts > 1 && (
+                                <span style={{ fontSize: '11px', color: '#64748b' }}>
+                                  Adjust slider or click below
+                                </span>
+                              )}
+                              {maxPkts > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setTransferPkts(maxPkts)}
+                                  style={{
+                                    padding: '2px 8px', borderRadius: '4px', border: '1px solid #4f46e5',
+                                    backgroundColor: currentPkts === maxPkts ? '#4f46e5' : 'rgba(79, 70, 229, 0.08)',
+                                    color: currentPkts === maxPkts ? '#ffffff' : '#4f46e5',
+                                    fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                                  }}
+                                >
+                                  Move All ({maxPkts} Pkts)
+                                </button>
+                              )}
                             </div>
                           </div>
                         </div>

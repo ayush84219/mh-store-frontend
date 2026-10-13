@@ -1024,6 +1024,8 @@ export default function MaterialIssueView({
   const [showCalcGuide, setShowCalcGuide] = useState(false);
   const [showRgpModal, setShowRgpModal] = useState(false);
   const [rgpVendorId, setRgpVendorId] = useState('');
+  const [isManualRgpVendor, setIsManualRgpVendor] = useState(false);
+  const [manualRgpVendorName, setManualRgpVendorName] = useState('');
   const [rgpNotes, setRgpNotes] = useState('Sent for job work/finishing.');
   const [rgpDate, setRgpDate] = useState(() => {
     const today = new Date();
@@ -1548,7 +1550,9 @@ export default function MaterialIssueView({
 
   const handlePrintRgp = () => {
     const doc = new jsPDF();
-    const vendor = vendors.find(v => v.id === rgpVendorId) || { name: 'Walk-in Vendor', email: 'N/A', address: 'N/A' };
+    const vendor = (rgpVendorId === '__manual__' || isManualRgpVendor)
+      ? { name: (manualRgpVendorName || '').trim() || 'Custom Vendor', email: 'N/A', address: 'N/A' }
+      : (vendors.find(v => v.id === rgpVendorId) || { name: 'Walk-in Vendor', email: 'N/A', address: 'N/A' });
     const gpNumber = `GP-${Math.floor(100000 + Math.random() * 900000)}`;
 
     // Top Brand Header
@@ -5989,18 +5993,78 @@ export default function MaterialIssueView({
 
             <form onSubmit={(e) => { e.preventDefault(); handlePrintRgp(); }}>
               <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Select Vendor / Receiver</label>
-                <select
-                  className="form-input"
-                  value={rgpVendorId}
-                  onChange={(e) => setRgpVendorId(e.target.value)}
-                  required
-                >
-                  <option value="">-- Choose Vendor --</option>
-                  {vendors.map(v => (
-                    <option key={v.id} value={v.id}>{v.name} ({v.materialsJoined})</option>
-                  ))}
-                </select>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <label className="form-label" style={{ margin: 0 }}>Select Vendor / Receiver</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isManualRgpVendor) {
+                        setIsManualRgpVendor(false);
+                        setRgpVendorId('');
+                        setManualRgpVendorName('');
+                      } else {
+                        setIsManualRgpVendor(true);
+                        setRgpVendorId('__manual__');
+                      }
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary-color, #2563eb)',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      padding: '2px 4px'
+                    }}
+                  >
+                    {isManualRgpVendor ? '📋 Pick from List' : '✍️ Enter Manually'}
+                  </button>
+                </div>
+                {isManualRgpVendor ? (
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="Enter Vendor / Receiver name..."
+                      value={manualRgpVendorName}
+                      onChange={(e) => setManualRgpVendorName(e.target.value)}
+                      required
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setIsManualRgpVendor(false);
+                        setRgpVendorId('');
+                        setManualRgpVendorName('');
+                      }}
+                      style={{ fontSize: '11px', padding: '0 10px', whiteSpace: 'nowrap' }}
+                    >
+                      List
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    className="form-input"
+                    value={rgpVendorId}
+                    onChange={(e) => {
+                      if (e.target.value === '__manual__') {
+                        setIsManualRgpVendor(true);
+                        setRgpVendorId('__manual__');
+                      } else {
+                        setRgpVendorId(e.target.value);
+                      }
+                    }}
+                    required
+                  >
+                    <option value="">-- Choose Vendor --</option>
+                    <option value="__manual__">✍️ Enter Vendor Manually...</option>
+                    {vendors.map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div className="form-group" style={{ marginBottom: '16px' }}>

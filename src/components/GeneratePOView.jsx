@@ -5,7 +5,7 @@ import {
   FileText, PlusCircle, Trash2, Download, RefreshCw,
   CheckCircle, AlertTriangle, Play, Settings, X, Search,
   Briefcase, Truck, Award, UserCheck, Shield, ChevronDown, History,
-  ChevronLeft, ChevronRight, Layers, Check
+  ChevronLeft, ChevronRight, Layers, Check, Edit2, Save
 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
@@ -1326,9 +1326,10 @@ function SearchableDesignSelect({ designs, value, onChange, placeholder = "-- Ch
  * ========================= */
 export default function GeneratePOView({
   designs,
-  vendors,
+  vendors = [],
   pos = [],
   onAddPO,
+  onAddVendor,
   currencySymbol = 'R',
   prefilledPoData = null,
   setPrefilledPoData = () => { },
@@ -1353,6 +1354,17 @@ export default function GeneratePOView({
   const [livePOs, setLivePOs] = useState(Array.isArray(pos) ? pos : []);
   const [loadingLivePOs, setLoadingLivePOs] = useState(false);
   const [backendMaterialsList, setBackendMaterialsList] = useState([]);
+  const [extraVendors, setExtraVendors] = useState([]);
+
+  const allVendors = useMemo(() => {
+    const list = Array.isArray(vendors) ? [...vendors] : [];
+    extraVendors.forEach(ev => {
+      if (!list.some(v => String(v.id) === String(ev.id) || (v.name || '').toLowerCase() === (ev.name || '').toLowerCase())) {
+        list.push(ev);
+      }
+    });
+    return list;
+  }, [vendors, extraVendors]);
 
   // Reset pagination when filter criteria change
   useEffect(() => {
@@ -1480,9 +1492,16 @@ export default function GeneratePOView({
 
           const vName = po.vendorName || "";
           setSupplierName(vName);
-          const matchedVendor = vendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
+          const matchedVendor = allVendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
           if (matchedVendor) {
             setSelectedVendorId(String(matchedVendor.id));
+            setIsManualVendor(false);
+          } else if (vName) {
+            setSelectedVendorId('__manual__');
+            setIsManualVendor(true);
+          } else {
+            setSelectedVendorId('');
+            setIsManualVendor(false);
           }
 
           if (po.date) {
@@ -2217,6 +2236,9 @@ export default function GeneratePOView({
 
   const [selectedDesignId, setSelectedDesignId] = useState('');
   const [selectedVendorId, setSelectedVendorId] = useState('');
+  const [isManualVendor, setIsManualVendor] = useState(false);
+  const [saveManualVendorToDb, setSaveManualVendorToDb] = useState(false);
+  const [isSavingVendor, setIsSavingVendor] = useState(false);
   const [poMode, setPoMode] = useState('lot'); // 'lot' | 'normal'
 
   const handlePoModeChange = (mode) => {
@@ -2361,16 +2383,72 @@ export default function GeneratePOView({
 
   // Vendor profiles autofill mapping
   const handleVendorChange = (vendorId) => {
+    if (vendorId === '__manual__') {
+      setIsManualVendor(true);
+      setSelectedVendorId('__manual__');
+      setSupplierName("");
+      return;
+    }
+    setIsManualVendor(false);
     setSelectedVendorId(vendorId);
     if (!vendorId) {
       setSupplierName("");
       return;
     }
-    const vendor = vendors.find(v => String(v.id) === String(vendorId) || String(v.name) === String(vendorId));
+    const vendor = allVendors.find(v => String(v.id) === String(vendorId) || String(v.name) === String(vendorId));
     if (vendor && vendor.name) {
       setSupplierName(vendor.name);
     } else {
       setSupplierName(vendorId);
+    }
+  };
+
+  const handleSaveVendorNow = async () => {
+    const trimmed = (supplierName || '').trim();
+    if (!trimmed) {
+      alert('Please enter a vendor name first.');
+      return;
+    }
+    const alreadyExists = allVendors.find(v => (v.name || '').toLowerCase() === trimmed.toLowerCase());
+    if (alreadyExists) {
+      alert(`Vendor "${alreadyExists.name}" is already in your saved vendor profiles!`);
+      setSelectedVendorId(String(alreadyExists.id));
+      setIsManualVendor(false);
+      return;
+    }
+    setIsSavingVendor(true);
+    const newVendor = {
+      id: `V${Date.now().toString().slice(-4)}`,
+      name: trimmed,
+      email: 'vendor@mohit.com',
+      address: 'Factory / Store Location',
+      materialsJoined: 'General Accessories'
+    };
+
+    try {
+      if (typeof onAddVendor === 'function') {
+        await onAddVendor(newVendor);
+      } else {
+        const res = await fetch(`${getBackendUrl()}/api/vendors`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newVendor)
+        });
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+      }
+      setExtraVendors(prev => [...prev, newVendor]);
+      setSelectedVendorId(String(newVendor.id));
+      setIsManualVendor(false);
+      setSaveManualVendorToDb(false);
+      alert(`Vendor "${trimmed}" successfully saved to vendor database!`);
+    } catch (err) {
+      console.error('Save vendor error:', err);
+      setExtraVendors(prev => [...prev, newVendor]);
+      setSelectedVendorId(String(newVendor.id));
+      setIsManualVendor(false);
+      alert(`Vendor "${trimmed}" added to session vendor list.`);
+    } finally {
+      setIsSavingVendor(false);
     }
   };
 
@@ -2552,6 +2630,9 @@ export default function GeneratePOView({
     setExpectedDate("");
     setExpectedTime("");
     setSupplierName("");
+    setSelectedVendorId("");
+    setIsManualVendor(false);
+    setSaveManualVendorToDb(false);
     setRows([blankRow()]);
     setSelectedDesignId("");
     setPoMode("lot");
@@ -2586,9 +2667,16 @@ export default function GeneratePOView({
             handleRegeneratePoNumber();
             const vName = po.vendorName || "";
             setSupplierName(vName);
-            const matchedVendor = vendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
+            const matchedVendor = allVendors.find(v => (v.name || '').toLowerCase() === vName.toLowerCase() || String(v.id) === String(vName));
             if (matchedVendor) {
               setSelectedVendorId(String(matchedVendor.id));
+              setIsManualVendor(false);
+            } else if (vName) {
+              setSelectedVendorId('__manual__');
+              setIsManualVendor(true);
+            } else {
+              setSelectedVendorId('');
+              setIsManualVendor(false);
             }
 
             if (po.date) {
@@ -2731,6 +2819,31 @@ export default function GeneratePOView({
 
       // Call parent MySQL database sync callback
       await onAddPO(mySqlPo);
+
+      // Auto-save manual vendor if requested
+      if (isManualVendor && saveManualVendorToDb && payload.supplierName?.trim()) {
+        const vTrim = payload.supplierName.trim();
+        const exists = allVendors.some(v => (v.name || '').toLowerCase() === vTrim.toLowerCase());
+        if (!exists) {
+          const newV = {
+            id: `V${Date.now().toString().slice(-4)}`,
+            name: vTrim,
+            email: 'vendor@mohit.com',
+            address: 'Factory / Store Location',
+            materialsJoined: 'General Accessories'
+          };
+          if (typeof onAddVendor === 'function') {
+            onAddVendor(newV);
+          } else {
+            fetch(`${getBackendUrl()}/api/vendors`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newV)
+            }).catch(() => {});
+          }
+          setExtraVendors(prev => [...prev, newV]);
+        }
+      }
 
       // Sheets Sync
       try {
@@ -3197,18 +3310,121 @@ export default function GeneratePOView({
                     )}
 
                     <div style={{ gridColumn: poMode === 'lot' ? 'span 1' : 'span 2' }}>
-                      <label className="FormLabel">Vendor Profile</label>
-                      <select
-                        className="FilterSelect"
-                        value={selectedVendorId}
-                        onChange={e => handleVendorChange(e.target.value)}
-                        style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
-                      >
-                        <option value="">-- Choose Vendor --</option>
-                        {vendors.map(v => (
-                          <option key={v.id} value={String(v.id)}>{v.name} ({v.materialsJoined || 'Trims'})</option>
-                        ))}
-                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <label className="FormLabel" style={{ margin: 0 }}>Vendor Profile</label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (isManualVendor) {
+                              setIsManualVendor(false);
+                              setSelectedVendorId('');
+                              setSupplierName('');
+                            } else {
+                              setIsManualVendor(true);
+                              setSelectedVendorId('__manual__');
+                            }
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: isManualVendor ? 'var(--text-muted, #64748b)' : 'var(--primary-color, #2563eb)',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            padding: '2px 4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          title={isManualVendor ? "Switch to vendor list" : "Enter vendor name manually"}
+                        >
+                          {isManualVendor ? '📋 Pick from Saved' : '✍️ Enter Manually'}
+                        </button>
+                      </div>
+
+                      {isManualVendor ? (
+                        <div style={{ background: 'var(--bg-secondary, #f8fafc)', border: '1.5px dashed var(--primary-color, #2563eb)', borderRadius: '8px', padding: '10px' }}>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              placeholder="Type vendor / supplier name manually..."
+                              value={supplierName}
+                              onChange={e => setSupplierName(e.target.value)}
+                              style={{
+                                flex: 1,
+                                height: '38px',
+                                borderRadius: '8px',
+                                border: '1px solid var(--border-color)',
+                                fontWeight: '700',
+                                color: 'var(--text-main, #0f172a)',
+                                background: 'var(--bg-primary, #ffffff)'
+                              }}
+                              autoFocus
+                              required
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              onClick={() => {
+                                setIsManualVendor(false);
+                                setSelectedVendorId('');
+                                setSupplierName('');
+                              }}
+                              title="Switch back to vendor dropdown list"
+                              style={{ height: '38px', padding: '0 10px', fontSize: '11px', borderRadius: '8px', whiteSpace: 'nowrap' }}
+                            >
+                              List
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '6px', flexWrap: 'wrap', gap: '6px', fontSize: '11px' }}>
+                            <label style={{ color: 'var(--text-muted, #64748b)', display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: 'pointer', userSelect: 'none' }}>
+                              <input
+                                type="checkbox"
+                                checked={saveManualVendorToDb}
+                                onChange={e => setSaveManualVendorToDb(e.target.checked)}
+                                style={{ cursor: 'pointer' }}
+                              />
+                              <span>Save to database for future POs</span>
+                            </label>
+                            {supplierName.trim() && (
+                              <button
+                                type="button"
+                                onClick={handleSaveVendorNow}
+                                disabled={isSavingVendor}
+                                style={{
+                                  background: '#eff6ff',
+                                  border: '1px solid #bfdbfe',
+                                  color: '#1d4ed8',
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  fontSize: '11px'
+                                }}
+                              >
+                                {isSavingVendor ? 'Saving...' : '💾 Save Vendor'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <select
+                          className="FilterSelect"
+                          value={selectedVendorId}
+                          onChange={e => handleVendorChange(e.target.value)}
+                          style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)' }}
+                        >
+                          <option value="">-- Choose Vendor --</option>
+                          <option value="__manual__">✍️ Enter Vendor Name Manually...</option>
+                          {allVendors.map(v => (
+                            <option key={v.id} value={String(v.id)}>{v.name}</option>
+                          ))}
+                        </select>
+                      )}
                     </div>
                   </div>
 
@@ -3299,13 +3515,23 @@ export default function GeneratePOView({
                     <label className="FormLabel">Choose From Saved Vendor Profiles</label>
                     <select
                       className="FilterSelect"
-                      value={selectedVendorId}
-                      onChange={e => handleVendorChange(e.target.value)}
+                      value={isManualVendor ? '__manual__' : selectedVendorId}
+                      onChange={e => {
+                        if (e.target.value === '__manual__') {
+                          setIsManualVendor(true);
+                          setSelectedVendorId('__manual__');
+                          setSupplierName('');
+                        } else {
+                          setIsManualVendor(false);
+                          handleVendorChange(e.target.value);
+                        }
+                      }}
                       style={{ width: '100%', height: '40px', borderRadius: '8px', border: '1px solid var(--border-color)', marginBottom: '8px' }}
                     >
                       <option value="">-- Choose Saved Vendor --</option>
-                      {vendors.map(v => (
-                        <option key={v.id} value={String(v.id)}>{v.name} ({v.materialsJoined || 'Trims'})</option>
+                      <option value="__manual__">✍️ Enter Vendor Name Manually...</option>
+                      {allVendors.map(v => (
+                        <option key={v.id} value={String(v.id)}>{v.name}</option>
                       ))}
                     </select>
                   </div>
@@ -3319,8 +3545,14 @@ export default function GeneratePOView({
                       onChange={e => {
                         const val = e.target.value;
                         setSupplierName(val);
-                        const matched = vendors.find(v => (v.name || '').toLowerCase() === val.trim().toLowerCase());
-                        setSelectedVendorId(matched ? matched.id : '');
+                        const matched = allVendors.find(v => (v.name || '').toLowerCase() === val.trim().toLowerCase());
+                        if (matched) {
+                          setSelectedVendorId(String(matched.id));
+                          setIsManualVendor(false);
+                        } else {
+                          setSelectedVendorId('__manual__');
+                          setIsManualVendor(true);
+                        }
                       }}
                       style={{ borderRadius: '8px' }}
                       required

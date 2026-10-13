@@ -2888,6 +2888,7 @@ export default function App() {
                   vendors={vendors}
                   pos={pos}
                   onAddPO={handleAddPO}
+                  onAddVendor={handleAddVendor}
                   currencySymbol={currencySymbol}
                   prefilledPoData={prefilledPoData}
                   setPrefilledPoData={setPrefilledPoData}
@@ -3089,6 +3090,7 @@ export default function App() {
                   racks={racks}
                   halls={halls}
                   materials={materials}
+                  onUpdateMaterial={handleUpdateMaterial}
                 />
               )}
 
@@ -3100,6 +3102,7 @@ export default function App() {
                   onNavigate={setActiveTab}
                   currentUser={currentUser}
                   allowWarehouseAddRack={allowWarehouseAddRack}
+                  onUpdateMaterial={handleUpdateMaterial}
                 />
               )}
 
