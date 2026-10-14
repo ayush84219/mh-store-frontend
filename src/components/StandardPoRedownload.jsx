@@ -17,9 +17,9 @@ const PO_DASH_KEYS = {
   SHADE_ENABLED: "po_dash_shade_enabled"
 };
 
-// Default Values
-const DEFAULT_API_KEY = "AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk";
-const DEFAULT_SPREADSHEET_ID = "1hy43mDxXtGVq4jeMV_NxX25Q7tnX55NnplN7eqpT74k";
+// Default Values from Environment
+const DEFAULT_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
+const DEFAULT_SPREADSHEET_ID = import.meta.env.VITE_PO_SPREADSHEET_ID || "";
 
 export default function StandardPoRedownload() {
   // Settings State
@@ -323,7 +323,7 @@ export default function StandardPoRedownload() {
       const poNo = selectedPO["PO #"];
 
       // Constants match defaults from form
-      const WEB_APP_BASE = "https://script.google.com/macros/s/AKfycbydY5UUXgbyseONnQvnrWldDpmxzRH_m9crbMMhyTapZZ4flbV6AztESNjmusoH1xAluA/exec";
+      const WEB_APP_BASE = import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || "";
       const company = {
         name: "StitchPro Pvt. Ltd.",
         address: "Plot 42, Industrial Area, Jaipur, RJ",

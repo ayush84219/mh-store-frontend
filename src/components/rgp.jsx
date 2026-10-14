@@ -7,7 +7,7 @@ import SmartSelectWithManual from "./SmartSelectWithManual";
 
 // MUST be your deployed /exec URL
 export const WEB_APP_URL =
-  "https://script.google.com/macros/s/AKfycbydY5UUXgbyseONnQvnrWldDpmxzRH_m9crbMMhyTapZZ4flbV6AztESNjmusoH1xAluA/exec";
+  import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || "";
 
 // Enhanced QR code generation with multiple fallbacks
 export const generateQRCode = async (url) => {

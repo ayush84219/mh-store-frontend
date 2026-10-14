@@ -6,8 +6,8 @@ import {
   WEB_APP_URL
 } from "./rgp";
 
-const HARDCODED_API_KEY = "AIzaSyAomDFBkOySlIxKWSKGHe6ATv9gvaBr7uk";
-const DEFAULT_SPREADSHEET_ID = "1BZ-ufmxeqa9XdU-jkuIgeNxHvhnYKjWj4UpnI3bHJKo";
+const HARDCODED_API_KEY = import.meta.env.VITE_GOOGLE_API_KEY || "";
+const DEFAULT_SPREADSHEET_ID = import.meta.env.VITE_RGP_SPREADSHEET_ID || "";
 
 function normalizeRgpNo(val) {
   return String(val || "")
@@ -210,8 +210,7 @@ export default function RgpRedownload({
     const payload = buildPdfPayload();
     if (!payload) throw new Error("No RGP selected or payload is invalid");
 
-    const assignedRgpNo = payload.rgpNo;
-    const baseUrl = WEB_APP_URL || "https://script.google.com/macros/s/AKfycbydY5UUXgbyseONnQvnrWldDpmxzRH_m9crbMMhyTapZZ4flbV6AztESNjmusoH1xAluA/exec";
+    const baseUrl = WEB_APP_URL || import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || "";
     const entryUrl = `${baseUrl}?mode=entry&rgp=${encodeURIComponent(assignedRgpNo)}`;
     const returnUrl = `${baseUrl}?mode=return&rgp=${encodeURIComponent(assignedRgpNo)}`;
 

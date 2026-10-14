@@ -2339,7 +2339,22 @@ export default function ExtraMaterialIssueView({
         const vId = String(log.id || `${log.lotId}-${log.date}`);
         if (!seenVouchers.has(vId)) {
           seenVouchers.add(vId);
-          combined.push(log);
+          const cleanLot = String(log.lotId || '').trim().toLowerCase();
+          const dMatch = (designs || []).find(d => 
+            String(d.id || '').trim().toLowerCase() === cleanLot ||
+            String(d.lotNo2 || '').trim().toLowerCase() === cleanLot ||
+            String(d.lotNumber || '').trim().toLowerCase() === cleanLot
+          );
+          const dbMatch = (dbExtraIssues || []).find(db => 
+            String(db.voucher_id || db.voucherId || db.id) === vId ||
+            String(db.lot_id || db.lotId).trim().toLowerCase() === cleanLot
+          );
+          const brand = log.brand || dbMatch?.brand || dMatch?.brand || 'Mohit Hosiery';
+          combined.push({
+            ...log,
+            brand,
+            category: log.category || dMatch?.category || dbMatch?.category || 'Garment'
+          });
         }
       }
     });
@@ -2349,6 +2364,12 @@ export default function ExtraMaterialIssueView({
       const vId = String(dbRow.voucher_id || dbRow.voucherId || dbRow.id || '');
       if (vId && !seenVouchers.has(vId)) {
         seenVouchers.add(vId);
+        const cleanLot = String(dbRow.lot_id || dbRow.lotId || '').trim().toLowerCase();
+        const dMatch = (designs || []).find(d => 
+          String(d.id || '').trim().toLowerCase() === cleanLot ||
+          String(d.lotNo2 || '').trim().toLowerCase() === cleanLot ||
+          String(d.lotNumber || '').trim().toLowerCase() === cleanLot
+        );
         combined.push({
           id: vId,
           lotId: dbRow.lot_id || dbRow.lotId,
@@ -2363,16 +2384,16 @@ export default function ExtraMaterialIssueView({
             unit: it.unit || 'Pcs',
             reason: it.reason
           })),
-          isReissue: Boolean(dbRow.is_reissue || dbRow.isReissue),
-          category: dbRow.category || 'Extra Material Issue',
-          brand: dbRow.brand,
+          isReissue: vId.startsWith('RI') ? true : false,
+          category: dbRow.category || dMatch?.category || 'Extra Material Issue',
+          brand: dbRow.brand || dMatch?.brand || 'Mohit Hosiery',
           volume: dbRow.pieces
         });
       }
     });
 
     return combined;
-  }, [allIssueLogs, dbExtraIssues]);
+  }, [allIssueLogs, dbExtraIssues, designs]);
 
   // Helper to accurately determine if a transaction log is Re-Issue vs Extra Material Issue
   const isLogReissue = (log) => {
@@ -2816,7 +2837,7 @@ export default function ExtraMaterialIssueView({
                 <th style="width: 25px; text-align: center;">#</th>
                 <th style="width: 95px;">Challan / Bill No</th>
                 <th style="width: 95px;">Date & Time</th>
-                <th style="width: 105px;">Lot & Garment</th>
+                <th style="width: 110px;">Lot & Brand</th>
                 <th style="width: 85px; text-align: center;">Category</th>
                 <th>Issued Materials, Quantities & Specific Reasons</th>
                 <th style="width: 95px;">Issued By</th>
@@ -2827,10 +2848,10 @@ export default function ExtraMaterialIssueView({
               ${extraIssueLogs.map((log, idx) => {
                 const isReissue = isLogReissue(log);
                 const matchedDesign = designs.find(d => String(d.id) === String(log.lotId));
-                const lotBrand = matchedDesign?.brand ? `${matchedDesign.brand} • ` : '';
                 const lotCategory = log.category || matchedDesign?.category || 'Garment';
                 const cleanIssuer = (log.personName || 'Store In-charge').replace(/\\s*\\(.*?\\)/, '').trim() || 'Store In-charge';
                 const receiver = log.receiverName || 'Cutting Floor';
+                const brandName = log.brand || matchedDesign?.brand || 'Mohit Hosiery';
 
                 return `
                   <tr>
@@ -2839,7 +2860,8 @@ export default function ExtraMaterialIssueView({
                     <td style="white-space: nowrap; color: #000000; font-weight: 700;">${log.date}</td>
                     <td>
                       <strong style="color: #000000; font-size: 10px;">LOT #${log.lotId || 'DIRECT'}</strong>
-                      <div style="font-size: 8.5px; color: #000000; font-weight: 600;">${lotBrand}${lotCategory}</div>
+                      <div style="font-size: 8.5px; color: #000000; font-weight: 800; margin-top: 1px;">Brand: ${brandName}</div>
+                      <div style="font-size: 8px; color: #000000; font-weight: 600;">${lotCategory && lotCategory !== 'Unknown' ? lotCategory : 'Garment'}</div>
                     </td>
                     <td style="text-align: center;">
                       <span class="badge-cat">
@@ -2953,7 +2975,7 @@ export default function ExtraMaterialIssueView({
         idx + 1,
         log.id,
         log.date,
-        `Lot #${log.lotId || 'DIRECT'}`,
+        `Lot #${log.lotId || 'DIRECT'}\nBrand: ${log.brand || 'Mohit Hosiery'}`,
         isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL',
         itemsText,
         cleanIssuer,
@@ -2963,7 +2985,7 @@ export default function ExtraMaterialIssueView({
 
     autoTable(doc, {
       startY: 28,
-      head: [['#', 'Challan No', 'Date', 'Lot Ref', 'Category', 'Issued Materials & Reasons', 'Issued By', 'Received By']],
+      head: [['#', 'Challan No', 'Date', 'Lot & Brand', 'Category', 'Issued Materials & Reasons', 'Issued By', 'Received By']],
       body: tableRows,
       theme: 'grid',
       headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
@@ -5513,7 +5535,7 @@ export default function ExtraMaterialIssueView({
                     <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
                       <th style={{ padding: '10px 12px' }}>Challan / Bill No</th>
                       <th style={{ padding: '10px 12px' }}>Date</th>
-                      <th style={{ padding: '10px 12px' }}>Lot Reference</th>
+                      <th style={{ padding: '10px 12px' }}>Lot & Brand</th>
                       <th style={{ padding: '10px 12px' }}>Issued Materials</th>
                       <th style={{ padding: '10px 12px' }}>Issued By</th>
                       <th style={{ padding: '10px 12px' }}>Received By</th>
@@ -5559,29 +5581,34 @@ export default function ExtraMaterialIssueView({
                             {log.date}
                           </td>
 
-                          {/* Lot Reference & Distinct Category Badge */}
+                          {/* Lot Reference & Distinct Category Badge & Brand */}
                           <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-                              <span>LOT #{log.lotId || 'DIRECT'}</span>
-                              {(() => {
-                                const isReissue = isLogReissue(log);
-                                return (
-                                  <span style={{
-                                    fontSize: '10px',
-                                    background: isReissue ? '#fef2f2' : '#f0fdf4',
-                                    color: isReissue ? '#b91c1c' : '#15803d',
-                                    border: `1px solid ${isReissue ? '#fecaca' : '#bbf7d0'}`,
-                                    padding: '2px 7px',
-                                    borderRadius: '5px',
-                                    fontWeight: '800',
-                                    letterSpacing: '0.3px',
-                                    display: 'inline-flex',
-                                    alignItems: 'center'
-                                  }}>
-                                    {isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL'}
-                                  </span>
-                                );
-                              })()}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                                <span>LOT #{log.lotId || 'DIRECT'}</span>
+                                {(() => {
+                                  const isReissue = isLogReissue(log);
+                                  return (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      background: isReissue ? '#fef2f2' : '#f0fdf4',
+                                      color: isReissue ? '#b91c1c' : '#15803d',
+                                      border: `1px solid ${isReissue ? '#fecaca' : '#bbf7d0'}`,
+                                      padding: '2px 7px',
+                                      borderRadius: '5px',
+                                      fontWeight: '800',
+                                      letterSpacing: '0.3px',
+                                      display: 'inline-flex',
+                                      alignItems: 'center'
+                                    }}>
+                                      {isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL'}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
+                              <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>
+                                <span style={{ color: '#0f172a', fontWeight: '800' }}>Brand:</span> {log.brand || 'Mohit Hosiery'}
+                              </div>
                             </div>
                           </td>
 
