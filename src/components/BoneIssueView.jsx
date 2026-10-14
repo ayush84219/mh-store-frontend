@@ -37,6 +37,8 @@ export default function BoneIssueView({
   const [customWidth, setCustomWidth] = useState('');
   const [selectedShade, setSelectedShade] = useState('');
   const effectiveWidth = boneWidth === 'Custom' ? (customWidth || '1.5 Inch') : boneWidth;
+  const effectiveTapeWidth = '0.5 Inch (Standard)';
+  const effectiveElasticWidth = '1 Inch (Standard)';
   const materialMode = 'bone';
 
   // Issuer, Receiver & Supervisor

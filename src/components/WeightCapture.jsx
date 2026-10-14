@@ -852,6 +852,7 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
           invoiceNo: form.invoiceNo,
           location: finalLocation,
           pieces: pieces,
+          packets: totalPackets,
           netWeightKg: netKg,
           uom: form.unit,
           personName: form.storeIncharge || currentUser?.name || 'Operator'

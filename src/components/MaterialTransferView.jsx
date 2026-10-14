@@ -270,7 +270,16 @@ function SearchableMaterialSelect({ materials = [], value, onChange, placeholder
                     onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {m.imageUrl ? (
+                          <div style={{ width: '28px', height: '28px', borderRadius: '6px', overflow: 'hidden', border: '1px solid #cbd5e1', flexShrink: 0, backgroundColor: '#ffffff' }}>
+                            <img src={m.imageUrl} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        ) : (
+                          <div style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #e2e8f0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f8fafc', color: '#94a3b8' }}>
+                            <Package size={14} />
+                          </div>
+                        )}
                         <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', color: 'var(--accent-color, #0284c7)', background: 'rgba(2, 132, 199, 0.12)', padding: '1px 6px', borderRadius: '4px' }}>
                           {m.id}
                         </span>
@@ -1389,8 +1398,28 @@ export default function MaterialTransferView({
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'var(--bg-secondary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-color, #0284c7)' }}>
-                    <Box size={20} />
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-secondary, #ffffff)',
+                    border: '1.5px solid var(--border-color, #cbd5e1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--accent-color, #0284c7)',
+                    overflow: 'hidden',
+                    flexShrink: 0
+                  }}>
+                    {selectedMaterial.imageUrl ? (
+                      <img
+                        src={selectedMaterial.imageUrl}
+                        alt={selectedMaterial.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      <Box size={22} />
+                    )}
                   </div>
                   <div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

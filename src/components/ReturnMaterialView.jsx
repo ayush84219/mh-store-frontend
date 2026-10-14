@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   RotateCcw, Search, Package, AlertTriangle, CheckCircle,
   Plus, Trash2, X, Layers, Info, Zap, Clock,
   ChevronDown, ChevronUp, Hash, Tag, User, Calendar, Box,
-  TrendingDown, FileText, BarChart3, ArrowLeft, Barcode
+  TrendingDown, FileText, BarChart3, ArrowLeft, Barcode,
+  Printer, Download, Copy, Check, Filter, ExternalLink, RefreshCw, Eye
 } from 'lucide-react';
 
 // Helper to extract strictly active BOM components where status is 'Yes'
@@ -244,6 +245,14 @@ export default function ReturnMaterialView({
   const [hoveredRow, setHoveredRow] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef(null);
+
+  // ── Return History State ─────────────────────────────────────────────────
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historyDateFilter, setHistoryDateFilter] = useState('all'); // 'all'|'today'|'yesterday'|'last7'|'thisMonth'|'custom'
+  const [historySpecificDate, setHistorySpecificDate] = useState('');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('all'); // 'all'|'lot'|'quick'
+  const [selectedReturnSlip, setSelectedReturnSlip] = useState(null);
+  const [copiedVoucherId, setCopiedVoucherId] = useState(null);
 
   // ── Barcode Scanner State & Handlers ─────────────────────────────────────
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -567,6 +576,368 @@ export default function ReturnMaterialView({
   const totalReturnQty = returnItems.reduce((sum, i) => sum + (parseFloat(i.qty) || 0), 0);
   const filledItems = returnItems.filter(i => i.materialId && parseFloat(i.qty) > 0).length;
 
+  // ── Return History Memoized Data & Handlers ──────────────────────────────
+  const parseDateToObj = (dateVal) => {
+    if (!dateVal) return new Date(0);
+    const str = String(dateVal).trim();
+    const dmyRegex = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?)?(?:\s*(AM|PM))?/i;
+    const match = str.match(dmyRegex);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const year = parseInt(match[3], 10);
+      let hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      const ampm = match[6];
+      if (ampm) {
+        if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
+        if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+      }
+      return new Date(year, month, day, hour, minute);
+    }
+    const parsed = new Date(dateVal);
+    return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+  };
+
+  const returnLogs = useMemo(() => {
+    return (issueLogs || []).filter(l => {
+      if (!l) return false;
+      const idUpper = String(l.id || '').toUpperCase();
+      const typeUpper = String(l.type || '').toUpperCase();
+      return l.isReturn === true || l.isReturn === 1 || String(l.isReturn).toLowerCase() === 'true' || idUpper.startsWith('MR') || typeUpper === 'RETURN' || typeUpper === 'RETURN_MATERIAL';
+    }).map(log => {
+      let mats = [];
+      if (Array.isArray(log.materials)) {
+        mats = log.materials;
+      } else if (typeof log.materials === 'string') {
+        try { mats = JSON.parse(log.materials); } catch (_) { mats = []; }
+      }
+      const totalQty = mats.reduce((sum, m) => sum + (Number(m.qty) || 0), 0);
+      const isLotReturn = Boolean(log.lotId && log.lotId !== 'N/A' && log.lotId !== 'DIRECT-ITEM');
+      const matchedDesign = designs.find(d => String(d.id).toLowerCase() === String(log.lotId || '').toLowerCase() || (d.lotNo2 && d.lotNo2.toLowerCase() === String(log.lotId || '').toLowerCase()));
+
+      return {
+        ...log,
+        parsedMaterials: mats,
+        totalQty: Math.round(totalQty * 100) / 100,
+        isLotReturn,
+        designInfo: matchedDesign
+      };
+    });
+  }, [issueLogs, designs]);
+
+  const filteredReturnLogs = useMemo(() => {
+    const today = new Date();
+    const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayYmd = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const sevenDaysYmd = `${sevenDaysAgo.getFullYear()}-${String(sevenDaysAgo.getMonth() + 1).padStart(2, '0')}-${String(sevenDaysAgo.getDate()).padStart(2, '0')}`;
+    const firstOfMonthYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+
+    return returnLogs.filter(log => {
+      const dObj = parseDateToObj(log.date || log.created_at);
+      const ymd = dObj.getFullYear() > 1970
+        ? `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`
+        : '';
+
+      // Date filter
+      if (historyDateFilter === 'today' && ymd !== todayYmd) return false;
+      if (historyDateFilter === 'yesterday' && ymd !== yesterdayYmd) return false;
+      if (historyDateFilter === 'last7' && (ymd < sevenDaysYmd || ymd > todayYmd)) return false;
+      if (historyDateFilter === 'thisMonth' && ymd < firstOfMonthYmd) return false;
+      if (historyDateFilter === 'custom' && historySpecificDate && ymd !== historySpecificDate) return false;
+
+      // Type filter
+      if (historyTypeFilter === 'lot' && !log.isLotReturn) return false;
+      if (historyTypeFilter === 'quick' && log.isLotReturn) return false;
+
+      // Search filter
+      if (historySearchQuery.trim()) {
+        const q = historySearchQuery.toLowerCase().trim();
+        const idMatch = String(log.id || '').toLowerCase().includes(q);
+        const lotMatch = String(log.lotId || '').toLowerCase().includes(q);
+        const personMatch = String(log.personName || '').toLowerCase().includes(q);
+        const catMatch = String(log.category || '').toLowerCase().includes(q);
+        const designMatch = log.designInfo && (
+          String(log.designInfo.style || '').toLowerCase().includes(q) ||
+          String(log.designInfo.brand || '').toLowerCase().includes(q)
+        );
+        const matMatch = (log.parsedMaterials || []).some(m =>
+          String(m.name || '').toLowerCase().includes(q) ||
+          String(m.bomItemName || '').toLowerCase().includes(q)
+        );
+        if (!idMatch && !lotMatch && !personMatch && !catMatch && !designMatch && !matMatch) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [returnLogs, historyDateFilter, historySpecificDate, historyTypeFilter, historySearchQuery]);
+
+  // Overall metrics for Return History
+  const historyMetrics = useMemo(() => {
+    let totalUnits = 0;
+    const uniqueMats = new Set();
+    let lotCount = 0;
+    let quickCount = 0;
+
+    filteredReturnLogs.forEach(log => {
+      totalUnits += log.totalQty || 0;
+      if (log.isLotReturn) lotCount++;
+      else quickCount++;
+      (log.parsedMaterials || []).forEach(m => {
+        if (m.name) uniqueMats.add(String(m.name).trim().toLowerCase());
+      });
+    });
+
+    return {
+      totalReturns: filteredReturnLogs.length,
+      totalUnits: Math.round(totalUnits * 100) / 100,
+      uniqueMaterials: uniqueMats.size,
+      lotReturns: lotCount,
+      quickReturns: quickCount
+    };
+  }, [filteredReturnLogs]);
+
+  const handleCopyVoucherId = (id) => {
+    if (!id) return;
+    navigator.clipboard?.writeText(id);
+    setCopiedVoucherId(id);
+    setTimeout(() => setCopiedVoucherId(null), 2000);
+  };
+
+  const exportReturnHistoryToCsv = () => {
+    if (filteredReturnLogs.length === 0) return;
+    const headers = [
+      'Return Voucher ID',
+      'Date & Time',
+      'Return Mode',
+      'Lot Number',
+      'Garment Style',
+      'Material Name',
+      'BOM Component',
+      'Returned Qty',
+      'Unit',
+      'Remarks / Reason'
+    ];
+    const rows = [];
+    filteredReturnLogs.forEach(log => {
+      const modeLabel = log.isLotReturn ? 'Lot Return' : 'Quick Return';
+      const lotNo = log.lotId || 'N/A';
+      const styleName = log.designInfo?.style || log.category || 'N/A';
+      const remarks = log.personName || '';
+
+      if (log.parsedMaterials.length === 0) {
+        rows.push([log.id, log.date || '', modeLabel, lotNo, styleName, '—', '—', '0', 'pcs', remarks]);
+      } else {
+        log.parsedMaterials.forEach(m => {
+          rows.push([
+            log.id,
+            log.date || '',
+            modeLabel,
+            lotNo,
+            styleName,
+            m.name || 'Unknown',
+            m.bomItemName || 'Return',
+            m.qty || 0,
+            m.unit || 'pcs',
+            remarks
+          ]);
+        });
+      }
+    });
+
+    const csvContent = [
+      headers.map(h => `"${h}"`).join(','),
+      ...rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `material_return_history_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const printReturnVoucher = (slip) => {
+    if (!slip) return;
+    const printWindow = window.open('', '_blank', 'width=850,height=900');
+    if (!printWindow) {
+      alert('Please allow popup windows to print the Return Voucher slip.');
+      return;
+    }
+    const materialsHtml = (slip.parsedMaterials || []).map((m, idx) => `
+      <tr>
+        <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${idx + 1}</td>
+        <td style="border: 1px solid #000; padding: 7px 10px; font-weight: bold;">${m.name || 'Material'}</td>
+        <td style="border: 1px solid #000; padding: 7px 10px;">${m.bomItemName || 'Return'}</td>
+        <td style="border: 1px solid #000; padding: 7px 10px; text-align: right; font-weight: bold;">${m.qty}</td>
+        <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${m.unit || 'pcs'}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Return Voucher - ${slip.id}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 24px; color: #000; }
+          .voucher-box { border: 2px solid #000; padding: 24px; max-width: 800px; margin: 0 auto; }
+          .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 18px; }
+          .header h1 { margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 1px; }
+          .header h2 { margin: 4px 0 0; font-size: 13px; font-weight: normal; }
+          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; font-size: 13px; }
+          .meta-item { display: flex; }
+          .meta-label { font-weight: bold; width: 140px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 14px; margin-bottom: 24px; font-size: 13px; }
+          th { border: 1.5px solid #000; padding: 8px 10px; background: #eee; text-align: left; }
+          .remarks { border: 1px solid #000; padding: 12px; font-size: 12px; margin-bottom: 36px; min-height: 40px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; }
+          .sig-block { text-align: center; width: 200px; border-top: 1px dashed #000; padding-top: 6px; font-size: 12px; font-weight: bold; }
+          @media print {
+            body { margin: 0; }
+            .voucher-box { border: 2px solid #000; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="voucher-box">
+          <div class="header">
+            <h1>MATERIAL RETURN VOUCHER (MRV)</h1>
+            <h2>Warehouse Accessories Inventory Return Slip</h2>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-item"><span class="meta-label">Voucher No:</span><strong>${slip.id}</strong></div>
+            <div class="meta-item"><span class="meta-label">Date & Time:</span><span>${slip.date || '—'}</span></div>
+            <div class="meta-item"><span class="meta-label">Return Mode:</span><span>${slip.isLotReturn ? `Lot Return (#${slip.lotId})` : 'Quick / Direct Return'}</span></div>
+            <div class="meta-item"><span class="meta-label">Style / Garment:</span><span>${slip.designInfo?.style || slip.category || 'N/A'}</span></div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 40px; text-align: center;">#</th>
+                <th>Material Description</th>
+                <th>BOM Component</th>
+                <th style="width: 100px; text-align: right;">Returned Qty</th>
+                <th style="width: 80px; text-align: center;">Unit</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${materialsHtml}
+            </tbody>
+          </table>
+          <div class="remarks">
+            <strong>Return Reason / Remarks:</strong><br/>
+            ${slip.personName || 'Excess or unused material returned back to warehouse inventory stock.'}
+          </div>
+          <div class="signatures">
+            <div class="sig-block">Returned By (Floor)</div>
+            <div class="sig-block">Store In-Charge (Receiver)</div>
+            <div class="sig-block">Authorized Signatory</div>
+          </div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  const printAllReturnHistory = () => {
+    if (filteredReturnLogs.length === 0) return;
+    const printWindow = window.open('', '_blank', 'width=1000,height=900');
+    if (!printWindow) {
+      alert('Please allow popup windows to print report.');
+      return;
+    }
+    const rowsHtml = filteredReturnLogs.map((log, idx) => {
+      const itemsText = (log.parsedMaterials || []).map(m => `${m.name} (${m.qty} ${m.unit || 'pcs'})`).join(', ') || '—';
+      return `
+        <tr>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: center;">${idx + 1}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; font-weight: bold;">${log.id}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;">${log.date || '—'}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;">${log.isLotReturn ? `Lot #${log.lotId}` : 'Quick Return'}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;">${log.designInfo?.style || log.category || '—'}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;">${itemsText}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px; text-align: right; font-weight: bold;">${log.totalQty}</td>
+          <td style="border: 1px solid #000; padding: 6px 8px;">${log.personName || '—'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Material Return History Audit Report</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; margin: 20px; color: #000; }
+          .header { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 16px; }
+          .header h1 { margin: 0; font-size: 18px; text-transform: uppercase; }
+          .header p { margin: 4px 0 0; font-size: 12px; color: #333; }
+          .summary-bar { display: flex; justify-content: space-between; border: 1px solid #000; padding: 8px 12px; font-size: 12px; margin-bottom: 14px; font-weight: bold; background: #f5f5f5; }
+          table { width: 100%; border-collapse: collapse; font-size: 11px; }
+          th { border: 1.5px solid #000; padding: 7px 8px; background: #eee; text-align: left; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 40px; padding-top: 10px; }
+          .sig-block { text-align: center; width: 180px; border-top: 1px dashed #000; padding-top: 5px; font-size: 11px; font-weight: bold; }
+          @media print {
+            body { margin: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>MATERIAL RETURN AUDIT REPORT & REGISTER</h1>
+          <p>Generated on: ${new Date().toLocaleString()} | Filter: ${historyDateFilter.toUpperCase()} | Total Returns: ${filteredReturnLogs.length}</p>
+        </div>
+        <div class="summary-bar">
+          <span>Total Vouchers: ${historyMetrics.totalReturns}</span>
+          <span>Total Units Returned: ${historyMetrics.totalUnits}</span>
+          <span>Lot Returns: ${historyMetrics.lotReturns} | Quick Returns: ${historyMetrics.quickReturns}</span>
+          <span>Unique Materials: ${historyMetrics.uniqueMaterials}</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30px; text-align: center;">#</th>
+              <th style="width: 80px;">Voucher #</th>
+              <th style="width: 100px;">Date & Time</th>
+              <th style="width: 90px;">Source</th>
+              <th style="width: 90px;">Style</th>
+              <th>Materials Returned</th>
+              <th style="width: 70px; text-align: right;">Total Qty</th>
+              <th style="width: 120px;">Reason / Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+        <div class="signatures">
+          <div class="sig-block">Store Clerk / Prepared By</div>
+          <div class="sig-block">Warehouse Manager</div>
+          <div class="sig-block">Factory Auditor</div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); }
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
 
 
   return (
@@ -599,14 +970,13 @@ export default function ReturnMaterialView({
           backdrop-filter: blur(20px);
           -webkit-backdrop-filter: blur(20px);
           border-radius: 20px;
-          padding: 28px 32px;
-          margin-bottom: 24px;
-          box-shadow: 0 2px 20px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.05);
+          padding: 22px 28px;
+          margin-bottom: 22px;
+          box-shadow: 0 2px 20px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
           display: flex;
           justify-content: space-between;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 24px;
+          gap: 20px;
           border: 1px solid rgba(99, 102, 241, 0.12);
           position: relative;
           overflow: hidden;
@@ -627,16 +997,17 @@ export default function ReturnMaterialView({
         .RM_HeroTitleSection {
           display: flex;
           align-items: center;
-          gap: 20px;
+          gap: 18px;
+          min-width: 0;
         }
 
         .RM_HeroIcon {
           display: flex;
           align-items: center;
           justify-content: center;
-          width: 64px;
-          height: 64px;
-          border-radius: 18px;
+          width: 58px;
+          height: 58px;
+          border-radius: 16px;
           background: linear-gradient(135deg, #6366f1 0%, #10b981 100%);
           color: white;
           font-size: 26px;
@@ -646,7 +1017,7 @@ export default function ReturnMaterialView({
 
         .RM_HeroText h2 {
           margin: 0;
-          font-size: 1.75rem;
+          font-size: 1.65rem;
           font-weight: 900;
           font-family: var(--font-family-title);
           background: linear-gradient(135deg, #312e81 0%, #6366f1 50%, #10b981 100%);
@@ -659,25 +1030,28 @@ export default function ReturnMaterialView({
         .RM_HeroText p {
           margin: 4px 0 0 0;
           color: var(--text-muted, #64748b);
-          font-size: 0.95rem;
+          font-size: 0.9rem;
           font-weight: 400;
         }
 
         .RM_StatRow {
           display: flex;
           gap: 12px;
-          flex-wrap: wrap;
+          align-items: center;
+          flex-shrink: 0;
         }
 
         .RM_StatCard {
-          padding: 12px 18px;
-          border-radius: 14px;
+          padding: 8px 14px;
+          border-radius: 13px;
           background: var(--bg-secondary, #ffffff);
           border: 1px solid var(--border-color, #e2e8f0);
           display: flex;
           align-items: center;
           gap: 10px;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+          box-shadow: 0 1px 4px rgba(0,0,0,0.02);
+          transition: all 0.2s ease;
+          user-select: none;
         }
 
         .RM_StatIcon {
@@ -687,54 +1061,112 @@ export default function ReturnMaterialView({
           display: flex;
           align-items: center;
           justify-content: center;
+          flex-shrink: 0;
         }
 
         .RM_StatVal {
-          font-size: 18px;
+          font-size: 16px;
           font-weight: 800;
           color: var(--text-main, #0f172a);
-          line-height: 1;
+          line-height: 1.1;
         }
 
         .RM_StatLabel {
           font-size: 11px;
           color: var(--text-muted, #64748b);
           margin-top: 2px;
-          font-weight: 500;
+          font-weight: 600;
+          white-space: nowrap;
         }
 
         .RM_ModeContainer {
           display: inline-flex;
+          align-items: center;
           background: var(--bg-secondary, #ffffff);
           border-radius: 14px;
           border: 1.5px solid var(--border-color, #e2e8f0);
           padding: 4px;
-          position: relative;
+          gap: 6px;
           box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-        }
-
-        .RM_ModePill {
-          position: absolute;
-          top: 4px;
-          bottom: 4px;
-          border-radius: 10px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .RM_ModeBtn {
           position: relative;
           z-index: 1;
-          padding: 10px 24px;
+          padding: 9px 18px;
           border: none;
           cursor: pointer;
           border-radius: 10px;
-          font-size: 0.9rem;
+          font-size: 0.88rem;
           font-weight: 600;
-          display: flex;
+          display: inline-flex;
           align-items: center;
           gap: 8px;
           background: transparent;
-          transition: color 0.25s ease;
+          color: var(--text-muted, #64748b);
+          transition: all 0.2s ease;
+          white-space: nowrap;
+          outline: none;
+        }
+
+        .RM_ModeBtn:hover:not(.active-lot):not(.active-quick):not(.active-history) {
+          color: var(--text-main, #0f172a);
+          background: rgba(0, 0, 0, 0.04);
+        }
+
+        .RM_ModeBtn.active-lot {
+          background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          color: #ffffff !important;
+          font-weight: 700;
+          box-shadow: 0 4px 14px rgba(99, 102, 241, 0.32);
+        }
+
+        .RM_ModeBtn.active-quick {
+          background: linear-gradient(135deg, #10b981, #059669);
+          color: #ffffff !important;
+          font-weight: 700;
+          box-shadow: 0 4px 14px rgba(16, 185, 129, 0.32);
+        }
+
+        .RM_ModeBtn.active-history {
+          background: linear-gradient(135deg, #0ea5e9, #0284c7);
+          color: #ffffff !important;
+          font-weight: 700;
+          box-shadow: 0 4px 14px rgba(14, 165, 233, 0.32);
+        }
+
+        .RM_TabCount {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 2px 7px;
+          border-radius: 12px;
+          font-size: 0.72rem;
+          font-weight: 700;
+          line-height: 1.1;
+        }
+
+        .RM_ModeBtn.active-history .RM_TabCount {
+          background: rgba(255, 255, 255, 0.28);
+          color: #ffffff;
+        }
+
+        .RM_ModeBtn:not(.active-history) .RM_TabCount {
+          background: rgba(14, 165, 233, 0.12);
+          color: #0284c7;
+        }
+
+        @media (max-width: 900px) {
+          .RM_Hero {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+          }
+          .RM_StatRow {
+            width: 100%;
+            overflow-x: auto;
+            padding-bottom: 4px;
+          }
         }
 
         .RM_Card {
@@ -923,6 +1355,88 @@ export default function ReturnMaterialView({
           opacity: 0.35;
           cursor: not-allowed;
         }
+
+        .RM_StatCardInteractive {
+          cursor: pointer;
+          transition: all 0.22s ease;
+        }
+        .RM_StatCardInteractive:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 16px rgba(16, 185, 129, 0.2);
+          border-color: #10b981;
+        }
+
+        .RM_HistoryTableWrap {
+          width: 100%;
+          overflow-x: auto;
+          border-radius: 14px;
+          border: 1px solid var(--border-color, #e2e8f0);
+          background: var(--bg-secondary, #ffffff);
+          box-shadow: 0 2px 10px rgba(0,0,0,0.02);
+        }
+        .RM_HistoryTable {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 0.88rem;
+          text-align: left;
+        }
+        .RM_HistoryTable th {
+          background: var(--bg-primary, #f8fafc);
+          padding: 12px 16px;
+          font-weight: 700;
+          color: var(--text-muted, #64748b);
+          font-size: 0.75rem;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          border-bottom: 1.5px solid var(--border-color, #e2e8f0);
+          white-space: nowrap;
+        }
+        .RM_HistoryTable td {
+          padding: 14px 16px;
+          border-bottom: 1px solid var(--border-color, #e2e8f0);
+          color: var(--text-main, #0f172a);
+          vertical-align: middle;
+        }
+        .RM_HistoryTable tr:last-child td {
+          border-bottom: none;
+        }
+        .RM_HistoryTable tr:hover td {
+          background: rgba(99, 102, 241, 0.025);
+        }
+        .RM_Badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 9px;
+          border-radius: 8px;
+          font-size: 0.78rem;
+          font-weight: 700;
+          letter-spacing: 0.02em;
+        }
+        .RM_FilterPill {
+          padding: 7px 14px;
+          border-radius: 20px;
+          border: 1.5px solid var(--border-color, #e2e8f0);
+          background: var(--bg-secondary, #ffffff);
+          color: var(--text-muted, #64748b);
+          font-size: 0.8rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .RM_FilterPill:hover {
+          border-color: #6366f1;
+          color: #6366f1;
+        }
+        .RM_FilterPill.active {
+          background: linear-gradient(135deg, #6366f1, #4f46e5);
+          border-color: #4f46e5;
+          color: #ffffff;
+          box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+        }
       `}</style>
 
       {/* ── HERO HEADER ─────────────────────────────────────────────── */}
@@ -933,7 +1447,7 @@ export default function ReturnMaterialView({
           </div>
           <div className="RM_HeroText">
             <h2>Return Material Center</h2>
-            <p>Return excess or unused materials back to inventory stock</p>
+            <p>Return excess or unused materials back to inventory stock & view audit history</p>
           </div>
         </div>
 
@@ -942,9 +1456,27 @@ export default function ReturnMaterialView({
           {[
             { label: 'Total Materials', value: materials.length, icon: <Package size={15} />, color: '#6366f1' },
             { label: 'Issue Records', value: issueLogs.filter(l => !l.isReturn).length, icon: <FileText size={15} />, color: '#f59e0b' },
-            { label: 'Return Records', value: issueLogs.filter(l => l.isReturn).length, icon: <RotateCcw size={15} />, color: '#10b981' },
+            {
+              label: 'Return Records',
+              value: returnLogs.length,
+              icon: <RotateCcw size={15} />,
+              color: '#10b981',
+              isClickable: true,
+              onClick: () => setMode('history')
+            },
           ].map((stat, i) => (
-            <div key={i} className="RM_StatCard">
+            <div
+              key={i}
+              className={`RM_StatCard ${stat.isClickable ? 'RM_StatCardInteractive' : ''}`}
+              onClick={stat.onClick}
+              style={{
+                cursor: stat.isClickable ? 'pointer' : 'default',
+                borderColor: stat.isClickable && mode === 'history' ? '#10b981' : undefined,
+                background: stat.isClickable && mode === 'history' ? 'rgba(16,185,129,0.06)' : undefined,
+                boxShadow: stat.isClickable && mode === 'history' ? '0 0 0 1.5px #10b981' : undefined
+              }}
+              title={stat.isClickable ? 'Click to switch to Return History & Vouchers' : undefined}
+            >
               <div className="RM_StatIcon" style={{ background: `${stat.color}15`, color: stat.color }}>
                 {stat.icon}
               </div>
@@ -957,58 +1489,57 @@ export default function ReturnMaterialView({
         </div>
       </div>
 
-      {/* ── MODE TOGGLE (Pill) ──────────────────────────────────────── */}
-      <div style={{ marginBottom: '28px' }}>
+      {/* ── MODE TOGGLE TABS ──────────────────────────────────────── */}
+      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px' }}>
         <div className="RM_ModeContainer">
-          {/* Animated pill indicator */}
-          <div className="RM_ModePill" style={{
-            left: mode === 'lot' ? '4px' : 'calc(50% + 0px)',
-            width: 'calc(50% - 4px)',
-            background: mode === 'lot'
-              ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
-              : 'linear-gradient(135deg, #10b981, #059669)',
-            boxShadow: mode === 'lot'
-              ? '0 4px 14px rgba(99,102,241,0.3)'
-              : '0 4px 14px rgba(16,185,129,0.3)'
-          }} />
-
           {[
             { key: 'lot', label: 'Lot Return', icon: <Search size={15} /> },
-            { key: 'quick', label: 'Quick Return', icon: <Zap size={15} /> }
+            { key: 'quick', label: 'Quick Return', icon: <Zap size={15} /> },
+            { key: 'history', label: 'Return History', icon: <RotateCcw size={15} />, count: returnLogs.length }
           ].map(m => (
             <button
               key={m.key}
               type="button"
-              className="RM_ModeBtn"
+              className={`RM_ModeBtn ${mode === m.key ? `active-${m.key}` : ''}`}
               onClick={() => {
                 setMode(m.key);
-                setFetchedDesign(null);
-                setFetchError('');
-                setLotInput('');
-                setLotHistory([]);
-                setReturnItems([{ materialId: '', bomItemName: '', qty: '', note: '' }]);
-                setReturnNotes('');
-                setFormError('');
-                setFormSuccess('');
-                setShowHistory(false);
+                if (m.key !== 'history') {
+                  setFetchedDesign(null);
+                  setFetchError('');
+                  setLotInput('');
+                  setLotHistory([]);
+                  setReturnItems([{ materialId: '', bomItemName: '', qty: '', note: '' }]);
+                  setReturnNotes('');
+                  setFormError('');
+                  setFormSuccess('');
+                }
               }}
-              style={{ color: mode === m.key ? '#fff' : 'var(--text-muted)' }}
             >
               {m.icon}
-              {m.label}
+              <span>{m.label}</span>
+              {m.count !== undefined && (
+                <span className="RM_TabCount">{m.count}</span>
+              )}
             </button>
           ))}
         </div>
 
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: '6px',
-          marginLeft: '16px', fontSize: '13px', color: 'var(--text-muted)',
-          verticalAlign: 'middle', fontWeight: '500'
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+          padding: '7px 14px',
+          borderRadius: '10px',
+          background: 'var(--bg-secondary, #ffffff)',
+          border: '1px solid var(--border-color, #e2e8f0)',
+          fontSize: '12.5px',
+          color: 'var(--text-muted, #64748b)',
+          fontWeight: '500'
         }}>
-          {mode === 'lot'
-            ? '↳ Auto-fetch lot details and pre-fill materials'
-            : '↳ Direct inventory return without lot mapping'}
-        </span>
+          {mode === 'lot' && <><span>💡</span> <span>Auto-fetch lot BOM and pre-fill returned quantities</span></>}
+          {mode === 'quick' && <><span>⚡</span> <span>Direct inventory stock return without lot linkage</span></>}
+          {mode === 'history' && <><span>📋</span> <span>Audit log of all excess returned materials & voucher slips</span></>}
+        </div>
       </div>
 
       {/* ── ALERTS ─────────────────────────────────────────────────── */}
@@ -1951,6 +2482,726 @@ export default function ReturnMaterialView({
             </div>
           </div>
         </form>
+      )}
+
+      {/* ══════════ RETURN HISTORY MODE ════════════════════════════════ */}
+      {mode === 'history' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+
+          {/* ── RETURN HISTORY METRICS STRIP ──────────────────────────── */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '16px'
+          }}>
+            {[
+              {
+                label: 'Total Return Vouchers',
+                value: historyMetrics.totalReturns,
+                subtext: `out of ${returnLogs.length} total logs`,
+                icon: <FileText size={18} />,
+                color: '#6366f1',
+                bg: 'rgba(99, 102, 241, 0.08)'
+              },
+              {
+                label: 'Total Units Returned',
+                value: historyMetrics.totalUnits,
+                subtext: 'returned to warehouse stock',
+                icon: <RotateCcw size={18} />,
+                color: '#10b981',
+                bg: 'rgba(16, 185, 129, 0.08)'
+              },
+              {
+                label: 'Lot Returns vs Direct',
+                value: `${historyMetrics.lotReturns} / ${historyMetrics.quickReturns}`,
+                subtext: `${historyMetrics.lotReturns} Lot · ${historyMetrics.quickReturns} Quick`,
+                icon: <Layers size={18} />,
+                color: '#0ea5e9',
+                bg: 'rgba(14, 165, 233, 0.08)'
+              },
+              {
+                label: 'Unique Materials Returned',
+                value: historyMetrics.uniqueMaterials,
+                subtext: 'distinct accessory items',
+                icon: <Package size={18} />,
+                color: '#f59e0b',
+                bg: 'rgba(245, 158, 11, 0.08)'
+              }
+            ].map((kpi, idx) => (
+              <div
+                key={idx}
+                className="RM_Card"
+                style={{
+                  padding: '18px 20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '14px',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--card-bg, #ffffff)'
+                }}
+              >
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
+                  background: kpi.bg,
+                  color: kpi.color,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  {kpi.icon}
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>
+                    {kpi.label}
+                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: '800', color: 'var(--text-main)', marginTop: '2px', lineHeight: 1.2 }}>
+                    {kpi.value}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {kpi.subtext}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* ── FILTERS & ACTIONS BAR ─────────────────────────────────── */}
+          <div className="RM_Card" style={{ padding: '20px 24px', background: 'var(--card-bg)' }}>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px'
+            }}>
+              {/* Row 1: Search and Export / Print Buttons */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px'
+              }}>
+                <div className="RM_SearchBox" style={{ flex: '1 1 300px', maxWidth: '520px', minWidth: '260px' }}>
+                  <Search size={16} style={{
+                    position: 'absolute', left: '16px', top: '50%',
+                    transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none'
+                  }} />
+                  <input
+                    type="text"
+                    className="RM_SearchInput"
+                    placeholder="Search by Return # (MR...), Lot #, Material, Style, Reason, Returnee..."
+                    value={historySearchQuery}
+                    onChange={(e) => setHistorySearchQuery(e.target.value)}
+                    style={{ paddingLeft: '44px' }}
+                  />
+                  {historySearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setHistorySearchQuery('')}
+                      style={{
+                        position: 'absolute', right: '14px', top: '50%', transform: 'translateY(-50%)',
+                        background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)'
+                      }}
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={exportReturnHistoryToCsv}
+                    disabled={filteredReturnLogs.length === 0}
+                    className="RM_BtnGhost"
+                    style={{ padding: '9px 16px', fontSize: '13px' }}
+                    title="Export filtered return logs to CSV"
+                  >
+                    <Download size={14} />
+                    Export CSV
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={printAllReturnHistory}
+                    disabled={filteredReturnLogs.length === 0}
+                    className="RM_BtnGhost"
+                    style={{ padding: '9px 16px', fontSize: '13px', borderColor: '#6366f1', color: '#6366f1' }}
+                    title="Print summary of all filtered return records"
+                  >
+                    <Printer size={14} />
+                    Print All
+                  </button>
+
+                  {(historySearchQuery || historyDateFilter !== 'all' || historySpecificDate || historyTypeFilter !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistorySearchQuery('');
+                        setHistoryDateFilter('all');
+                        setHistorySpecificDate('');
+                        setHistoryTypeFilter('all');
+                      }}
+                      className="RM_BtnGhost"
+                      style={{ padding: '9px 14px', fontSize: '12px', color: '#ef4444', borderColor: 'rgba(239,68,68,0.3)' }}
+                    >
+                      <RefreshCw size={13} />
+                      Reset Filters
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Row 2: Date Pills & Type Filter */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+                paddingTop: '12px',
+                borderTop: '1px solid var(--border-color)'
+              }}>
+                {/* Date Filter Pills */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginRight: '4px' }}>
+                    <Calendar size={13} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '4px' }} />
+                    Date:
+                  </span>
+                  {[
+                    { key: 'all', label: 'All Dates' },
+                    { key: 'today', label: 'Today' },
+                    { key: 'yesterday', label: 'Yesterday' },
+                    { key: 'last7', label: 'Last 7 Days' },
+                    { key: 'thisMonth', label: 'This Month' },
+                    { key: 'custom', label: 'Specific Date 📅' }
+                  ].map(df => (
+                    <button
+                      key={df.key}
+                      type="button"
+                      className={`RM_FilterPill ${historyDateFilter === df.key ? 'active' : ''}`}
+                      onClick={() => {
+                        setHistoryDateFilter(df.key);
+                        if (df.key !== 'custom') setHistorySpecificDate('');
+                      }}
+                    >
+                      {df.label}
+                    </button>
+                  ))}
+
+                  {historyDateFilter === 'custom' && (
+                    <input
+                      type="date"
+                      value={historySpecificDate}
+                      onChange={(e) => setHistorySpecificDate(e.target.value)}
+                      className="form-input"
+                      style={{
+                        padding: '6px 10px',
+                        fontSize: '12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #6366f1',
+                        color: 'var(--text-main)'
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Return Mode Filter */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    <Filter size={13} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '4px' }} />
+                    Mode:
+                  </span>
+                  <div style={{
+                    display: 'inline-flex',
+                    background: 'var(--bg-primary, #f1f5f9)',
+                    borderRadius: '10px',
+                    padding: '3px',
+                    border: '1px solid var(--border-color)'
+                  }}>
+                    {[
+                      { key: 'all', label: 'All' },
+                      { key: 'lot', label: 'Lot Returns' },
+                      { key: 'quick', label: 'Quick Returns' }
+                    ].map(tf => (
+                      <button
+                        key={tf.key}
+                        type="button"
+                        onClick={() => setHistoryTypeFilter(tf.key)}
+                        style={{
+                          border: 'none',
+                          background: historyTypeFilter === tf.key ? '#ffffff' : 'transparent',
+                          color: historyTypeFilter === tf.key ? '#0f172a' : 'var(--text-muted)',
+                          boxShadow: historyTypeFilter === tf.key ? '0 2px 6px rgba(0,0,0,0.08)' : 'none',
+                          fontWeight: historyTypeFilter === tf.key ? '700' : '500',
+                          fontSize: '12px',
+                          padding: '5px 12px',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          transition: 'all 0.18s ease'
+                        }}
+                      >
+                        {tf.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ── RETURN HISTORY TABLE ─────────────────────────────────── */}
+          <div className="RM_HistoryTableWrap">
+            {filteredReturnLogs.length === 0 ? (
+              <div style={{
+                textAlign: 'center',
+                padding: '60px 24px',
+                color: 'var(--text-muted)'
+              }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '18px',
+                  background: 'rgba(99, 102, 241, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 16px',
+                  color: '#6366f1'
+                }}>
+                  <RotateCcw size={28} />
+                </div>
+                <div style={{ fontWeight: '800', fontSize: '16px', color: 'var(--text-main)', marginBottom: '6px' }}>
+                  {returnLogs.length === 0 ? 'No Material Returns Recorded Yet' : 'No Return Records Match Filters'}
+                </div>
+                <div style={{ fontSize: '13px', maxWidth: '400px', margin: '0 auto 16px', lineHeight: 1.5 }}>
+                  {returnLogs.length === 0
+                    ? 'When you return excess materials using Lot Return or Quick Return, an audit voucher will be saved here automatically.'
+                    : 'Try clearing your search query or choosing "All Dates" to view all return records.'}
+                </div>
+                {(historySearchQuery || historyDateFilter !== 'all' || historySpecificDate || historyTypeFilter !== 'all') && (
+                  <button
+                    type="button"
+                    className="RM_BtnGhost"
+                    onClick={() => {
+                      setHistorySearchQuery('');
+                      setHistoryDateFilter('all');
+                      setHistorySpecificDate('');
+                      setHistoryTypeFilter('all');
+                    }}
+                    style={{ margin: '0 auto', fontSize: '13px' }}
+                  >
+                    Clear All Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <table className="RM_HistoryTable">
+                <thead>
+                  <tr>
+                    <th style={{ width: '140px' }}>Voucher #</th>
+                    <th style={{ width: '150px' }}>Date & Time</th>
+                    <th style={{ width: '170px' }}>Return Mode & Lot</th>
+                    <th>Returned Materials</th>
+                    <th style={{ width: '110px', textAlign: 'right' }}>Total Qty</th>
+                    <th style={{ width: '220px' }}>Reason / Remarks</th>
+                    <th style={{ width: '130px', textAlign: 'center' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReturnLogs.map((log) => {
+                    const isCopied = copiedVoucherId === log.id;
+                    return (
+                      <tr key={log.id}>
+                        {/* Voucher ID */}
+                        <td>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              className="RM_Badge"
+                              style={{
+                                background: 'rgba(99, 102, 241, 0.1)',
+                                color: '#4f46e5',
+                                border: '1px solid rgba(99, 102, 241, 0.25)',
+                                fontFamily: 'monospace',
+                                fontSize: '12px'
+                              }}
+                            >
+                              {log.id}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopyVoucherId(log.id)}
+                              title={isCopied ? 'Copied!' : 'Copy Voucher ID'}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                padding: '2px',
+                                color: isCopied ? 'var(--success)' : 'var(--text-muted)'
+                              }}
+                            >
+                              {isCopied ? <Check size={13} /> : <Copy size={13} />}
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* Date & Time */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                              <Calendar size={12} color="var(--text-muted)" />
+                              {log.date ? log.date.split(' ')[0] : '—'}
+                            </span>
+                            {log.date && log.date.split(' ')[1] && (
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <Clock size={11} />
+                                {log.date.split(' ').slice(1).join(' ')}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Return Mode & Lot Info */}
+                        <td>
+                          {log.isLotReturn ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <span
+                                className="RM_Badge"
+                                style={{
+                                  background: 'rgba(99, 102, 241, 0.1)',
+                                  color: '#6366f1',
+                                  width: 'fit-content'
+                                }}
+                              >
+                                <Search size={11} />
+                                Lot #{log.lotId}
+                              </span>
+                              {(log.designInfo?.style || log.category) && (
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>
+                                  {log.designInfo?.style || log.category}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <span
+                                className="RM_Badge"
+                                style={{
+                                  background: 'rgba(16, 185, 129, 0.1)',
+                                  color: '#059669',
+                                  width: 'fit-content'
+                                }}
+                              >
+                                <Zap size={11} />
+                                Quick Return
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Returned Materials List */}
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {log.parsedMaterials && log.parsedMaterials.length > 0 ? (
+                              log.parsedMaterials.map((mat, mIdx) => (
+                                <div
+                                  key={mIdx}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '8px',
+                                    flexWrap: 'wrap',
+                                    padding: '4px 8px',
+                                    borderRadius: '8px',
+                                    background: 'var(--bg-primary, #f8fafc)',
+                                    border: '1px solid var(--border-color)'
+                                  }}
+                                >
+                                  <span style={{ fontWeight: '700', fontSize: '12px', color: 'var(--text-main)' }}>
+                                    {mat.name || 'Unknown Material'}
+                                  </span>
+                                  {mat.bomItemName && mat.bomItemName !== 'Return' && mat.bomItemName !== 'General Return' && (
+                                    <span style={{
+                                      fontSize: '10px',
+                                      padding: '1px 6px',
+                                      borderRadius: '6px',
+                                      background: 'rgba(99, 102, 241, 0.1)',
+                                      color: '#6366f1',
+                                      fontWeight: '600'
+                                    }}>
+                                      {mat.bomItemName}
+                                    </span>
+                                  )}
+                                  <span style={{
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    color: '#059669',
+                                    marginLeft: 'auto',
+                                    background: 'rgba(16, 185, 129, 0.12)',
+                                    padding: '2px 8px',
+                                    borderRadius: '6px'
+                                  }}>
+                                    +{mat.qty} {mat.unit || 'pcs'}
+                                  </span>
+                                </div>
+                              ))
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Total Qty */}
+                        <td style={{ textAlign: 'right' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            fontWeight: '800',
+                            fontSize: '13px',
+                            color: '#059669',
+                            background: 'rgba(16, 185, 129, 0.08)',
+                            padding: '4px 10px',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(16, 185, 129, 0.2)'
+                          }}>
+                            +{log.totalQty} units
+                          </span>
+                        </td>
+
+                        {/* Reason / Remarks */}
+                        <td>
+                          <div style={{
+                            fontSize: '12px',
+                            color: log.personName ? 'var(--text-main)' : 'var(--text-muted)',
+                            lineHeight: 1.4,
+                            maxWidth: '240px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {log.personName || '—'}
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedReturnSlip(log)}
+                              className="RM_BtnGhost"
+                              style={{ padding: '6px 10px', fontSize: '11px', borderRadius: '8px' }}
+                              title="View formal Return Slip voucher"
+                            >
+                              <Eye size={13} />
+                              Slip
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => printReturnVoucher(log)}
+                              className="RM_BtnGhost"
+                              style={{ padding: '6px 9px', fontSize: '11px', borderRadius: '8px', color: '#6366f1', borderColor: 'rgba(99,102,241,0.3)' }}
+                              title="Print return slip voucher"
+                            >
+                              <Printer size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════ RETURN VOUCHER SLIP MODAL ══════════════════════════ */}
+      {selectedReturnSlip && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(5px)',
+          WebkitBackdropFilter: 'blur(5px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '20px'
+        }}>
+          <div style={{
+            background: 'var(--bg-secondary, #ffffff)',
+            borderRadius: '20px',
+            border: '1px solid var(--border-color)',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
+            width: '100%',
+            maxWidth: '680px',
+            maxHeight: '92vh',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            animation: 'slideUp 0.25s ease'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '18px 24px',
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: 'linear-gradient(135deg, rgba(99,102,241,0.06) 0%, rgba(16,185,129,0.04) 100%)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #6366f1, #10b981)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: '#fff'
+                }}>
+                  <RotateCcw size={18} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: '800', fontSize: '16px', color: 'var(--text-main)' }}>
+                    Material Return Voucher (MRV)
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Voucher ID: <strong style={{ color: '#6366f1', fontFamily: 'monospace' }}>#{selectedReturnSlip.id}</strong>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedReturnSlip(null)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-muted)', padding: '6px', borderRadius: '8px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              {/* Meta Grid */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px',
+                padding: '14px 18px', borderRadius: '12px',
+                background: 'var(--bg-primary, #f8fafc)', border: '1px solid var(--border-color)',
+                fontSize: '13px'
+              }}>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block' }}>DATE & TIME</span>
+                  <strong>{selectedReturnSlip.date || '—'}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block' }}>RETURN MODE</span>
+                  <strong>{selectedReturnSlip.isLotReturn ? `Lot Return (#${selectedReturnSlip.lotId})` : 'Quick / Direct Return'}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block' }}>STYLE / GARMENT</span>
+                  <strong>{selectedReturnSlip.designInfo?.style || selectedReturnSlip.category || 'N/A'}</strong>
+                </div>
+                <div>
+                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'block' }}>TOTAL RETURN UNITS</span>
+                  <strong style={{ color: '#059669' }}>+{selectedReturnSlip.totalQty} units</strong>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                  Returned Material Details
+                </div>
+                <div style={{ borderRadius: '10px', border: '1px solid var(--border-color)', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-primary, #f8fafc)', borderBottom: '1px solid var(--border-color)' }}>
+                        <th style={{ padding: '10px 12px', textAlign: 'center', width: '40px', color: 'var(--text-muted)', fontSize: '11px' }}>#</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>Material</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--text-muted)', fontSize: '11px' }}>BOM Component</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'right', width: '110px', color: 'var(--text-muted)', fontSize: '11px' }}>Qty</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'center', width: '70px', color: 'var(--text-muted)', fontSize: '11px' }}>Unit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedReturnSlip.parsedMaterials || []).map((m, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                          <td style={{ padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>{m.name || 'Material'}</td>
+                          <td style={{ padding: '10px 12px', color: 'var(--text-muted)' }}>{m.bomItemName || 'Return'}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '800', color: '#059669' }}>+{m.qty}</td>
+                          <td style={{ padding: '10px 12px', textAlign: 'center', color: 'var(--text-muted)' }}>{m.unit || 'pcs'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div style={{
+                padding: '12px 16px', borderRadius: '10px',
+                background: 'var(--bg-primary, #f8fafc)', border: '1px solid var(--border-color)'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                  Return Remarks & Reason:
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-main)' }}>
+                  {selectedReturnSlip.personName || 'Excess unused materials returned back to warehouse inventory stock.'}
+                </div>
+              </div>
+
+              {/* Signatures Preview */}
+              <div style={{
+                display: 'flex', justifyContent: 'space-between',
+                paddingTop: '28px', marginTop: '10px',
+                borderTop: '1px dashed var(--border-color)',
+                textAlign: 'center', fontSize: '11px', fontWeight: '600', color: 'var(--text-muted)'
+              }}>
+                <div style={{ width: '160px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                  Returned By (Floor)
+                </div>
+                <div style={{ width: '160px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                  Store In-Charge (Receiver)
+                </div>
+                <div style={{ width: '160px', borderTop: '1px solid var(--border-color)', paddingTop: '6px' }}>
+                  Authorized Signatory
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: '12px',
+              background: 'var(--bg-secondary)'
+            }}>
+              <button
+                type="button"
+                className="RM_BtnGhost"
+                onClick={() => setSelectedReturnSlip(null)}
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                className="RM_BtnPrimary"
+                onClick={() => printReturnVoucher(selectedReturnSlip)}
+                style={{ background: 'linear-gradient(135deg, #6366f1, #4f46e5)' }}
+              >
+                <Printer size={15} />
+                Print Voucher Slip
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

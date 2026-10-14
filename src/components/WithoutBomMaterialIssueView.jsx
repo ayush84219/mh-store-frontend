@@ -926,15 +926,20 @@ export default function WithoutBomMaterialIssueView({
     return `BILL-MI-${max + 1}`;
   }, [issueLogs]);
 
-  // Filter without-bom issue logs for history tab
+  // Filter without-bom issue logs for history tab (Strictly Without-BOM only)
   const withoutBomLogs = useMemo(() => {
     return (issueLogs || []).filter(l => {
+      const vid = String(l.id || '').toUpperCase();
+      // STRICT: Exclude Extra Material & Re-Issues
+      if (l.isReissue || vid.startsWith('EMI-') || vid.startsWith('RI-') || String(l.personName || '').toLowerCase().includes('extra')) {
+        return false;
+      }
       const isWo = Boolean(
         l.isWithoutBom ||
-        String(l.id || '').toUpperCase().startsWith('BILL-MI-') ||
-        String(l.id || '').toUpperCase().startsWith('CH-MI-') ||
-        String(l.id || '').toUpperCase().startsWith('WO-MI-') ||
-        String(l.id || '').toUpperCase().startsWith('MI-WO-') ||
+        vid.startsWith('BILL-MI-') ||
+        vid.startsWith('CH-MI-') ||
+        vid.startsWith('WO-MI-') ||
+        vid.startsWith('MI-WO-') ||
         String(l.category || '').toUpperCase().includes('WITHOUT BOM') ||
         String(l.lotId || '').toUpperCase().includes('DIRECT')
       );

@@ -8,7 +8,7 @@ import {
   Package, ChevronDown, CheckCircle, HelpCircle,
   TrendingUp, Sparkles, Filter, RefreshCw, Eye, BarChart3,
   User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode,
-  Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn
+  Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn, Download
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -1042,6 +1042,10 @@ export default function ExtraMaterialIssueView({
   const [formSuccess, setFormSuccess] = useState('');
   const [activeSubTab, setActiveSubTab] = useState('issue'); // 'issue', 'history', or 'combined_audit'
   const [historySearch, setHistorySearch] = useState('');
+  const [historyCategoryFilter, setHistoryCategoryFilter] = useState('all'); // 'all' | 'extra' | 'reissue'
+  const [historyDateFrom, setHistoryDateFrom] = useState(''); // 'YYYY-MM-DD'
+  const [historyDateTo, setHistoryDateTo] = useState(''); // 'YYYY-MM-DD'
+  const [showAllDetailsInTable, setShowAllDetailsInTable] = useState(false);
   const [auditLotSearch, setAuditLotSearch] = useState('');
   const [expandedAuditLots, setExpandedAuditLots] = useState({});
   const toggleAuditLotExpand = (lotId) => {
@@ -1209,11 +1213,12 @@ export default function ExtraMaterialIssueView({
         woLotId.trim(),
         parseInt(woPieces, 10) || 100,
         issuedPayloadItems,
-        true, // isReissue
+        false, // isReissue: false (Extra Material Issue)
         personName.trim(),
         woReceiverName.trim(),
         woReceiverDept.trim(),
-        true // isWithoutBom
+        true, // isWithoutBom
+        voucherId // customId
       );
     }
 
@@ -1222,7 +1227,7 @@ export default function ExtraMaterialIssueView({
       lotId: woLotId.trim(),
       style: woLotStyle.trim() || 'Floor Issue',
       brand: woBrand.trim() || 'Mohit Hosiery',
-      category: woCategory.trim() || 'Floor Requisition',
+      category: woCategory.trim() || 'Extra Material Issue',
       season: 'Current',
       pieces: parseInt(woPieces, 10) || 100,
       personName: personName.trim(),
@@ -1231,6 +1236,8 @@ export default function ExtraMaterialIssueView({
       issueDate: issueDateStr,
       status: 'Issued',
       isWithoutBom: true,
+      isReissue: false,
+      is_reissue: 0,
       items: issuedPayloadItems.map(it => ({
         ...it,
         baseQty: 0,
@@ -2084,10 +2091,14 @@ export default function ExtraMaterialIssueView({
         design.id,
         pcs,
         issuedPayloadItems,
-        true, // isReissue / extra issue
+        false, // isReissue: false (Extra Material Issue)
         isSingle
           ? `${pName} (Extra: ${items[0]?.item?.extraReason || 'Requisition'})`
-          : `${pName} (Extra Batch Issue)`
+          : `${pName} (Extra Batch Issue)`,
+        rName,
+        rDept,
+        false, // isWithoutBom
+        voucherId // customId
       );
     }
 
@@ -2097,7 +2108,7 @@ export default function ExtraMaterialIssueView({
       lotId: design.id,
       style: design.style || '',
       brand: design.brand || '',
-      category: design.category || '',
+      category: design.category || 'Extra Material Issue',
       season: design.season || '',
       pieces: pcs,
       personName: pName,
@@ -2105,6 +2116,8 @@ export default function ExtraMaterialIssueView({
       receiverDept: rDept,
       issueDate: issueDateStr,
       status: 'Issued',
+      isReissue: false,
+      is_reissue: 0,
       items: items.map(it => ({
         materialId: it.mat.id,
         materialName: it.mat.color && it.mat.color !== 'Default' ? `${it.mat.name} (${it.mat.color})` : it.mat.name,
@@ -2298,40 +2311,379 @@ export default function ExtraMaterialIssueView({
     }, 1000);
   };
 
-  // All extra/re-issue logs (unfiltered) for accurate KPI statistics
+  // All extra/re-issue logs (unfiltered) - strictly Extra Material & Re-Issues ONLY
   const allExtraLogs = useMemo(() => {
-    return allIssueLogs.filter(log => {
-      const isExtra = log.isReissue || 
-        (log.id && (log.id.startsWith('EMI') || log.id.startsWith('RI'))) || 
-        (log.personName && log.personName.toLowerCase().includes('extra'));
-      return isExtra;
-    });
-  }, [allIssueLogs]);
+    const combined = [];
+    const seenVouchers = new Set();
 
-  // Filter extra logs for History Tab Search
+    // 1. Logs from allIssueLogs (App.jsx state / /api/issue-logs)
+    (allIssueLogs || []).forEach(log => {
+      const vid = String(log.id || '').toUpperCase();
+      // STRICT FILTER: Exclude Without-BOM issues (WO-MI, BILL-MI, CH-MI, MI-WO)
+      const isWithoutBom = log.isWithoutBom || 
+        vid.startsWith('WO-MI-') || 
+        vid.startsWith('BILL-MI-') || 
+        vid.startsWith('CH-MI-') || 
+        vid.startsWith('MI-WO-') ||
+        String(log.category || '').toLowerCase().includes('without bom');
+      if (isWithoutBom) return;
+
+      // STRICT FILTER: Only include Extra Material or Re-issues
+      const isExtra = log.isReissue || 
+        vid.startsWith('EMI') || 
+        vid.startsWith('RI') || 
+        String(log.personName || '').toLowerCase().includes('extra') ||
+        String(log.category || '').toLowerCase().includes('extra');
+
+      if (isExtra) {
+        const vId = String(log.id || `${log.lotId}-${log.date}`);
+        if (!seenVouchers.has(vId)) {
+          seenVouchers.add(vId);
+          combined.push(log);
+        }
+      }
+    });
+
+    // 2. Also incorporate dbExtraIssues if not already in combined
+    (dbExtraIssues || []).forEach(dbRow => {
+      const vId = String(dbRow.voucher_id || dbRow.voucherId || dbRow.id || '');
+      if (vId && !seenVouchers.has(vId)) {
+        seenVouchers.add(vId);
+        combined.push({
+          id: vId,
+          lotId: dbRow.lot_id || dbRow.lotId,
+          date: dbRow.issue_date || dbRow.issueDate || (dbRow.created_at ? new Date(dbRow.created_at).toLocaleString('en-GB') : ''),
+          personName: dbRow.person_name || dbRow.personName,
+          receiverName: dbRow.receiver_name || dbRow.receiverName,
+          receiverDept: dbRow.receiver_dept || dbRow.receiverDept,
+          materials: (dbRow.items || []).map(it => ({
+            name: it.materialName || it.material_name || it.name,
+            bomItemName: it.bomItemName || it.bom_item_name,
+            qty: it.totalRequired || it.total_required || it.qty,
+            unit: it.unit || 'Pcs',
+            reason: it.reason
+          })),
+          isReissue: Boolean(dbRow.is_reissue || dbRow.isReissue),
+          category: dbRow.category || 'Extra Material Issue',
+          brand: dbRow.brand,
+          volume: dbRow.pieces
+        });
+      }
+    });
+
+    return combined;
+  }, [allIssueLogs, dbExtraIssues]);
+
+  // Helper to accurately determine if a transaction log is Re-Issue vs Extra Material Issue
+  const isLogReissue = (log) => {
+    if (!log) return false;
+    const vid = String(log.id || '').toUpperCase().trim();
+    // Anything starting with EMI or EMI-WO- was created in Extra Material Issue -> ALWAYS Extra Material Issue, NEVER Re-Issue!
+    if (vid.startsWith('EMI')) return false;
+    // Explicit Extra category or person notes
+    const cat = String(log.category || '').toLowerCase();
+    const pName = String(log.personName || '').toLowerCase();
+    if (cat.includes('extra') || pName.includes('(extra') || pName.includes('extra:')) return false;
+    // Vouchers starting with RI or marked isReissue (and not EMI) are Re-Issues
+    if (vid.startsWith('RI')) return true;
+    return Boolean(log.isReissue);
+  };
+
+  // Parse date string (DD/MM/YYYY HH:mm, ISO, or YYYY-MM-DD) into Date object
+  const parseDateToObj = (dateVal) => {
+    if (!dateVal) return new Date(0);
+    const str = String(dateVal).trim();
+    const dmyRegex = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?)?(?:\s*(AM|PM))?/i;
+    const match = str.match(dmyRegex);
+    if (match) {
+      const day = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const year = parseInt(match[3], 10);
+      let hour = match[4] ? parseInt(match[4], 10) : 0;
+      const minute = match[5] ? parseInt(match[5], 10) : 0;
+      const ampm = match[6];
+      if (ampm) {
+        if (ampm.toUpperCase() === 'PM' && hour < 12) hour += 12;
+        if (ampm.toUpperCase() === 'AM' && hour === 12) hour = 0;
+      }
+      return new Date(year, month, day, hour, minute);
+    }
+    const parsed = new Date(dateVal);
+    return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+  };
+
+  // Quick Date Range Presets helper
+  const setQuickDatePreset = (preset) => {
+    const today = new Date();
+    const formatDateInput = (d) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === 'today') {
+      const tStr = formatDateInput(today);
+      setHistoryDateFrom(tStr);
+      setHistoryDateTo(tStr);
+    } else if (preset === 'yesterday') {
+      const yest = new Date();
+      yest.setDate(yest.getDate() - 1);
+      const yStr = formatDateInput(yest);
+      setHistoryDateFrom(yStr);
+      setHistoryDateTo(yStr);
+    } else if (preset === '7days') {
+      const past = new Date();
+      past.setDate(past.getDate() - 7);
+      setHistoryDateFrom(formatDateInput(past));
+      setHistoryDateTo(formatDateInput(today));
+    } else if (preset === 'thisMonth') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      setHistoryDateFrom(formatDateInput(firstDay));
+      setHistoryDateTo(formatDateInput(today));
+    } else if (preset === 'all') {
+      setHistoryDateFrom('');
+      setHistoryDateTo('');
+    }
+  };
+
+  // Filter extra logs for History Tab Search + Category Sub-filter + Date Range
   const extraIssueLogs = useMemo(() => {
+    let list = allExtraLogs;
+
+    // 1. Filter by Category (Strict separation: Extra Material Issue vs Re-Issue)
+    if (historyCategoryFilter === 'reissue') {
+      list = list.filter(l => isLogReissue(l));
+    } else if (historyCategoryFilter === 'extra') {
+      list = list.filter(l => !isLogReissue(l));
+    }
+
+    // 2. Filter by Date Range (From - To)
+    if (historyDateFrom) {
+      const fromObj = new Date(historyDateFrom + 'T00:00:00');
+      list = list.filter(l => {
+        const dObj = parseDateToObj(l.date);
+        return dObj >= fromObj;
+      });
+    }
+    if (historyDateTo) {
+      const toObj = new Date(historyDateTo + 'T23:59:59');
+      list = list.filter(l => {
+        const dObj = parseDateToObj(l.date);
+        return dObj <= toObj;
+      });
+    }
+
+    // 3. Filter by Search Query
     const q = historySearch.toLowerCase().trim();
-    if (!q) return allExtraLogs;
-    return allExtraLogs.filter(log => {
+    if (!q) return list;
+    return list.filter(log => {
       const idMatch = String(log.id || '').toLowerCase().includes(q);
       const lotMatch = String(log.lotId || '').toLowerCase().includes(q);
       const personMatch = String(log.personName || '').toLowerCase().includes(q);
+      const receiverMatch = String(log.receiverName || '').toLowerCase().includes(q);
+      const deptMatch = String(log.receiverDept || '').toLowerCase().includes(q);
       const catMatch = String(log.category || '').toLowerCase().includes(q);
       const matMatch = log.materials && log.materials.some(m => 
         (m.name || '').toLowerCase().includes(q) || 
         (m.bomItemName || '').toLowerCase().includes(q) ||
         (m.reason || '').toLowerCase().includes(q)
       );
-      return idMatch || lotMatch || personMatch || catMatch || matMatch;
+      return idMatch || lotMatch || personMatch || receiverMatch || deptMatch || catMatch || matMatch;
     });
-  }, [allExtraLogs, historySearch]);
+  }, [allExtraLogs, historyCategoryFilter, historyDateFrom, historyDateTo, historySearch]);
 
-  // Calculate lifetime stats for History tab overview cards
+  // Helper to build normalized slip data from log
+  const buildSlipDataFromLog = (log) => {
+    const matchedDesign = designs.find(d => String(d.id) === String(log.lotId));
+    const cleanIssuer = (log.personName || 'Store In-charge').replace(/\s*\(.*?\)/, '').trim() || 'Store In-charge';
+    const receiver = log.receiverName || 'Cutting Floor';
+    const dept = log.receiverDept || 'Cutting Dept';
+
+    return {
+      voucherId: log.id,
+      issueDate: log.date,
+      lotId: log.lotId,
+      design: matchedDesign || { id: log.lotId, category: log.category || 'Garment', brand: log.brand || '' },
+      pieces: log.volume || matchedDesign?.quantity || 100,
+      personName: cleanIssuer,
+      receiverName: receiver,
+      receiverDept: dept,
+      isSingle: false,
+      isReissue: isLogReissue(log),
+      items: (log.materials || []).map(m => ({
+        materialId: m.materialId || 'MT-ITEM',
+        materialName: m.name || m.bomItemName,
+        bomItemName: m.bomItemName || m.name,
+        totalRequired: m.qty,
+        unit: m.unit || 'Pcs',
+        reason: m.reason || (isLogReissue(log) ? 'Re-Issue Requisition' : 'Extra Material Requisition')
+      }))
+    };
+  };
+
+  // Generate printable HTML for direct iframe printing (Store Copy + Production Copy)
+  const generateExtraSlipPrintHtml = (slipData) => {
+    const voucherId = slipData.voucherId || 'VOUCHER';
+    const dateStr = slipData.issueDate || new Date().toLocaleDateString('en-GB');
+    const lotId = slipData.lotId || slipData.design?.id || '—';
+    const lotBadge = slipData.isWithoutBom ? 'WITHOUT BOM' : (slipData.isReissue ? 'RE-ISSUE' : 'EXTRA ISSUE');
+    const brand = slipData.design?.brand || slipData.brand || 'Mohit Hosiery';
+    const category = slipData.design?.category || slipData.design?.style || slipData.style || 'Garment';
+    const pieces = slipData.pieces || 0;
+    const personName = slipData.personName || 'Store In-charge';
+    const receiverName = slipData.receiverName || 'Cutting Floor';
+    const receiverDept = slipData.receiverDept || 'Cutting Dept';
+    const items = slipData.items || [];
+
+    const renderSlip = (copyTitle, isDashed = false) => `
+      <div style="border: ${isDashed ? '1.5px dashed #000000' : '1.5px solid #000000'}; padding: 16px; border-radius: 4px; margin-bottom: 20px; background: #ffffff; color: #000000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #000000; padding-bottom: 8px; margin-bottom: 12px;">
+          <div>
+            <h2 style="margin: 0; font-size: 16px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #000000;">MH ACCESSORIES & BOM STORE</h2>
+            <span style="font-size: 10px; color: #000000; font-weight: 600;">Garment Product Data Management System (G-PDMS)</span>
+          </div>
+          <div style="text-align: right;">
+            <div style="font-size: 13px; font-weight: 900; color: #000000; text-transform: uppercase;">EXTRA MATERIAL ISSUE VOUCHER</div>
+            <span style="font-size: 10px; font-weight: 800; color: #000000;">[ ${copyTitle} ]</span>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 16px; padding: 10px; background: #ffffff; border: 1.5px solid #000000; border-radius: 4px; font-size: 11px; margin-bottom: 12px; color: #000000;">
+          <div><strong>Voucher No:</strong> <span style="font-family: monospace; font-weight: 900;">${voucherId}</span></div>
+          <div><strong>Issue Date:</strong> <strong>${dateStr}</strong></div>
+          <div><strong>Lot Number:</strong> <strong>Lot ${lotId}</strong> <span style="font-weight: 900; font-size: 9.5px; background: #ffffff; color: #000000; padding: 1px 5px; border-radius: 3px; border: 1.2px solid #000000;">${lotBadge}</span></div>
+          <div><strong>Brand:</strong> ${brand}</div>
+          <div><strong>Garment Type:</strong> ${category}</div>
+          <div><strong>Order Volume:</strong> <strong>${Number(pieces).toLocaleString()} Units</strong></div>
+          <div><strong>Issued By:</strong> <strong>${personName}</strong></div>
+          <div><strong>Received By:</strong> <strong>${receiverName}</strong></div>
+          <div><strong>Dept/Line:</strong> <strong>${receiverDept}</strong></div>
+        </div>
+
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; border: 1.5px solid #000000;">
+          <thead>
+            <tr style="background-color: #f0f0f0; border-bottom: 1.5px solid #000000; color: #000000;">
+              <th style="padding: 6px; text-align: center; width: 30px; border: 1px solid #000000; font-weight: 900;">#</th>
+              <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Component Name</th>
+              <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Material Description</th>
+              <th style="padding: 6px; text-align: center; width: 90px; border: 1px solid #000000; font-weight: 900;">Extra Qty</th>
+              <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Reason / Cause</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((it, idx) => `
+              <tr style="border-bottom: 1px solid #000000; color: #000000;">
+                <td style="padding: 6px; text-align: center; border: 1px solid #000000; font-weight: 900;">${idx + 1}</td>
+                <td style="padding: 6px; font-weight: 700; border: 1px solid #000000;"><span style="padding: 2px 6px; border-radius: 3px; background-color: #ffffff; color: #000000; border: 1.2px solid #000000; font-size: 11px; font-weight: 900;">${it.bomItemName || it.materialName}</span></td>
+                <td style="padding: 6px; border: 1px solid #000000; font-weight: 600;">${it.materialName || it.bomItemName}</td>
+                <td style="padding: 6px; text-align: center; font-weight: 900; color: #000000; border: 1px solid #000000;">${it.totalRequired || it.qty} ${it.unit || 'Pcs'}</td>
+                <td style="padding: 6px; border: 1px solid #000000; font-weight: 600;">${it.reason || 'Extra Material Issue'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; font-size: 11px; border-top: 1.5px solid #000000; padding-top: 16px; margin-top: 10px; color: #000000;">
+          <div style="text-align: center;">
+            <div style="height: 25px;"></div>
+            <div style="border-bottom: 1.5px solid #000000; width: 85%; margin: 0 auto;"></div>
+            <div style="margin-top: 4px; font-weight: 800; text-transform: uppercase;">Issued By (Store Keeper)</div>
+            <div style="font-size: 10.5px; font-weight: 700;">${personName}</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="height: 25px;"></div>
+            <div style="border-bottom: 1.5px solid #000000; width: 85%; margin: 0 auto;"></div>
+            <div style="margin-top: 4px; font-weight: 800; text-transform: uppercase;">Received By (Cutting/Master)</div>
+            <div style="font-size: 10.5px; font-weight: 700;">${receiverName}</div>
+          </div>
+          <div style="text-align: center;">
+            <div style="height: 25px;"></div>
+            <div style="border-bottom: 1.5px solid #000000; width: 85%; margin: 0 auto;"></div>
+            <div style="margin-top: 4px; font-weight: 800; text-transform: uppercase;">Authorized / Supervisor</div>
+            <div style="font-size: 10.5px; font-weight: 700;">Store / Production Head</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Extra Material Issue Slip - ${voucherId}</title>
+          <style>
+            @page { size: A4; margin: 10mm; }
+            body { margin: 0; padding: 0; background: #ffffff; color: #000000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+            @media print {
+              body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            }
+          </style>
+        </head>
+        <body>
+          ${renderSlip('ORIGINAL STORE COPY', false)}
+          ${renderSlip('DUPLICATE PRODUCTION COPY', true)}
+        </body>
+      </html>
+    `;
+  };
+
+  // 1-Click Direct Print from History Table
+  const handleDirectPrintLog = (log) => {
+    const slipData = buildSlipDataFromLog(log);
+    try {
+      const printHtml = generateExtraSlipPrintHtml(slipData);
+      const oldFrame = document.getElementById('extra-issue-print-iframe');
+      if (oldFrame) {
+        try { document.body.removeChild(oldFrame); } catch (e) {}
+      }
+
+      const printFrame = document.createElement('iframe');
+      printFrame.id = 'extra-issue-print-iframe';
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+      printFrame.style.visibility = 'hidden';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow.document;
+      frameDoc.open();
+      frameDoc.write(printHtml);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          if (printFrame.contentWindow) {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+          }
+        } catch (err) {
+          console.warn('Iframe print error, falling back:', err);
+          setPrintSlipData(slipData);
+          handleTriggerBrowserPrint();
+        }
+      }, 250);
+    } catch (err) {
+      console.warn('Direct print error:', err);
+      setPrintSlipData(slipData);
+    }
+  };
+
+  // Preview on-screen and download PDF handler
+  const handlePreviewSlip = (log) => {
+    const slipData = buildSlipDataFromLog(log);
+    setPrintSlipData(slipData);
+  };
+
+  // Calculate dynamic stats for History tab overview cards (reflecting active filters)
   const historyStats = useMemo(() => {
     let totalItemsCount = 0;
     let totalQtySum = 0;
     const uniqueLots = new Set();
-    allExtraLogs.forEach(log => {
+    extraIssueLogs.forEach(log => {
       if (log.lotId) uniqueLots.add(String(log.lotId));
       if (log.materials && Array.isArray(log.materials)) {
         totalItemsCount += log.materials.length;
@@ -2341,12 +2693,297 @@ export default function ExtraMaterialIssueView({
       }
     });
     return {
-      totalVouchers: allExtraLogs.length,
+      totalVouchers: extraIssueLogs.length,
       totalItems: totalItemsCount,
       totalQty: totalQtySum,
       uniqueLotsCount: uniqueLots.size
     };
-  }, [allExtraLogs]);
+  }, [extraIssueLogs]);
+
+  // Master Detailed Print Function - Prints full report of all filtered extra issue slips with all line items
+  const handlePrintAllDetails = () => {
+    if (extraIssueLogs.length === 0) {
+      alert('No records available to print with the current filter.');
+      return;
+    }
+
+    const dateFilterLabel = (historyDateFrom || historyDateTo)
+      ? `${historyDateFrom || 'Start'} to ${historyDateTo || 'End'}`
+      : 'All Dates (Full History)';
+
+    const catLabel = historyCategoryFilter === 'reissue' 
+      ? 'Re-Issue Only' 
+      : historyCategoryFilter === 'extra' 
+        ? 'Extra Material Issue Only' 
+        : 'All Extra Material & Re-Issues';
+
+    const totalPieces = extraIssueLogs.reduce((sum, log) => {
+      return sum + (log.materials || []).reduce((mSum, m) => mSum + (parseFloat(m.qty) || 0), 0);
+    }, 0);
+
+    const totalLines = extraIssueLogs.reduce((sum, log) => sum + (log.materials || []).length, 0);
+
+    const printHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Extra Material Issue Master Audit Report - ${new Date().toLocaleDateString('en-GB')}</title>
+          <style>
+            @page { size: A4 landscape; margin: 8mm; }
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; color: #000000; font-size: 10px; background: #ffffff; }
+            .header-bar { border-bottom: 2.5px solid #000000; padding-bottom: 6px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: flex-end; }
+            .header-bar h1 { margin: 0; font-size: 18px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; color: #000000; }
+            .header-bar .subtitle { font-size: 10.5px; color: #000000; margin-top: 2px; font-weight: 700; letter-spacing: 0.2px; }
+            .meta-info { text-align: right; font-size: 9.5px; color: #000000; line-height: 1.45; font-weight: 600; }
+            
+            .summary-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+            .summary-card { padding: 6px 10px; background: #ffffff; border: 1.5px solid #000000; border-radius: 4px; }
+            .summary-card .lbl { font-size: 9px; color: #000000; font-weight: 800; text-transform: uppercase; letter-spacing: 0.3px; }
+            .summary-card .val { font-size: 13.5px; font-weight: 900; color: #000000; margin-top: 2px; }
+
+            table { width: 100%; border-collapse: collapse; font-size: 9.5px; margin-bottom: 16px; border: 1.5px solid #000000; }
+            th { background: #f0f0f0 !important; border: 1px solid #000000; border-bottom: 2px solid #000000; padding: 6px 7px; font-weight: 900; text-transform: uppercase; font-size: 9px; color: #000000; letter-spacing: 0.3px; }
+            td { border: 1px solid #000000; padding: 6px 7px; vertical-align: top; color: #000000; background-color: #ffffff; }
+            tr:nth-child(even) td { background-color: #fcfcfc !important; }
+
+            .badge-voucher { font-family: monospace; font-weight: 900; color: #000000; background: #ffffff; border: 1.2px solid #000000; padding: 2px 5px; border-radius: 3px; font-size: 9.5px; display: inline-block; white-space: nowrap; }
+            .badge-cat { font-weight: 900; font-size: 8.5px; padding: 2px 6px; border-radius: 3px; display: inline-block; white-space: nowrap; border: 1.2px solid #000000; color: #000000; background: #ffffff; text-transform: uppercase; }
+
+            .mat-row { margin-bottom: 3.5px; line-height: 1.35; color: #000000; }
+            .mat-row:last-child { margin-bottom: 0; }
+            .mat-qty { font-weight: 900; color: #000000; margin-left: 2px; }
+            .mat-reason { font-size: 9px; color: #000000; font-weight: 700; margin-left: 4px; display: inline-block; }
+
+            .signatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 24px; padding-top: 10px; page-break-inside: avoid; }
+            .sig-box { text-align: center; font-size: 9.5px; color: #000000; }
+            .sig-line { border-bottom: 1.5px solid #000000; width: 75%; margin: 32px auto 5px auto; }
+            .sig-name { font-weight: 900; text-transform: uppercase; color: #000000; }
+            .sig-sub { color: #000000; font-size: 8.5px; font-weight: 600; }
+
+            @media print {
+              body {
+                color: #000000 !important;
+                background: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              th, td, div, span, strong, h1, h2 {
+                color: #000000 !important;
+              }
+              table, th, td, .summary-card, .badge-voucher, .badge-cat, .sig-line {
+                border-color: #000000 !important;
+              }
+              tr { page-break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header-bar">
+            <div>
+              <h1>MH ACCESSORIES & BOM STORE</h1>
+              <div class="subtitle">EXTRA MATERIAL & RE-ISSUE MASTER AUDIT REPORT (DETAILED LOG)</div>
+            </div>
+            <div class="meta-info">
+              <div><strong>Date Range:</strong> ${dateFilterLabel}</div>
+              <div><strong>Category:</strong> ${catLabel}</div>
+              <div><strong>Printed On:</strong> ${new Date().toLocaleString('en-GB')}</div>
+            </div>
+          </div>
+
+          <div class="summary-cards">
+            <div class="summary-card">
+              <div class="lbl">TOTAL ISSUE SLIPS</div>
+              <div class="val">${extraIssueLogs.length} Vouchers</div>
+            </div>
+            <div class="summary-card">
+              <div class="lbl">TOTAL EXTRA UNITS ISSUED</div>
+              <div class="val">${totalPieces} Pcs</div>
+            </div>
+            <div class="summary-card">
+              <div class="lbl">TOTAL LINE COMPONENTS</div>
+              <div class="val">${totalLines} Line Items</div>
+            </div>
+            <div class="summary-card">
+              <div class="lbl">PRODUCTION LOTS COVERED</div>
+              <div class="val">${historyStats.uniqueLotsCount} Lots</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 25px; text-align: center;">#</th>
+                <th style="width: 95px;">Challan / Bill No</th>
+                <th style="width: 95px;">Date & Time</th>
+                <th style="width: 105px;">Lot & Garment</th>
+                <th style="width: 85px; text-align: center;">Category</th>
+                <th>Issued Materials, Quantities & Specific Reasons</th>
+                <th style="width: 95px;">Issued By</th>
+                <th style="width: 115px;">Received By & Dept</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${extraIssueLogs.map((log, idx) => {
+                const isReissue = isLogReissue(log);
+                const matchedDesign = designs.find(d => String(d.id) === String(log.lotId));
+                const lotBrand = matchedDesign?.brand ? `${matchedDesign.brand} • ` : '';
+                const lotCategory = log.category || matchedDesign?.category || 'Garment';
+                const cleanIssuer = (log.personName || 'Store In-charge').replace(/\\s*\\(.*?\\)/, '').trim() || 'Store In-charge';
+                const receiver = log.receiverName || 'Cutting Floor';
+
+                return `
+                  <tr>
+                    <td style="text-align: center; font-weight: 900; color: #000000;">${idx + 1}</td>
+                    <td><span class="badge-voucher">${log.id}</span></td>
+                    <td style="white-space: nowrap; color: #000000; font-weight: 700;">${log.date}</td>
+                    <td>
+                      <strong style="color: #000000; font-size: 10px;">LOT #${log.lotId || 'DIRECT'}</strong>
+                      <div style="font-size: 8.5px; color: #000000; font-weight: 600;">${lotBrand}${lotCategory}</div>
+                    </td>
+                    <td style="text-align: center;">
+                      <span class="badge-cat">
+                        ${isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL'}
+                      </span>
+                    </td>
+                    <td>
+                      ${(log.materials || []).map(m => `
+                        <div class="mat-row">
+                          <strong>&bull; ${m.bomItemName || m.name}:</strong> 
+                          <span class="mat-qty">${m.qty} ${m.unit || 'Pcs'}</span>
+                          ${m.reason ? `<span class="mat-reason">[${m.reason}]</span>` : ''}
+                        </div>
+                      `).join('')}
+                    </td>
+                    <td><strong style="color: #000000;">${cleanIssuer}</strong></td>
+                    <td>
+                      <strong style="color: #000000; text-transform: uppercase;">${receiver}</strong>
+                      <div style="font-size: 8.5px; color: #000000; font-weight: 600;">${log.receiverDept || 'Cutting'}</div>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+
+          <div class="signatures">
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <div class="sig-name">Prepared By (Store Clerk)</div>
+              <div class="sig-sub">Accessories Central Store</div>
+            </div>
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <div class="sig-name">Audited By (Store In-charge)</div>
+              <div class="sig-sub">Inventory & Stock Control</div>
+            </div>
+            <div class="sig-box">
+              <div class="sig-line"></div>
+              <div class="sig-name">Authorized Manager</div>
+              <div class="sig-sub">Production / Plant Head</div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+
+    try {
+      const oldFrame = document.getElementById('extra-issue-detailed-report-iframe');
+      if (oldFrame) {
+        try { document.body.removeChild(oldFrame); } catch (e) {}
+      }
+
+      const printFrame = document.createElement('iframe');
+      printFrame.id = 'extra-issue-detailed-report-iframe';
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '0';
+      printFrame.style.bottom = '0';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+      printFrame.style.visibility = 'hidden';
+      document.body.appendChild(printFrame);
+
+      const frameDoc = printFrame.contentWindow.document;
+      frameDoc.open();
+      frameDoc.write(printHtml);
+      frameDoc.close();
+
+      setTimeout(() => {
+        try {
+          if (printFrame.contentWindow) {
+            printFrame.contentWindow.focus();
+            printFrame.contentWindow.print();
+          }
+        } catch (err) {
+          console.warn('Detailed report print failed:', err);
+        }
+      }, 250);
+    } catch (err) {
+      console.warn('Print iframe error:', err);
+    }
+  };
+
+  // Master PDF Download Function using jsPDF + autoTable
+  const handleDownloadAllDetailsPdf = () => {
+    if (extraIssueLogs.length === 0) {
+      alert('No records available to download.');
+      return;
+    }
+    const doc = new jsPDF({ orientation: 'landscape', format: 'a4' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('MH ACCESSORIES & BOM STORE', 14, 15);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('EXTRA MATERIAL & RE-ISSUE MASTER AUDIT REPORT', 14, 20);
+
+    const dateFilterLabel = (historyDateFrom || historyDateTo)
+      ? `Date Range: ${historyDateFrom || 'Start'} to ${historyDateTo || 'End'}`
+      : 'Date Range: All Dates (Full History)';
+    doc.setFontSize(9);
+    doc.text(dateFilterLabel, 14, 25);
+    doc.text(`Generated on: ${new Date().toLocaleString('en-GB')} | Total Records: ${extraIssueLogs.length}`, 190, 25);
+
+    const tableRows = extraIssueLogs.map((log, idx) => {
+      const isReissue = isLogReissue(log);
+      const cleanIssuer = (log.personName || 'Store In-charge').replace(/\s*\(.*?\)/, '').trim() || 'Store In-charge';
+      const itemsText = (log.materials || []).map(m => `• ${m.bomItemName || m.name}: ${m.qty} ${m.unit || 'Pcs'}${m.reason ? ` (${m.reason})` : ''}`).join('\n');
+      return [
+        idx + 1,
+        log.id,
+        log.date,
+        `Lot #${log.lotId || 'DIRECT'}`,
+        isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL',
+        itemsText,
+        cleanIssuer,
+        `${log.receiverName || 'Cutting Floor'}${log.receiverDept ? `\n(${log.receiverDept})` : ''}`
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 28,
+      head: [['#', 'Challan No', 'Date', 'Lot Ref', 'Category', 'Issued Materials & Reasons', 'Issued By', 'Received By']],
+      body: tableRows,
+      theme: 'grid',
+      headStyles: { fillColor: [0, 0, 0], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
+      bodyStyles: { fontSize: 8, textColor: [0, 0, 0], lineColor: [0, 0, 0], lineWidth: 0.15 },
+      styles: { lineColor: [0, 0, 0], lineWidth: 0.15 },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 28, fontStyle: 'bold' },
+        2: { cellWidth: 26 },
+        3: { cellWidth: 25, fontStyle: 'bold' },
+        4: { cellWidth: 25, fontStyle: 'bold' },
+        5: { cellWidth: 'auto' },
+        6: { cellWidth: 25 },
+        7: { cellWidth: 32 }
+      },
+      margin: { left: 14, right: 14 }
+    });
+
+    doc.save(`EXTRA_MATERIAL_MASTER_REPORT_${historyDateFrom || 'ALL'}_TO_${historyDateTo || 'ALL'}.pdf`);
+  };
 
   // Group all issue logs by Lot Number for complete 1st Time vs Extra Material audit
   const lotAuditSummary = useMemo(() => {
@@ -4418,7 +5055,7 @@ export default function ExtraMaterialIssueView({
                 <TrendingUp size={20} />
               </div>
               <div>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', fontWeight: '600', display: 'block' }}>Total Units Re-Issued</span>
+                <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', fontWeight: '600', display: 'block' }}>Total Extra Units Issued</span>
                 <strong style={{ fontSize: '18px', fontWeight: '800', color: '#dc2626' }}>
                   {historyStats.totalQty.toLocaleString()} Pcs
                 </strong>
@@ -4519,300 +5156,554 @@ export default function ExtraMaterialIssueView({
                 </p>
               </div>
 
-              <div style={{ position: 'relative', width: '320px', maxWidth: '100%' }}>
-                <Search size={15} style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                <input
-                  type="text"
-                  placeholder="Filter by Lot No, Material, Person, Reason..."
-                  value={historySearch}
-                  onChange={(e) => setHistorySearch(e.target.value)}
-                  className="form-input"
-                  style={{
-                    width: '100%',
-                    height: '36px',
-                    paddingLeft: '34px',
-                    paddingRight: historySearch ? '30px' : '12px',
-                    borderRadius: '8px',
-                    fontSize: '12.5px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                {historySearch && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                {/* Category Pills for Extra Material */}
+                <div style={{
+                  display: 'inline-flex',
+                  backgroundColor: 'var(--bg-secondary, #f1f5f9)',
+                  padding: '3px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color, #e2e8f0)'
+                }}>
                   <button
                     type="button"
-                    onClick={() => setHistorySearch('')}
+                    onClick={() => setHistoryCategoryFilter('all')}
                     style={{
-                      position: 'absolute',
-                      right: '8px',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      background: 'none',
+                      padding: '5px 12px',
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
                       border: 'none',
-                      color: 'var(--text-muted)',
                       cursor: 'pointer',
-                      fontSize: '14px'
+                      background: historyCategoryFilter === 'all' ? '#0f172a' : 'transparent',
+                      color: historyCategoryFilter === 'all' ? '#ffffff' : '#64748b',
+                      transition: 'all 0.15s ease'
                     }}
                   >
-                    &times;
+                    All Extra ({allExtraLogs.length})
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setHistoryCategoryFilter('extra')}
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: historyCategoryFilter === 'extra' ? '#059669' : 'transparent',
+                      color: historyCategoryFilter === 'extra' ? '#ffffff' : '#64748b',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Extra Issue ({allExtraLogs.filter(l => !isLogReissue(l)).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryCategoryFilter('reissue')}
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: historyCategoryFilter === 'reissue' ? '#dc2626' : 'transparent',
+                      color: historyCategoryFilter === 'reissue' ? '#ffffff' : '#64748b',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    Re-Issue ({allExtraLogs.filter(l => isLogReissue(l)).length})
+                  </button>
+                </div>
+
+                <div style={{ position: 'relative', width: '280px', maxWidth: '100%' }}>
+                  <Search size={15} style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Filter by Lot No, Material, Person, Reason..."
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    className="form-input"
+                    style={{
+                      width: '100%',
+                      height: '34px',
+                      paddingLeft: '34px',
+                      paddingRight: historySearch ? '30px' : '12px',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  {historySearch && (
+                    <button
+                      type="button"
+                      onClick={() => setHistorySearch('')}
+                      style={{
+                        position: 'absolute',
+                        right: '8px',
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        fontSize: '14px'
+                      }}
+                    >
+                      &times;
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Date Range Filter & Master Actions Bar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px',
+              padding: '10px 14px',
+              backgroundColor: '#ffffff',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color, #e2e8f0)',
+              marginBottom: '14px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+            }}>
+              {/* Left: Date Range Filter (From Date, To Date, Quick Presets) */}
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#334155', fontSize: '12px', fontWeight: '800' }}>
+                  <Calendar size={15} style={{ color: '#4f46e5' }} />
+                  <span>Choose Days:</span>
+                </div>
+
+                {/* From Date */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>From:</span>
+                  <input
+                    type="date"
+                    value={historyDateFrom}
+                    onChange={(e) => setHistoryDateFrom(e.target.value)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '11.5px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#0f172a',
+                      cursor: 'pointer'
+                    }}
+                  />
+                </div>
+
+                {/* To Date */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>To:</span>
+                  <input
+                    type="date"
+                    value={historyDateTo}
+                    onChange={(e) => setHistoryDateTo(e.target.value)}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '11.5px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#0f172a',
+                      cursor: 'pointer'
+                    }}
+                  />
+                </div>
+
+                {/* Quick Presets */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setQuickDatePreset('today')}
+                    style={{
+                      padding: '3px 9px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '5px',
+                      border: '1px solid #e2e8f0',
+                      background: '#f1f5f9',
+                      color: '#334155',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickDatePreset('yesterday')}
+                    style={{
+                      padding: '3px 9px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '5px',
+                      border: '1px solid #e2e8f0',
+                      background: '#f1f5f9',
+                      color: '#334155',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Yesterday
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickDatePreset('7days')}
+                    style={{
+                      padding: '3px 9px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '5px',
+                      border: '1px solid #e2e8f0',
+                      background: '#f1f5f9',
+                      color: '#334155',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Last 7 Days
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickDatePreset('thisMonth')}
+                    style={{
+                      padding: '3px 9px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '5px',
+                      border: '1px solid #e2e8f0',
+                      background: '#f1f5f9',
+                      color: '#334155',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    This Month
+                  </button>
+                  {(historyDateFrom || historyDateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => setQuickDatePreset('all')}
+                      style={{
+                        padding: '3px 9px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        borderRadius: '5px',
+                        border: '1px solid #fecaca',
+                        background: '#fef2f2',
+                        color: '#dc2626',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px'
+                      }}
+                      title="Clear Date Range Filter"
+                    >
+                      <RotateCcw size={11} />
+                      <span>Clear</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Master Print & Export Actions */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {/* On-screen expand toggle */}
+                <button
+                  type="button"
+                  onClick={() => setShowAllDetailsInTable(!showAllDetailsInTable)}
+                  style={{
+                    padding: '6px 11px',
+                    fontSize: '11.5px',
+                    fontWeight: '700',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: showAllDetailsInTable ? '#eff6ff' : '#ffffff',
+                    color: showAllDetailsInTable ? '#1d4ed8' : '#475569',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="Toggle expanding all items and reasons in the table"
+                >
+                  <Eye size={13} />
+                  <span>{showAllDetailsInTable ? 'Collapse Details' : 'See All Detail'}</span>
+                </button>
+
+                {/* Print All Details Master Report Button */}
+                <button
+                  type="button"
+                  onClick={handlePrintAllDetails}
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: '800',
+                    borderRadius: '7px',
+                    border: '1px solid #0f172a',
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                  }}
+                  title="Print full A4 landscape report with all items, reasons, issuers and receivers"
+                >
+                  <Printer size={14} style={{ color: '#ea580c' }} />
+                  <span>Print All Detail</span>
+                </button>
+
+                {/* PDF Download Button */}
+                <button
+                  type="button"
+                  onClick={handleDownloadAllDetailsPdf}
+                  style={{
+                    padding: '6px 11px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    borderRadius: '7px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#334155',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px'
+                  }}
+                  title="Export detailed audit report as PDF"
+                >
+                  <Download size={13} style={{ color: '#4f46e5' }} />
+                  <span>PDF</span>
+                </button>
               </div>
             </div>
 
             {/* Table Container */}
-            <div style={{ overflowX: 'auto', width: '100%', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)', backgroundColor: 'var(--bg-primary, #ffffff)' }}>
-              <table style={{ width: '100%', minWidth: '950px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                <thead>
-                  <tr style={{ backgroundColor: 'var(--bg-secondary, #f1f5f9)', borderBottom: '1.5px solid var(--border-color, #cbd5e1)', textAlign: 'left' }}>
-                    <th style={{ width: '120px', padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>Voucher ID</th>
-                    <th style={{ width: '150px', padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>Lot & Garment</th>
-                    <th style={{ width: '140px', padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>Date & Time</th>
-                    <th style={{ width: '160px', padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>Issued By / Details</th>
-                    <th style={{ padding: '10px 12px', fontWeight: '700', color: 'var(--text-main)' }}>Issued Materials (Qty & Reason)</th>
-                    <th style={{ width: '120px', padding: '10px 12px', textAlign: 'center', fontWeight: '700', color: 'var(--text-main)' }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {extraIssueLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
-                          <div style={{
-                            width: '48px',
-                            height: '48px',
-                            borderRadius: '50%',
-                            backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#6366f1'
-                          }}>
-                            <Clock size={24} />
-                          </div>
-                          <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>No Extra Issue Logs Found</strong>
-                          <span style={{ fontSize: '12px', maxWidth: '350px' }}>
-                            {historySearch ? 'No vouchers match your search filter.' : 'When extra materials are issued for production lots, their permanent audit logs will appear here.'}
-                          </span>
-                        </div>
-                      </td>
+            {extraIssueLogs.length === 0 ? (
+              <div style={{ padding: '48px 20px', textAlign: 'center', color: 'var(--text-muted)', border: '1px solid #e2e8f0', borderRadius: '10px', background: '#ffffff' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' }}>
+                  <div style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#6366f1'
+                  }}>
+                    <Clock size={24} />
+                  </div>
+                  <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>No Extra Issue Logs Found</strong>
+                  <span style={{ fontSize: '12px', maxWidth: '350px' }}>
+                    {historySearch ? 'No vouchers match your search filter.' : 'When extra materials are issued for production lots, their permanent audit logs will appear here.'}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px', background: '#ffffff' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
+                      <th style={{ padding: '10px 12px' }}>Challan / Bill No</th>
+                      <th style={{ padding: '10px 12px' }}>Date</th>
+                      <th style={{ padding: '10px 12px' }}>Lot Reference</th>
+                      <th style={{ padding: '10px 12px' }}>Issued Materials</th>
+                      <th style={{ padding: '10px 12px' }}>Issued By</th>
+                      <th style={{ padding: '10px 12px' }}>Received By</th>
+                      <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
                     </tr>
-                  ) : (
-                    extraIssueLogs.map((log, idx) => {
-                      const matchedDesign = designs.find(d => String(d.id) === String(log.lotId));
+                  </thead>
+                  <tbody>
+                    {extraIssueLogs.map((log, idx) => {
+                      const cleanIssuer = (log.personName || 'Store In-charge').replace(/\s*\(.*?\)/, '').trim() || 'Store In-charge';
+                      const receiver = log.receiverName || 'Cutting Floor';
+                      const dept = log.receiverDept || 'Cutting';
 
                       return (
                         <tr
                           key={log.id || idx}
                           style={{
-                            borderBottom: '1px solid var(--border-color, #e2e8f0)',
+                            borderBottom: '1px solid #f1f5f9',
+                            background: idx % 2 === 0 ? '#ffffff' : '#fafafa',
                             transition: 'background-color 0.15s ease'
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--bg-hover, #f8fafc)'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = idx % 2 === 0 ? '#ffffff' : '#fafafa'}
                         >
-                          {/* Log Voucher ID */}
-                          <td style={{ padding: '12px' }}>
-                            <div style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              padding: '4px 8px',
-                              backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                              color: '#4f46e5',
-                              borderRadius: '6px',
+                          {/* Challan / Bill No */}
+                          <td style={{ padding: '10px 12px', fontWeight: '800' }}>
+                            <span style={{
                               fontFamily: 'monospace',
+                              background: '#fff7ed',
+                              color: '#c2410c',
+                              border: '1px solid #fed7aa',
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              fontSize: '12px',
                               fontWeight: '800',
-                              fontSize: '12px'
+                              whiteSpace: 'nowrap'
                             }}>
-                              <FileText size={13} />
-                              <span>{log.id}</span>
-                            </div>
+                              {log.id}
+                            </span>
                           </td>
 
-                          {/* Lot & Garment */}
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
-                              <strong style={{ fontSize: '13px', color: 'var(--text-main)' }}>
-                                Lot {log.lotId}
-                              </strong>
-                              {matchedDesign?.lotNo2 && (
-                                <span style={{
-                                  fontSize: '9.5px',
-                                  padding: '1px 5px',
-                                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                                  color: '#4f46e5',
-                                  borderRadius: '3px',
-                                  fontWeight: '700'
-                                }}>
-                                  {matchedDesign.lotNo2}
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                              {matchedDesign?.brand ? `${matchedDesign.brand} • ` : ''}{log.category || matchedDesign?.category || 'Garment'}
-                            </div>
+                          {/* Date */}
+                          <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                            {log.date}
                           </td>
 
-                          {/* Date & Time */}
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: 'var(--text-main)', fontSize: '12px', fontWeight: '600' }}>
-                              <Calendar size={13} style={{ color: '#6366f1' }} />
-                              <span>{log.date}</span>
-                            </div>
-                          </td>
-
-                          {/* Issuer / Details */}
-                          <td style={{ padding: '12px' }}>
-                            {(() => {
-                              const rawName = log.personName || 'Store Incharge';
-                              const noteMatch = rawName.match(/\((.*?)\)/);
-                              const cleanName = rawName.replace(/\s*\(.*?\)/, '').trim() || 'Store Incharge';
-                              const extraNote = noteMatch ? noteMatch[1] : null;
-
-                              return (
-                                <>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <div style={{
-                                      width: '24px',
-                                      height: '24px',
-                                      borderRadius: '50%',
-                                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                      color: '#059669',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      flexShrink: 0
-                                    }}>
-                                      <User size={13} />
-                                    </div>
-                                    <span style={{ fontWeight: '700', color: 'var(--text-main)', fontSize: '12.5px' }}>
-                                      {cleanName}
-                                    </span>
-                                  </div>
-                                  {extraNote && (
-                                    <div style={{ marginTop: '3px', marginLeft: '30px' }}>
-                                      <span style={{
-                                        fontSize: '10px',
-                                        fontWeight: '700',
-                                        backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                                        color: '#4f46e5',
-                                        padding: '1px 6px',
-                                        borderRadius: '4px',
-                                        display: 'inline-block'
-                                      }}>
-                                        {extraNote}
-                                      </span>
-                                    </div>
-                                  )}
-                                  {log.category && (
-                                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '2px', marginLeft: '30px' }}>
-                                      {log.category}
-                                    </span>
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </td>
-
-                          {/* Issued Materials Chips */}
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                              {(log.materials || []).map((m, mIdx) => (
-                                <div
-                                  key={mIdx}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '6px',
-                                    padding: '4px 8px',
-                                    backgroundColor: 'var(--bg-secondary, #f8fafc)',
-                                    borderRadius: '6px',
-                                    border: '1px solid var(--border-color, #e2e8f0)',
-                                    fontSize: '11.5px'
-                                  }}
-                                >
-                                  <span style={{ fontWeight: '700', color: '#334155' }}>
-                                    {m.bomItemName || m.name}
-                                  </span>
+                          {/* Lot Reference & Distinct Category Badge */}
+                          <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                              <span>LOT #{log.lotId || 'DIRECT'}</span>
+                              {(() => {
+                                const isReissue = isLogReissue(log);
+                                return (
                                   <span style={{
+                                    fontSize: '10px',
+                                    background: isReissue ? '#fef2f2' : '#f0fdf4',
+                                    color: isReissue ? '#b91c1c' : '#15803d',
+                                    border: `1px solid ${isReissue ? '#fecaca' : '#bbf7d0'}`,
+                                    padding: '2px 7px',
+                                    borderRadius: '5px',
                                     fontWeight: '800',
-                                    color: '#dc2626',
-                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                    padding: '1px 6px',
-                                    borderRadius: '4px',
-                                    fontSize: '11.5px'
+                                    letterSpacing: '0.3px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center'
                                   }}>
-                                    +{m.qty} {m.unit || 'Pcs'}
+                                    {isReissue ? 'RE-ISSUE' : 'EXTRA MATERIAL'}
                                   </span>
+                                );
+                              })()}
+                            </div>
+                          </td>
+
+                          {/* Issued Materials */}
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              {(showAllDetailsInTable ? (log.materials || []) : (log.materials || []).slice(0, 3)).map((m, mIdx) => (
+                                <div key={mIdx} style={{ fontSize: '11.5px', color: '#334155', lineHeight: 1.35 }}>
+                                  &bull; <strong>{m.bomItemName || m.name}:</strong> <span style={{ fontWeight: '700', color: '#0f172a' }}>{m.qty} {m.unit || 'Pcs'}</span>
                                   {m.reason && (
                                     <span style={{
-                                      fontSize: '10.5px',
-                                      color: '#64748b',
-                                      backgroundColor: 'rgba(0,0,0,0.04)',
+                                      fontSize: '10px',
+                                      color: '#b91c1c',
+                                      marginLeft: '5px',
+                                      backgroundColor: '#fef2f2',
                                       padding: '1px 5px',
-                                      borderRadius: '3px'
+                                      borderRadius: '4px',
+                                      border: '1px solid #fee2e2',
+                                      fontWeight: '600'
                                     }}>
                                       {m.reason}
                                     </span>
                                   )}
                                 </div>
                               ))}
+                              {!showAllDetailsInTable && (log.materials || []).length > 3 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllDetailsInTable(true)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    padding: 0,
+                                    textAlign: 'left',
+                                    fontSize: '11px',
+                                    color: '#ea580c',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline'
+                                  }}
+                                >
+                                  +{(log.materials || []).length - 3} more item(s) (click to see all)
+                                </button>
+                              )}
                             </div>
                           </td>
 
-                          {/* Reprint Action Button */}
-                          <td style={{ padding: '12px', textAlign: 'center' }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const slipData = {
-                                  voucherId: log.id,
-                                  issueDate: log.date,
-                                  design: matchedDesign || { id: log.lotId, category: log.category, brand: '' },
-                                  pieces: log.volume || 100,
-                                  personName: log.personName || 'Store Staff',
-                                  receiverName: 'Cutting Dept',
-                                  receiverDept: 'Cutting Line',
-                                  items: (log.materials || []).map(m => ({
-                                    materialId: 'MT-ITEM',
-                                    materialName: m.name,
-                                    bomItemName: m.bomItemName || m.name,
-                                    totalRequired: m.qty,
-                                    unit: m.unit || 'Pcs',
-                                    reason: 'Extra Material Issue Log'
-                                  }))
-                                };
-                                setPrintSlipData(slipData);
-                              }}
-                              className="btn btn-primary btn-sm"
-                              style={{
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '5px',
-                                padding: '6px 12px',
-                                fontSize: '11.5px',
-                                fontWeight: '700',
-                                borderRadius: '6px',
-                                backgroundColor: '#6366f1',
-                                color: '#ffffff',
-                                border: 'none',
-                                cursor: 'pointer',
-                                boxShadow: '0 2px 6px rgba(99, 102, 241, 0.25)',
-                                whiteSpace: 'nowrap'
-                              }}
-                              title="Reprint Extra Material Slip"
-                            >
-                              <Printer size={13} />
-                              <span>Reprint Slip</span>
-                            </button>
+                          {/* Issued By */}
+                          <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
+                            {cleanIssuer}
+                          </td>
+
+                          {/* Received By */}
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              <strong style={{ color: '#0f172a', fontWeight: '800', fontSize: '12.5px', textTransform: 'uppercase' }}>
+                                {receiver}
+                              </strong>
+                              {dept && (
+                                <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+                                  {dept}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Actions: Print and Preview buttons matching user screenshot */}
+                          <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleDirectPrintLog(log)}
+                                style={{
+                                  padding: '5px 12px',
+                                  borderRadius: '6px',
+                                  border: '1.5px solid #0f172a',
+                                  background: '#0f172a',
+                                  color: '#ffffff',
+                                  fontSize: '11.5px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                                }}
+                                title="Direct 1-Click Print"
+                              >
+                                <Printer size={13} style={{ color: '#ea580c' }} />
+                                <span>Print</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePreviewSlip(log)}
+                                style={{
+                                  padding: '5px 10px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  color: '#475569',
+                                  fontSize: '11.5px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                                }}
+                                title="Preview on-screen and download PDF"
+                              >
+                                <Eye size={13} />
+                                <span>Preview</span>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

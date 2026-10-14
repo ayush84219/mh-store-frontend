@@ -1055,6 +1055,7 @@ export default function MaterialIssueView({
   const [receiverName, setReceiverName] = useState('');
   const [receiverDept, setReceiverDept] = useState('Cutting');
   const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logsCategoryFilter, setLogsCategoryFilter] = useState('all'); // 'all' | 'with_bom' | 'without_bom' | 'extra'
   const [printLog, setPrintLog] = useState(null);
   const [auditTab, setAuditTab] = useState('combined_audit'); // 'combined_audit', 'by_lot', 'person_wise', 'receiver_wise', or 'all_logs'
   const [personFilter, setPersonFilter] = useState('all');
@@ -1833,16 +1834,29 @@ export default function MaterialIssueView({
     });
   }, [lotAuditSummary, logSearchQuery]);
 
-  const filteredLogs = issueLogs.filter(log => {
-    const q = logSearchQuery.toLowerCase();
-    const idMatch = String(log.id).toLowerCase().includes(q);
-    const lotMatch = `lot ${log.lotId}`.toLowerCase().includes(q) || String(log.lotId).toLowerCase().includes(q);
-    const categoryMatch = String(log.category).toLowerCase().includes(q);
-    const personMatch = String(log.personName || '').toLowerCase().includes(q);
-    const dateMatch = String(log.date).toLowerCase().includes(q);
-    const materialMatch = log.materials && log.materials.some(m => String(m.name).toLowerCase().includes(q));
-    return idMatch || lotMatch || categoryMatch || personMatch || dateMatch || materialMatch;
-  });
+  const filteredLogs = useMemo(() => {
+    return issueLogs.filter(log => {
+      const vid = String(log.id || '').toUpperCase();
+      const isExtra = log.isReissue || vid.startsWith('EMI') || vid.startsWith('RI') || String(log.personName || '').toLowerCase().includes('extra') || String(log.category || '').toLowerCase().includes('extra');
+      const isWithoutBom = log.isWithoutBom || vid.startsWith('WO-MI') || vid.startsWith('BILL-MI') || vid.startsWith('CH-MI') || vid.startsWith('MI-WO') || String(log.category || '').toLowerCase().includes('without bom');
+      const isWithBom = !isExtra && !isWithoutBom;
+
+      if (logsCategoryFilter === 'with_bom' && !isWithBom) return false;
+      if (logsCategoryFilter === 'without_bom' && !isWithoutBom) return false;
+      if (logsCategoryFilter === 'extra' && !isExtra) return false;
+
+      const q = logSearchQuery.toLowerCase().trim();
+      if (!q) return true;
+      const idMatch = String(log.id).toLowerCase().includes(q);
+      const lotMatch = `lot ${log.lotId}`.toLowerCase().includes(q) || String(log.lotId).toLowerCase().includes(q);
+      const categoryMatch = String(log.category).toLowerCase().includes(q);
+      const personMatch = String(log.personName || '').toLowerCase().includes(q);
+      const receiverMatch = String(log.receiverName || '').toLowerCase().includes(q);
+      const dateMatch = String(log.date).toLowerCase().includes(q);
+      const materialMatch = log.materials && log.materials.some(m => String(m.name || m.bomItemName || '').toLowerCase().includes(q));
+      return idMatch || lotMatch || categoryMatch || personMatch || receiverMatch || dateMatch || materialMatch;
+    });
+  }, [issueLogs, logsCategoryFilter, logSearchQuery]);
 
   const handlePrintAllLogs = () => {
     document.body.classList.add('print-issue-logs-mode');
@@ -4004,6 +4018,81 @@ export default function MaterialIssueView({
                 </div>
               )}
 
+              {auditTab === 'all_logs' && (
+                <div style={{
+                  display: 'inline-flex',
+                  backgroundColor: 'var(--bg-secondary, #f1f5f9)',
+                  padding: '2px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-color, #cbd5e1)'
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => setLogsCategoryFilter('all')}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: logsCategoryFilter === 'all' ? '#0f172a' : 'transparent',
+                      color: logsCategoryFilter === 'all' ? '#ffffff' : '#64748b'
+                    }}
+                  >
+                    All ({issueLogs.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogsCategoryFilter('with_bom')}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: logsCategoryFilter === 'with_bom' ? '#2563eb' : 'transparent',
+                      color: logsCategoryFilter === 'with_bom' ? '#ffffff' : '#64748b'
+                    }}
+                  >
+                    With BOM ({issueLogs.filter(l => !l.isReissue && !l.isWithoutBom && !String(l.id || '').toUpperCase().startsWith('EMI') && !String(l.id || '').toUpperCase().startsWith('WO-MI') && !String(l.id || '').toUpperCase().startsWith('BILL-MI')).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogsCategoryFilter('without_bom')}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: logsCategoryFilter === 'without_bom' ? '#ea580c' : 'transparent',
+                      color: logsCategoryFilter === 'without_bom' ? '#ffffff' : '#64748b'
+                    }}
+                  >
+                    Without BOM ({issueLogs.filter(l => l.isWithoutBom || String(l.id || '').toUpperCase().startsWith('WO-MI') || String(l.id || '').toUpperCase().startsWith('BILL-MI')).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLogsCategoryFilter('extra')}
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '4px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      background: logsCategoryFilter === 'extra' ? '#059669' : 'transparent',
+                      color: logsCategoryFilter === 'extra' ? '#ffffff' : '#64748b'
+                    }}
+                  >
+                    Extra Material ({issueLogs.filter(l => l.isReissue || String(l.id || '').toUpperCase().startsWith('EMI') || String(l.id || '').toUpperCase().startsWith('RI')).length})
+                  </button>
+                </div>
+              )}
+
               <div style={{ position: 'relative', width: '230px' }}>
                 <input
                   type="text"
@@ -5198,6 +5287,7 @@ export default function MaterialIssueView({
                 <thead>
                   <tr>
                     <th>Log ID</th>
+                    <th>Issue Category</th>
                     <th>Lot Number</th>
                     <th>Garment Category</th>
                     <th>Volume (Pieces)</th>
@@ -5210,45 +5300,73 @@ export default function MaterialIssueView({
                 <tbody>
                   {filteredLogs.length === 0 ? (
                     <tr>
-                      <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                      <td colSpan="9" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                         {issueLogs.length === 0
                           ? 'No material issues logged for this manufacturing cycle.'
                           : 'No matching transaction logs found.'}
                       </td>
                     </tr>
                   ) : (
-                    filteredLogs.map((log) => (
-                      <tr key={log.id}>
-                        <td style={{ fontWeight: 'bold' }}>
-                          {log.id}
-                          {log.isReissue && (
-                            <span className="status-badge rejected" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase' }}>
-                              Re-issue
-                            </span>
-                          )}
-                          {log.isReturn && (
-                            <span className="status-badge verified" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase', backgroundColor: 'var(--success-light)', color: 'var(--success)' }}>
-                              Return
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          {log.isReturn ? (
-                            <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
-                              {log.lotId && log.lotId !== 'N/A' ? `Lot ${log.lotId}` : 'No Lot'}
-                            </span>
-                          ) : (
-                            <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>Lot {log.lotId}</span>
-                          )}
-                        </td>
-                        <td>{log.category}</td>
-                        <td>
-                          {log.isReturn ? (
-                            <span style={{ color: 'var(--text-muted)' }}>—</span>
-                          ) : (
-                            <strong>{log.volume.toLocaleString()} units</strong>
-                          )}
-                        </td>
+                    filteredLogs.map((log) => {
+                      const vid = String(log.id || '').toUpperCase();
+                      const isExtra = log.isReissue || vid.startsWith('EMI') || vid.startsWith('RI') || String(log.personName || '').toLowerCase().includes('extra') || String(log.category || '').toLowerCase().includes('extra');
+                      const isWithoutBom = log.isWithoutBom || vid.startsWith('WO-MI') || vid.startsWith('BILL-MI') || vid.startsWith('CH-MI') || vid.startsWith('MI-WO') || String(log.category || '').toLowerCase().includes('without bom');
+
+                      return (
+                        <tr key={log.id}>
+                          <td style={{ fontWeight: 'bold' }}>
+                            {log.id}
+                            {log.isReissue && (
+                              <span className="status-badge rejected" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase' }}>
+                                Re-issue
+                              </span>
+                            )}
+                            {log.isReturn && (
+                              <span className="status-badge verified" style={{ fontSize: '9px', padding: '1px 4px', marginLeft: '6px', textTransform: 'uppercase', backgroundColor: 'var(--success-light)', color: 'var(--success)' }}>
+                                Return
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {log.isReturn ? (
+                              <span style={{ fontSize: '10px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                RETURN
+                              </span>
+                            ) : log.isReissue ? (
+                              <span style={{ fontSize: '10px', background: '#fef2f2', color: '#b91c1c', border: '1px solid #fecaca', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                RE-ISSUE
+                              </span>
+                            ) : isExtra ? (
+                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                EXTRA MATERIAL
+                              </span>
+                            ) : isWithoutBom ? (
+                              <span style={{ fontSize: '10px', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                WITHOUT BOM
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '10px', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                WITH BOM
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            {log.isReturn ? (
+                              <span className="status-badge" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}>
+                                {log.lotId && log.lotId !== 'N/A' ? `Lot ${log.lotId}` : 'No Lot'}
+                              </span>
+                            ) : (
+                              <span className={`status-badge ${log.isReissue ? 'pending' : 'po-generated'}`}>Lot {log.lotId}</span>
+                            )}
+                          </td>
+                          <td>{log.category}</td>
+                          <td>
+                            {log.isReturn ? (
+                              <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            ) : (
+                              <strong>{(log.volume || 0).toLocaleString()} units</strong>
+                            )}
+                          </td>
                         <td><strong>{log.personName || 'System'}</strong></td>
                         <td>{log.date}</td>
                         <td style={{ fontSize: '12px' }}>
@@ -5281,7 +5399,8 @@ export default function MaterialIssueView({
                           </button>
                         </td>
                       </tr>
-                    ))
+                    );
+                  })
                   )}
                 </tbody>
               </table>

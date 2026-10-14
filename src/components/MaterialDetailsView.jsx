@@ -1073,6 +1073,7 @@ export default function MaterialDetailsView({
   }, [materials]);
 
   // Add Material Form State
+  const [itemCode, setItemCode] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Fabric');
   const [stock, setStock] = useState(0);
@@ -1090,6 +1091,45 @@ export default function MaterialDetailsView({
   const [imageUrl, setImageUrl] = useState('');
   const [imageInputMode, setImageInputMode] = useState('upload'); // 'upload' | 'url'
   const [imageUploading, setImageUploading] = useState(false);
+
+  const availableItemCodes = useMemo(() => {
+    const set = new Set();
+    (materials || []).forEach(m => {
+      if (m.itemCode) set.add(m.itemCode);
+      if (m.stCode) set.add(m.stCode);
+    });
+    return Array.from(set).sort();
+  }, [materials]);
+
+  const matchedExistingMaterial = useMemo(() => {
+    if (!itemCode.trim()) return null;
+    const clean = itemCode.trim().toLowerCase();
+    return (materials || []).find(m =>
+      (m.itemCode && m.itemCode.toLowerCase() === clean) ||
+      (m.stCode && m.stCode.toLowerCase() === clean) ||
+      (m.id && m.id.toLowerCase() === clean)
+    ) || null;
+  }, [itemCode, materials]);
+
+  const handleItemCodeChange = (newCode) => {
+    setItemCode(newCode);
+    const clean = newCode.trim().toLowerCase();
+    if (!clean) return;
+    const matched = (materials || []).find(m =>
+      (m.itemCode && m.itemCode.toLowerCase() === clean) ||
+      (m.stCode && m.stCode.toLowerCase() === clean) ||
+      (m.id && m.id.toLowerCase() === clean)
+    );
+    if (matched) {
+      if (!name || name === matched.name) setName(matched.name);
+      if (matched.category) setCategory(matched.category);
+      if (matched.unit) setUnit(matched.unit);
+      if (matched.location && !location) setLocation(matched.location);
+      if (matched.color && !color) setColor(matched.color);
+      if (matched.cost) setCost(matched.cost);
+      if (matched.threshold) setThreshold(matched.threshold);
+    }
+  };
 
   const handleImageFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -1161,7 +1201,9 @@ export default function MaterialDetailsView({
     }
     setFormError('');
 
-    const materialId = `M${Math.floor(1400 + Math.random() * 8000)}`;
+    const isAccumulate = Boolean(matchedExistingMaterial);
+    const materialId = matchedExistingMaterial ? matchedExistingMaterial.id : `M${Math.floor(1400 + Math.random() * 8000)}`;
+    const finalItemCode = itemCode.trim() || (matchedExistingMaterial ? (matchedExistingMaterial.itemCode || matchedExistingMaterial.stCode) : undefined);
     const numPackets = Math.max(1, parseInt(packetsToPrint, 10) || 1);
     const generatedBarcodes = Array.from(
       { length: numPackets }, 
@@ -1170,6 +1212,7 @@ export default function MaterialDetailsView({
 
     const newMaterial = {
       id: materialId,
+      itemCode: finalItemCode,
       name: name.trim(),
       category,
       stock: Number(stock),
@@ -1177,13 +1220,14 @@ export default function MaterialDetailsView({
       cost: Number(cost),
       threshold: Number(threshold),
       color: color.trim() || 'Default',
-      location: location.trim() || 'Main Store',
-      imageUrl: imageUrl.trim() || undefined,
+      location: location.trim() || (matchedExistingMaterial?.location || 'Main Store'),
+      imageUrl: imageUrl.trim() || matchedExistingMaterial?.imageUrl || undefined,
       poNumber: poNumber.trim() || undefined,
       invoiceNo: invoiceNo.trim() || undefined,
       supplier: supplier.trim() || undefined,
       packets: numPackets,
-      barcodes: generatedBarcodes
+      barcodes: generatedBarcodes,
+      accumulateStock: isAccumulate
     };
 
     onAddMaterial(newMaterial);
@@ -1197,6 +1241,7 @@ export default function MaterialDetailsView({
     }
 
     // Reset state
+    setItemCode('');
     setName('');
     setStock(0);
     setCost(0);
@@ -1341,6 +1386,49 @@ export default function MaterialDetailsView({
                 <span>{formError}</span>
               </div>
             )}
+
+            <div className="form-grid" style={{ marginBottom: '14px' }}>
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                  <span>Item Code / ST Code (Select existing to accumulate stock, or leave blank / enter new)</span>
+                  {matchedExistingMaterial && (
+                    <span style={{ fontSize: '11.5px', color: '#10b981', fontWeight: '700' }}>
+                      ✓ Existing Item Code Found: {matchedExistingMaterial.itemCode || matchedExistingMaterial.stCode || matchedExistingMaterial.id} ({matchedExistingMaterial.stock} {matchedExistingMaterial.unit} currently in stock)
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. ST00019 (type or select existing to ADD / accumulate stock)"
+                  value={itemCode}
+                  onChange={(e) => handleItemCodeChange(e.target.value)}
+                  list="mdv-itemcode-suggestions"
+                  autoComplete="off"
+                  style={{
+                    fontWeight: '700',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    letterSpacing: '0.04em',
+                    borderColor: matchedExistingMaterial ? '#10b981' : undefined,
+                    backgroundColor: matchedExistingMaterial ? 'rgba(16, 185, 129, 0.05)' : undefined
+                  }}
+                />
+                <datalist id="mdv-itemcode-suggestions">
+                  {availableItemCodes.map((code, idx) => (
+                    <option key={idx} value={code} />
+                  ))}
+                </datalist>
+                {matchedExistingMaterial && (
+                  <div style={{ marginTop: '8px', fontSize: '12px', color: '#047857', backgroundColor: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '8px 12px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <CheckCircle2 size={16} style={{ flexShrink: 0, color: '#10b981' }} />
+                    <span>
+                      <strong>Logically Adding Stock:</strong> Adding {stock || 0} {unit} will be accumulated into existing material <strong>{matchedExistingMaterial.name}</strong> (Total will become {(Number(matchedExistingMaterial.stock) || 0) + (Number(stock) || 0)} {unit}, {(Number(matchedExistingMaterial.packets) || 0) + (Number(packetsToPrint) || 1)} packets). No duplicate row will be created.
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">Material Name</label>

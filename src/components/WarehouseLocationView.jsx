@@ -113,6 +113,7 @@ export default function WarehouseLocationView({
   const [transferError, setTransferError] = useState('');
   const [isTransferSubmitting, setIsTransferSubmitting] = useState(false);
   const [transferSuccess, setTransferSuccess] = useState('');
+  const [previewImage, setPreviewImage] = useState(null);
 
   // Search & Filters State
   const [searchQuery, setSearchQuery] = useState('');
@@ -417,6 +418,9 @@ export default function WarehouseLocationView({
         totalQty += Math.round((Number(m.stock) / totalPkts) * effectivePkts);
         unit = m.unit || 'Pcs';
         const matLabel = m.color && m.color !== 'Default' ? `${m.name} (${m.color})` : m.name;
+        const capMatch = matchedCaptures.find(c => String(c.materialCode) === String(m.id) || String(c.barcodeId) === String(m.id) || (m.itemCode && String(c.itemCode) === String(m.itemCode)));
+        const resolvedImage = m.imageUrl || capMatch?.imageUrl || '';
+
         materialDetailsList.push({
           id: m.id,
           itemCode: m.itemCode || m.id,
@@ -429,6 +433,7 @@ export default function WarehouseLocationView({
           stock: m.stock,
           unit: m.unit || 'Pcs',
           poNumber: m.poNumber,
+          imageUrl: resolvedImage,
           fullMaterial: m
         });
         if (m.poNumber && m.poNumber !== 'N/A') poNumbers.push(m.poNumber);
@@ -470,6 +475,7 @@ export default function WarehouseLocationView({
         status,
         qty: totalQty,
         unit,
+        imageUrl: materialDetailsList[0]?.imageUrl || '',
         materialName: materialDetailsList.map(m => m.name).join(', ') || 'Empty Slot',
         materialDetailsList,
         matchedMaterials: matchedMaterialsEntries.map(e => e.material),
@@ -2473,7 +2479,7 @@ export default function WarehouseLocationView({
                         const m = sourceMaterials.find(item => String(item.id) === String(e.target.value));
                         if (m) {
                           setTransferMaterial(m);
-                          setTransferPkts(Math.min(m.packets || 1, 1));
+                          setTransferPkts(Number(m.packets) || 1);
                         }
                       }}
                       required
@@ -2491,6 +2497,95 @@ export default function WarehouseLocationView({
                         <option value="">No materials found in {transferSourceLoc}</option>
                       )}
                     </select>
+
+                    {/* Visual Material Identification Card with Photo */}
+                    {activeMaterial && (
+                      <div style={{
+                        marginTop: '10px',
+                        padding: '12px 14px',
+                        borderRadius: '12px',
+                        backgroundColor: '#f8fafc',
+                        border: '1.5px solid #e2e8f0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px'
+                      }}>
+                        {/* Material Photo Thumbnail with Zoom capability */}
+                        <div 
+                          onClick={() => {
+                            const img = activeMaterial.imageUrl || activeMaterial.fullMaterial?.imageUrl;
+                            if (img) setPreviewImage({ url: img, title: activeMaterial.name });
+                          }}
+                          style={{
+                            width: '64px',
+                            height: '64px',
+                            borderRadius: '10px',
+                            backgroundColor: '#ffffff',
+                            border: '1.5px solid #cbd5e1',
+                            overflow: 'hidden',
+                            flexShrink: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: (activeMaterial.imageUrl || activeMaterial.fullMaterial?.imageUrl) ? 'pointer' : 'default',
+                            position: 'relative',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.06)'
+                          }}
+                          title={(activeMaterial.imageUrl || activeMaterial.fullMaterial?.imageUrl) ? "Click to enlarge photo" : "No photo uploaded"}
+                        >
+                          {(activeMaterial.imageUrl || activeMaterial.fullMaterial?.imageUrl) ? (
+                            <>
+                              <img
+                                src={activeMaterial.imageUrl || activeMaterial.fullMaterial?.imageUrl}
+                                alt={activeMaterial.name}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                              <div style={{
+                                position: 'absolute',
+                                bottom: '2px',
+                                right: '2px',
+                                backgroundColor: 'rgba(0,0,0,0.6)',
+                                color: '#ffffff',
+                                borderRadius: '4px',
+                                padding: '1px 4px',
+                                fontSize: '8px',
+                                fontWeight: '700'
+                              }}>
+                                🔍
+                              </div>
+                            </>
+                          ) : (
+                            <Package size={28} color="#94a3b8" />
+                          )}
+                        </div>
+
+                        {/* Material Identity Details */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                              {activeMaterial.name}
+                            </span>
+                            {(activeMaterial.category || activeMaterial.fullMaterial?.category) && (
+                              <span style={{
+                                fontSize: '10px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px',
+                                backgroundColor: '#e0e7ff', color: '#4338ca', border: '1px solid #c7d2fe',
+                                textTransform: 'uppercase'
+                              }}>
+                                {activeMaterial.category || activeMaterial.fullMaterial?.category}
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '4px', flexWrap: 'wrap', fontSize: '11px', color: '#64748b' }}>
+                            <span>Item Code: <strong style={{ color: '#0f172a', fontFamily: 'monospace' }}>#{activeMaterial.itemCode || activeMaterial.id}</strong></span>
+                            {activeMaterial.poNumber && activeMaterial.poNumber !== 'N/A' && (
+                              <span>PO: <strong style={{ color: '#0f172a' }}>{activeMaterial.poNumber}</strong></span>
+                            )}
+                            <span>Stock: <strong style={{ color: '#059669' }}>{Number(activeMaterial.stock || 0).toLocaleString()} {activeMaterial.unit || 'Pcs'}</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* 3. Quantity to Relocate Slider */}
@@ -2837,6 +2932,55 @@ export default function WarehouseLocationView({
                             alignItems: 'center',
                             gap: '12px'
                           }}>
+                            {/* Material Photo Thumbnail */}
+                            <div
+                              onClick={() => {
+                                const img = item.imageUrl || item.fullMaterial?.imageUrl;
+                                if (img) setPreviewImage({ url: img, title: item.name });
+                              }}
+                              style={{
+                                width: '50px',
+                                height: '50px',
+                                borderRadius: '10px',
+                                backgroundColor: '#ffffff',
+                                border: '1.5px solid #cbd5e1',
+                                overflow: 'hidden',
+                                flexShrink: 0,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: (item.imageUrl || item.fullMaterial?.imageUrl) ? 'pointer' : 'default',
+                                position: 'relative',
+                                boxShadow: '0 2px 5px rgba(0,0,0,0.05)'
+                              }}
+                              title={(item.imageUrl || item.fullMaterial?.imageUrl) ? "Click to view full photo" : "No photo uploaded"}
+                            >
+                              {(item.imageUrl || item.fullMaterial?.imageUrl) ? (
+                                <>
+                                  <img
+                                    src={item.imageUrl || item.fullMaterial?.imageUrl}
+                                    alt={item.name}
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                  />
+                                  <div style={{
+                                    position: 'absolute',
+                                    bottom: '2px',
+                                    right: '2px',
+                                    backgroundColor: 'rgba(0,0,0,0.6)',
+                                    color: '#ffffff',
+                                    borderRadius: '3px',
+                                    padding: '0 3px',
+                                    fontSize: '8px',
+                                    fontWeight: '800'
+                                  }}>
+                                    🔍
+                                  </div>
+                                </>
+                              ) : (
+                                <Package size={22} color="#94a3b8" />
+                              )}
+                            </div>
+
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                                 <span style={{ fontSize: '14px', fontWeight: '700', color: '#0f172a' }}>
@@ -3023,6 +3167,77 @@ export default function WarehouseLocationView({
           </>
         )}
       </AnimatePresence>
+
+      {/* Photo Preview Lightbox Modal */}
+      {previewImage && (
+        <div 
+          onClick={() => setPreviewImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 999999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px'
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              padding: '16px',
+              maxWidth: '460px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              position: 'relative'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', paddingRight: '8px' }}>
+                {previewImage.title || 'Material Photo'}
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewImage(null)}
+                style={{
+                  background: '#f1f5f9', border: 'none', borderRadius: '8px',
+                  width: '32px', height: '32px', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', cursor: 'pointer', color: '#64748b'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div style={{
+              width: '100%',
+              height: '320px',
+              borderRadius: '12px',
+              overflow: 'hidden',
+              backgroundColor: '#f8fafc',
+              border: '1.5px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <img
+                src={previewImage.url}
+                alt={previewImage.title}
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              />
+            </div>
+            <div style={{ fontSize: '11.5px', color: '#64748b', textAlign: 'center', fontWeight: '600' }}>
+              Accessory Warehouse Visual Verification Photo
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import SmartSelectWithManual from "./SmartSelectWithManual";
 
 // MUST be your deployed /exec URL
-const WEB_APP_URL =
-  "";
+export const WEB_APP_URL =
+  "https://script.google.com/macros/s/AKfycbydY5UUXgbyseONnQvnrWldDpmxzRH_m9crbMMhyTapZZ4flbV6AztESNjmusoH1xAluA/exec";
 
 // Enhanced QR code generation with multiple fallbacks
 export const generateQRCode = async (url) => {
@@ -38,7 +39,7 @@ export const generateQRCode = async (url) => {
 };
 
 // Convert image URL to data URL with better error handling
-const toDataURL = (src) =>
+export const toDataURL = (src) =>
   new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -513,6 +514,7 @@ const modalStyles = {
 };
 
 export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, prefilledRgpData = null, setPrefilledRgpData = null, currentUser = null }) {
+  const navigate = useNavigate();
   const toYMD = (d) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
@@ -3605,6 +3607,21 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           >
             <Emoji size={16} mr={8}>📊</Emoji>
             RGP Entries Report
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/re-download?tab=rgp')}
+            style={{
+              ...styles.modeTab,
+              border: 'none',
+              margin: 0,
+              backgroundColor: '#e0f2fe',
+              color: '#0369a1',
+              fontWeight: '700'
+            }}
+          >
+            <Emoji size={16} mr={8}>📥</Emoji>
+            Re-Download Old RGP
           </button>
         </div>
 

@@ -45,6 +45,7 @@ const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
 const ElasticTapeIssueView = lazy(() => import('./components/ElasticTapeIssueView'));
 const WithoutBomMaterialIssueView = lazy(() => import('./components/WithoutBomMaterialIssueView'));
+const AllIssuedAndAddedReport = lazy(() => import('./components/AllIssuedAndAddedReport'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -119,6 +120,7 @@ const hasTabAccess = (tabName, role) => {
       'approval_queue',
       'only_cutting',
       'material_details',
+      're_download',
       'item_codes'
     ].includes(tabName);
   }
@@ -141,6 +143,7 @@ const hasTabAccess = (tabName, role) => {
       'approval_queue',
       'rgp',
       'generate_po',
+      're_download',
       'bone_issue',
       'bone_po',
       'elastic_issue',
@@ -185,6 +188,7 @@ const TAB_ROUTES = {
   po_verification: '/po-verification',
   only_cutting: '/only-cutting',
   item_codes: '/item-codes',
+  movement_report: '/movement-report',
 };
 
 const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
@@ -206,7 +210,11 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/daily-fabric-issue': 'reports_history',
   '/without-bom-material-issue': 'without_bom_material_issue',
   '/material-issue-without-bom': 'without_bom_material_issue',
-  '/without-bom': 'without_bom_material_issue'
+  '/without-bom': 'without_bom_material_issue',
+  '/reports/all-issued-added': 'movement_report',
+  '/reports/movement-register': 'movement_report',
+  '/all-issued-added': 'movement_report',
+  '/movement-report': 'movement_report'
 });
 
 export default function App() {
@@ -560,6 +568,7 @@ export default function App() {
       material_transfer: 'Material Transfer',
       warehouse_locations: 'Warehouse Locations',
       reports_history: 'Report and History',
+      movement_report: 'All Issued & Added Report',
       settings: 'Setting',
       approval_queue: currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests',
       item_codes: 'Item Code Generator'
@@ -1349,13 +1358,48 @@ export default function App() {
   };
 
   const handleAddMaterial = async (newMat) => {
-    setMaterials(prev => [newMat, ...prev]);
+    const targetCode = (newMat.itemCode || '').trim();
+    const targetId = (newMat.id || '').trim();
+    const existingIdx = materials.findIndex(m =>
+      (targetId && m.id && m.id.toLowerCase() === targetId.toLowerCase()) ||
+      (targetCode && (
+        (m.itemCode && m.itemCode.toLowerCase() === targetCode.toLowerCase()) ||
+        (m.stCode && m.stCode.toLowerCase() === targetCode.toLowerCase()) ||
+        (m.id && m.id.toLowerCase() === targetCode.toLowerCase())
+      ))
+    );
+
+    if (existingIdx !== -1) {
+      setMaterials(prev => {
+        const updated = [...prev];
+        const ext = updated[existingIdx];
+        updated[existingIdx] = {
+          ...ext,
+          stock: (Number(ext.stock) || 0) + (Number(newMat.stock) || 0),
+          packets: (Number(ext.packets) || 0) + (Number(newMat.packets) || 1),
+          location: newMat.location || ext.location,
+          poNumber: newMat.poNumber || ext.poNumber,
+          invoiceNo: newMat.invoiceNo || ext.invoiceNo,
+          imageUrl: newMat.imageUrl || ext.imageUrl
+        };
+        return updated;
+      });
+    } else {
+      setMaterials(prev => [newMat, ...prev]);
+    }
+
     try {
-      await fetch(`${getBackendUrl()}/api/materials`, {
+      const res = await fetch(`${getBackendUrl()}/api/materials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMat)
+        body: JSON.stringify({ ...newMat, accumulateStock: existingIdx !== -1 })
       });
+      if (res.ok) {
+        const refreshed = await fetch(`${getBackendUrl()}/api/materials`).then(r => r.json());
+        if (Array.isArray(refreshed)) {
+          setMaterials(refreshed);
+        }
+      }
     } catch (err) {
       console.error('Failed to save material to DB:', err);
     }
@@ -2347,6 +2391,10 @@ export default function App() {
                   <Sparkles size={18} />
                   <span className="sidebar-text">Extra Material Issue</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'movement_report' ? 'active' : ''}`} onClick={() => handleTabClick('movement_report')} title="All Issued & Added Material Report">
+                  <FileSpreadsheet size={18} />
+                  <span className="sidebar-text">Movement Report (All Issues)</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'return_material' ? 'active' : ''}`} onClick={() => handleTabClick('return_material')} title="Return Material">
                   <RotateCcw size={18} />
                   <span className="sidebar-text">Return Material</span>
@@ -2370,6 +2418,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 're_download' ? 'active' : ''}`} onClick={() => handleTabClick('re_download')} title="Re-Download (Old PO & RGP)">
+                  <Download size={18} />
+                  <span className="sidebar-text">Re-Download (PO & RGP)</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'item_codes' ? 'active' : ''}`} onClick={() => handleTabClick('item_codes')} title="Item Code Generator">
                   <Tag size={18} />
@@ -2904,6 +2956,7 @@ export default function App() {
                 <ReDownloadView
                   currencySymbol={currencySymbol}
                   currentUser={currentUser}
+                  onNavigate={setActiveTab}
                 />
               )}
 
@@ -2968,6 +3021,7 @@ export default function App() {
                   designs={designs}
                   issueLogs={issueLogs}
                   currencySymbol={currencySymbol}
+                  currentUser={currentUser}
                   onNavigateToMaterialIssue={(lotNo) => {
                     setPrefilledLotNo(lotNo);
                     setActiveTab('material_issue');
@@ -2983,6 +3037,17 @@ export default function App() {
                   onRedirectToTab={(tab, lotNo) => {
                     if (lotNo) setPrefilledLotNo(lotNo);
                     setActiveTab(tab);
+                  }}
+                />
+              )}
+
+              {activeTab === 'movement_report' && (
+                <AllIssuedAndAddedReport
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  onNavigateToLot={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('material_issue');
                   }}
                 />
               )}

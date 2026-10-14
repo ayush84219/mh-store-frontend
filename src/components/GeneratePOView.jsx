@@ -1,5 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import {
   FileText, PlusCircle, Trash2, Download, RefreshCw,
@@ -1337,6 +1338,7 @@ export default function GeneratePOView({
   initialPoViewMode = 'create'
 }) {
   const approvedDesigns = designs.filter(d => d.status === 'Approved');
+  const navigate = useNavigate();
 
   const [poViewMode, setPoViewMode] = useState(initialPoViewMode);
 
@@ -3239,6 +3241,20 @@ export default function GeneratePOView({
             }}
           >
             <Award size={16} /> 🏷️ Item Code Generator & Report
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => navigate('/re-download?tab=po')}
+            style={{
+              padding: '8px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 'bold', height: 'auto', minHeight: 'unset',
+              color: 'var(--text-main)',
+              display: 'flex', alignItems: 'center', gap: '6px',
+              border: '1.5px solid var(--border-color)',
+              background: 'rgba(99, 102, 241, 0.04)'
+            }}
+          >
+            <Download size={16} style={{ color: 'var(--accent-color, #6366f1)' }} /> 📥 Re-Download Old PO
           </button>
         </div>
       </div>

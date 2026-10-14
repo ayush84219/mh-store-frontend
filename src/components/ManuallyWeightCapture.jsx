@@ -530,6 +530,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
           invoiceNo: form.invoiceNo,
           location: finalLocation,
           pieces: totalPieces,
+          packets: totalPackets,
           netWeightKg: 0,
           uom: form.unit,
           personName: form.storeIncharge || currentUser?.name || 'Operator'

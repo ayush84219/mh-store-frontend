@@ -8,6 +8,8 @@ import { generatePurchaseOrderPDF, downloadPdfBlob, toDataURL_QR, buildPoQrUrls 
 import { generateRgpPDF, generateQRCode } from './rgp';
 import { generateIssuePdf as generateZipIssuePdf } from './pogenerate';
 import { generateIssuePdf as generateDoriIssuePdf } from './dooripogenerate';
+import StandardPoRedownload from './StandardPoRedownload';
+import RgpRedownload from './RgpRedownload';
 
 const formatDateSafe = (dateVal) => {
   try {
@@ -22,8 +24,33 @@ const formatDateSafe = (dateVal) => {
   }
 };
 
-export default function ReDownloadView({ currencySymbol = 'R', currentUser = null }) {
-  const [activeSubTab, setActiveSubTab] = useState('po'); // 'po', 'zip', 'dori', 'rgp'
+export default function ReDownloadView({ currencySymbol = 'R', currentUser = null, initialTab = null, onNavigate = null }) {
+  const getInitialSubTab = () => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') || params.get('subtab') || params.get('type');
+      if (tabParam && ['po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
+        return tabParam.toLowerCase();
+      }
+    } catch (_) {}
+    if (initialTab && ['po', 'rgp', 'zip', 'dori'].includes(initialTab.toLowerCase())) {
+      return initialTab.toLowerCase();
+    }
+    return 'po';
+  };
+
+  const [activeSubTab, setActiveSubTab] = useState(getInitialSubTab);
+
+  // Sync subtab if URL parameters change
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab') || params.get('subtab') || params.get('type');
+      if (tabParam && ['po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
+        setActiveSubTab(tabParam.toLowerCase());
+      }
+    } catch (_) {}
+  }, []);
   const [poList, setPoList] = useState([]);
   const [zipPoList, setZipPoList] = useState([]);
   const [doriPoList, setDoriPoList] = useState([]);
@@ -66,86 +93,51 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
     loadZipData();
   }, []);
 
-  // Fetch all categories from database
+  // Fetch cutting headers and doori orders for Zip & Dori tabs
   const fetchDocuments = async () => {
     setLoading(true);
     setError('');
     try {
-      const hostname = window.location.hostname;
-
-      // 1. Fetch Standard POs
-      const poRes = await fetch(`${getBackendUrl()}/api/pos`);
-      if (poRes.ok) {
-        const posData = await poRes.json();
-        posData.sort((a, b) => b.poNumber.localeCompare(a.poNumber));
-        setPoList(posData);
+      // 1. Fetch Zip PO cutting headers
+      try {
+        const zipRes = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+        if (zipRes.ok) {
+          const zipData = await zipRes.json();
+          if (Array.isArray(zipData)) {
+            zipData.sort((a, b) => (b.Lot_Number || '').localeCompare(a.Lot_Number || ''));
+            setZipPoList(zipData);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not load cutting headers:", e);
       }
 
-      // 2. Fetch Zip PO cutting headers
-      const zipRes = await fetch(`${getBackendUrl()}/api/cutting-headers`);
-      if (zipRes.ok) {
-        const zipData = await zipRes.json();
-        zipData.sort((a, b) => (b.Lot_Number || '').localeCompare(a.Lot_Number || ''));
-        setZipPoList(zipData);
-      }
-
-      // 3. Fetch Dori PO orders
-      const doriRes = await fetch(`${getBackendUrl()}/api/doori-orders`);
-      if (doriRes.ok) {
-        const doriData = await doriRes.json();
-        doriData.sort((a, b) => (b.Lot_Number || '').localeCompare(a.Lot_Number || ''));
-        setDoriPoList(doriData);
-      }
-
-      // 4. Fetch RGP scans (scan_type = 'rgp_entry')
-      const scansRes = await fetch(`${getBackendUrl()}/api/scans`);
-      if (scansRes.ok) {
-        const scansData = await scansRes.json();
-        const rgps = scansData
-          .filter(s => s.scan_type === 'rgp_entry')
-          .map(s => {
-            if (s.rgp_payload) {
-              try {
-                return JSON.parse(s.rgp_payload);
-              } catch (err) {
-                // fallback to reconstruction below
-              }
-            }
-            return {
-              rgpNo: s.lot_number || `RGP-${s.id}`,
-              date: formatDateSafe(s.scanned_at),
-              vendor: s.supplier_name || 'N/A',
-              rgpType: s.material_name && s.material_name.toLowerCase().includes('dori') ? 'Dori Processing' : 'Fabric Dyeing/Embroidery',
-              purpose: s.material_name || 'Material Processing',
-              vehicleNo: 'N/A',
-              preparedBy: s.person_name || 'System',
-              entries: [
-                {
-                  srNo: 1,
-                  lotNo: (s.lot_number || '').replace('RGP-TEMP-', '').replace('RGP-', ''),
-                  itemDesc: s.material_name || 'Material Entry',
-                  qty1: s.quantity || 1,
-                  uom: 'PCS'
-                }
-              ]
-            };
-          })
-          .filter(Boolean);
-
-        rgps.sort((a, b) => (b.rgpNo || '').localeCompare(a.rgpNo || ''));
-        setRgpList(rgps);
+      // 2. Fetch Dori PO orders
+      try {
+        const doriRes = await fetch(`${getBackendUrl()}/api/doori-orders`);
+        if (doriRes.ok) {
+          const doriData = await doriRes.json();
+          if (Array.isArray(doriData)) {
+            doriData.sort((a, b) => (b.Lot_Number || '').localeCompare(a.Lot_Number || ''));
+            setDoriPoList(doriData);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not load doori orders:", e);
       }
     } catch (err) {
       console.error("Failed to load documents archive:", err);
-      setError("Could not retrieve documents archive. Verify that database backend is running.");
+      setError("Could not retrieve documents archive.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDocuments();
-  }, []);
+    if (activeSubTab === 'zip' || activeSubTab === 'dori') {
+      fetchDocuments();
+    }
+  }, [activeSubTab]);
 
   // Reset selected document when active tab changes
   useEffect(() => {
@@ -644,7 +636,7 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
 
       {/* Styled Segmented Sub-Tab Switcher */}
       <div style={{
-        maxWidth: '640px',
+        maxWidth: '820px',
         marginBottom: '28px',
         display: 'flex',
         background: 'var(--bg-primary, #f8fafc)',
@@ -654,10 +646,10 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
         gap: '4px'
       }}>
         {[
-          { id: 'po', label: 'Standard PO', icon: <FileText size={16} /> },
-          { id: 'zip', label: 'Zip Purcharge Orders', icon: <Layers size={16} /> },
-          { id: 'dori', label: 'Dori Purcharge Orders', icon: <Scissors size={16} /> },
-          { id: 'rgp', label: 'Returnable Gate Pass', icon: <Truck size={16} /> }
+          { id: 'po', label: '📄 Old PO (Standard)', icon: <FileText size={16} /> },
+          { id: 'rgp', label: '🚚 Old RGP (Fabric Gate Pass)', icon: <Truck size={16} /> },
+          { id: 'zip', label: '⚡ Zip PO Archive', icon: <Layers size={16} /> },
+          { id: 'dori', label: '✂️ Dori PO Archive', icon: <Scissors size={16} /> }
         ].map(tab => {
           const isActive = activeSubTab === tab.id;
           return (
@@ -701,25 +693,34 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
         })}
       </div>
 
-      {/* Loading & Error Boundary */}
-      {loading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '20px', color: 'var(--text-muted)' }}>
-          <RefreshCw className="spin-animation" size={20} />
-          <span>Refreshing database records...</span>
-        </div>
-      )}
+      {/* Standard PO Tab Content (from po redownload.txt) */}
+      {activeSubTab === 'po' && <StandardPoRedownload />}
 
-      {error && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '16px', background: 'var(--danger-light)', border: '1px solid var(--danger)', borderRadius: '12px', color: 'var(--danger)', marginBottom: '20px' }}>
-          <AlertCircle size={20} />
-          <span>{error}</span>
-          <button onClick={fetchDocuments} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontWeight: '600' }}>Retry</button>
-        </div>
-      )}
+      {/* Returnable Gate Pass Tab Content (from rgp-code.txt) */}
+      {activeSubTab === 'rgp' && <RgpRedownload />}
 
-      {/* Main Split Layout */}
-      {!loading && !error && (
-        <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '24px', alignItems: 'start' }}>
+      {/* Zip & Dori Purcharge Orders */}
+      {(activeSubTab === 'zip' || activeSubTab === 'dori') && (
+        <>
+          {/* Loading & Error Boundary */}
+          {loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '20px', color: 'var(--text-muted)' }}>
+              <RefreshCw className="spin-animation" size={20} />
+              <span>Refreshing database records...</span>
+            </div>
+          )}
+
+          {error && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '16px', background: 'var(--danger-light)', border: '1px solid var(--danger)', borderRadius: '12px', color: 'var(--danger)', marginBottom: '20px' }}>
+              <AlertCircle size={20} />
+              <span>{error}</span>
+              <button onClick={fetchDocuments} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'inherit', textDecoration: 'underline', cursor: 'pointer', fontWeight: '600' }}>Retry</button>
+            </div>
+          )}
+
+          {/* Main Split Layout */}
+          {!loading && !error && (
+            <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '24px', alignItems: 'start' }}>
 
           {/* LEFT COLUMN: Search & List Panel */}
           <div className="panel" style={{ padding: '20px', borderRadius: '16px', border: '1px solid var(--border-color)', boxShadow: '0 4px 20px rgba(0,0,0,0.01)' }}>
@@ -1143,6 +1144,8 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
             )}
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* Local spinner rotation animation style */}

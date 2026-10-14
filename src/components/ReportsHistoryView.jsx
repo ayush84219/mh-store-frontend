@@ -15,6 +15,7 @@ import { PDFDocument } from './PDFDocument';
 import DailyWeeklyCalendarReport from './DailyWeeklyCalendarReport';
 import ItemCodeReportView from './ItemCodeReportView';
 import DailyActivityAnalyticsReport from './DailyActivityAnalyticsReport';
+import AllIssuedAndAddedReport from './AllIssuedAndAddedReport';
 
 const formatDateTime = (dateVal) => {
   if (!dateVal) return '—';
@@ -98,7 +99,9 @@ export default function ReportsHistoryView({
   pos = [], 
   designs = [],
   issueLogs = [],
-  currencySymbol = 'R',
+  currencySymbol = '₹',
+  currentUser = null,
+  initialSubTab = '',
   onNavigateToMaterialIssue,
   onNavigateToElasticIssue,
   onNavigateToDesign,
@@ -192,7 +195,7 @@ export default function ReportsHistoryView({
       transition: 'all 0.2s'
     }
   };
-  const [activeReportTab, setActiveReportTab] = useState('daily_activity_analytics'); // 'daily_activity_analytics', 'master_operations_report', 'daily_weekly_calendar', 'lot_wise_report', 'item_code_report', 'rgp_reports', 'material_ledger'
+  const [activeReportTab, setActiveReportTab] = useState(initialSubTab || 'all_issued_added_report'); // 'all_issued_added_report', 'daily_activity_analytics', 'master_operations_report', 'daily_weekly_calendar', 'lot_wise_report', 'item_code_report', 'rgp_reports', 'material_ledger'
   const [selectedLotId, setSelectedLotId] = useState('');
   
   // Master Operations & Logistics (RGP, Dori, Zip, PO, Extra Pieces, Scanner) states
@@ -2522,6 +2525,28 @@ export default function ReportsHistoryView({
         flexWrap: 'wrap',
         gap: '4px'
       }}>
+        <button
+          type="button"
+          onClick={() => setActiveReportTab('all_issued_added_report')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '700',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeReportTab === 'all_issued_added_report' ? '#0284c7' : 'transparent',
+            color: activeReportTab === 'all_issued_added_report' ? '#ffffff' : 'var(--text-main)',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: activeReportTab === 'all_issued_added_report' ? '0 2px 6px rgba(2,132,199,0.35)' : 'none'
+          }}
+        >
+          <Layers size={14} />
+          <span>(★ NEW) All Issued &amp; Added Material Report</span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveReportTab('daily_activity_analytics')}
@@ -4918,6 +4943,17 @@ export default function ReportsHistoryView({
             document.body
           )}
         </div>
+      )}
+
+      {activeReportTab === 'all_issued_added_report' && (
+        <AllIssuedAndAddedReport
+          currencySymbol={currencySymbol}
+          currentUser={currentUser}
+          onNavigateToLot={(lotId) => {
+            setSelectedLotId(lotId);
+            setActiveReportTab('material_ledger');
+          }}
+        />
       )}
 
       {activeReportTab === 'daily_activity_analytics' && (

@@ -1,0 +1,842 @@
+/* PoDashboard.css - Premium Modern Styles for Standard PO Re-Download */
+
+.po-dash-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  color: var(--text-main, #0f172a);
+  font-family: inherit;
+}
+
+.po-dash-appbar {
+  display: none; /* Hidden when embedded inside ReDownloadView tabs */
+}
+
+.po-dash-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.po-dash-error-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fef2f2;
+  border: 1px solid #f87171;
+  color: #b91c1c;
+  padding: 14px 20px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.po-dash-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+
+.po-dash-stat-card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s ease;
+}
+
+.po-dash-stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.po-dash-stat-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.po-dash-stat-card.stat-info .po-dash-stat-icon-wrapper {
+  background: rgba(2, 132, 199, 0.1);
+}
+
+.po-dash-stat-card.stat-success .po-dash-stat-icon-wrapper {
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.po-dash-stat-card.stat-warning .po-dash-stat-icon-wrapper {
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.po-dash-stat-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.po-dash-stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.po-dash-stat-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+}
+
+.po-dash-split-layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .po-dash-split-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Left List Pane */
+.po-dash-list-pane {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(100vh - 200px);
+}
+
+.po-dash-pane-header {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.po-dash-pane-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.po-dash-pane-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.po-dash-config-toggle {
+  background: var(--surface-subtle, #f1f5f9);
+  border: 1px solid var(--border-color, #cbd5e1);
+  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.po-dash-config-toggle:hover {
+  background: #e2e8f0;
+  transform: rotate(45deg);
+}
+
+.po-dash-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.po-dash-search-icon {
+  position: absolute;
+  left: 12px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.po-dash-search-input {
+  width: 100%;
+  padding: 10px 14px 10px 36px;
+  border-radius: 10px;
+  border: 1.5px solid var(--border-color, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text-main, #0f172a);
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.po-dash-search-input:focus {
+  border-color: var(--primary, #0284c7);
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.po-dash-filter-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.po-dash-filter-select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-color, #cbd5e1);
+  background: var(--surface, #ffffff);
+  color: var(--text-main, #0f172a);
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+  cursor: pointer;
+}
+
+.po-dash-filter-select:focus {
+  border-color: var(--primary, #0284c7);
+}
+
+/* List scroll */
+.po-dash-list-scroll {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.po-dash-loading-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 12px;
+  color: var(--text-muted, #64748b);
+  font-size: 14px;
+}
+
+.po-dash-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid rgba(2, 132, 199, 0.2);
+  border-top-color: #0284c7;
+  border-radius: 50%;
+  animation: poSpin 0.8s linear infinite;
+}
+
+@keyframes poSpin {
+  to { transform: rotate(360deg); }
+}
+
+.po-dash-empty-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: var(--text-muted, #94a3b8);
+  font-size: 13px;
+  text-align: center;
+  gap: 8px;
+}
+
+.po-dash-empty-icon {
+  font-size: 32px;
+}
+
+/* PO Record Card */
+.po-dash-record-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1.5px solid var(--border-color, #e2e8f0);
+  background: var(--surface, #ffffff);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.po-dash-record-card:hover {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.03);
+  transform: translateY(-1px);
+}
+
+.po-dash-record-card.active {
+  border-color: #0284c7;
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.08) 0%, rgba(37, 99, 235, 0.04) 100%);
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.15);
+}
+
+.po-dash-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.po-dash-card-po-no {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+}
+
+.po-dash-card-supplier {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted, #475569);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.po-dash-card-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-muted, #64748b);
+  margin-top: 2px;
+}
+
+.po-dash-card-amount {
+  font-weight: 800;
+  color: #0284c7;
+}
+
+/* Status Badges */
+.po-dash-status-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.status-approved {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.status-pending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.status-draft {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.status-cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Right Detail Pane */
+.po-dash-detail-pane {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.po-dash-detail-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+  color: var(--text-muted, #64748b);
+}
+
+.po-dash-detail-empty-icon {
+  font-size: 48px;
+}
+
+.po-dash-detail-empty-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  margin: 0;
+}
+
+.po-dash-detail-empty-desc {
+  font-size: 13px;
+  max-width: 400px;
+}
+
+.po-dash-detail-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-bottom: 1.5px dashed var(--border-color, #e2e8f0);
+  padding-bottom: 20px;
+}
+
+.po-dash-detail-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.po-dash-detail-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.po-dash-detail-title {
+  font-size: 24px;
+  font-weight: 800;
+  color: #0284c7;
+  margin: 0;
+}
+
+.po-dash-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.po-dash-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25);
+  transition: all 0.2s ease;
+}
+
+.po-dash-action-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(2, 132, 199, 0.35);
+}
+
+.po-dash-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.po-dash-detail-info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.po-dash-info-block {
+  background: var(--surface-subtle, #f8fafc);
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.po-dash-info-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted, #64748b);
+  text-transform: uppercase;
+}
+
+.po-dash-info-value {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+}
+
+.po-dash-detail-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.po-dash-meta-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .po-dash-meta-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+.po-dash-detail-card {
+  background: var(--surface-subtle, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.po-dash-card-title,
+.po-dash-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0369a1;
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.po-dash-kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.po-dash-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.po-dash-kv-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.po-dash-key {
+  font-weight: 600;
+  color: var(--text-muted, #64748b);
+}
+
+.po-dash-value {
+  font-weight: 700;
+  color: var(--text-main, #0f172a);
+}
+
+/* Items Table */
+.po-dash-items-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.po-dash-items-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  margin: 0;
+}
+
+.po-dash-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+}
+
+.po-dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.po-dash-table th {
+  background: #0284c7;
+  color: #ffffff;
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.po-dash-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  color: var(--text-main, #334155);
+  font-weight: 600;
+}
+
+.po-dash-table tr:last-child td {
+  border-bottom: none;
+}
+
+.po-dash-table-total-row {
+  background: var(--surface-subtle, #f8fafc);
+  font-weight: 800;
+}
+
+.align-center {
+  text-align: center;
+}
+
+.align-right {
+  text-align: right;
+}
+
+/* Dialog Overlay */
+.po-dash-dialog-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 20px;
+}
+
+.po-dash-dialog {
+  background: var(--surface, #ffffff);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.po-dash-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+}
+
+.po-dash-dialog-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-main, #0f172a);
+  margin: 0;
+}
+
+.po-dash-dialog-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  font-weight: 800;
+  cursor: pointer;
+  color: var(--text-muted, #64748b);
+}
+
+.po-dash-dialog-body {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.po-dash-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.po-dash-form-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted, #475569);
+}
+
+.po-dash-form-input {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border-color, #cbd5e1);
+  font-size: 13px;
+  outline: none;
+}
+
+.po-dash-form-input:focus {
+  border-color: #0284c7;
+}
+
+.po-dash-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  background: var(--surface-subtle, #f8fafc);
+  border-top: 1px solid var(--border-color, #e2e8f0);
+}
+
+.po-dash-btn-secondary {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #cbd5e1);
+  background: var(--surface, #ffffff);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.po-dash-btn-primary {
+  padding: 8px 18px;
+  border-radius: 8px;
+  border: none;
+  background: #0284c7;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ── Lot Number UI Accents ── */
+.po-dash-card-lot {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.po-dash-lot-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  letter-spacing: 0.3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.po-dash-record-card.active .po-dash-lot-badge {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.po-dash-info-lot-block {
+  border-left: 3px solid #16a34a !important;
+  background: linear-gradient(135deg, rgba(22, 163, 74, 0.04) 0%, rgba(22, 163, 74, 0.01) 100%);
+}
+
+.lot-number-highlight {
+  display: inline-block;
+  font-weight: 800 !important;
+  color: #15803d !important;
+  background: #dcfce7;
+  padding: 2px 10px;
+  border-radius: 6px;
+  border: 1px solid #86efac;
+  font-size: 13px;
+  letter-spacing: 0.4px;
+}
+
+.po-dash-item-lot-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+
+.po-dash-item-lot-tag.has-lot {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.po-dash-lot-badge-general {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.po-dash-record-card.active .po-dash-lot-badge-general {
+  background: rgba(255, 255, 255, 0.15);
+  color: #e2e8f0;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.lot-number-general {
+  display: inline-block;
+  font-weight: 600 !important;
+  color: #64748b !important;
+  background: #f1f5f9;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  font-size: 12px;
+}
+
+.stat-lot {
+  border-left: 4px solid #10b981;
+}
+
+.stat-lot:hover {
+  border-color: #059669;
+  background: #f0fdf4;
+}
+
+.po-dash-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
