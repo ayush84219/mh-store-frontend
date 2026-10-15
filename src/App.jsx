@@ -7,7 +7,8 @@ import {
   CheckCircle, AlertTriangle, Scissors,
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
-  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode, Tag
+  PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode, Tag,
+  FileSpreadsheet
 } from 'lucide-react';
 import './App.css';
 

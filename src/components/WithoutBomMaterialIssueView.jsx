@@ -32,7 +32,8 @@ import {
   Copy,
   Scissors,
   CheckCircle2,
-  ChevronDown
+  ChevronDown,
+  Settings
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -177,8 +178,7 @@ function SearchableMaterialDropdown({
       if (ct.includes('dori')) matchKeywords = ['dori', 'drawcord', 'cord', 'string'];
       else if (ct.includes('elastic')) matchKeywords = ['elastic', 'waistband'];
       else if (ct.includes('zip')) matchKeywords = ['zip', 'zipper', 'slider'];
-
-      if (matchKeywords.length === 0) return materials || [];
+      else if (ct && ct !== '__custom__' && ct !== '__manage__') matchKeywords = [ct];
 
       return [...(materials || [])].sort((a, b) => {
         const aText = `${a.name || ''} ${a.category || ''}`.toLowerCase();
@@ -860,6 +860,7 @@ export default function WithoutBomMaterialIssueView({
 
   // Form Fields
   const [lotNo, setLotNo] = useState('');
+  const [brandName, setBrandName] = useState('');
   const [styleName, setStyleName] = useState('Direct Item Requisition');
   const [pieces, setPieces] = useState(1);
   const [personName, setPersonName] = useState(currentUser?.name || 'paras');
@@ -867,6 +868,36 @@ export default function WithoutBomMaterialIssueView({
   const [receiverDept, setReceiverDept] = useState('Cutting');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
+
+  // Available brands from designs list
+  const availableBrands = useMemo(() => {
+    const set = new Set();
+    (designs || []).forEach(d => {
+      if (d.brand && typeof d.brand === 'string') {
+        const b = d.brand.trim();
+        if (b) set.add(b);
+      }
+    });
+    return Array.from(set).sort();
+  }, [designs]);
+
+  // Auto-detect brand & style when user types or selects a lot
+  useEffect(() => {
+    if (!lotNo) return;
+    const cleanLot = String(lotNo).trim().toLowerCase();
+    const match = (designs || []).find(d => 
+      String(d.id).trim().toLowerCase() === cleanLot || 
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLot
+    );
+    if (match) {
+      if (match.brand && !brandName) {
+        setBrandName(match.brand);
+      }
+      if (match.category && (!styleName || styleName === 'Direct Item Requisition' || styleName === 'Floor Batch Issue')) {
+        setStyleName(match.category);
+      }
+    }
+  }, [lotNo, designs]);
 
   // Barcode quick-input
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -949,6 +980,7 @@ export default function WithoutBomMaterialIssueView({
       return (
         String(l.id || '').toLowerCase().includes(q) ||
         String(l.lotId || '').toLowerCase().includes(q) ||
+        String(l.brand || l.brandName || '').toLowerCase().includes(q) ||
         String(l.receiverName || '').toLowerCase().includes(q) ||
         String(l.personName || '').toLowerCase().includes(q) ||
         String(l.category || '').toLowerCase().includes(q) ||
@@ -957,13 +989,119 @@ export default function WithoutBomMaterialIssueView({
     });
   }, [issueLogs, historySearch]);
 
-  // Specific accessory component types (1. DORI, 2. ELASTIC, 3. ZIP, + Add Manually)
-  const componentTypeOptions = [
-    { value: 'DORI', label: '1. DORI' },
-    { value: 'ELASTIC', label: '2. ELASTIC' },
-    { value: 'ZIP', label: '3. ZIP' },
-    { value: '__custom__', label: '✏️ + Add Manually (Custom Type)' }
-  ];
+  // Base default accessory component types
+  const BASE_COMPONENT_TYPES = useMemo(() => ['DORI', 'ELASTIC', 'ZIP'], []);
+
+  // Custom accessory component types persisted in localStorage
+  const [customComponentTypes, setCustomComponentTypes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('without_bom_custom_component_types');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+      }
+    } catch (e) {
+      console.error('Failed to load custom component types', e);
+    }
+    return [];
+  });
+
+  const [showManageTypesModal, setShowManageTypesModal] = useState(false);
+  const [newTypeNameInput, setNewTypeNameInput] = useState('');
+
+  // Persist custom types whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('without_bom_custom_component_types', JSON.stringify(customComponentTypes));
+    } catch (e) {}
+  }, [customComponentTypes]);
+
+  // Helper to add a custom component type into list
+  const addCustomComponentType = (rawName) => {
+    if (!rawName) return '';
+    const clean = String(rawName).trim().toUpperCase();
+    if (!clean || clean === '__CUSTOM__' || clean === '__MANAGE__') return '';
+
+    const existsInBase = BASE_COMPONENT_TYPES.some(t => t.toUpperCase() === clean);
+    const existsInCustom = customComponentTypes.some(t => t.toUpperCase() === clean);
+
+    if (!existsInBase && !existsInCustom) {
+      setCustomComponentTypes(prev => {
+        const updated = [...prev, clean];
+        try {
+          localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+    }
+    return clean;
+  };
+
+  // Helper to remove a custom component type from list
+  const removeCustomComponentType = (typeToRemove) => {
+    setCustomComponentTypes(prev => {
+      const updated = prev.filter(t => t.toUpperCase() !== String(typeToRemove).toUpperCase());
+      try {
+        localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  // Unified list of all types: 1. DORI, 2. ELASTIC, 3. ZIP, 4. [CUSTOM 1], ...
+  const allComponentTypes = useMemo(() => {
+    const list = [...BASE_COMPONENT_TYPES];
+    customComponentTypes.forEach(t => {
+      const clean = String(t).trim().toUpperCase();
+      if (clean && !list.includes(clean)) {
+        list.push(clean);
+      }
+    });
+    return list;
+  }, [BASE_COMPONENT_TYPES, customComponentTypes]);
+
+  // Dropdown options
+  const componentTypeOptions = useMemo(() => {
+    const opts = allComponentTypes.map((type, idx) => ({
+      value: type,
+      label: `${idx + 1}. ${type}`
+    }));
+    opts.push({ value: '__custom__', label: '✏️ + Add Manually (Custom Type)' });
+    if (customComponentTypes.length > 0) {
+      opts.push({ value: '__manage__', label: `⚙️ Manage Types (${customComponentTypes.length})...` });
+    }
+    return opts;
+  }, [allComponentTypes, customComponentTypes]);
+
+  // Commit custom type entered in a row input
+  const commitCustomType = (rowId, rawVal) => {
+    const clean = String(rawVal || '').trim().toUpperCase();
+    if (!clean) {
+      setItems(prev => prev.map(item => {
+        if (item.id !== rowId) return item;
+        return {
+          ...item,
+          isCustomType: false,
+          customComponentType: '',
+          componentType: item.componentType && item.componentType !== '__custom__' ? item.componentType : (allComponentTypes[0] || 'DORI')
+        };
+      }));
+      return;
+    }
+
+    addCustomComponentType(clean);
+
+    setItems(prev => prev.map(item => {
+      if (item.id !== rowId) return item;
+      return {
+        ...item,
+        isCustomType: false,
+        customComponentType: clean,
+        componentType: clean,
+        unit: (clean === 'DORI' || clean === 'ELASTIC') ? (item.unit || 'Mtr') : (item.unit || 'Pcs')
+      };
+    }));
+  };
 
   // Quick department choices
   const commonDepts = ['Cutting', 'Stitching', 'Finishing', 'Packing', 'Sampling', 'Main Store'];
@@ -1195,10 +1333,13 @@ export default function WithoutBomMaterialIssueView({
     doc.text(issueData.date, im + 90, y + 8);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Lot Reference:', im + 128, y + 8);
+    doc.text('Lot / Brand:', im + 128, y + 8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(234, 88, 12);
-    doc.text(`LOT #${issueData.lotId}`, im + 152, y + 8);
+    const lotBrandText = (issueData.brandName || issueData.brand)
+      ? `LOT #${issueData.lotId} (${issueData.brandName || issueData.brand})`
+      : `LOT #${issueData.lotId}`;
+    doc.text(lotBrandText, im + 148, y + 8);
     doc.setTextColor(15, 23, 42);
 
     // Row 2
@@ -1356,6 +1497,8 @@ export default function WithoutBomMaterialIssueView({
       date: formattedDate,
       issueMode,
       lotId: effectiveLot,
+      brand: brandName.trim(),
+      brandName: brandName.trim(),
       style: styleName || (issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Issue'),
       pieces: issueMode === 'item_only' ? 1 : (parseInt(pieces, 10) || 1),
       personName: personName.trim() || 'Store In-charge',
@@ -1473,6 +1616,8 @@ export default function WithoutBomMaterialIssueView({
         date: formattedDate,
         issueMode,
         lotId: effectiveLot,
+        brand: brandName.trim(),
+        brandName: brandName.trim(),
         style: styleName || (issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Issue'),
         pieces: issueMode === 'item_only' ? 1 : (parseInt(pieces, 10) || 1),
         personName: personName.trim(),
@@ -1480,7 +1625,11 @@ export default function WithoutBomMaterialIssueView({
         receiverDept: receiverDept.trim(),
         remarks: remarks.trim(),
         items: validItems.map(i => {
-          const effectiveType = i.isCustomType ? (i.customComponentType?.trim() || 'Custom Accessory') : (i.componentType || 'DORI');
+          const rawType = i.isCustomType ? (i.customComponentType?.trim() || 'Custom Accessory') : (i.componentType || 'DORI');
+          if (rawType && rawType !== 'Custom Accessory') {
+            addCustomComponentType(rawType);
+          }
+          const effectiveType = rawType;
           const effectiveName = i.entryMode === 'manual' ? (i.materialName?.trim() || `${effectiveType} Item`) : i.materialName;
           return {
             ...i,
@@ -1500,7 +1649,7 @@ export default function WithoutBomMaterialIssueView({
       // Do NOT block screen with preview modal on confirm; keep the reset form visible for the next bill
       setPreviewModal(null);
       setFormError('');
-      setFormSuccess(`✓ Bill #${voucherId} (Lot #${effectiveLot}) confirmed & stock deducted. Printing window opened. Form is reset & ready for next bill.`);
+      setFormSuccess(`✓ Bill #${voucherId} (Lot #${effectiveLot}${brandName ? ` • ${brandName}` : ''}) confirmed & stock deducted. Printing window opened. Form is reset & ready for next bill.`);
 
       // Automatically launch the printing window directly
       setTimeout(() => {
@@ -1509,6 +1658,7 @@ export default function WithoutBomMaterialIssueView({
 
       // Process complete: refill and reset all columns/inputs back to clean state for next bill
       setLotNo('');
+      setBrandName('');
       setReceiverName('');
       setReceiverDept('Cutting');
       setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
@@ -1553,6 +1703,7 @@ export default function WithoutBomMaterialIssueView({
   // Clear and refill all form columns/inputs for a fresh issue
   const handleResetForm = () => {
     setLotNo('');
+    setBrandName('');
     setReceiverName('');
     setReceiverDept('Cutting');
     setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
@@ -1589,6 +1740,8 @@ export default function WithoutBomMaterialIssueView({
       date: log.date || new Date().toLocaleDateString('en-GB'),
       issueMode: String(log.lotId || '').toLowerCase().includes('direct') ? 'item_only' : 'floor_lot',
       lotId: log.lotId || 'DIRECT-ITEM',
+      brand: log.brand || log.brandName || '',
+      brandName: log.brandName || log.brand || '',
       style: log.style || log.category || 'Store Issue',
       pieces: log.volume || 1,
       personName: log.personName || 'Store In-charge',
@@ -2304,6 +2457,37 @@ export default function WithoutBomMaterialIssueView({
                 </span>
               </div>
 
+              {/* Brand Name */}
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                  Brand Name
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    list="existing-brands-list"
+                    className="form-input"
+                    placeholder="Enter or select Brand Name (e.g. Mohit, Lux, Dixcy)..."
+                    value={brandName}
+                    onChange={(e) => setBrandName(e.target.value)}
+                    style={{
+                      width: '100%',
+                      height: '38px',
+                      fontSize: '13px',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                  <datalist id="existing-brands-list">
+                    {availableBrands.map(b => (
+                      <option key={b} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '3px', display: 'block' }}>
+                  Optional brand/buyer label for this lot
+                </span>
+              </div>
+
               {/* Garment Style / Description */}
               <div>
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
@@ -2479,7 +2663,34 @@ export default function WithoutBomMaterialIssueView({
                 <thead>
                   <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                     <th style={{ padding: '10px 12px', width: '38px', textAlign: 'center' }}>#</th>
-                    <th style={{ padding: '10px 12px', width: '160px' }}>Component / Type</th>
+                    <th style={{ padding: '10px 12px', width: '175px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px' }}>
+                        <span>Component / Type</span>
+                        {customComponentTypes.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowManageTypesModal(true)}
+                            title="Manage custom types"
+                            style={{
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '4px',
+                              padding: '2px 5px',
+                              fontSize: '10px',
+                              fontWeight: '700',
+                              color: '#475569',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px'
+                            }}
+                          >
+                            <Settings size={10} />
+                            <span>({customComponentTypes.length})</span>
+                          </button>
+                        )}
+                      </div>
+                    </th>
                     <th style={{ padding: '10px 12px', minWidth: '260px' }}>Store Material Item</th>
                     <th style={{ padding: '10px 12px', width: '110px', textAlign: 'right' }}>Current Stock</th>
                     <th style={{ padding: '10px 12px', width: '130px' }}>Method</th>
@@ -2504,62 +2715,104 @@ export default function WithoutBomMaterialIssueView({
                         {/* Component Type */}
                         <td style={{ padding: '10px 12px' }}>
                           {item.isCustomType ? (
-                            <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                              <input
-                                type="text"
-                                placeholder="Type custom accessory type..."
-                                value={item.customComponentType || ''}
-                                onChange={(e) => {
-                                  handleUpdateItem(item.id, 'customComponentType', e.target.value);
-                                  handleUpdateItem(item.id, 'componentType', e.target.value);
-                                }}
-                                style={{
-                                  width: '100%',
-                                  padding: '6px 8px',
-                                  borderRadius: '6px',
-                                  border: '1.5px solid #ea580c',
-                                  background: '#fff7ed',
-                                  fontSize: '12px',
-                                  fontWeight: '700',
-                                  color: '#0f172a',
-                                  boxSizing: 'border-box'
-                                }}
-                                autoFocus
-                              />
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  handleUpdateItem(item.id, 'isCustomType', false);
-                                  handleUpdateItem(item.id, 'customComponentType', '');
-                                  handleUpdateItem(item.id, 'componentType', 'DORI');
-                                }}
-                                title="Revert back to standard types"
-                                style={{
-                                  background: '#f1f5f9',
-                                  border: '1px solid #cbd5e1',
-                                  borderRadius: '5px',
-                                  cursor: 'pointer',
-                                  padding: '4px 6px',
-                                  fontSize: '11px',
-                                  color: '#64748b'
-                                }}
-                              >
-                                ✕
-                              </button>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                              <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  placeholder="Type name (e.g. BUTTON)..."
+                                  value={item.customComponentType || ''}
+                                  onChange={(e) => {
+                                    handleUpdateItem(item.id, 'customComponentType', e.target.value);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      commitCustomType(item.id, item.customComponentType);
+                                    } else if (e.key === 'Escape') {
+                                      handleUpdateItem(item.id, 'isCustomType', false);
+                                      handleUpdateItem(item.id, 'customComponentType', '');
+                                    }
+                                  }}
+                                  onBlur={() => {
+                                    if (item.customComponentType && item.customComponentType.trim()) {
+                                      commitCustomType(item.id, item.customComponentType);
+                                    }
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 8px',
+                                    borderRadius: '6px',
+                                    border: '1.5px solid #ea580c',
+                                    background: '#fff7ed',
+                                    fontSize: '12px',
+                                    fontWeight: '700',
+                                    color: '#0f172a',
+                                    boxSizing: 'border-box'
+                                  }}
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => commitCustomType(item.id, item.customComponentType)}
+                                  title="Save and add to list"
+                                  style={{
+                                    background: '#059669',
+                                    color: '#ffffff',
+                                    border: 'none',
+                                    borderRadius: '5px',
+                                    cursor: 'pointer',
+                                    padding: '5px 8px',
+                                    fontSize: '11px',
+                                    fontWeight: '800',
+                                    whiteSpace: 'nowrap',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '2px'
+                                  }}
+                                >
+                                  ✓ Add
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleUpdateItem(item.id, 'isCustomType', false);
+                                    handleUpdateItem(item.id, 'customComponentType', '');
+                                    handleUpdateItem(item.id, 'componentType', allComponentTypes[0] || 'DORI');
+                                  }}
+                                  title="Cancel"
+                                  style={{
+                                    background: '#f1f5f9',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '5px',
+                                    cursor: 'pointer',
+                                    padding: '5px 7px',
+                                    fontSize: '11px',
+                                    color: '#64748b'
+                                  }}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <span style={{ fontSize: '10px', color: '#ea580c', fontWeight: '600' }}>
+                                ↵ Enter or click ✓ Add to save to list
+                              </span>
                             </div>
                           ) : (
                             <select
                               value={item.componentType}
                               onChange={(e) => {
-                                if (e.target.value === '__custom__') {
+                                const val = e.target.value;
+                                if (val === '__custom__') {
                                   handleUpdateItem(item.id, 'isCustomType', true);
                                   handleUpdateItem(item.id, 'customComponentType', '');
+                                } else if (val === '__manage__') {
+                                  setShowManageTypesModal(true);
                                 } else {
-                                  handleUpdateItem(item.id, 'componentType', e.target.value);
+                                  handleUpdateItem(item.id, 'componentType', val);
                                   handleUpdateItem(item.id, 'isCustomType', false);
-                                  if (e.target.value === 'DORI' || e.target.value === 'ELASTIC') {
+                                  if (val === 'DORI' || val === 'ELASTIC') {
                                     if (!item.materialId) handleUpdateItem(item.id, 'unit', 'Mtr');
-                                  } else if (e.target.value === 'ZIP') {
+                                  } else {
                                     if (!item.materialId) handleUpdateItem(item.id, 'unit', 'Pcs');
                                   }
                                 }
@@ -2577,7 +2830,16 @@ export default function WithoutBomMaterialIssueView({
                               }}
                             >
                               {componentTypeOptions.map(opt => (
-                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                <option 
+                                  key={opt.value} 
+                                  value={opt.value}
+                                  style={{
+                                    fontWeight: opt.value.startsWith('__') ? '600' : '700',
+                                    color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
+                                  }}
+                                >
+                                  {opt.label}
+                                </option>
                               ))}
                             </select>
                           )}
@@ -3129,7 +3391,7 @@ export default function WithoutBomMaterialIssueView({
                             DIRECT ITEM REQUISITION
                           </span>
                         ) : (
-                          <span>LOT #{log.lotId}</span>
+                          <span>LOT #{log.lotId}{(log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : ''}</span>
                         )}
                         <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', color: '#475569', fontWeight: '800' }}>
                           W/O BOM
@@ -3320,6 +3582,11 @@ export default function WithoutBomMaterialIssueView({
                     <span style={{ color: '#64748b', fontSize: '10.5px', display: 'block', fontWeight: '700' }}>LOT REFERENCE:</span>
                     <strong style={{ color: '#ea580c', fontSize: '13px' }}>
                       LOT #{previewModal.issueData?.lotId}
+                      {(previewModal.issueData?.brandName || previewModal.issueData?.brand) && (
+                        <span style={{ fontSize: '11px', color: '#0284c7', marginLeft: '6px' }}>
+                          ({previewModal.issueData.brandName || previewModal.issueData.brand})
+                        </span>
+                      )}
                     </strong>
                   </div>
                   <div>
@@ -3512,6 +3779,221 @@ export default function WithoutBomMaterialIssueView({
         </div>
       )}
 
+      {/* Manage Custom Types Modal */}
+      {showManageTypesModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(3px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 99999,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '440px',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1)',
+            overflow: 'hidden',
+            border: '1px solid #e2e8f0',
+            animation: 'fadeIn 0.15s ease-out'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#f8fafc'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Tag size={18} style={{ color: '#0f172a' }} />
+                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
+                  Manage Component / Types
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManageTypesModal(false);
+                  setNewTypeNameInput('');
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  borderRadius: '6px'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px' }}>
+              <p style={{ margin: '0 0 14px 0', fontSize: '12.5px', color: '#64748b' }}>
+                All custom accessory types entered are saved and shown in your dropdown list across bills.
+              </p>
+
+              {/* Add New Type input */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newTypeNameInput.trim()) {
+                    addCustomComponentType(newTypeNameInput.trim().toUpperCase());
+                    setNewTypeNameInput('');
+                  }
+                }}
+                style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}
+              >
+                <input
+                  type="text"
+                  placeholder="Type new component name (e.g. BUTTON)..."
+                  value={newTypeNameInput}
+                  onChange={(e) => setNewTypeNameInput(e.target.value)}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '7px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '12.5px',
+                    fontWeight: '600'
+                  }}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!newTypeNameInput.trim()}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '7px',
+                    border: 'none',
+                    background: newTypeNameInput.trim() ? '#0f172a' : '#cbd5e1',
+                    color: '#ffffff',
+                    fontWeight: '700',
+                    fontSize: '12px',
+                    cursor: newTypeNameInput.trim() ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  + Add
+                </button>
+              </form>
+
+              {/* Types List */}
+              <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                {/* Default Types */}
+                {BASE_COMPONENT_TYPES.map((t, idx) => (
+                  <div
+                    key={t}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      borderBottom: '1px solid #f1f5f9',
+                      background: '#f8fafc',
+                      fontSize: '12.5px',
+                      fontWeight: '700',
+                      color: '#475569'
+                    }}
+                  >
+                    <span>{idx + 1}. {t}</span>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '600', background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>
+                      Standard
+                    </span>
+                  </div>
+                ))}
+
+                {/* Custom Types */}
+                {customComponentTypes.map((t, idx) => (
+                  <div
+                    key={t}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      borderBottom: '1px solid #f1f5f9',
+                      fontSize: '12.5px',
+                      fontWeight: '800',
+                      color: '#0f172a'
+                    }}
+                  >
+                    <span>{BASE_COMPONENT_TYPES.length + idx + 1}. {t}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeCustomComponentType(t)}
+                      title={`Delete "${t}" from list`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '11px',
+                        fontWeight: '700'
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                ))}
+
+                {customComponentTypes.length === 0 && (
+                  <div style={{ padding: '14px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                    No custom types added yet. Use "+ Add Manually" in the table or add one above!
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid #e2e8f0',
+              background: '#f8fafc',
+              display: 'flex',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManageTypesModal(false);
+                  setNewTypeNameInput('');
+                }}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '7px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#334155',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── HIDDEN PRINT CONTAINER (FOR WINDOW.PRINT DUAL COPY) ── */}
       {(previewModal || activePrintData) && (() => {
         const printIssue = previewModal?.issueData || activePrintData;
@@ -3541,7 +4023,7 @@ export default function WithoutBomMaterialIssueView({
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1px solid #000', padding: '8px', marginBottom: '10px' }}>
-                <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}</div>
+                <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}{(printIssue.brandName || printIssue.brand) ? ` • BRAND: ${printIssue.brandName || printIssue.brand}` : ''}</div>
                 <div><strong>ISSUED BY:</strong> {printIssue.personName}</div>
                 <div><strong>RECEIVED BY:</strong> {printIssue.receiverName} ({printIssue.receiverDept})</div>
                 <div><strong>REQUISITION:</strong> {printIssue.style}</div>
@@ -3626,7 +4108,7 @@ export default function WithoutBomMaterialIssueView({
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1px solid #000', padding: '8px', marginBottom: '10px' }}>
-                <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}</div>
+                <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}{(printIssue.brandName || printIssue.brand) ? ` • BRAND: ${printIssue.brandName || printIssue.brand}` : ''}</div>
                 <div><strong>ISSUED BY:</strong> {printIssue.personName}</div>
                 <div><strong>RECEIVED BY:</strong> {printIssue.receiverName} ({printIssue.receiverDept})</div>
                 <div><strong>REQUISITION:</strong> {printIssue.style}</div>
