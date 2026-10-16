@@ -616,28 +616,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
       setPrintProgressText('');
       setPrintModalOpen(true);
 
-      // 1. Accumulate stock in materials table & write INWARD entry to item_code_ledger
-      fetch(`${getBackendUrl()}/api/materials/accumulate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          itemCode: form.materialCode,
-          name: form.materialName,
-          category: form.category,
-          supplier: form.supplier,
-          lotNo: form.lotNo || 'N/A',
-          poNumber: form.poNumber,
-          invoiceNo: form.invoiceNo,
-          location: finalLocation,
-          pieces: totalPieces,
-          packets: totalPackets,
-          netWeightKg: 0,
-          uom: form.unit,
-          personName: form.storeIncharge || currentUser?.name || 'Operator'
-        })
-      }).catch(err => console.error('Error accumulating material stock:', err));
-
-      // 2. Save entry into weight_capture log
+      // Save entry into weight_capture log (automatically updates stock and writes to item_code_ledger)
       fetch(`${getBackendUrl()}/api/weight-capture`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
