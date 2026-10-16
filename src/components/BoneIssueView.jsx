@@ -32,6 +32,7 @@ export default function BoneIssueView({
 
   // Step 2: Simple Issue Details (Direct Issue Weight in Kg & Cutting Pcs)
   const [boneWeightKg, setBoneWeightKg] = useState('2.50');
+  const [boneRollCount, setBoneRollCount] = useState('');
   const [issuePcs, setIssuePcs] = useState(0);
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customWidth, setCustomWidth] = useState('');
@@ -913,6 +914,9 @@ export default function BoneIssueView({
         materialMode,
         issuePcs: effectivePcs,
         boneWeightKg: boneWeightKg || '2.50',
+        boneRollCount: boneRollCount || '',
+        boneRolls: boneRollCount ? `${boneRollCount} Roll(s) (${boneWeightKg || '2.50'} Kg)` : `${boneWeightKg || '2.50'} Kg`,
+        rolls: boneRollCount ? Number(boneRollCount) : 1,
         weight: boneWeightKg || '2.50',
         supervisorName: supervisorName || 'ROHIT / MONU',
         selectedBoneMaterialId,
@@ -2137,38 +2141,103 @@ export default function BoneIssueView({
                           Kg-Wise Floor Issue
                         </span>
                       </label>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          value={boneWeightKg}
-                          onChange={(e) => setBoneWeightKg(e.target.value)}
-                          placeholder="Enter Weight in Kg (e.g. 2.50)"
-                          style={{
-                            flex: 1,
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '2px solid #0284c7',
-                            background: '#ffffff',
-                            fontSize: '16px',
-                            fontWeight: '900',
-                            color: '#0f172a',
-                            outline: 'none'
-                          }}
-                        />
-                        <span style={{
-                          fontSize: '15px',
-                          fontWeight: '900',
-                          color: '#0369a1',
-                          background: '#e0f2fe',
-                          padding: '7px 14px',
-                          borderRadius: '8px',
-                          border: '1.5px solid #bae6fd'
-                        }}>
-                          Kgs
-                        </span>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '10px', alignItems: 'flex-start' }}>
+                        {/* 1. Bone Issue Weight */}
+                        <div>
+                          <span style={{ fontSize: '11px', fontWeight: '800', color: '#0369a1', display: 'block', marginBottom: '4px' }}>
+                            Issue Weight (Kg):
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0.01"
+                              value={boneWeightKg}
+                              onChange={(e) => setBoneWeightKg(e.target.value)}
+                              placeholder="e.g. 2.50"
+                              style={{
+                                width: '100%',
+                                boxSizing: 'border-box',
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                border: '2px solid #0284c7',
+                                background: '#ffffff',
+                                fontSize: '15px',
+                                fontWeight: '900',
+                                color: '#0f172a',
+                                outline: 'none'
+                              }}
+                            />
+                            <span style={{
+                              fontSize: '13px',
+                              fontWeight: '900',
+                              color: '#0369a1',
+                              background: '#e0f2fe',
+                              padding: '7px 12px',
+                              borderRadius: '8px',
+                              border: '1.5px solid #bae6fd',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              Kg
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 2. Roll Quantity (Optional) */}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: '800', color: '#0369a1' }}>
+                              Roll Quantity:
+                            </span>
+                            <span style={{
+                              fontSize: '9.5px',
+                              color: '#0284c7',
+                              background: '#e0f2fe',
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              fontWeight: '700'
+                            }}>
+                              Optional
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={boneRollCount}
+                              onChange={(e) => setBoneRollCount(e.target.value)}
+                              placeholder="e.g. 1, 2 (Optional)"
+                              style={{
+                                width: '100%',
+                                boxSizing: 'border-box',
+                                padding: '8px 10px',
+                                borderRadius: '8px',
+                                border: '1.5px solid #0284c7',
+                                background: '#ffffff',
+                                fontSize: '15px',
+                                fontWeight: '800',
+                                color: '#0f172a',
+                                outline: 'none'
+                              }}
+                            />
+                            <span style={{
+                              fontSize: '13px',
+                              fontWeight: '900',
+                              color: '#0369a1',
+                              background: '#e0f2fe',
+                              padding: '7px 10px',
+                              borderRadius: '8px',
+                              border: '1.5px solid #bae6fd',
+                              whiteSpace: 'nowrap'
+                            }}>
+                              Roll(s)
+                            </span>
+                          </div>
+                        </div>
                       </div>
+
+                      {/* Quick Weights & Quick Rolls */}
                       <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
                         {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
@@ -2191,6 +2260,47 @@ export default function BoneIssueView({
                             {w} Kg
                           </button>
                         ))}
+
+                        <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginLeft: '6px' }}>Rolls (Opt):</span>
+                        {['1', '2', '3', '4', '5'].map(r => (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setBoneRollCount(r)}
+                            style={{
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              border: String(boneRollCount) === r ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                              background: String(boneRollCount) === r ? '#0284c7' : '#ffffff',
+                              color: String(boneRollCount) === r ? '#ffffff' : '#0369a1',
+                              fontSize: '11px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              transition: 'all 0.1s ease'
+                            }}
+                          >
+                            {r} Roll{r > 1 ? 's' : ''}
+                          </button>
+                        ))}
+                        {boneRollCount && (
+                          <button
+                            type="button"
+                            onClick={() => setBoneRollCount('')}
+                            style={{
+                              padding: '3px 6px',
+                              borderRadius: '6px',
+                              border: '1px solid #cbd5e1',
+                              background: '#f1f5f9',
+                              color: '#64748b',
+                              fontSize: '10.5px',
+                              fontWeight: '700',
+                              cursor: 'pointer'
+                            }}
+                            title="Clear Roll Count"
+                          >
+                            ✕ Clear
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -2263,6 +2373,11 @@ export default function BoneIssueView({
                           <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
                             {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
                           </div>
+                          {boneRollCount ? (
+                            <div style={{ fontSize: '11px', fontWeight: '800', background: 'rgba(255,255,255,0.25)', padding: '1px 6px', borderRadius: '4px', marginTop: '2px', display: 'inline-block' }}>
+                              {boneRollCount} Roll{Number(boneRollCount) > 1 ? 's' : ''}
+                            </div>
+                          ) : null}
                           <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
                             {currentBoneMaterial ? `Store stock: ${currentBoneMaterial.stock || '15'}` : 'Store stock: 15'}
                           </div>
@@ -2297,11 +2412,11 @@ export default function BoneIssueView({
                 <div style={{ fontSize: '13px', color: '#64748b' }}>
                   {isWithoutLot ? (
                     <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Zap size={15} /> Without BOM Mode &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{boneWeightKg} Kg</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (Supervisor: {supervisorName || 'ROHIT / MONU'})
+                      <Zap size={15} /> Without BOM Mode &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{boneWeightKg} Kg{boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''}</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (Supervisor: {supervisorName || 'ROHIT / MONU'})
                     </span>
                   ) : bomStatus === 'approved' ? (
                     <span style={{ color: '#16a34a', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <ShieldCheck size={16} /> With BOM Mode &bull; LOT #{lotDetails?.lotNo || searchLotInput || '—'} &bull; Total: <strong style={{ color: '#0284c7' }}>{boneWeightKg} Kg ({lotDetails?.quantity || issuePcs || 0} Pcs)</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (BOM Approved ✓)
+                      <ShieldCheck size={16} /> With BOM Mode &bull; LOT #{lotDetails?.lotNo || searchLotInput || '—'} &bull; Total: <strong style={{ color: '#0284c7' }}>{boneWeightKg} Kg{boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''} ({lotDetails?.quantity || issuePcs || 0} Pcs)</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (BOM Approved ✓)
                     </span>
                   ) : (
                     <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>

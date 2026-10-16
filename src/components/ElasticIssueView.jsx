@@ -39,6 +39,8 @@ export default function ElasticIssueView({
   const [otherMaterialName, setOtherMaterialName] = useState('Drawcord / Other Accessory');
   const [otherRollCount, setOtherRollCount] = useState(1);
   const [otherUnit, setOtherUnit] = useState('Roll');
+  const [isManualOtherUnit, setIsManualOtherUnit] = useState(false);
+  const [manualUnitInput, setManualUnitInput] = useState('');
   const [isWithoutLot, setIsWithoutLot] = useState(false); // Without Lot / Direct Floor Issue Mode
   const [isWithoutPo, setIsWithoutPo] = useState(false); // W/O PO (Direct Floor Issue) Mode
   const withoutLotActive = isWithoutLot || isWithoutPo;
@@ -1634,7 +1636,7 @@ export default function ElasticIssueView({
         lotNo: currentLotNo,
         isWithoutLot: withoutLotActive,
         isWithoutPo: withoutLotActive,
-        rolls: materialMode === 'bone' ? (parseFloat(boneWeightKg) || 1) : calculatedRolls,
+        rolls: materialMode === 'bone' ? (boneRollCount ? Number(boneRollCount) : (parseFloat(boneWeightKg) || 1)) : calculatedRolls,
         otherRollCount: parseFloat(otherRollCount) || 1,
         otherMaterialName: otherMaterialName || 'Other Accessory',
         otherUnit: otherUnit || 'Roll',
@@ -1643,7 +1645,8 @@ export default function ElasticIssueView({
         width: effectiveWidth,
         tapeWidth: effectiveTapeWidth,
         boneWidth: effectiveBoneWidth,
-        boneRolls: `${boneWeightKg || '0'} Kg`,
+        boneRolls: boneRollCount ? `${boneRollCount} Roll(s) (${boneWeightKg || '0'} Kg)` : `${boneWeightKg || '0'} Kg`,
+        boneRollCount: boneRollCount || '',
         boneWeightKg: boneWeightKg || '0',
         weight: boneWeightKg || '0',
         shade: selectedShade || lotDetails?.shade || 'Standard Shade',
@@ -1792,6 +1795,509 @@ export default function ElasticIssueView({
       console.error('Reprint error:', err);
       showToast('Failed to open bill for printing.', 'error');
     }
+  };
+
+  const handlePrintAllDetails = (format = 'register') => {
+    if (!processedHistory || processedHistory.length === 0) {
+      showToast('No records found to print for the selected filter.', 'error');
+      return;
+    }
+
+    const printWin = window.open('', '_blank', 'width=1200,height=850');
+    if (!printWin) {
+      alert('Popup was blocked by your browser. Please allow popups to open the print report.');
+      return;
+    }
+
+    const totalSlips = processedHistory.length;
+    const totalPcs = processedHistory.reduce((sum, item) => sum + Number(item.quantity || item.issuePcs || 0), 0);
+    const totalRolls = processedHistory.reduce((sum, item) => {
+      if (item.tapeRolls) return sum + Number(item.tapeRolls);
+      if (item.boneRolls) return sum + Number(item.boneRolls);
+      if (item.rolls) return sum + Number(item.rolls);
+      return sum + 1;
+    }, 0);
+
+    const filterLabels = {
+      all: 'All Slips (Consolidated History)',
+      elastic_wo: 'Elastic W/O BOM (Internal Roll Issue)',
+      tape_wo: 'Tape W/O BOM (Drawcord / Tape Issue)',
+      bone_wo: 'Bone W/O BOM (Chinese Piping Issue)',
+      standard: 'With LOT (BOM Approved Issue)'
+    };
+    const activeFilterLabel = filterLabels[historyLineFilter] || 'All Slips';
+    const sortLabels = {
+      seq_asc: 'Sequence Ascending (#1, #2, #3...)',
+      seq_desc: 'Latest Sequence Descending',
+      date_desc: 'Newest Date First',
+      date_asc: 'Oldest Date First'
+    };
+    const activeSortLabel = sortLabels[historySortMode] || 'Sequence Order';
+
+    const tableRowsHtml = processedHistory.map((item, idx) => {
+      const meta = getSlipMeta(item.slipNo);
+      const isWO = Boolean(String(item.slipNo || '').toLowerCase().includes('-w/o-') || item.isWithoutLot || item.isWithoutPo);
+      const lotDisplay = isWO
+        ? (item.lotNo && item.lotNo !== 'W/O-LOT' && item.lotNo !== 'W/O-PO-FLOOR' ? `LOT #${item.lotNo} (W/O BOM)` : 'W/O BOM (Floor)')
+        : `LOT #${item.lotNo || '—'}`;
+
+      const perPc = String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+        ? '1/45 Roll'
+        : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+          ? '18 CM Cut'
+          : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—');
+
+      const totalReq = String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+        ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
+        : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+          ? `${item.boneRolls || item.rolls || 1} Roll(s)`
+          : (item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : `${item.rolls || 1} Roll(s)`);
+
+      return `
+        <tr>
+          <td style="text-align: center; font-weight: 800; font-family: monospace;">#${idx + 1}</td>
+          <td style="font-weight: 800; font-family: monospace; white-space: nowrap;">
+            ${item.slipNo || '—'}
+          </td>
+          <td style="text-align: center; white-space: nowrap;">
+            <span class="badge" style="border: 1px solid #000000; color: #000000; background: #ffffff; padding: 2px 6px; font-weight: 800;">
+              ${meta.badgeText}
+            </span>
+          </td>
+          <td style="text-align: center; white-space: nowrap; font-size: 10px;">${item.date || '—'}</td>
+          <td style="font-weight: 700; font-size: 10.5px;">${lotDisplay}</td>
+          <td style="text-align: center; font-weight: 700;">${item.style || item.garmentType || 'LOWER'}</td>
+          ${!historyLineFilter.includes('wo') ? `
+            <td style="text-align: center; font-weight: 800;">${item.quantity || item.issuePcs ? `${item.quantity || item.issuePcs} Pcs` : '—'}</td>
+            <td style="text-align: center; font-weight: 700;">${perPc}</td>
+          ` : ''}
+          <td style="text-align: center; font-weight: 900; font-size: 11px;">${totalReq}</td>
+          <td style="text-align: center; font-size: 10px;">${item.issuerName || 'STORE STAFF'}</td>
+          <td style="text-align: center; font-size: 10px; font-weight: 800;">${item.receiverName || 'CUTTING MASTER'}</td>
+          <td style="text-align: center; font-size: 10px; font-weight: 700;">${item.supervisorName || 'ROHIT / MONU'}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const vouchersHtml = processedHistory.map((item, idx) => {
+      const meta = getSlipMeta(item.slipNo);
+      const isWO = Boolean(String(item.slipNo || '').toLowerCase().includes('-w/o-') || item.isWithoutLot || item.isWithoutPo);
+      const lotDisplay = isWO
+        ? (item.lotNo && item.lotNo !== 'W/O-LOT' && item.lotNo !== 'W/O-PO-FLOOR' ? `LOT #${item.lotNo}` : 'DIRECT FLOOR')
+        : `LOT #${item.lotNo || '—'}`;
+
+      const totalReq = String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+        ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
+        : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+          ? `${item.boneRolls || item.rolls || 1} Roll(s)`
+          : (item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : `${item.rolls || 1} Roll(s)`);
+
+      return `
+        <div class="voucher-card">
+          <div class="voucher-header">
+            <div>
+              <div class="vh-company">MOHIT HOSIERY</div>
+              <div class="vh-title">${isWO ? 'MATERIAL ISSUE SLIP (W/O BOM - FLOOR ISSUE)' : 'OFFICIAL MATERIAL ISSUE VOUCHER'}</div>
+              <div class="vh-sub">Store &amp; Accessories Department • Issue Line: ${meta.badgeText}</div>
+            </div>
+            <div style="text-align: right;">
+              <div style="font-family: monospace; font-size: 13px; font-weight: 900;">SLIP: ${item.slipNo}</div>
+              <div style="font-size: 10px; color: #333;">Seq #${idx + 1} • Date: ${item.date || '—'}</div>
+              <div style="display: inline-block; padding: 2px 6px; font-size: 9.5px; font-weight: 800; border: 1px solid #000; border-radius: 4px; margin-top: 3px;">
+                ${isWO ? 'DIRECT ISSUE (WITHOUT BOM)' : 'WITH APPROVED BOM'}
+              </div>
+            </div>
+          </div>
+
+          <table class="voucher-table">
+            <tr>
+              <td style="width: 25%;"><strong>Lot Number:</strong></td>
+              <td style="width: 25%; font-weight: 800;">${lotDisplay}</td>
+              <td style="width: 25%;"><strong>Garment Quantity:</strong></td>
+              <td style="width: 25%; font-weight: 800; font-size: 11.5px;">${item.quantity || item.issuePcs || 0} Pcs</td>
+            </tr>
+            <tr>
+              <td><strong>Garment / Style:</strong></td>
+              <td style="font-weight: 700;">${item.style || item.garmentType || 'LOWER'}</td>
+              <td><strong>Fabric / Shade:</strong></td>
+              <td>${item.fabric || 'Cotton Poly Blend'} / ${item.shade || 'Standard'}</td>
+            </tr>
+            <tr>
+              <td><strong>Accessory Material:</strong></td>
+              <td style="font-weight: 700;">${meta.badgeText}</td>
+              <td><strong>Total Issued:</strong></td>
+              <td style="font-weight: 900; font-size: 12px; color: #047857;">${totalReq}</td>
+            </tr>
+            <tr>
+              <td><strong>Issued By:</strong></td>
+              <td>${item.issuerName || 'STORE STAFF'}</td>
+              <td><strong>Received By:</strong></td>
+              <td style="font-weight: 800;">${item.receiverName || 'CUTTING MASTER'}</td>
+            </tr>
+            <tr>
+              <td><strong>Floor Supervisor:</strong></td>
+              <td>${item.supervisorName || 'ROHIT / MONU'}</td>
+              <td><strong>Remarks / Notes:</strong></td>
+              <td>${(item.remarks && !String(item.remarks).trim().startsWith('[') && !String(item.remarks).trim().startsWith('{')) ? item.remarks : 'Standard Issue'}</td>
+            </tr>
+          </table>
+
+          <div class="voucher-signatures">
+            <div class="sig-box">Store Staff (Issued)</div>
+            <div class="sig-box">Cutting Master (Received)</div>
+            <div class="sig-box">Supervisor (ROHIT / MONU)</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Elastic &amp; Material Issue History - MH Store</title>
+        <style>
+          @page {
+            size: A4 landscape;
+            margin: 8mm 6mm;
+          }
+          * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+          }
+          body {
+            margin: 0;
+            padding: 12px;
+            color: #000000;
+            background: #ffffff;
+            font-size: 11px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .no-print-bar {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+          }
+          .btn-print {
+            background: #000000;
+            color: #ffffff;
+            border: 1px solid rgba(255,255,255,0.4);
+            padding: 7px 16px;
+            font-weight: 800;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          .btn-toggle {
+            background: #334155;
+            color: #ffffff;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 700;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-left: 8px;
+          }
+          .btn-close {
+            background: #64748b;
+            color: #ffffff;
+            border: none;
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          @media print {
+            .no-print-bar { display: none !important; }
+            body { padding: 0 !important; }
+            thead { display: table-header-group !important; }
+            tr { page-break-inside: avoid !important; }
+            .voucher-card { page-break-inside: avoid !important; margin-bottom: 24px !important; }
+          }
+          .header-box {
+            border-bottom: 2px solid #000000;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+          }
+          .company-title {
+            font-size: 17px;
+            font-weight: 900;
+            color: #000000;
+            letter-spacing: 0.5px;
+            margin: 0 0 2px 0;
+          }
+          .doc-title {
+            font-size: 12.5px;
+            font-weight: 800;
+            color: #000000;
+            margin: 0;
+          }
+          .doc-sub {
+            font-size: 10px;
+            color: #333333;
+            margin-top: 2px;
+          }
+          .meta-info {
+            text-align: right;
+            font-size: 10px;
+            color: #000000;
+            line-height: 1.4;
+          }
+          .summary-strip {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+          }
+          .summary-card {
+            flex: 1;
+            border: 1px solid #000000;
+            padding: 6px 8px;
+            font-size: 10px;
+            text-align: center;
+          }
+          .summary-card span {
+            display: block;
+            font-size: 9px;
+            color: #475569;
+            font-weight: 700;
+          }
+          .summary-card strong {
+            display: block;
+            font-size: 13px;
+            color: #000000;
+            margin-top: 2px;
+          }
+          table.report-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+          }
+          table.report-table th, table.report-table td {
+            border: 1.5px solid #000000;
+            padding: 6px 7px;
+            vertical-align: middle;
+            color: #000000;
+          }
+          table.report-table th {
+            background-color: #f8fafc;
+            font-weight: 900;
+            text-transform: uppercase;
+            font-size: 9.5px;
+            letter-spacing: 0.03em;
+            text-align: left;
+            color: #000000;
+          }
+          .badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 800;
+            white-space: nowrap;
+          }
+          .footer-signs {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            page-break-inside: avoid;
+          }
+          .sign-box {
+            border-top: 1px solid #000000;
+            width: 190px;
+            text-align: center;
+            padding-top: 6px;
+            font-weight: 700;
+          }
+          .voucher-card {
+            border: 1.5px solid #000000;
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            background: #ffffff;
+          }
+          .voucher-header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 1.5px solid #000000;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+          }
+          .vh-company { font-size: 14px; font-weight: 900; }
+          .vh-title { font-size: 11px; font-weight: 800; }
+          .vh-sub { font-size: 9.5px; color: #475569; }
+          table.voucher-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            margin-bottom: 8px;
+          }
+          table.voucher-table td {
+            border: 1px solid #e2e8f0;
+            padding: 5px 8px;
+          }
+          .voucher-signatures {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            padding-top: 6px;
+            border-top: 1px dashed #cbd5e1;
+            font-size: 9.5px;
+          }
+          .sig-box {
+            font-weight: 700;
+            color: #334155;
+            border-top: 1px solid #000;
+            padding-top: 4px;
+            width: 160px;
+            text-align: center;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print-bar">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn-print" onclick="window.print()">🖨️ Print Now (Black &amp; White)</button>
+            <button class="btn-toggle" onclick="toggleView()" id="toggleBtn">
+              ${format === 'vouchers' ? '📋 Switch to Register Table' : '📑 Switch to All Slips (Vouchers)'}
+            </button>
+            <span style="font-size: 12px; color: #cbd5e1; margin-left: 6px;">A4 Landscape • High Contrast Ink-Saver</span>
+          </div>
+          <button class="btn-close" onclick="window.close()">✕ Close Preview</button>
+        </div>
+
+        <!-- 1. Register Table View -->
+        <div id="registerView" style="${format === 'vouchers' ? 'display: none;' : 'display: block;'}">
+          <div class="header-box">
+            <div>
+              <div class="company-title">MOHIT HOSIERY</div>
+              <div class="doc-title">ELASTIC &amp; MATERIAL ISSUE REGISTER (ALL DETAILS)</div>
+              <div class="doc-sub">MH Textiles &amp; Accessories Store • Internal Floor Issue Records</div>
+            </div>
+            <div class="meta-info">
+              <div><strong>Report Date:</strong> ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+              <div><strong>Line Filter:</strong> ${activeFilterLabel.toUpperCase()}</div>
+              <div><strong>Sort Order:</strong> ${activeSortLabel.toUpperCase()}</div>
+              <div><strong>Total Slips:</strong> ${totalSlips}</div>
+              <div><strong>Printed By:</strong> ${(currentUser?.name || 'STORE STAFF').toUpperCase()}</div>
+            </div>
+          </div>
+
+          <div class="summary-strip">
+            <div class="summary-card">
+              <span>TOTAL ISSUE SLIPS</span>
+              <strong>${totalSlips}</strong>
+            </div>
+            ${!historyLineFilter.includes('wo') ? `
+            <div class="summary-card">
+              <span>TOTAL GARMENT PCS</span>
+              <strong>${totalPcs.toLocaleString('en-IN')} Pcs</strong>
+            </div>
+            ` : ''}
+            <div class="summary-card">
+              <span>TOTAL ROLLS ISSUED</span>
+              <strong>${totalRolls} Roll(s)</strong>
+            </div>
+            <div class="summary-card">
+              <span>ISSUE LINE TRACK</span>
+              <strong>${activeFilterLabel}</strong>
+            </div>
+            <div class="summary-card">
+              <span>DESTINATION FLOOR</span>
+              <strong>CUTTING FLOOR</strong>
+            </div>
+          </div>
+
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th style="width: 35px; text-align: center;">SEQ #</th>
+                <th>BILL / SLIP NO</th>
+                <th style="text-align: center;">LINE TYPE</th>
+                <th style="text-align: center;">DATE</th>
+                <th>LOT NO</th>
+                <th style="text-align: center;">ITEM / STYLE</th>
+                ${!historyLineFilter.includes('wo') ? `
+                  <th style="text-align: center;">PCS</th>
+                  <th style="text-align: center;">PER PC REQ.</th>
+                ` : ''}
+                <th style="text-align: center;">TOTAL ISSUE</th>
+                <th style="text-align: center;">ISSUED BY</th>
+                <th style="text-align: center;">RECEIVED BY</th>
+                <th style="text-align: center;">SUPERVISOR</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHtml}
+            </tbody>
+          </table>
+
+          <div class="footer-signs">
+            <div class="sign-box">Prepared / Issued By<br/><small style="font-weight: normal; color: #444;">Store Incharge</small></div>
+            <div class="sign-box">Received By<br/><small style="font-weight: normal; color: #444;">Cutting Master</small></div>
+            <div class="sign-box">Verified By<br/><small style="font-weight: normal; color: #444;">Floor Supervisor (ROHIT / MONU)</small></div>
+            <div class="sign-box">Authorized Signatory<br/><small style="font-weight: normal; color: #444;">Production Manager</small></div>
+          </div>
+        </div>
+
+        <!-- 2. Individual Vouchers View -->
+        <div id="vouchersView" style="${format === 'vouchers' ? 'display: block;' : 'display: none;'}">
+          <div class="header-box" style="margin-bottom: 14px;">
+            <div>
+              <div class="company-title">MOHIT HOSIERY</div>
+              <div class="doc-title">BATCH MATERIAL ISSUE VOUCHERS (${totalSlips} SLIPS)</div>
+              <div class="doc-sub">Full Voucher Printout for All Filtered Records</div>
+            </div>
+            <div class="meta-info">
+              <div><strong>Printed Date:</strong> ${new Date().toLocaleDateString('en-IN')}</div>
+              <div><strong>Filter:</strong> ${activeFilterLabel}</div>
+              <div><strong>Total Vouchers:</strong> ${totalSlips}</div>
+            </div>
+          </div>
+          ${vouchersHtml}
+        </div>
+
+        <script>
+          function toggleView() {
+            var reg = document.getElementById('registerView');
+            var vou = document.getElementById('vouchersView');
+            var btn = document.getElementById('toggleBtn');
+            if (reg.style.display === 'none') {
+              reg.style.display = 'block';
+              vou.style.display = 'none';
+              btn.innerText = '📑 Switch to All Slips (Vouchers)';
+            } else {
+              reg.style.display = 'none';
+              vou.style.display = 'block';
+              btn.innerText = '📋 Switch to Register Table';
+            }
+          }
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWin.document.open();
+    printWin.document.write(htmlContent);
+    printWin.document.close();
   };
 
   return (
@@ -3120,7 +3626,7 @@ export default function ElasticIssueView({
                               <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
                                 3. TOTAL MATERIAL / QUANTITY TO ISSUE:
                               </span>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 95px', gap: '6px', alignItems: 'center' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: '6px', alignItems: 'center' }}>
                                 <input
                                   type="number"
                                   min="1"
@@ -3135,12 +3641,22 @@ export default function ElasticIssueView({
                                   }}
                                 />
                                 <select
-                                  value={otherUnit}
-                                  onChange={(e) => setOtherUnit(e.target.value)}
+                                  value={isManualOtherUnit ? 'manual' : otherUnit}
+                                  onChange={(e) => {
+                                    if (e.target.value === 'manual') {
+                                      setIsManualOtherUnit(true);
+                                      if (manualUnitInput.trim()) {
+                                        setOtherUnit(manualUnitInput.trim());
+                                      }
+                                    } else {
+                                      setIsManualOtherUnit(false);
+                                      setOtherUnit(e.target.value);
+                                    }
+                                  }}
                                   style={{
                                     padding: '9px 8px', borderRadius: '7px',
                                     border: '1.5px solid #7c3aed', fontSize: '12px', fontWeight: '800',
-                                    color: '#6b21a8', background: '#ffffff', outline: 'none', cursor: 'pointer'
+                                    color: '#6b21a8', background: isManualOtherUnit ? '#f3e8ff' : '#ffffff', outline: 'none', cursor: 'pointer'
                                   }}
                                 >
                                   <option value="Roll">Roll</option>
@@ -3152,8 +3668,69 @@ export default function ElasticIssueView({
                                   <option value="Box">Box</option>
                                   <option value="Dozen">Dozen</option>
                                   <option value="Gross">Gross</option>
+                                  <option value="manual">✏️ Manually</option>
                                 </select>
                               </div>
+
+                              {isManualOtherUnit && (
+                                <div style={{
+                                  marginTop: '6px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  background: '#faf5ff',
+                                  padding: '6px 8px',
+                                  borderRadius: '7px',
+                                  border: '1.5px solid #7c3aed'
+                                }}>
+                                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#6b21a8', whiteSpace: 'nowrap' }}>
+                                    ✏️ Unit:
+                                  </span>
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    placeholder="Type unit (e.g. Set, Bundle, Thaan, Bag)..."
+                                    value={manualUnitInput}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      setManualUnitInput(val);
+                                      setOtherUnit(val || 'Unit');
+                                    }}
+                                    style={{
+                                      flex: 1,
+                                      padding: '5px 8px',
+                                      borderRadius: '5px',
+                                      border: '1px solid #c084fc',
+                                      fontSize: '12px',
+                                      fontWeight: '800',
+                                      color: '#0f172a',
+                                      background: '#ffffff',
+                                      outline: 'none'
+                                    }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsManualOtherUnit(false);
+                                      setOtherUnit('Roll');
+                                    }}
+                                    style={{
+                                      padding: '5px 8px',
+                                      borderRadius: '5px',
+                                      border: '1px solid #d8b4fe',
+                                      background: '#f3e8ff',
+                                      color: '#6b21a8',
+                                      fontSize: '11px',
+                                      fontWeight: '800',
+                                      cursor: 'pointer',
+                                      whiteSpace: 'nowrap'
+                                    }}
+                                    title="Switch back to preset units"
+                                  >
+                                    ✕ Preset
+                                  </button>
+                                </div>
+                              )}
                               <div style={{
                                 fontSize: '11px',
                                 fontWeight: '800',
@@ -5108,38 +5685,103 @@ export default function ElasticIssueView({
                               Kg-Wise Floor Issue
                             </span>
                           </label>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0.01"
-                              value={boneWeightKg}
-                              onChange={(e) => setBoneWeightKg(e.target.value)}
-                              placeholder="Enter Weight in Kg (e.g. 2.50)"
-                              style={{
-                                flex: 1,
-                                padding: '8px 12px',
-                                borderRadius: '8px',
-                                border: '2px solid #0284c7',
-                                background: '#ffffff',
-                                fontSize: '16px',
-                                fontWeight: '900',
-                                color: '#0f172a',
-                                outline: 'none'
-                              }}
-                            />
-                            <span style={{
-                              fontSize: '15px',
-                              fontWeight: '900',
-                              color: '#0369a1',
-                              background: '#e0f2fe',
-                              padding: '7px 14px',
-                              borderRadius: '8px',
-                              border: '1.5px solid #bae6fd'
-                            }}>
-                              Kgs
-                            </span>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '10px', alignItems: 'flex-start' }}>
+                            {/* 1. Bone Issue Weight */}
+                            <div>
+                              <span style={{ fontSize: '11px', fontWeight: '800', color: '#0369a1', display: 'block', marginBottom: '4px' }}>
+                                Issue Weight (Kg):
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0.01"
+                                  value={boneWeightKg}
+                                  onChange={(e) => setBoneWeightKg(e.target.value)}
+                                  placeholder="e.g. 2.50"
+                                  style={{
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '2px solid #0284c7',
+                                    background: '#ffffff',
+                                    fontSize: '15px',
+                                    fontWeight: '900',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                  }}
+                                />
+                                <span style={{
+                                  fontSize: '13px',
+                                  fontWeight: '900',
+                                  color: '#0369a1',
+                                  background: '#e0f2fe',
+                                  padding: '7px 12px',
+                                  borderRadius: '8px',
+                                  border: '1.5px solid #bae6fd',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  Kg
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* 2. Roll Quantity (Optional) */}
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '11px', fontWeight: '800', color: '#0369a1' }}>
+                                  Roll Quantity:
+                                </span>
+                                <span style={{
+                                  fontSize: '9.5px',
+                                  color: '#0284c7',
+                                  background: '#e0f2fe',
+                                  padding: '1px 5px',
+                                  borderRadius: '4px',
+                                  fontWeight: '700'
+                                }}>
+                                  Optional
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  value={boneRollCount}
+                                  onChange={(e) => setBoneRollCount(e.target.value)}
+                                  placeholder="e.g. 1, 2 (Optional)"
+                                  style={{
+                                    width: '100%',
+                                    boxSizing: 'border-box',
+                                    padding: '8px 10px',
+                                    borderRadius: '8px',
+                                    border: '1.5px solid #0284c7',
+                                    background: '#ffffff',
+                                    fontSize: '15px',
+                                    fontWeight: '800',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                  }}
+                                />
+                                <span style={{
+                                  fontSize: '13px',
+                                  fontWeight: '900',
+                                  color: '#0369a1',
+                                  background: '#e0f2fe',
+                                  padding: '7px 10px',
+                                  borderRadius: '8px',
+                                  border: '1.5px solid #bae6fd',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  Roll(s)
+                                </span>
+                              </div>
+                            </div>
                           </div>
+
+                          {/* Quick Weights & Quick Rolls */}
                           <div style={{ display: 'flex', gap: '6px', marginTop: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                             <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>Quick Weights:</span>
                             {['0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '5.0', '10.0'].map(w => (
@@ -5162,6 +5804,47 @@ export default function ElasticIssueView({
                                 {w} Kg
                               </button>
                             ))}
+
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', marginLeft: '6px' }}>Rolls (Opt):</span>
+                            {['1', '2', '3', '4', '5'].map(r => (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => setBoneRollCount(r)}
+                                style={{
+                                  padding: '3px 8px',
+                                  borderRadius: '6px',
+                                  border: String(boneRollCount) === r ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                                  background: String(boneRollCount) === r ? '#0284c7' : '#ffffff',
+                                  color: String(boneRollCount) === r ? '#ffffff' : '#0369a1',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.1s ease'
+                                }}
+                              >
+                                {r} Roll{r > 1 ? 's' : ''}
+                              </button>
+                            ))}
+                            {boneRollCount && (
+                              <button
+                                type="button"
+                                onClick={() => setBoneRollCount('')}
+                                style={{
+                                  padding: '3px 6px',
+                                  borderRadius: '6px',
+                                  border: '1px solid #cbd5e1',
+                                  background: '#f1f5f9',
+                                  color: '#64748b',
+                                  fontSize: '10.5px',
+                                  fontWeight: '700',
+                                  cursor: 'pointer'
+                                }}
+                                title="Clear Roll Count"
+                              >
+                                ✕ Clear
+                              </button>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -5499,6 +6182,11 @@ export default function ElasticIssueView({
                               <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
                                 {boneWeightKg || '0'} <span style={{ fontSize: '18px', fontWeight: '800' }}>Kg</span>
                               </div>
+                              {boneRollCount ? (
+                                <div style={{ fontSize: '11px', fontWeight: '800', background: 'rgba(255,255,255,0.25)', padding: '1px 6px', borderRadius: '4px', marginTop: '2px', display: 'inline-block' }}>
+                                  {boneRollCount} Roll{Number(boneRollCount) > 1 ? 's' : ''}
+                                </div>
+                              ) : null}
                               <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
                                 Store stock: {currentBoneMaterial ? (currentBoneMaterial.stock ?? '15') : '15'}
                               </div>
@@ -5600,11 +6288,11 @@ export default function ElasticIssueView({
                   <div style={{ fontSize: '13px', color: '#64748b' }}>
                     {withoutLotActive ? (
                       <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <Zap size={15} /> Without BOM Mode ({materialMode === 'other' ? 'Other Accessories' : materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total Issue: <strong style={{ color: '#ea580c' }}>{materialMode === 'other' ? `${otherRollCount || 1} ${otherUnit || 'Roll'}(s)` : materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / effectiveDivisor)} Roll(s) (${effectiveWidth})`}</strong>
+                        <Zap size={15} /> Without BOM Mode ({materialMode === 'other' ? 'Other Accessories' : materialMode === 'tape' ? 'Tape Only' : materialMode === 'bone' ? 'Bone Only' : 'Elastic Only'}) &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total Issue: <strong style={{ color: '#ea580c' }}>{materialMode === 'other' ? `${otherRollCount || 1} ${otherUnit || 'Roll'}(s)` : materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg${boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''}` : `${Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / effectiveDivisor)} Roll(s) (${effectiveWidth})`}</strong>
                       </span>
                     ) : bomStatus === 'approved' ? (
                       <span>
-                        Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
+                        Total Requirement: <strong style={{ color: '#059669' }}>{materialMode === 'tape' ? `${calcResult.tapeRolls || Math.ceil((parseInt(issuePcs || lotDetails?.quantity || 0, 10)) / 45) || 1} Roll(s)` : materialMode === 'bone' ? `${boneWeightKg || '0'} Kg${boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''}` : `${calcResult.totalElasticMtr} Mtr`}</strong> for <strong>LOT #{lotDetails?.lotNo || searchLotInput || '—'}</strong> (BOM Approved ✓)
                       </span>
                     ) : (
                       <span style={{ color: '#dc2626', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -5823,6 +6511,53 @@ export default function ElasticIssueView({
 
               <button
                 type="button"
+                onClick={() => handlePrintAllDetails('register')}
+                style={{
+                  padding: '6px 13px',
+                  borderRadius: '8px',
+                  border: '1px solid #0f172a',
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(15, 23, 42, 0.15)',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Print complete register with all details (A4 Landscape Table)"
+              >
+                <Printer size={13} />
+                <span>Print All Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handlePrintAllDetails('vouchers')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#0f172a',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease'
+                }}
+                title="Print all individual vouchers in batch"
+              >
+                <FileText size={13} />
+                <span>Print All Slips</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={loadIssueHistory}
                 style={{
                   padding: '6px 11px', borderRadius: '8px', border: '1px solid #cbd5e1',
@@ -5933,9 +6668,13 @@ export default function ElasticIssueView({
                     </th>
                     <th style={{ padding: '10px 12px' }}>LOT NO</th>
                     <th style={{ padding: '10px 12px' }}>ITEM / STYLE</th>
-                    <th style={{ padding: '10px 12px' }}>PCS</th>
-                    <th style={{ padding: '10px 12px' }}>PER PC REQ.</th>
-                    <th style={{ padding: '10px 12px' }}>TOTAL REQUIREMENT</th>
+                    {!historyLineFilter.includes('wo') && (
+                      <>
+                        <th style={{ padding: '10px 12px' }}>PCS</th>
+                        <th style={{ padding: '10px 12px' }}>PER PC REQ.</th>
+                      </>
+                    )}
+                    <th style={{ padding: '10px 12px' }}>TOTAL ISSUE</th>
                     <th style={{ padding: '10px 12px' }}>ISSUED BY</th>
                     <th style={{ padding: '10px 12px' }}>RECEIVED BY</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>ACTIONS</th>
@@ -5963,38 +6702,22 @@ export default function ElasticIssueView({
                           </span>
                         </td>
 
-                        {/* Slip No with Series Indicator */}
+                        {/* Slip No */}
                         <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' }}>
-                            <span style={{
-                              fontFamily: 'monospace',
-                              fontSize: '12.5px',
-                              fontWeight: '800',
-                              color: meta.color,
-                              background: meta.bg,
-                              padding: '3px 8px',
-                              borderRadius: '6px',
-                              border: `1px solid ${meta.border}`,
-                              display: 'inline-block',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              {item.slipNo}
-                            </span>
-                            {meta.seq > 0 && (
-                              <span style={{
-                                fontSize: '10.5px',
-                                fontWeight: '700',
-                                color: '#475569',
-                                background: '#f1f5f9',
-                                border: '1px solid #cbd5e1',
-                                padding: '1px 5px',
-                                borderRadius: '4px',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                Series #{meta.seq}
-                              </span>
-                            )}
-                          </div>
+                          <span style={{
+                            fontFamily: 'monospace',
+                            fontSize: '12.5px',
+                            fontWeight: '800',
+                            color: meta.color,
+                            background: meta.bg,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            border: `1px solid ${meta.border}`,
+                            display: 'inline-block',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {item.slipNo}
+                          </span>
                         </td>
 
                         {/* Line Type Tag */}
@@ -6038,16 +6761,20 @@ export default function ElasticIssueView({
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.style || item.garmentType || 'LOWER'}
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                          {item.quantity || item.issuePcs || 0} Pcs
-                        </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '800', color: '#047857' }}>
-                          {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
-                            ? '1/45 Roll'
-                            : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
-                              ? '18 CM Cut'
-                              : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—')}
-                        </td>
+                        {!historyLineFilter.includes('wo') && (
+                          <>
+                            <td style={{ padding: '10px 12px', fontWeight: '800' }}>
+                              {item.quantity || item.issuePcs ? `${item.quantity || item.issuePcs} Pcs` : '—'}
+                            </td>
+                            <td style={{ padding: '10px 12px', fontWeight: '800', color: '#047857' }}>
+                              {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+                                ? '1/45 Roll'
+                                : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+                                  ? '18 CM Cut'
+                                  : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—')}
+                            </td>
+                          </>
+                        )}
                         <td style={{ padding: '10px 12px', fontWeight: '900', color: '#065f46', background: '#f0fdf4' }}>
                           {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
                             ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
@@ -6235,7 +6962,7 @@ export default function ElasticIssueView({
                     </strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>TOTAL REQUIREMENT ON BILL</span>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block', fontWeight: '600' }}>TOTAL ISSUE ON BILL</span>
                     <strong style={{ color: '#059669', fontSize: '16px' }}>
                       {materialMode === 'tape' || String(generatedSlipData.slipNo || '').toLowerCase().includes('tape-')
                         ? `${generatedSlipData.tapeRolls || generatedSlipData.rolls || Math.ceil((generatedSlipData.issuePcs || generatedSlipData.quantity || 0) / 45)} Roll(s)`

@@ -3348,20 +3348,6 @@ export default function ElasticTapeIssueView({
                           }}>
                             {item.billNo}
                           </span>
-                          {seriesNum > 0 && (
-                            <span style={{
-                              fontSize: '10.5px',
-                              fontWeight: '700',
-                              color: '#64748b',
-                              background: '#f8fafc',
-                              border: '1px solid #e2e8f0',
-                              padding: '2px 5px',
-                              borderRadius: '4px',
-                              whiteSpace: 'nowrap'
-                            }}>
-                              Series #{seriesNum}
-                            </span>
-                          )}
                         </div>
                       </td>
 

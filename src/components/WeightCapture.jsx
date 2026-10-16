@@ -203,16 +203,116 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
 
   const [metadataFlash, setMetadataFlash] = useState(false);
 
+  // Indexed map for fast O(1) metadata lookup (photo, total pieces, rack no)
+  const itemCodeMetaMap = useMemo(() => {
+    const map = new Map();
+
+    const matByCode = new Map();
+    const matByName = new Map();
+    (dbMaterials || []).forEach(m => {
+      const code1 = String(m.itemCode || '').trim().toLowerCase();
+      const code2 = String(m.stCode || '').trim().toLowerCase();
+      const code3 = String(m.materialCode || '').trim().toLowerCase();
+      const mId = String(m.id || '').trim().toLowerCase();
+      const mName = String(m.name || '').trim().toLowerCase();
+      if (code1) matByCode.set(code1, m);
+      if (code2) matByCode.set(code2, m);
+      if (code3) matByCode.set(code3, m);
+      if (mId) matByCode.set(mId, m);
+      if (mName) matByName.set(mName, m);
+    });
+
+    const capByCode = new Map();
+    const capByName = new Map();
+    (captures || []).forEach(c => {
+      const cCode = String(c.materialCode || c.itemCode || '').trim().toLowerCase();
+      const cName = String(c.materialName || '').trim().toLowerCase();
+      if (cCode) {
+        if (!capByCode.has(cCode)) capByCode.set(cCode, []);
+        capByCode.get(cCode).push(c);
+      }
+      if (cName) {
+        if (!capByName.has(cName)) capByName.set(cName, []);
+        capByName.get(cName).push(c);
+      }
+    });
+
+    (itemCodesList || []).forEach(item => {
+      const ic = String(item.item_code || '').trim().toLowerCase();
+      const iname = String(item.item_name || '').trim().toLowerCase();
+      const mtCode = String(item.mt_code || '').trim().toLowerCase();
+
+      const mat = (ic && matByCode.get(ic)) || (mtCode && matByCode.get(mtCode)) || (iname && matByName.get(iname));
+      const caps = (ic && capByCode.get(ic)) || (mtCode && capByCode.get(mtCode)) || (iname && capByName.get(iname)) || [];
+
+      let photo = item.image_url || item.imageUrl || item.photo || item.image || '';
+      if (!photo && mat) {
+        photo = mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '';
+      }
+      if (!photo && caps.length > 0) {
+        const withImg = caps.find(c => c.imageUrl || c.photo || c.image);
+        if (withImg) photo = withImg.imageUrl || withImg.photo || withImg.image;
+      }
+      if (photo) photo = getCleanImageUrl(photo);
+
+      let stock = 0;
+      if (mat && mat.stock != null) {
+        stock = Number(mat.stock) || 0;
+      } else if (caps.length > 0) {
+        stock = caps.reduce((sum, c) => sum + (Number(c.pieces) || 0), 0);
+      } else if (item.stock != null || item.pieces != null) {
+        stock = Number(item.stock || item.pieces) || 0;
+      }
+
+      let location = '';
+      if (mat && mat.location && mat.location !== 'Main Store') {
+        location = mat.location;
+      }
+      if (!location && caps.length > 0) {
+        const withLoc = [...caps].reverse().find(c => c.storeLocation && c.storeLocation !== 'Main Store');
+        if (withLoc) location = withLoc.storeLocation;
+        else if (caps[caps.length - 1]?.storeLocation) {
+          location = caps[caps.length - 1].storeLocation;
+        }
+      }
+      if (!location && mat && mat.location) {
+        location = mat.location;
+      }
+      if (!location && (item.location || item.rack || item.storeLocation)) {
+        location = item.location || item.rack || item.storeLocation;
+      }
+
+      const unit = item.uom || mat?.unit || 'PCS';
+
+      map.set(item.item_code, { photo, stock, location, unit });
+    });
+
+    return map;
+  }, [itemCodesList, dbMaterials, captures]);
+
+  const getItemCodeMeta = (item) => {
+    if (!item) return { photo: '', stock: 0, location: '', unit: 'PCS' };
+    return itemCodeMetaMap.get(item.item_code) || {
+      photo: getCleanImageUrl(item.image_url || item.imageUrl || item.photo || ''),
+      stock: Number(item.stock || item.pieces) || 0,
+      location: item.location || item.rack || item.storeLocation || '',
+      unit: item.uom || 'PCS'
+    };
+  };
+
   const handleItemCodeSelect = (code) => {
     setSelectedItemCode(code);
     const matched = itemCodesList.find(i => i.item_code === code);
     if (matched) {
+      const meta = getItemCodeMeta(matched);
       setForm(prev => ({
         ...prev,
         materialCode: matched.item_code,
         materialName: matched.item_name,
         category: matched.category || prev.category,
-        unit: matched.uom || prev.unit
+        unit: matched.uom || prev.unit,
+        storeLocation: (meta.location && (!prev.storeLocation || prev.storeLocation === 'Main Store - Rack 1')) ? meta.location : prev.storeLocation,
+        imageUrl: (meta.photo && !prev.imageUrl) ? meta.photo : prev.imageUrl
       }));
     }
   };
@@ -2127,18 +2227,80 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                     )}
                   </div>
 
+                  {/* Selected Item Quick Details Pill */}
+                  {selectedItemCode && (() => {
+                    const selectedItemObj = itemCodesList.find(i => i.item_code === selectedItemCode);
+                    const selectedMeta = getItemCodeMeta(selectedItemObj || { item_code: selectedItemCode, item_name: form.materialName });
+                    return (
+                      <div style={{
+                        marginBottom: '6px',
+                        padding: '6px 10px',
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '10px',
+                        fontSize: '11.5px',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {selectedMeta.photo ? (
+                            <div
+                              title="Click to view full photo"
+                              onClick={() => setPreviewModalImage({
+                                photo: selectedMeta.photo,
+                                item_code: selectedItemCode,
+                                item_name: form.materialName || selectedItemObj?.item_name,
+                                brand: selectedItemObj?.brand,
+                                category: form.category || selectedItemObj?.category,
+                                uom: form.unit || selectedItemObj?.uom,
+                                stock: selectedMeta.stock,
+                                unit: selectedMeta.unit,
+                                location: selectedMeta.location || form.storeLocation
+                              })}
+                              style={{
+                                position: 'relative', width: '32px', height: '32px', borderRadius: '6px',
+                                overflow: 'hidden', border: '1.5px solid #cbd5e1', cursor: 'zoom-in', flexShrink: 0
+                              }}
+                            >
+                              <img src={selectedMeta.photo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { e.currentTarget.style.display = 'none'; }} />
+                              <div style={{ position: 'absolute', bottom: 0, right: 0, background: 'rgba(0,0,0,0.65)', color: '#fff', fontSize: '7px', padding: '0 2px' }}>🔍</div>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '14px' }}>📦</span>
+                          )}
+                          <span style={{ fontWeight: '800', color: '#0f172a' }}>
+                            {selectedItemCode} &bull; {form.materialName || selectedItemObj?.item_name}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ background: '#f0fdf4', color: '#15803d', border: '1px solid #bbf7d0', padding: '2px 7px', borderRadius: '6px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <Package size={11} style={{ color: '#16a34a' }} />
+                            Total Pieces: {selectedMeta.stock.toLocaleString('en-IN')} {selectedMeta.unit}
+                          </span>
+                          <span style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 7px', borderRadius: '6px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <MapPin size={11} style={{ color: '#ea580c' }} />
+                            Rack: {selectedMeta.location || form.storeLocation || 'Main Store'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Dropdown Panel */}
                   {icDropdownOpen && (
                     <div style={{
                       position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 9999,
                       background: '#ffffff', border: '1.5px solid #3b82f6', borderRadius: '10px',
-                      boxShadow: '0 8px 32px rgba(30,64,175,0.18)', maxHeight: '260px',
+                      boxShadow: '0 12px 36px rgba(15, 23, 42, 0.22)', maxHeight: '340px',
                       overflowY: 'auto', marginTop: '4px'
                     }}>
                       {/* Clear selection option */}
                       <div
                         onMouseDown={() => { handleItemCodeSelect(''); setItemCodeSearch(''); setIcDropdownOpen(false); }}
-                        style={{ padding: '10px 14px', fontSize: '12.5px', color: '#94a3b8', fontWeight: '700', cursor: 'pointer', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}
+                        style={{ padding: '9px 14px', fontSize: '12px', color: '#94a3b8', fontWeight: '700', cursor: 'pointer', borderBottom: '1px solid #e2e8f0', background: '#f8fafc' }}
                       >
                         — Choose Item Code from Master (e.g. ST00001) —
                       </div>
@@ -2146,22 +2308,25 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                         .filter(item => {
                           const q = itemCodeSearch.toLowerCase().trim();
                           if (!q) return true;
+                          const meta = getItemCodeMeta(item);
                           return (
                             (item.item_code || '').toLowerCase().includes(q) ||
                             (item.item_name || '').toLowerCase().includes(q) ||
                             (item.brand || '').toLowerCase().includes(q) ||
                             (item.category || '').toLowerCase().includes(q) ||
-                            (item.uom || '').toLowerCase().includes(q)
+                            (item.uom || '').toLowerCase().includes(q) ||
+                            (meta.location || '').toLowerCase().includes(q)
                           );
                         })
                         .map(item => {
                           const isSelected = selectedItemCode === item.item_code;
+                          const meta = getItemCodeMeta(item);
                           return (
                             <div
                               key={item.id || item.item_code}
                               onMouseDown={() => { handleItemCodeSelect(item.item_code); setItemCodeSearch(''); setIcDropdownOpen(false); }}
                               style={{
-                                padding: '10px 14px', cursor: 'pointer', fontSize: '13px',
+                                padding: '8px 12px', cursor: 'pointer', fontSize: '12.5px',
                                 display: 'flex', alignItems: 'center', gap: '10px',
                                 background: isSelected ? '#eff6ff' : 'transparent',
                                 borderBottom: '1px solid #f1f5f9',
@@ -2170,16 +2335,114 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                               onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#f0f9ff'; }}
                               onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
                             >
-                              <span style={{ background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '6px', fontWeight: '900', fontSize: '11.5px', fontFamily: 'monospace', flexShrink: 0 }}>
-                                {item.item_code}
-                              </span>
-                              <span style={{ fontWeight: '700', color: '#0f172a', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                {item.item_name}
-                              </span>
-                              <span style={{ fontSize: '11px', color: '#64748b', flexShrink: 0 }}>
-                                [{item.category || 'General'}] {item.uom || 'PCS'}
-                              </span>
-                              {isSelected && <span style={{ color: '#10b981', fontWeight: '900', flexShrink: 0 }}>✓</span>}
+                              {/* 1. PHOTO THUMBNAIL (CLICKABLE TO PREVIEW) */}
+                              {meta.photo ? (
+                                <div
+                                  title="Click to view full photo"
+                                  onMouseDown={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setPreviewModalImage({
+                                      photo: meta.photo,
+                                      item_code: item.item_code,
+                                      item_name: item.item_name,
+                                      brand: item.brand,
+                                      category: item.category,
+                                      uom: item.uom,
+                                      stock: meta.stock,
+                                      unit: meta.unit,
+                                      location: meta.location
+                                    });
+                                  }}
+                                  style={{
+                                    position: 'relative',
+                                    width: '38px',
+                                    height: '38px',
+                                    borderRadius: '6px',
+                                    overflow: 'hidden',
+                                    border: '1.5px solid #cbd5e1',
+                                    flexShrink: 0,
+                                    cursor: 'zoom-in',
+                                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                                  }}
+                                >
+                                  <img
+                                    src={meta.photo}
+                                    alt=""
+                                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                    onError={e => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                  <div style={{
+                                    position: 'absolute', bottom: 0, right: 0, background: 'rgba(15,23,42,0.7)',
+                                    color: '#fff', fontSize: '8px', padding: '1px 3px', borderTopLeftRadius: '4px'
+                                  }}>
+                                    🔍
+                                  </div>
+                                </div>
+                              ) : (
+                                <div style={{ width: '38px', height: '38px', borderRadius: '6px', background: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', flexShrink: 0 }}>
+                                  📦
+                                </div>
+                              )}
+
+                              {/* 2. ITEM CONTENT - 2 Lines so Total Pieces & Rack are NEVER clipped */}
+                              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, gap: '3px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ background: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: '5px', fontWeight: '900', fontSize: '11px', fontFamily: 'monospace', flexShrink: 0 }}>
+                                    {item.item_code}
+                                  </span>
+                                  <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {item.item_name}
+                                  </span>
+                                  {item.brand && (
+                                    <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', flexShrink: 0 }}>
+                                      • {item.brand}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '10.5px', flexWrap: 'wrap' }}>
+                                  <span style={{ color: '#475569', fontWeight: '700', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px' }}>
+                                    [{item.category || 'General'}]
+                                  </span>
+                                  {item.uom && <span style={{ color: '#94a3b8' }}>&bull; {item.uom}</span>}
+
+                                  {/* Total Pieces Badge */}
+                                  <span style={{
+                                    background: '#f0fdf4',
+                                    color: '#15803d',
+                                    border: '1px solid #bbf7d0',
+                                    padding: '1px 6px',
+                                    borderRadius: '5px',
+                                    fontWeight: '800',
+                                    fontSize: '10.5px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }} title="Total in-stock pieces">
+                                    <Package size={11} style={{ color: '#16a34a' }} />
+                                    <span>{meta.stock.toLocaleString('en-IN')} {meta.unit}</span>
+                                  </span>
+
+                                  {/* Rack No Badge */}
+                                  <span style={{
+                                    background: meta.location ? '#fff7ed' : '#f8fafc',
+                                    color: meta.location ? '#c2410c' : '#94a3b8',
+                                    border: meta.location ? '1px solid #fed7aa' : '1px solid #e2e8f0',
+                                    padding: '1px 6px',
+                                    borderRadius: '5px',
+                                    fontWeight: '700',
+                                    fontSize: '10.5px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }} title="Storage Rack / Location Slot">
+                                    <MapPin size={10} style={{ color: meta.location ? '#ea580c' : '#94a3b8' }} />
+                                    <span>Rack: {meta.location || 'No Rack'}</span>
+                                  </span>
+                                </div>
+                              </div>
+
+                              {isSelected && <span style={{ color: '#10b981', fontWeight: '900', fontSize: '14px', flexShrink: 0 }}>✓</span>}
                             </div>
                           );
                         })
@@ -3209,51 +3472,140 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
       {previewModalImage && (
         <div
           className="modal-overlay"
-          style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, background: 'rgba(0,0,0,0.75)' }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            background: 'rgba(15, 23, 42, 0.82)',
+            backdropFilter: 'blur(4px)',
+            padding: '16px'
+          }}
           onClick={() => setPreviewModalImage(null)}
         >
           <div
             className="panel animate-scale"
             style={{
-              maxWidth: '650px', width: '90%', padding: '20px',
-              borderRadius: '12px', background: '#ffffff',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-              position: 'relative', display: 'flex', flexDirection: 'column', gap: '14px'
+              maxWidth: '580px',
+              width: '100%',
+              padding: '20px',
+              borderRadius: '16px',
+              background: '#ffffff',
+              boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              maxHeight: '92vh',
+              overflowY: 'auto'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '10px' }}>
-              <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                📷 Material Photo Preview
-              </h3>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '18px' }}>📷</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#0f172a' }}>
+                    {typeof previewModalImage === 'object' && previewModalImage.item_code
+                      ? `${previewModalImage.item_code} • ${previewModalImage.item_name || 'Material Photo'}`
+                      : 'Material Photo Preview'}
+                  </h3>
+                  {typeof previewModalImage === 'object' && previewModalImage.brand && (
+                    <div style={{ fontSize: '12px', color: '#64748b', fontWeight: '600', marginTop: '2px' }}>
+                      Brand: {previewModalImage.brand} {previewModalImage.category ? `• Category: ${previewModalImage.category}` : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setPreviewModalImage(null)}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '4px' }}
+                style={{
+                  background: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '50%',
+                  width: '32px',
+                  height: '32px',
+                  cursor: 'pointer',
+                  color: '#64748b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s'
+                }}
+                title="Close"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
 
+            {/* Photo Container */}
             <div style={{
-              width: '100%', maxHeight: '450px', display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-              background: '#f8fafc', borderRadius: '8px', overflow: 'hidden', padding: '10px'
+              width: '100%',
+              maxHeight: '440px',
+              minHeight: '220px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f8fafc',
+              borderRadius: '12px',
+              border: '1px solid #e2e8f0',
+              overflow: 'hidden',
+              padding: '12px'
             }}>
               <img
-                src={getCleanImageUrl(previewModalImage)}
+                src={getCleanImageUrl(typeof previewModalImage === 'object' ? previewModalImage.photo : previewModalImage)}
                 alt="Material preview enlarged"
-                style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '6px' }}
-                onError={(e) => { e.target.alt = 'Image failed to load'; }}
+                style={{ maxWidth: '100%', maxHeight: '420px', objectFit: 'contain', borderRadius: '8px' }}
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.parentElement) {
+                    e.currentTarget.parentElement.innerHTML = '<div style="padding: 40px; text-align: center; color: #94a3b8; font-weight: 700;">⚠️ Image could not be loaded</div>';
+                  }
+                }}
               />
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            {/* Detail Chips if metadata present */}
+            {typeof previewModalImage === 'object' && (previewModalImage.stock !== undefined || previewModalImage.location) && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap',
+                background: '#f8fafc',
+                padding: '10px 14px',
+                borderRadius: '10px',
+                border: '1px solid #e2e8f0'
+              }}>
+                {previewModalImage.category && (
+                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#475569', background: '#ffffff', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: '6px' }}>
+                    🏷️ {previewModalImage.category}
+                  </span>
+                )}
+                {previewModalImage.stock !== undefined && (
+                  <span style={{ fontSize: '12px', fontWeight: '800', color: '#15803d', background: '#f0fdf4', border: '1px solid #bbf7d0', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <Package size={13} style={{ color: '#16a34a' }} />
+                    Total Pieces: {previewModalImage.stock.toLocaleString('en-IN')} {previewModalImage.unit || 'PCS'}
+                  </span>
+                )}
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#c2410c', background: '#fff7ed', border: '1px solid #fed7aa', padding: '3px 8px', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                  <MapPin size={13} style={{ color: '#ea580c' }} />
+                  Rack: {previewModalImage.location || 'Not Configured'}
+                </span>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button
                 type="button"
                 className="btn btn-secondary"
                 onClick={() => setPreviewModalImage(null)}
-                style={{ fontWeight: '700', padding: '8px 16px' }}
+                style={{ fontWeight: '700', padding: '8px 18px', borderRadius: '8px' }}
               >
                 Close Preview
               </button>

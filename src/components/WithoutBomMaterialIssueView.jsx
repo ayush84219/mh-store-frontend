@@ -33,7 +33,8 @@ import {
   Scissors,
   CheckCircle2,
   ChevronDown,
-  Settings
+  Settings,
+  Filter
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -341,6 +342,23 @@ function SearchableMaterialDropdown({
                   boxShadow: '0 1px 2px rgba(2, 132, 199, 0.25)'
                 }}>
                   {selectedItemCode}
+                </span>
+              )}
+
+              {selectedMaterial.category && (
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: '800',
+                  background: '#fff7ed',
+                  color: '#c2410c',
+                  border: '1px solid #fed7aa',
+                  padding: '1.5px 6px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.3px',
+                  flexShrink: 0
+                }}>
+                  {selectedMaterial.category}
                 </span>
               )}
 
@@ -681,6 +699,25 @@ function SearchableMaterialDropdown({
                         </span>
                       )}
 
+                      {/* Category Badge */}
+                      {mat.category && (
+                        <span style={{
+                          fontSize: '10px',
+                          fontWeight: '800',
+                          background: '#fff7ed',
+                          color: '#c2410c',
+                          border: '1px solid #fed7aa',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.3px',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}>
+                          {mat.category}
+                        </span>
+                      )}
+
                       <div style={{ overflow: 'hidden', flex: 1, minWidth: 0 }}>
                         <div style={{
                           fontWeight: '700',
@@ -697,12 +734,19 @@ function SearchableMaterialDropdown({
                             </span>
                           )}
                         </div>
-                        {mat.location && (
-                          <div style={{ fontSize: '10.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px', marginTop: '1px' }}>
-                            <MapPin size={10} style={{ color: '#0284c7' }} />
-                            <span>{mat.location}</span>
-                          </div>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '1px', flexWrap: 'wrap' }}>
+                          {mat.location && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                              <MapPin size={10} style={{ color: '#0284c7' }} />
+                              <span>{mat.location}</span>
+                            </div>
+                          )}
+                          {mat.category && (
+                            <span style={{ fontSize: '10px', color: '#ea580c', fontWeight: '700' }}>
+                              • {mat.category}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -932,8 +976,187 @@ export default function WithoutBomMaterialIssueView({
   const [previewModal, setPreviewModal] = useState(null); // { doc, pdfUrl, voucherId, issueData, isPreviewOnly }
   const [activePrintData, setActivePrintData] = useState(null);
 
-  // Search filter for history tab
+  // Helper to extract clean photo URL for any material in logs or materials prop
+  const getMaterialPhoto = (m) => {
+    if (!m) return '';
+    const direct = m.imageUrl || m.photo || m.image || m.imgUrl;
+    if (direct) return getCleanImageUrl(direct);
+    const mId = m.materialId || m.id;
+    const mName = m.name || m.materialName || m.bomItemName;
+    if (mId || mName) {
+      const match = (materials || []).find(mat => 
+        (mId && String(mat.id) === String(mId)) ||
+        (mName && String(mat.name).trim().toLowerCase() === String(mName).trim().toLowerCase()) ||
+        (m.itemCode && String(mat.itemCode || '').trim().toLowerCase() === String(m.itemCode).trim().toLowerCase())
+      );
+      if (match) {
+        const foundImg = match.imageUrl || match.image || match.photo || match.imgUrl;
+        if (foundImg) return getCleanImageUrl(foundImg);
+      }
+    }
+    return '';
+  };
+
+  // Helper to extract component/category name for any material item
+  const getMaterialCategory = (m) => {
+    if (!m) return '';
+    const directType = m.componentType || m.bomItemName;
+    if (directType && directType !== 'Accessory' && directType !== 'Material Item' && directType !== 'Standard' && directType !== 'Custom Accessory') {
+      return directType;
+    }
+    if (m.category && m.category !== 'General' && m.category !== 'Standard') {
+      return m.category;
+    }
+
+    const mId = m.materialId || m.id;
+    const mName = m.name || m.materialName;
+    if (mId || mName) {
+      const match = (materials || []).find(mat => 
+        (mId && String(mat.id) === String(mId)) ||
+        (mName && String(mat.name).trim().toLowerCase() === String(mName).trim().toLowerCase()) ||
+        (m.itemCode && String(mat.itemCode || '').trim().toLowerCase() === String(m.itemCode).trim().toLowerCase())
+      );
+      if (match) {
+        return match.category || match.componentType || match.type || directType || '';
+      }
+    }
+    return directType || m.category || '';
+  };
+
+  // Helper to extract location / rack number for any material item
+  const getMaterialLocation = (m) => {
+    if (!m) return '';
+    const directLoc = m.location || m.warehouseLocation || m.storeLocation || m.rack || m.rackNo;
+    if (directLoc && directLoc !== 'Store' && directLoc !== 'Main Store') {
+      return directLoc;
+    }
+    const mId = m.materialId || m.id;
+    const mName = m.name || m.materialName || m.bomItemName;
+    const code = m.itemCode;
+    const mCat = (m.bomItemName || m.componentType || m.category || '').trim().toLowerCase();
+
+    if (mId || mName || code) {
+      let match = (materials || []).find(mat => 
+        (mId && String(mat.id) === String(mId)) ||
+        (code && String(mat.itemCode || '').trim().toLowerCase() === String(code).trim().toLowerCase())
+      );
+
+      if (!match && mName && mCat) {
+        match = (materials || []).find(mat => {
+          const matName = String(mat.name || '').trim().toLowerCase();
+          const matCat = String(mat.category || mat.componentType || mat.type || '').trim().toLowerCase();
+          return matName === String(mName).trim().toLowerCase() && (matCat.includes(mCat) || mCat.includes(matCat));
+        });
+      }
+
+      if (!match && mName) {
+        match = (materials || []).find(mat => 
+          String(mat.name || '').trim().toLowerCase() === String(mName).trim().toLowerCase()
+        );
+      }
+
+      if (match && (match.location || match.warehouseLocation || match.storeLocation || match.rack || match.rackNo)) {
+        return match.location || match.warehouseLocation || match.storeLocation || match.rack || match.rackNo;
+      }
+    }
+    return directLoc || '';
+  };
+
+  // Helper to parse log date string (DD/MM/YYYY or YYYY-MM-DD) into standard YYYY-MM-DD
+  const parseLogDateToYmd = (dateStr) => {
+    if (!dateStr) return '';
+    const str = String(dateStr).trim();
+    // Check if DD/MM/YYYY or DD-MM-YYYY (e.g. "15/10/2026" or "15/10/2026 18:14")
+    const dmyMatch = str.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, '0');
+      const month = dmyMatch[2].padStart(2, '0');
+      const year = dmyMatch[3];
+      return `${year}-${month}-${day}`;
+    }
+    // Check if YYYY-MM-DD
+    const ymdMatch = str.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+    if (ymdMatch) {
+      const year = ymdMatch[1];
+      const month = ymdMatch[2].padStart(2, '0');
+      const day = ymdMatch[3].padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+    return '';
+  };
+
+  // History Tab Filters State (Dates, Category Multi-Select, Person, Search)
   const [historySearch, setHistorySearch] = useState('');
+  const [historyDateFrom, setHistoryDateFrom] = useState('');
+  const [historyDateTo, setHistoryDateTo] = useState('');
+  const [historyCategories, setHistoryCategories] = useState([]); // multi-select categories array e.g. ['TAG', 'LABEL']
+  const [historyPerson, setHistoryPerson] = useState(''); // '' | 'iss:pooja' | 'rec:KARAN'
+
+  // Scrollable Category Dropdown Menu State
+  const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
+  const [categorySearchTerm, setCategorySearchTerm] = useState('');
+  const categoryDropdownRef = useRef(null);
+
+  // Close category dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(e.target)) {
+        setCategoryDropdownOpen(false);
+      }
+    };
+    if (categoryDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [categoryDropdownOpen]);
+
+  // Category multi-select toggle (allows choosing 2-3+ categories together)
+  const handleToggleHistoryCategory = (catName) => {
+    const upper = catName.trim().toUpperCase();
+    setHistoryCategories(prev => {
+      if (prev.includes(upper)) {
+        return prev.filter(c => c !== upper);
+      } else {
+        return [...prev, upper];
+      }
+    });
+  };
+
+  // Date Quick Preset Handlers
+  const handleSetToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setHistoryDateFrom(today);
+    setHistoryDateTo(today);
+  };
+
+  const handleSetYesterday = () => {
+    const yest = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    setHistoryDateFrom(yest);
+    setHistoryDateTo(yest);
+  };
+
+  const handleSetLast7Days = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const past = new Date(Date.now() - 6 * 86400000).toISOString().split('T')[0];
+    setHistoryDateFrom(past);
+    setHistoryDateTo(today);
+  };
+
+  const handleResetAllFilters = () => {
+    setHistorySearch('');
+    setHistoryDateFrom('');
+    setHistoryDateTo('');
+    setHistoryCategories([]);
+    setHistoryPerson('');
+    setCategorySearchTerm('');
+    setCategoryDropdownOpen(false);
+  };
 
   // Auto-generate clean sequential Challan / Bill No (e.g. BILL-MI-1, BILL-MI-2...)
   const nextVoucherId = useMemo(() => {
@@ -957,15 +1180,15 @@ export default function WithoutBomMaterialIssueView({
     return `BILL-MI-${max + 1}`;
   }, [issueLogs]);
 
-  // Filter without-bom issue logs for history tab (Strictly Without-BOM only)
-  const withoutBomLogs = useMemo(() => {
+  // Raw without-bom issue logs for history tab (Strictly Without-BOM only)
+  const rawWithoutBomLogs = useMemo(() => {
     return (issueLogs || []).filter(l => {
       const vid = String(l.id || '').toUpperCase();
       // STRICT: Exclude Extra Material & Re-Issues
       if (l.isReissue || vid.startsWith('EMI-') || vid.startsWith('RI-') || String(l.personName || '').toLowerCase().includes('extra')) {
         return false;
       }
-      const isWo = Boolean(
+      return Boolean(
         l.isWithoutBom ||
         vid.startsWith('BILL-MI-') ||
         vid.startsWith('CH-MI-') ||
@@ -974,20 +1197,133 @@ export default function WithoutBomMaterialIssueView({
         String(l.category || '').toUpperCase().includes('WITHOUT BOM') ||
         String(l.lotId || '').toUpperCase().includes('DIRECT')
       );
-      if (!isWo) return false;
-      if (!historySearch) return true;
-      const q = historySearch.toLowerCase();
-      return (
-        String(l.id || '').toLowerCase().includes(q) ||
-        String(l.lotId || '').toLowerCase().includes(q) ||
-        String(l.brand || l.brandName || '').toLowerCase().includes(q) ||
-        String(l.receiverName || '').toLowerCase().includes(q) ||
-        String(l.personName || '').toLowerCase().includes(q) ||
-        String(l.category || '').toLowerCase().includes(q) ||
-        (l.materials || []).some(m => String(m.name || '').toLowerCase().includes(q))
-      );
     });
-  }, [issueLogs, historySearch]);
+  }, [issueLogs]);
+
+  // Distinct categories available in Without-BOM logs + count of challans having them
+  const availableHistoryCategories = useMemo(() => {
+    const counts = {};
+    // Seed default common categories
+    ['TAG', 'LABEL', 'DORI', 'ZIP', 'ELASTIC', 'BUTTON'].forEach(c => { counts[c] = 0; });
+
+    rawWithoutBomLogs.forEach(l => {
+      const seenInThisLog = new Set();
+      (l.materials || []).forEach(m => {
+        const cat = getMaterialCategory(m);
+        if (cat && typeof cat === 'string' && cat.trim()) {
+          seenInThisLog.add(cat.trim().toUpperCase());
+        }
+      });
+      if (l.category && typeof l.category === 'string' && l.category.trim() && !l.category.toUpperCase().includes('WITHOUT BOM')) {
+        seenInThisLog.add(l.category.trim().toUpperCase());
+      }
+      seenInThisLog.forEach(cat => {
+        counts[cat] = (counts[cat] || 0) + 1;
+      });
+    });
+
+    return Object.keys(counts)
+      .filter(Boolean)
+      .sort((a, b) => {
+        if ((counts[b] > 0) !== (counts[a] > 0)) {
+          return counts[b] > 0 ? 1 : -1;
+        }
+        return a.localeCompare(b);
+      })
+      .map(name => ({ name, count: counts[name] || 0 }));
+  }, [rawWithoutBomLogs, materials]);
+
+  // Filtered categories for category dropdown menu search
+  const filteredCategoryOptions = useMemo(() => {
+    if (!categorySearchTerm.trim()) return availableHistoryCategories;
+    const term = categorySearchTerm.trim().toLowerCase();
+    return availableHistoryCategories.filter(c => c.name.toLowerCase().includes(term));
+  }, [availableHistoryCategories, categorySearchTerm]);
+
+  // Distinct issuers & receivers for person filter
+  const availablePeople = useMemo(() => {
+    const issuers = new Set();
+    const receivers = new Set();
+    rawWithoutBomLogs.forEach(l => {
+      if (l.personName && typeof l.personName === 'string' && l.personName.trim()) {
+        issuers.add(l.personName.trim());
+      }
+      if (l.receiverName && typeof l.receiverName === 'string' && l.receiverName.trim()) {
+        receivers.add(l.receiverName.trim());
+      }
+    });
+    return {
+      issuers: Array.from(issuers).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+      receivers: Array.from(receivers).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    };
+  }, [rawWithoutBomLogs]);
+
+  // Filtered without-bom issue logs based on search, dates, multi-select categories, and person
+  const withoutBomLogs = useMemo(() => {
+    return rawWithoutBomLogs.filter(l => {
+      // 1. Date Range Filter
+      if (historyDateFrom || historyDateTo) {
+        const logDateYmd = parseLogDateToYmd(l.date);
+        if (!logDateYmd) return false;
+        if (historyDateFrom && logDateYmd < historyDateFrom) return false;
+        if (historyDateTo && logDateYmd > historyDateTo) return false;
+      }
+
+      // 2. Category Multi-Select Filter (user can pick 2-3+ categories at once)
+      if (historyCategories.length > 0) {
+        const hasMatchingCat = (l.materials || []).some(m => {
+          const cat = (getMaterialCategory(m) || '').trim().toUpperCase();
+          return historyCategories.some(sel => {
+            const selUpper = sel.trim().toUpperCase();
+            return cat === selUpper || cat.includes(selUpper) || selUpper.includes(cat);
+          });
+        }) || (l.category && historyCategories.some(sel => String(l.category).toUpperCase().includes(sel.toUpperCase())));
+
+        if (!hasMatchingCat) return false;
+      }
+
+      // 3. Person Wise Filter (Issuer or Receiver)
+      if (historyPerson) {
+        if (historyPerson.startsWith('iss:')) {
+          const target = historyPerson.replace('iss:', '').trim().toLowerCase();
+          if (String(l.personName || '').trim().toLowerCase() !== target) return false;
+        } else if (historyPerson.startsWith('rec:')) {
+          const target = historyPerson.replace('rec:', '').trim().toLowerCase();
+          if (!String(l.receiverName || '').trim().toLowerCase().includes(target)) return false;
+        } else {
+          const target = historyPerson.trim().toLowerCase();
+          const issMatch = String(l.personName || '').trim().toLowerCase().includes(target);
+          const recMatch = String(l.receiverName || '').trim().toLowerCase().includes(target);
+          if (!issMatch && !recMatch) return false;
+        }
+      }
+
+      // 4. Free text search
+      if (historySearch) {
+        const q = historySearch.toLowerCase();
+        const matches = (
+          String(l.id || '').toLowerCase().includes(q) ||
+          String(l.lotId || '').toLowerCase().includes(q) ||
+          String(l.brand || l.brandName || '').toLowerCase().includes(q) ||
+          String(l.receiverName || '').toLowerCase().includes(q) ||
+          String(l.receiverDept || '').toLowerCase().includes(q) ||
+          String(l.personName || '').toLowerCase().includes(q) ||
+          String(l.category || '').toLowerCase().includes(q) ||
+          (l.materials || []).some(m => String(m.name || m.bomItemName || '').toLowerCase().includes(q))
+        );
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [rawWithoutBomLogs, historyDateFrom, historyDateTo, historyCategories, historyPerson, historySearch, materials]);
+
+  // Total active filter criteria count
+  const activeFiltersCount = (historyDateFrom ? 1 : 0) + 
+    (historyDateTo ? 1 : 0) + 
+    (historyCategories.length > 0 ? historyCategories.length : 0) + 
+    (historyPerson ? 1 : 0) + 
+    (historySearch ? 1 : 0);
 
   // Base default accessory component types
   const BASE_COMPONENT_TYPES = useMemo(() => ['DORI', 'ELASTIC', 'ZIP'], []);
@@ -1753,7 +2089,7 @@ export default function WithoutBomMaterialIssueView({
         materialName: m.name || 'Material Item',
         itemCode: getItemCodeDisplay(m) || `ITM-${idx + 1}`,
         color: m.color || 'Standard',
-        location: m.location || 'Main Store',
+        location: getMaterialLocation(m) || m.location || 'Main Store',
         availableStock: m.qty || 0,
         totalQty: m.qty || 1,
         unit: m.unit || 'Pcs'
@@ -2163,6 +2499,754 @@ export default function WithoutBomMaterialIssueView({
     } catch (err) {
       alert('Failed to generate reprint: ' + err.message);
     }
+  };
+
+  // Handler to print full page report with detailed table, brand-wise, lot-wise summaries and photos
+  const handlePrintFullHistoryReport = () => {
+    if (!withoutBomLogs || withoutBomLogs.length === 0) {
+      alert('No Without-BOM challan records found to print.');
+      return;
+    }
+
+    // Filter summary text for printed report
+    const filterParts = [];
+    if (historyDateFrom || historyDateTo) {
+      filterParts.push(`Dates: ${historyDateFrom || 'Start'} to ${historyDateTo || 'Today'}`);
+    }
+    if (historyCategories.length > 0) {
+      filterParts.push(`Categories: ${historyCategories.join(', ')}`);
+    }
+    if (historyPerson) {
+      const pText = historyPerson.startsWith('iss:') 
+        ? `Store/Issuer: ${historyPerson.replace('iss:', '')}` 
+        : historyPerson.startsWith('rec:') 
+        ? `Floor/Receiver: ${historyPerson.replace('rec:', '')}` 
+        : `Person: ${historyPerson}`;
+      filterParts.push(pText);
+    }
+    if (historySearch) {
+      filterParts.push(`Search: "${historySearch}"`);
+    }
+    const filterBannerHtml = filterParts.length > 0
+      ? `<div style="margin-top: 4px; font-size: 10px; font-weight: 700; color: #c2410c; background: #fff7ed; border: 1px solid #fed7aa; padding: 2px 7px; border-radius: 4px;">🔍 Filtered By: ${filterParts.join(' &nbsp;|&nbsp; ')}</div>`
+      : '';
+
+    const printWin = window.open('', '_blank', 'width=1200,height=850');
+    if (!printWin) {
+      alert('Popup was blocked by your browser. Please allow popups to open the print report.');
+      return;
+    }
+
+    const totalChallans = withoutBomLogs.length;
+    let totalLineItems = 0;
+    let totalQtyIssued = 0;
+    const uniqueLots = new Set();
+    const uniqueBrands = new Set();
+
+    // Data structures for summaries
+    const brandSummaryMap = {};
+    const lotSummaryMap = {};
+    const materialSummaryMap = {};
+
+    withoutBomLogs.forEach((log) => {
+      const rawBrand = (log.brand || log.brandName || '').trim();
+      const rawLot = String(log.lotId || '').trim();
+      const isDirect = !rawLot || rawLot === 'DIRECT-ITEM' || rawLot.toLowerCase().includes('direct');
+      
+      const effectiveLot = isDirect ? 'DIRECT REQUISITION' : `LOT #${rawLot}`;
+
+      if (rawBrand) {
+        uniqueBrands.add(rawBrand);
+        if (!brandSummaryMap[rawBrand]) {
+          brandSummaryMap[rawBrand] = {
+            brand: rawBrand,
+            lots: new Set(),
+            materials: {}
+          };
+        }
+        if (!isDirect) brandSummaryMap[rawBrand].lots.add(rawLot);
+      }
+
+      if (!isDirect) uniqueLots.add(rawLot);
+
+      if (!lotSummaryMap[effectiveLot]) {
+        lotSummaryMap[effectiveLot] = {
+          lot: effectiveLot,
+          rawLot: rawLot,
+          isDirect: isDirect,
+          brand: rawBrand || '',
+          challans: new Set(),
+          materials: {}
+        };
+      }
+      if (rawBrand && !lotSummaryMap[effectiveLot].brand) {
+        lotSummaryMap[effectiveLot].brand = rawBrand;
+      }
+      if (log.id) lotSummaryMap[effectiveLot].challans.add(log.id);
+
+      (log.materials || []).forEach(m => {
+        totalLineItems += 1;
+        const q = Number(m.qty) || 0;
+        totalQtyIssued += q;
+        const matName = m.name || m.bomItemName || 'Material';
+        const unit = m.unit || 'Pcs';
+        const matKey = `${matName.toLowerCase()}__${unit.toLowerCase()}`;
+        const photo = getMaterialPhoto(m);
+        const code = getItemCodeDisplay(m) || m.itemCode || '';
+        const cat = getMaterialCategory(m);
+
+        // Brand map (only when genuine brand exists)
+        if (rawBrand) {
+          if (!brandSummaryMap[rawBrand].materials[matKey]) {
+            brandSummaryMap[rawBrand].materials[matKey] = {
+              name: matName,
+              componentType: cat || m.bomItemName || 'Accessory',
+              itemCode: code,
+              unit,
+              photo,
+              totalQty: 0
+            };
+          }
+          brandSummaryMap[rawBrand].materials[matKey].totalQty += q;
+        }
+
+        const loc = getMaterialLocation(m);
+
+        // Lot map
+        if (!lotSummaryMap[effectiveLot].materials[matKey]) {
+          lotSummaryMap[effectiveLot].materials[matKey] = {
+            name: matName,
+            componentType: cat || m.bomItemName || 'Accessory',
+            itemCode: code,
+            location: loc,
+            unit,
+            photo,
+            totalQty: 0
+          };
+        }
+        lotSummaryMap[effectiveLot].materials[matKey].totalQty += q;
+
+        // Overall material map
+        if (!materialSummaryMap[matKey]) {
+          materialSummaryMap[matKey] = {
+            name: matName,
+            componentType: cat || m.bomItemName || 'Accessory',
+            itemCode: code,
+            location: loc,
+            unit,
+            photo,
+            totalQty: 0,
+            challanCount: 0
+          };
+        }
+        materialSummaryMap[matKey].totalQty += q;
+        materialSummaryMap[matKey].challanCount += 1;
+      });
+    });
+
+    // Build Rows for Main Log Table
+    const tableRowsHtml = withoutBomLogs.map((log, idx) => {
+      const isDirect = !log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct');
+      const lotDisplay = isDirect ? 'DIRECT REQUISITION' : `LOT #${log.lotId}`;
+      const brandDisplay = (log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : '';
+
+      const materialsHtml = (log.materials || []).map(m => {
+        const photo = getMaterialPhoto(m);
+        const code = getItemCodeDisplay(m) || m.itemCode || '';
+        const cat = getMaterialCategory(m);
+        const loc = getMaterialLocation(m);
+        return `
+          <div class="mat-item-row">
+            ${photo ? `<img src="${photo}" alt="${m.name}" class="mat-thumb" onerror="this.style.display='none'" />` : `<span class="no-photo">📦</span>`}
+            <div class="mat-info">
+              ${cat ? `<span class="cat-badge">${cat.toUpperCase()}</span>` : ''}
+              <span class="mat-name"><strong>${m.name || m.bomItemName}</strong>${code ? ` <span class="mat-code">[${code}]</span>` : ''}</span>
+              <span class="mat-qty-badge">${m.qty} ${m.unit || 'Pcs'}</span>
+              ${loc ? `<span class="rack-badge">📍 ${loc}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return `
+        <tr>
+          <td style="text-align: center; font-weight: 800; font-family: monospace;">#${idx + 1}</td>
+          <td style="font-weight: 800; font-family: monospace; white-space: nowrap;">
+            <span class="challan-badge">${log.id}</span>
+          </td>
+          <td style="white-space: nowrap; font-size: 10px;">${log.date || '—'}</td>
+          <td style="font-weight: 700;">
+            <div style="font-size: 11px; font-weight: 900; color: #000000;">${lotDisplay}${brandDisplay}</div>
+            <div style="font-size: 9px; color: #555555; font-weight: 600;">W/O BOM CHALLAN</div>
+          </td>
+          <td>
+            <div class="mat-list-container">
+              ${materialsHtml}
+            </div>
+          </td>
+          <td style="font-size: 10px;">${log.personName || 'Store In-charge'}</td>
+          <td style="font-size: 10px; font-weight: 700;">
+            ${log.receiverName || 'Cutting Master'}
+            ${log.receiverDept ? `<br/><small style="font-weight: normal; color: #555;">(${log.receiverDept})</small>` : ''}
+          </td>
+          <td style="font-size: 9.5px; max-width: 130px; word-break: break-word;">
+            ${log.remarks || log.style || 'Standard Floor Issue'}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Check if there are real brands
+    const hasRealBrands = Object.keys(brandSummaryMap).length > 0;
+
+    // Build Brand-Wise Summary Section (Only when actual brands exist)
+    const brandSectionsHtml = hasRealBrands ? Object.values(brandSummaryMap).map(bData => {
+      const lotsArr = Array.from(bData.lots);
+      const matItems = Object.values(bData.materials);
+      const brandTotalQty = matItems.reduce((acc, m) => acc + m.totalQty, 0);
+
+      return `
+        <div class="summary-group-box">
+          <div class="group-header">
+            <div>
+              <span class="group-title">🏷️ BRAND: ${bData.brand.toUpperCase()}</span>
+              ${lotsArr.length > 0 ? `<span class="group-sub">• Lots: ${lotsArr.map(l => `LOT #${l}`).join(', ')}</span>` : ''}
+            </div>
+            <div class="group-badge">
+              Total Materials: <strong>${brandTotalQty.toLocaleString('en-IN')} Units / Pcs</strong>
+            </div>
+          </div>
+          <table class="sub-table">
+            <thead>
+              <tr>
+                <th style="width: 45px; text-align: center;">PHOTO</th>
+                <th>MATERIAL / ACCESSORY NAME</th>
+                <th style="width: 100px;">CATEGORY</th>
+                <th style="width: 90px;">ITEM CODE</th>
+                <th style="width: 120px; text-align: right;">TOTAL ISSUE QTY</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${matItems.map(m => `
+                <tr>
+                  <td style="text-align: center;">
+                    ${m.photo ? `<img src="${m.photo}" alt="${m.name}" class="mat-thumb" onerror="this.style.display='none'" />` : `<span class="no-photo">📦</span>`}
+                  </td>
+                  <td><strong>${m.name}</strong></td>
+                  <td>${m.componentType}</td>
+                  <td style="font-family: monospace; font-weight: 700;">${m.itemCode || '—'}</td>
+                  <td style="text-align: right; font-weight: 900; font-size: 12px; color: #000000;">
+                    ${m.totalQty.toLocaleString('en-IN')} ${m.unit}
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }).join('') : '';
+
+    // Build Consolidated Lot-Wise Total Summary Table Rows (ONE table for all lots!)
+    const lotTableRowsHtml = Object.values(lotSummaryMap).map((lData, lIdx) => {
+      const challansArr = Array.from(lData.challans);
+      const matItems = Object.values(lData.materials);
+      const lotTotalQty = matItems.reduce((acc, m) => acc + m.totalQty, 0);
+
+      const lotMaterialsHtml = matItems.map(m => `
+        <div class="mat-item-row" style="padding: 2px 0;">
+          ${m.photo ? `<img src="${m.photo}" alt="${m.name}" class="mat-thumb" onerror="this.style.display='none'" />` : `<span class="no-photo">📦</span>`}
+          <div class="mat-info">
+            <span class="cat-badge">${m.componentType}</span>
+            <span class="mat-name"><strong>${m.name}</strong>${m.itemCode ? ` <span class="mat-code">[${m.itemCode}]</span>` : ''}</span>
+            <span class="mat-qty-badge">${m.totalQty.toLocaleString('en-IN')} ${m.unit}</span>
+            ${m.location ? `<span class="rack-badge">📍 ${m.location}</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      return `
+        <tr>
+          <td style="text-align: center; font-weight: 800; font-family: monospace;">#${lIdx + 1}</td>
+          <td style="font-weight: 900; font-size: 11.5px; color: #000000; white-space: nowrap;">
+            <span class="challan-badge" style="background: #f0fdf4; border-color: #000000; color: #000000;">
+              ${lData.lot}
+            </span>
+          </td>
+          <td style="font-weight: 700; color: #000000;">
+            ${lData.brand ? `<span style="font-weight: 800; font-size: 11px;">${lData.brand}</span>` : '<span style="color: #64748b;">—</span>'}
+          </td>
+          <td style="font-family: monospace; font-size: 9.5px; font-weight: 700;">
+            ${challansArr.join(', ')}
+          </td>
+          <td>
+            <div class="mat-list-container">
+              ${lotMaterialsHtml}
+            </div>
+          </td>
+          <td style="text-align: right; font-weight: 900; font-size: 12.5px; color: #000000; white-space: nowrap;">
+            ${lotTotalQty.toLocaleString('en-IN')} Pcs
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Build Consolidated Material Summary (With Location / Rack No column)
+    const materialListHtml = Object.values(materialSummaryMap).map(m => `
+      <tr>
+        <td style="text-align: center;">
+          ${m.photo ? `<img src="${m.photo}" alt="${m.name}" class="mat-thumb" onerror="this.style.display='none'" />` : `<span class="no-photo">📦</span>`}
+        </td>
+        <td><strong>${m.name}</strong></td>
+        <td style="font-family: monospace; font-weight: 700;">${m.itemCode || '—'}</td>
+        <td style="font-weight: 700; color: #000000;">
+          ${m.location ? `<span class="rack-badge">📍 ${m.location}</span>` : '<span style="color: #94a3b8;">—</span>'}
+        </td>
+        <td style="text-align: center; font-weight: 700;">${m.challanCount} Challan(s)</td>
+        <td style="text-align: right; font-weight: 900; font-size: 13px; color: #000000;">
+          ${m.totalQty.toLocaleString('en-IN')} ${m.unit}
+        </td>
+      </tr>
+    `).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Without-BOM Material Issue Register &amp; Summary Report - Mohit Hosiery</title>
+        <style>
+          @page {
+            size: A4 landscape;
+            margin: 8mm 6mm;
+          }
+          * {
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+          }
+          body {
+            margin: 0;
+            padding: 12px;
+            color: #000000;
+            background: #ffffff;
+            font-size: 11px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .no-print-bar {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+          }
+          .btn-print {
+            background: #ea580c;
+            color: #ffffff;
+            border: none;
+            padding: 7px 18px;
+            font-weight: 800;
+            font-size: 13px;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          .btn-close {
+            background: #475569;
+            color: #ffffff;
+            border: none;
+            padding: 7px 14px;
+            font-size: 12px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+          }
+          @media print {
+            .no-print-bar { display: none !important; }
+            body { padding: 0 !important; color: #000000 !important; }
+            thead { display: table-header-group !important; }
+            tr { page-break-inside: avoid !important; }
+            .page-break { page-break-before: always; }
+            th, td { border: 1.5px solid #000000 !important; color: #000000 !important; }
+            .summary-group-box { page-break-inside: avoid !important; }
+          }
+          .header-box {
+            border-bottom: 2px solid #000000;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+          }
+          .company-title {
+            font-size: 18px;
+            font-weight: 900;
+            color: #000000;
+            letter-spacing: 0.5px;
+            margin: 0 0 2px 0;
+          }
+          .doc-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: #000000;
+            margin: 0;
+          }
+          .doc-sub {
+            font-size: 10px;
+            color: #333333;
+            margin-top: 2px;
+          }
+          .meta-info {
+            text-align: right;
+            font-size: 10px;
+            color: #000000;
+            line-height: 1.4;
+          }
+          .summary-strip {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+          }
+          .summary-card {
+            flex: 1;
+            border: 1.5px solid #000000;
+            border-radius: 4px;
+            padding: 6px 8px;
+            font-size: 10px;
+            text-align: center;
+            background: #ffffff;
+          }
+          .summary-card span {
+            display: block;
+            font-size: 9px;
+            color: #000000;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .summary-card strong {
+            display: block;
+            font-size: 13px;
+            color: #000000;
+            margin-top: 2px;
+          }
+          table.report-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin-bottom: 16px;
+          }
+          table.report-table th, table.report-table td {
+            border: 1.5px solid #000000;
+            padding: 6px 7px;
+            vertical-align: middle;
+            color: #000000;
+          }
+          table.report-table th {
+            background-color: #f8fafc;
+            font-weight: 900;
+            text-transform: uppercase;
+            font-size: 9.5px;
+            letter-spacing: 0.03em;
+            text-align: left;
+            color: #000000;
+          }
+          .challan-badge {
+            font-family: monospace;
+            font-weight: 800;
+            font-size: 11px;
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border: 1px solid #000000;
+            border-radius: 4px;
+            display: inline-block;
+          }
+          .mat-list-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .mat-item-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .mat-thumb {
+            width: 28px;
+            height: 28px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #000000;
+            background: #ffffff;
+            flex-shrink: 0;
+          }
+          .no-photo {
+            width: 28px;
+            height: 28px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            font-size: 12px;
+            flex-shrink: 0;
+          }
+          .mat-info {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+          }
+          .mat-name {
+            font-size: 11px;
+            color: #000000;
+          }
+          .mat-code {
+            font-family: monospace;
+            font-size: 9.5px;
+            color: #555555;
+          }
+          .mat-qty-badge {
+            font-weight: 900;
+            font-size: 11px;
+            background: #f0fdf4;
+            border: 1px solid #000000;
+            padding: 1px 5px;
+            border-radius: 3px;
+          }
+          .cat-badge {
+            font-size: 8.5px;
+            font-weight: 800;
+            background: #f1f5f9;
+            color: #0f172a;
+            border: 1px solid #000000;
+            padding: 1px 4px;
+            border-radius: 3px;
+            text-transform: uppercase;
+            white-space: nowrap;
+            letter-spacing: 0.3px;
+            display: inline-block;
+          }
+          .rack-badge {
+            font-size: 8.5px;
+            font-weight: 800;
+            background: #fff7ed;
+            color: #9a3412;
+            border: 1px solid #000000;
+            padding: 1px 5px;
+            border-radius: 3px;
+            white-space: nowrap;
+            letter-spacing: 0.2px;
+            display: inline-block;
+          }
+          .section-banner {
+            background: #0f172a;
+            color: #ffffff;
+            padding: 7px 12px;
+            font-size: 12px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 18px 0 10px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .summary-group-box {
+            border: 1.5px solid #000000;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            background: #ffffff;
+            overflow: hidden;
+          }
+          .group-header {
+            background: #f1f5f9;
+            border-bottom: 1.5px solid #000000;
+            padding: 6px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .group-title {
+            font-weight: 900;
+            font-size: 12px;
+            color: #000000;
+          }
+          .group-sub {
+            font-size: 10px;
+            color: #475569;
+            margin-left: 6px;
+          }
+          .group-badge {
+            font-size: 11px;
+            color: #000000;
+          }
+          table.sub-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10.5px;
+          }
+          table.sub-table th, table.sub-table td {
+            border: 1px solid #cbd5e1;
+            padding: 5px 8px;
+            vertical-align: middle;
+          }
+          table.sub-table th {
+            background: #f8fafc;
+            font-weight: 800;
+            text-transform: uppercase;
+            font-size: 9px;
+            color: #000000;
+          }
+          .footer-signs {
+            margin-top: 24px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            page-break-inside: avoid;
+          }
+          .sign-box {
+            border-top: 1.5px solid #000000;
+            width: 190px;
+            text-align: center;
+            padding-top: 6px;
+            font-weight: 800;
+            color: #000000;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="no-print-bar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button class="btn-print" onclick="window.print()">🖨️ Print Full Report Now</button>
+            <span style="font-size: 12px; color: #cbd5e1;">A4 Landscape • High-Contrast Black &amp; White with Photos</span>
+          </div>
+          <button class="btn-close" onclick="window.close()">✕ Close Preview</button>
+        </div>
+
+        <!-- 1. Header Box -->
+        <div class="header-box">
+          <div>
+            <div class="company-title">MOHIT HOSIERY</div>
+            <div class="doc-title">WITHOUT-BOM &amp; MATERIAL ISSUE REGISTER (AUDIT REPORT)</div>
+            <div class="doc-sub">Central Store &amp; Accessories Department • Complete Floor Issue Track</div>
+            ${filterBannerHtml}
+          </div>
+          <div class="meta-info">
+            <div><strong>Report Date:</strong> ${new Date().toLocaleDateString('en-IN')} ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</div>
+            <div><strong>Total Challans:</strong> ${totalChallans} Records</div>
+            <div><strong>Total Units:</strong> ${totalQtyIssued.toLocaleString('en-IN')} Units / Pcs</div>
+            <div><strong>Printed By:</strong> ${(currentUser?.name || 'STORE STAFF').toUpperCase()}</div>
+          </div>
+        </div>
+
+        <!-- 2. Summary Metric Strip -->
+        <div class="summary-strip">
+          <div class="summary-card">
+            <span>TOTAL CHALLANS</span>
+            <strong>${totalChallans}</strong>
+          </div>
+          <div class="summary-card">
+            <span>TOTAL LINE ITEMS</span>
+            <strong>${totalLineItems}</strong>
+          </div>
+          <div class="summary-card">
+            <span>TOTAL QUANTITY ISSUED</span>
+            <strong>${totalQtyIssued.toLocaleString('en-IN')} Units</strong>
+          </div>
+          <div class="summary-card">
+            <span>TOTAL UNIQUE LOTS</span>
+            <strong>${uniqueLots.size} Lot(s)</strong>
+          </div>
+          <div class="summary-card">
+            <span>TOTAL BRANDS</span>
+            <strong>${uniqueBrands.size} Brand(s)</strong>
+          </div>
+        </div>
+
+        <!-- 3. Main Challans Register Table -->
+        <div style="margin-bottom: 6px; font-weight: 800; font-size: 11.5px; text-transform: uppercase;">
+          1. Issue Challans / Bill Logs Register
+        </div>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">SEQ #</th>
+              <th style="width: 105px;">CHALLAN NO</th>
+              <th style="width: 90px;">DATE</th>
+              <th style="width: 140px;">LOT &amp; BRAND</th>
+              <th>ISSUED MATERIALS (WITH PHOTO &amp; QTY)</th>
+              <th style="width: 95px;">ISSUED BY</th>
+              <th style="width: 110px;">RECEIVED BY</th>
+              <th style="width: 120px;">REMARKS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRowsHtml}
+          </tbody>
+          <tfoot>
+            <tr style="background: #f8fafc; font-weight: 900; font-size: 11.5px; border-top: 2px solid #000000;">
+              <td colspan="4" style="text-align: right; text-transform: uppercase;">Register Total (${totalChallans} Challans):</td>
+              <td style="font-weight: 900; font-size: 13px; color: #000000; background: #f0fdf4;">
+                <span style="color: #15803d;">Total Pieces Issued:</span> <strong>${totalQtyIssued.toLocaleString('en-IN')} Units / Pcs</strong>
+              </td>
+              <td colspan="3" style="font-size: 10px; color: #475569; font-weight: 700;">
+                ${totalLineItems} Material Item Rows Across ${uniqueLots.size} Lot(s)
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- Page break for End Summary -->
+        <div class="page-break"></div>
+
+        <!-- 2. Consolidated Material Grand Totals (With Location / Rack No) -->
+        <div class="section-banner">
+          <span>2. CONSOLIDATED MATERIAL GRAND TOTALS</span>
+          <span style="font-size: 10px; font-weight: 600;">(Complete Material-wise Issue Volume Across All Lots)</span>
+        </div>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width: 45px; text-align: center;">PHOTO</th>
+              <th>MATERIAL / ACCESSORY NAME</th>
+              <th style="width: 110px;">ITEM CODE</th>
+              <th style="width: 140px;">LOCATION / RACK NO</th>
+              <th style="width: 130px; text-align: center;">CHALLAN COUNT</th>
+              <th style="width: 170px; text-align: right;">GRAND TOTAL ISSUED</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${materialListHtml}
+          </tbody>
+          <tfoot>
+            <tr style="background: #f8fafc; font-weight: 900; font-size: 12px; border-top: 2px solid #000000;">
+              <td colspan="4" style="text-align: right; text-transform: uppercase;">Overall Register Grand Total:</td>
+              <td style="text-align: center;">${totalChallans} Challans</td>
+              <td style="text-align: right; font-size: 13.5px; color: #000000; background: #f0fdf4;">
+                <strong>${totalQtyIssued.toLocaleString('en-IN')} Units / Pcs</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- 7. Footer Signatures -->
+        <div class="footer-signs">
+          <div class="sign-box">Prepared / Issued By<br/><small style="font-weight: normal; color: #444;">Store In-charge</small></div>
+          <div class="sign-box">Received By<br/><small style="font-weight: normal; color: #444;">Cutting Master</small></div>
+          <div class="sign-box">Verified By<br/><small style="font-weight: normal; color: #444;">Floor Supervisor</small></div>
+          <div class="sign-box">Authorized Signatory<br/><small style="font-weight: normal; color: #444;">Production Manager</small></div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    printWin.document.open();
+    printWin.document.write(htmlContent);
+    printWin.document.close();
   };
 
   return (
@@ -3334,31 +4418,612 @@ export default function WithoutBomMaterialIssueView({
               </p>
             </div>
 
-            {/* Search */}
-            <div style={{ position: 'relative', width: '270px' }}>
-              <input
-                type="text"
-                placeholder="Search Bill No, Material, Receiver..."
-                value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value)}
+            {/* Search & Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', width: '260px' }}>
+                <input
+                  type="text"
+                  placeholder="Search Bill No, Material, Receiver..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '7px 28px 7px 30px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '12.5px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <Search size={14} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                {historySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setHistorySearch('')}
+                    style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={handlePrintFullHistoryReport}
                 style={{
-                  width: '100%',
-                  padding: '7px 10px 7px 30px',
+                  padding: '7px 14px',
                   borderRadius: '8px',
-                  border: '1px solid #cbd5e1',
+                  border: '1.5px solid #0f172a',
+                  background: '#0f172a',
+                  color: '#ffffff',
                   fontSize: '12.5px',
-                  boxSizing: 'border-box'
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(15, 23, 42, 0.15)',
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap'
                 }}
-              />
-              <Search size={14} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                title="Print full audit register with material photos, brand-wise and lot-wise summaries"
+              >
+                <Printer size={14} style={{ color: '#ea580c' }} />
+                <span>Print Full Report ({withoutBomLogs.length})</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── INTERACTIVE MULTI-FILTER PANEL (Dates, Categories Multi-Select, Person) ── */}
+          <div style={{
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}>
+            {/* ROW 1: Date Filter + Person Filter + Reset Button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+              
+              {/* Date Filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <Calendar size={14} style={{ color: '#ea580c' }} />
+                  Dates Wise:
+                </span>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: '#ffffff', padding: '3px 8px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                  <input
+                    type="date"
+                    value={historyDateFrom}
+                    onChange={(e) => setHistoryDateFrom(e.target.value)}
+                    title="From Date"
+                    style={{ border: 'none', background: 'transparent', fontSize: '11.5px', color: '#0f172a', fontWeight: '600', outline: 'none' }}
+                  />
+                  <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '700' }}>to</span>
+                  <input
+                    type="date"
+                    value={historyDateTo}
+                    onChange={(e) => setHistoryDateTo(e.target.value)}
+                    title="To Date"
+                    style={{ border: 'none', background: 'transparent', fontSize: '11.5px', color: '#0f172a', fontWeight: '600', outline: 'none' }}
+                  />
+                  {(historyDateFrom || historyDateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }}
+                      title="Clear Dates"
+                      style={{ border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: '2px', display: 'flex', alignItems: 'center' }}
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Date Presets */}
+                <div style={{ display: 'inline-flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    onClick={handleSetToday}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: (historyDateFrom && historyDateFrom === new Date().toISOString().split('T')[0] && historyDateTo === historyDateFrom) ? '#0f172a' : '#ffffff',
+                      color: (historyDateFrom && historyDateFrom === new Date().toISOString().split('T')[0] && historyDateTo === historyDateFrom) ? '#ffffff' : '#475569',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSetYesterday}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Yesterday
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSetLast7Days}
+                    style={{
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#475569',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Last 7 Days
+                  </button>
+                </div>
+              </div>
+
+              {/* Person Filter */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <User size={14} style={{ color: '#0284c7' }} />
+                  Person Wise:
+                </span>
+                <select
+                  value={historyPerson}
+                  onChange={(e) => setHistoryPerson(e.target.value)}
+                  style={{
+                    padding: '5px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: '#0f172a',
+                    background: '#ffffff',
+                    cursor: 'pointer',
+                    outline: 'none',
+                    minWidth: '190px'
+                  }}
+                >
+                  <option value="">👤 All Persons (Any Role)</option>
+                  {availablePeople.issuers.length > 0 && (
+                    <optgroup label="Issued By (Store Team)">
+                      {availablePeople.issuers.map(name => (
+                        <option key={`iss_${name}`} value={`iss:${name}`}>Store: {name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {availablePeople.receivers.length > 0 && (
+                    <optgroup label="Received By (Floor / Masters)">
+                      {availablePeople.receivers.map(name => (
+                        <option key={`rec_${name}`} value={`rec:${name}`}>Floor: {name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+
+                {/* Reset Filters button if any filter active */}
+                {activeFiltersCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetAllFilters}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid #fca5a5',
+                      background: '#fef2f2',
+                      color: '#b91c1c',
+                      fontSize: '11.5px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Clear all active filters"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Reset Filters ({activeFiltersCount})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ROW 2: Category Multi-Select Scrollable Dropdown Menu */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              flexWrap: 'wrap',
+              borderTop: '1px dashed #e2e8f0',
+              paddingTop: '8px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Tag size={13} style={{ color: '#7c3aed' }} />
+                <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', whiteSpace: 'nowrap' }}>
+                  Category Wise:
+                </span>
+              </div>
+
+              {/* Scrollable Dropdown Menu Trigger Container */}
+              <div ref={categoryDropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+                <button
+                  type="button"
+                  onClick={() => setCategoryDropdownOpen(prev => !prev)}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    border: historyCategories.length > 0 ? '1.5px solid #2563eb' : '1px solid #cbd5e1',
+                    background: historyCategories.length > 0 ? '#eff6ff' : '#ffffff',
+                    color: historyCategories.length > 0 ? '#1d4ed8' : '#0f172a',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: historyCategories.length > 0 ? '0 1px 3px rgba(37,99,235,0.15)' : 'none',
+                    transition: 'all 0.15s ease'
+                  }}
+                  title="Click to open scrollable category multi-select menu"
+                >
+                  <Tag size={12} style={{ color: historyCategories.length > 0 ? '#2563eb' : '#64748b' }} />
+                  <span>
+                    {historyCategories.length === 0 
+                      ? `All Categories (${rawWithoutBomLogs.length})` 
+                      : historyCategories.length === 1 
+                      ? `${historyCategories[0]}` 
+                      : `${historyCategories.slice(0, 2).join(', ')}${historyCategories.length > 2 ? ` +${historyCategories.length - 2}` : ''}`}
+                  </span>
+                  {historyCategories.length > 0 && (
+                    <span style={{
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      fontSize: '10px',
+                      fontWeight: '800',
+                      padding: '1px 6px',
+                      borderRadius: '10px'
+                    }}>
+                      {historyCategories.length}
+                    </span>
+                  )}
+                  <ChevronDown size={13} style={{ transform: categoryDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease', color: '#64748b' }} />
+                </button>
+
+                {/* The Floating Scrollable Dropdown Menu */}
+                {categoryDropdownOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 5px)',
+                    left: 0,
+                    zIndex: 100,
+                    width: '300px',
+                    background: '#ffffff',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    boxShadow: '0 12px 28px -4px rgba(15, 23, 42, 0.2), 0 8px 12px -6px rgba(15, 23, 42, 0.12)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    {/* Header with Search and Quick Actions */}
+                    <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+                      <div style={{ position: 'relative', marginBottom: '8px' }}>
+                        <input
+                          type="text"
+                          placeholder="Search categories..."
+                          value={categorySearchTerm}
+                          onChange={(e) => setCategorySearchTerm(e.target.value)}
+                          autoFocus
+                          style={{
+                            width: '100%',
+                            padding: '6px 8px 6px 26px',
+                            fontSize: '11.5px',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            boxSizing: 'border-box',
+                            outline: 'none'
+                          }}
+                        />
+                        <Search size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                        {categorySearchTerm && (
+                          <X
+                            size={12}
+                            style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', cursor: 'pointer' }}
+                            onClick={() => setCategorySearchTerm('')}
+                          />
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const allNames = availableHistoryCategories.map(c => c.name);
+                            setHistoryCategories(allNames);
+                          }}
+                          style={{ border: 'none', background: 'transparent', color: '#2563eb', fontWeight: '700', cursor: 'pointer', padding: '2px 4px' }}
+                        >
+                          Select All ({availableHistoryCategories.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setHistoryCategories([])}
+                          style={{ border: 'none', background: 'transparent', color: '#64748b', fontWeight: '700', cursor: 'pointer', padding: '2px 4px' }}
+                        >
+                          Clear Selection
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scrollable Category List */}
+                    <div style={{
+                      maxHeight: '220px',
+                      overflowY: 'auto',
+                      padding: '4px 6px'
+                    }}>
+                      {/* "All Categories" row option */}
+                      <div
+                        onClick={() => setHistoryCategories([])}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '7px 10px',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                          background: historyCategories.length === 0 ? '#f1f5f9' : 'transparent',
+                          transition: 'background 0.1s ease',
+                          fontSize: '12px'
+                        }}
+                        onMouseEnter={(e) => { if (historyCategories.length !== 0) e.currentTarget.style.background = '#f8fafc'; }}
+                        onMouseLeave={(e) => { if (historyCategories.length !== 0) e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="checkbox"
+                            checked={historyCategories.length === 0}
+                            onChange={() => setHistoryCategories([])}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <span style={{ fontWeight: historyCategories.length === 0 ? '800' : '600', color: historyCategories.length === 0 ? '#0f172a' : '#334155' }}>
+                            All Categories (No Filter)
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '10px', color: '#64748b', background: '#e2e8f0', padding: '1px 6px', borderRadius: '8px', fontWeight: '700' }}>
+                          {rawWithoutBomLogs.length}
+                        </span>
+                      </div>
+
+                      {filteredCategoryOptions.length === 0 ? (
+                        <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>
+                          No categories found matching "{categorySearchTerm}"
+                        </div>
+                      ) : (
+                        filteredCategoryOptions.map(catItem => {
+                          const isChecked = historyCategories.includes(catItem.name);
+                          return (
+                            <div
+                              key={catItem.name}
+                              onClick={() => handleToggleHistoryCategory(catItem.name)}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '6px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                background: isChecked ? '#eff6ff' : 'transparent',
+                                transition: 'background 0.1s ease',
+                                fontSize: '12px'
+                              }}
+                              onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = '#f8fafc'; }}
+                              onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                                <span style={{ fontWeight: isChecked ? '800' : '600', color: isChecked ? '#1d4ed8' : '#0f172a' }}>
+                                  {catItem.name}
+                                </span>
+                              </div>
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: '700',
+                                color: isChecked ? '#ffffff' : '#64748b',
+                                background: isChecked ? '#2563eb' : '#e2e8f0',
+                                padding: '1px 6px',
+                                borderRadius: '8px'
+                              }}>
+                                {catItem.count}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Footer */}
+                    <div style={{
+                      padding: '8px 12px',
+                      background: '#f8fafc',
+                      borderTop: '1px solid #f1f5f9',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                        {historyCategories.length === 0 ? 'Showing all categories' : `${historyCategories.length} selected`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCategoryDropdownOpen(false)}
+                        style={{
+                          padding: '4px 12px',
+                          borderRadius: '6px',
+                          border: 'none',
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Categories Display Tags */}
+              {historyCategories.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Selected:</span>
+                  {historyCategories.map(cat => (
+                    <span
+                      key={cat}
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        color: '#1d4ed8',
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      {cat}
+                      <X
+                        size={11}
+                        style={{ cursor: 'pointer', opacity: 0.8 }}
+                        onClick={() => handleToggleHistoryCategory(cat)}
+                        title={`Remove ${cat}`}
+                      />
+                    </span>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setHistoryCategories([])}
+                    style={{
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#dc2626',
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* ROW 3: Active Filters Summary & Count Banner */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontSize: '11.5px',
+              color: '#64748b',
+              paddingTop: '6px',
+              borderTop: '1px dashed #e2e8f0',
+              flexWrap: 'wrap',
+              gap: '6px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontWeight: '700', color: '#0f172a' }}>
+                  Showing <span style={{ color: '#ea580c', fontWeight: '900' }}>{withoutBomLogs.length}</span> of {rawWithoutBomLogs.length} Challans
+                </span>
+
+                {/* Badges for active filters */}
+                {historyDateFrom && (
+                  <span style={{ background: '#ffedd5', color: '#c2410c', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    📅 {historyDateFrom} to {historyDateTo || 'Today'}
+                    <X size={10} style={{ cursor: 'pointer' }} onClick={() => { setHistoryDateFrom(''); setHistoryDateTo(''); }} />
+                  </span>
+                )}
+                {historyCategories.length > 0 && (
+                  <span style={{ background: '#dbeafe', color: '#1d4ed8', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    🏷️ {historyCategories.join(', ')}
+                    <X size={10} style={{ cursor: 'pointer' }} onClick={() => setHistoryCategories([])} />
+                  </span>
+                )}
+                {historyPerson && (
+                  <span style={{ background: '#e0e7ff', color: '#4338ca', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    👤 {historyPerson.startsWith('iss:') ? `Store: ${historyPerson.replace('iss:', '')}` : historyPerson.startsWith('rec:') ? `Floor: ${historyPerson.replace('rec:', '')}` : historyPerson}
+                    <X size={10} style={{ cursor: 'pointer' }} onClick={() => setHistoryPerson('')} />
+                  </span>
+                )}
+                {historySearch && (
+                  <span style={{ background: '#f1f5f9', color: '#334155', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                    🔍 "{historySearch}"
+                    <X size={10} style={{ cursor: 'pointer' }} onClick={() => setHistorySearch('')} />
+                  </span>
+                )}
+              </div>
+
+              {activeFiltersCount > 0 && (
+                <span style={{ fontSize: '11px', color: '#ea580c', fontWeight: '700' }}>
+                  Print button will export only these {withoutBomLogs.length} filtered records.
+                </span>
+              )}
             </div>
           </div>
 
           {withoutBomLogs.length === 0 ? (
             <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
               <FileText size={40} style={{ margin: '0 auto 8px', opacity: 0.4 }} />
-              <div style={{ fontWeight: '700', fontSize: '14px' }}>No Without-BOM issue slips found.</div>
-              <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>Issue materials above to track them in this audit log.</p>
+              <div style={{ fontWeight: '700', fontSize: '14px', color: '#475569' }}>
+                {activeFiltersCount > 0 ? 'No Without-BOM challans match your selected filters.' : 'No Without-BOM issue slips found.'}
+              </div>
+              <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>
+                {activeFiltersCount > 0 
+                  ? 'Try broadening your dates, clearing category selection, or resetting filters.' 
+                  : 'Issue materials above to track them in this audit log.'}
+              </p>
+              {activeFiltersCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetAllFilters}
+                  style={{
+                    marginTop: '12px',
+                    padding: '7px 16px',
+                    borderRadius: '8px',
+                    border: '1.5px solid #0f172a',
+                    background: '#0f172a',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Reset All Filters
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
@@ -3398,15 +5063,62 @@ export default function WithoutBomMaterialIssueView({
                         </span>
                       </td>
                       <td style={{ padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                          {(log.materials || []).slice(0, 3).map((m, mIdx) => (
-                            <span key={mIdx} style={{ fontSize: '11.5px', color: '#334155' }}>
-                              &bull; <strong>{m.name || m.bomItemName}:</strong> {m.qty} {m.unit || 'pcs'}
-                            </span>
-                          ))}
-                          {(log.materials || []).length > 3 && (
-                            <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '700' }}>
-                              +{(log.materials || []).length - 3} more item(s)
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          {(log.materials || []).slice(0, 4).map((m, mIdx) => {
+                            const photoSrc = getMaterialPhoto(m);
+                            const categoryName = getMaterialCategory(m);
+                            const loc = getMaterialLocation(m);
+                            return (
+                              <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                {photoSrc ? (
+                                  <img
+                                    src={photoSrc}
+                                    alt={m.name || 'material'}
+                                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', flexShrink: 0 }}
+                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>📦</span>
+                                )}
+                                {categoryName && (
+                                  <span style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: '800',
+                                    background: '#f1f5f9',
+                                    color: '#1e293b',
+                                    border: '1px solid #cbd5e1',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    textTransform: 'uppercase',
+                                    letterSpacing: '0.3px',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {categoryName}
+                                  </span>
+                                )}
+                                <span style={{ fontSize: '12px', color: '#0f172a' }}>
+                                  <strong>{m.name || m.bomItemName}:</strong> {m.qty} {m.unit || 'pcs'}
+                                </span>
+                                {loc && (
+                                  <span style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: '800',
+                                    background: '#fff7ed',
+                                    color: '#c2410c',
+                                    border: '1px solid #fed7aa',
+                                    padding: '1px 5px',
+                                    borderRadius: '4px',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    📍 {loc}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {(log.materials || []).length > 4 && (
+                            <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '700', marginLeft: '4px' }}>
+                              +{(log.materials || []).length - 4} more item(s)
                             </span>
                           )}
                         </div>

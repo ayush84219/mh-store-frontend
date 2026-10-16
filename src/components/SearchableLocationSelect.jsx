@@ -67,6 +67,17 @@ export default function SearchableLocationSelect({
     return `${warehouse} - ${rackPart}`;
   };
 
+  // Helper to match locations case-insensitively and canonicalized
+  const isLocationMatch = (locA, locB) => {
+    if (!locA || !locB) return false;
+    const sA = String(locA).trim().toLowerCase();
+    const sB = String(locB).trim().toLowerCase();
+    if (sA === sB) return true;
+    const cA = canonicalizeLocation(locA);
+    const cB = canonicalizeLocation(locB);
+    return Boolean(cA && cB && cA.toUpperCase() === cB.toUpperCase());
+  };
+
   // Normalize locations array to standard objects { code, label, warehouse }
   const normalizedLocations = useMemo(() => {
     const list = [];
@@ -95,14 +106,19 @@ export default function SearchableLocationSelect({
       return naturalCompare(a.label || a.code, b.label || b.code);
     });
 
-    // If current value is set but not in list, add it as a preserved entry at the top
-    if (value && !seen.has(String(value).trim())) {
-      const customVal = String(value).trim();
-      list.unshift({
-        code: customVal,
-        label: `${customVal} (Current)`,
-        warehouse: customVal.includes(' - ') ? customVal.split(' - ')[0].trim() : 'Current'
-      });
+    // If current value is set and not already in list, add it cleanly without duplicate or (Current) label
+    if (value) {
+      const cleanVal = canonicalizeLocation(value);
+      const valKey = cleanVal ? cleanVal.toUpperCase() : String(value).trim().toUpperCase();
+      if (valKey && !seen.has(valKey)) {
+        const displayVal = cleanVal || String(value).trim();
+        const wh = displayVal.includes(' - ') ? displayVal.split(' - ')[0].trim() : 'Custom';
+        list.unshift({
+          code: displayVal,
+          label: displayVal,
+          warehouse: wh
+        });
+      }
     }
 
     return list;
@@ -121,7 +137,7 @@ export default function SearchableLocationSelect({
   const filteredLocations = useMemo(() => {
     let result = normalizedLocations;
     if (selectedWarehouse !== 'All') {
-      result = result.filter(l => l.warehouse === selectedWarehouse || l.code === value);
+      result = result.filter(l => l.warehouse === selectedWarehouse || isLocationMatch(l.code, value));
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -135,8 +151,8 @@ export default function SearchableLocationSelect({
   }, [normalizedLocations, selectedWarehouse, searchQuery, value]);
 
   // Find currently selected item display
-  const currentItem = normalizedLocations.find(l => l.code === value);
-  const displayLabel = currentItem ? (currentItem.label.replace(' (Current)', '') || currentItem.code) : value;
+  const currentItem = normalizedLocations.find(l => isLocationMatch(l.code, value));
+  const displayLabel = currentItem ? currentItem.label : value;
 
   // Handle outside click
   useEffect(() => {
@@ -221,6 +237,10 @@ export default function SearchableLocationSelect({
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
           {value && !disabled && (
             <span
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                if (onChange) onChange('');
+              }}
               onClick={(e) => {
                 e.stopPropagation();
                 if (onChange) onChange('');
@@ -468,12 +488,21 @@ export default function SearchableLocationSelect({
                 )}
               </div>
             ) : (
-              filteredLocations.map(loc => {
-                const isSelected = String(value) === String(loc.code);
+              filteredLocations.map((loc, idx) => {
+                const isSelected = isLocationMatch(value, loc.code);
                 return (
                   <div
-                    key={loc.code}
-                    onClick={() => handleSelect(loc.code)}
+                    key={`${loc.code}-${idx}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSelect(loc.code);
+                    }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleSelect(loc.code);
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
