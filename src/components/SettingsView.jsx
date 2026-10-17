@@ -2,9 +2,36 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield, Mail, UserCheck, ShieldCheck } from 'lucide-react';
 import { getBackendUrl } from '../utils/api';
 
+// Helper to derive pure ST ID (suppressing internal MT/M codes)
+export const getSTCode = (m) => {
+  if (!m) return '';
+  const rawCode = String(m.itemCode || m.item_code || m.stCode || '').trim();
+  if (rawCode && rawCode.toUpperCase().startsWith('ST')) {
+    return rawCode.toUpperCase();
+  }
+  if (rawCode && rawCode.toUpperCase().startsWith('MT')) {
+    return rawCode.toUpperCase().replace(/^MT/, 'ST');
+  }
+  if (rawCode && /^M\d+/i.test(rawCode)) {
+    const digits = rawCode.replace(/\D/g, '');
+    return `ST${digits.padStart(5, '0')}`;
+  }
+  if (rawCode && !rawCode.toUpperCase().startsWith('M')) return rawCode;
+
+  const rawId = String(m.id || '').trim();
+  if (rawId.toUpperCase().startsWith('ST')) return rawId.toUpperCase();
+  if (rawId.toUpperCase().startsWith('MT')) return rawId.toUpperCase().replace(/^MT/, 'ST');
+  if (/^M\d+/i.test(rawId)) {
+    const digits = rawId.replace(/\D/g, '');
+    return `ST${digits.padStart(5, '0')}`;
+  }
+  return rawId ? (rawId.replace(/\D/g, '') ? `ST${rawId.replace(/\D/g, '').padStart(5, '0')}` : `ST-${rawId}`) : '—';
+};
+
 export default function SettingsView({
   currentUser,
   vendors,
+  pos = [],
   onAddVendor,
   onDeleteVendor,
   currencySymbol,
@@ -360,6 +387,8 @@ export default function SettingsView({
   const [matThreshold, setMatThreshold] = useState('50');
   const [matColor, setMatColor] = useState('');
   const [matLocation, setMatLocation] = useState('');
+  const [matPoNumber, setMatPoNumber] = useState('');
+  const [matVendorName, setMatVendorName] = useState('');
   const [matError, setMatError] = useState('');
 
   const categorySuggestions = useMemo(() => {
@@ -375,6 +404,33 @@ export default function SettingsView({
     return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [materials]);
 
+  const poSuggestions = useMemo(() => {
+    const set = new Set();
+    (pos || []).forEach(p => {
+      const num = p.poNumber || p.id;
+      if (num && String(num).trim()) set.add(String(num).trim());
+    });
+    (materials || []).forEach(m => {
+      if (m.poNumber && m.poNumber !== 'N/A' && String(m.poNumber).trim()) {
+        set.add(String(m.poNumber).trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [pos, materials]);
+
+  const vendorSuggestions = useMemo(() => {
+    const set = new Set();
+    (vendors || []).forEach(v => {
+      const name = typeof v === 'string' ? v : (v.name || v.vendorName);
+      if (name && String(name).trim()) set.add(String(name).trim());
+    });
+    (materials || []).forEach(m => {
+      const v = m.vendorName || m.vendor || m.supplier;
+      if (v && String(v).trim()) set.add(String(v).trim());
+    });
+    return Array.from(set).sort();
+  }, [vendors, materials]);
+
   // Handle Edit Material Update Submit
   const handleUpdateSubmit = (e) => {
     e.preventDefault();
@@ -382,9 +438,10 @@ export default function SettingsView({
       setMatError('Material Name is required.');
       return;
     }
+    const effectiveStCode = matItemCode ? matItemCode.trim().toUpperCase() : getSTCode(editingMaterial);
     const updated = {
       ...editingMaterial,
-      itemCode: matItemCode ? matItemCode.trim() : (editingMaterial.itemCode || editingMaterial.id),
+      itemCode: effectiveStCode,
       name: matName.trim(),
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
@@ -392,7 +449,9 @@ export default function SettingsView({
       cost: parseFloat(matCost) || 0,
       threshold: parseFloat(matThreshold) || 50,
       color: matColor ? matColor.trim() : 'Default',
-      location: matLocation ? matLocation.trim() : 'Main Store'
+      location: matLocation ? matLocation.trim() : 'Main Store',
+      poNumber: matPoNumber ? matPoNumber.trim() : (editingMaterial.poNumber || 'N/A'),
+      vendorName: matVendorName ? matVendorName.trim() : (editingMaterial.vendorName || '')
     };
     if (onUpdateMaterial) {
       onUpdateMaterial(updated);
@@ -408,10 +467,12 @@ export default function SettingsView({
       setMatError('Material Name is required.');
       return;
     }
-    const newId = `M${Math.floor(1000 + Math.random() * 9000)}`;
+    const autoStNum = Math.floor(10000 + Math.random() * 90000);
+    const effectiveStCode = matItemCode ? matItemCode.trim().toUpperCase() : `ST${autoStNum}`;
+    const newId = effectiveStCode;
     const newMat = {
       id: newId,
-      itemCode: matItemCode ? matItemCode.trim() : newId,
+      itemCode: effectiveStCode,
       name: matName.trim(),
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
@@ -421,7 +482,8 @@ export default function SettingsView({
       color: matColor ? matColor.trim() : 'Default',
       location: matLocation ? matLocation.trim() : 'Main Store',
       packets: 1,
-      poNumber: 'N/A',
+      poNumber: matPoNumber ? matPoNumber.trim() : 'N/A',
+      vendorName: matVendorName ? matVendorName.trim() : '',
       invoiceNo: 'N/A'
     };
     if (onAddMaterial) {
@@ -437,6 +499,8 @@ export default function SettingsView({
     setMatThreshold('50');
     setMatColor('');
     setMatLocation('');
+    setMatPoNumber('');
+    setMatVendorName('');
     setMatError('');
   };
 
@@ -445,14 +509,15 @@ export default function SettingsView({
     if (Number(m.stock) <= 0) return false;
     const q = matSearchQuery.toLowerCase().trim();
     if (!q) return true;
+    const st = getSTCode(m).toLowerCase();
     return (
       (m.name || '').toLowerCase().includes(q) ||
-      (m.id || '').toLowerCase().includes(q) ||
-      (m.itemCode || '').toLowerCase().includes(q) ||
-      (m.item_code || '').toLowerCase().includes(q) ||
+      st.includes(q) ||
       (m.category || '').toLowerCase().includes(q) ||
       (m.color || '').toLowerCase().includes(q) ||
-      (m.location || '').toLowerCase().includes(q)
+      (m.location || '').toLowerCase().includes(q) ||
+      (m.poNumber || '').toLowerCase().includes(q) ||
+      (m.vendorName || '').toLowerCase().includes(q)
     );
   });
 
@@ -1690,8 +1755,7 @@ export default function SettingsView({
           <table className="custom-table">
             <thead>
               <tr>
-                <th style={{ width: '85px', minWidth: '80px' }}>ID</th>
-                <th style={{ width: '130px', minWidth: '110px' }}>Item Code</th>
+                <th style={{ width: '130px', minWidth: '110px' }}>ST ID</th>
                 <th>Material Name</th>
                 <th>Category</th>
                 <th>Stock Level</th>
@@ -1701,85 +1765,101 @@ export default function SettingsView({
             <tbody>
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                     No raw materials match your search query.
                   </td>
                 </tr>
               ) : (
-                filteredMaterials.map(m => (
-                  <tr key={m.id}>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: '12px' }}>{m.id}</td>
-                    <td>
-                      <span className="badge" style={{
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        color: '#2563eb',
-                        border: '1px solid rgba(59, 130, 246, 0.25)',
-                        fontFamily: 'monospace',
-                        fontWeight: '800',
-                        fontSize: '12px',
-                        padding: '3px 8px',
-                        borderRadius: '6px',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '4px'
-                      }}>
-                        {m.itemCode || m.item_code || m.id}
-                      </span>
-                    </td>
-                    <td>
-                      <strong style={{ display: 'block', fontSize: '14px' }}>{m.name}</strong>
-                      {m.color && m.color !== 'Default' && (
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Color: {m.color}</span>
-                      )}
-                      {m.location && m.location !== 'Default' && (
-                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block' }}>Location: {m.location}</span>
-                      )}
-                    </td>
-                    <td style={{ textTransform: 'capitalize' }}>{m.category}</td>
-                    <td>
-                      <span style={{
-                        fontWeight: '700',
-                        color: m.stock <= m.threshold ? 'var(--danger)' : 'var(--text-main)'
-                      }}>
-                        {m.stock} {m.unit}
-                      </span>
-                      {m.stock <= m.threshold && (
-                        <span style={{
-                          marginLeft: '6px', fontSize: '10px', fontWeight: '700',
-                          backgroundColor: 'var(--danger-light)', color: 'var(--danger)',
-                          padding: '2px 6px', borderRadius: '4px'
+                filteredMaterials.map(m => {
+                  const stCode = getSTCode(m);
+                  return (
+                    <tr key={m.id}>
+                      <td>
+                        <span className="badge" style={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          color: '#2563eb',
+                          border: '1px solid rgba(59, 130, 246, 0.25)',
+                          fontFamily: 'monospace',
+                          fontWeight: '800',
+                          fontSize: '12px',
+                          padding: '3px 8px',
+                          borderRadius: '6px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px'
                         }}>
-                          LOW STOCK
+                          {stCode}
                         </span>
-                      )}
-                    </td>
+                      </td>
+                      <td>
+                        <strong style={{ display: 'block', fontSize: '14px' }}>{m.name}</strong>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                          {m.poNumber && m.poNumber !== 'N/A' && (
+                            <span style={{ fontSize: '11px', color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                              PO: {m.poNumber}
+                            </span>
+                          )}
+                          {m.vendorName && (
+                            <span style={{ fontSize: '11px', color: '#15803d', background: '#dcfce7', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                              Vendor: {m.vendorName}
+                            </span>
+                          )}
+                          {m.color && m.color !== 'Default' && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Color: {m.color}</span>
+                          )}
+                          {m.location && m.location !== 'Default' && (
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Loc: {m.location}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ textTransform: 'capitalize' }}>{m.category}</td>
+                      <td>
+                        <span style={{
+                          fontWeight: '700',
+                          color: m.stock <= m.threshold ? 'var(--danger)' : 'var(--text-main)'
+                        }}>
+                          {m.stock} {m.unit}
+                        </span>
+                        {m.stock <= m.threshold && (
+                          <span style={{
+                            marginLeft: '6px', fontSize: '10px', fontWeight: '700',
+                            backgroundColor: 'var(--danger-light)', color: 'var(--danger)',
+                            padding: '2px 6px', borderRadius: '4px'
+                          }}>
+                            LOW STOCK
+                          </span>
+                        )}
+                      </td>
 
-                    <td style={{ textAlign: 'right' }}>
-                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => {
-                            setEditingMaterial(m);
-                            setMatItemCode(m.itemCode || m.item_code || m.id || '');
-                            setMatName(m.name || '');
-                            setMatCategory(m.category || 'FABRICS');
-                            setMatStock(m.stock !== undefined ? m.stock : '');
-                            setMatUnit(m.unit || 'Pcs');
-                            setMatCost(m.cost !== undefined ? m.cost : 0);
-                            setMatThreshold(m.threshold !== undefined ? m.threshold : 50);
-                            setMatColor(m.color || '');
-                            setMatLocation(m.location || '');
-                            setMatError('');
-                          }}
-                          style={{ padding: '6px' }}
-                          title="Edit material details"
-                        >
-                          <Edit size={14} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      <td style={{ textAlign: 'right' }}>
+                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => {
+                              setEditingMaterial(m);
+                              setMatItemCode(stCode);
+                              setMatName(m.name || '');
+                              setMatCategory(m.category || 'FABRICS');
+                              setMatStock(m.stock !== undefined ? m.stock : '');
+                              setMatUnit(m.unit || 'Pcs');
+                              setMatCost(m.cost !== undefined ? m.cost : 0);
+                              setMatThreshold(m.threshold !== undefined ? m.threshold : 50);
+                              setMatColor(m.color || '');
+                              setMatLocation(m.location || '');
+                              setMatPoNumber(m.poNumber && m.poNumber !== 'N/A' ? m.poNumber : '');
+                              setMatVendorName(m.vendorName || m.vendor || m.supplier || '');
+                              setMatError('');
+                            }}
+                            style={{ padding: '6px' }}
+                            title="Edit material details"
+                          >
+                            <Edit size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -1815,7 +1895,7 @@ export default function SettingsView({
 
               <div className="form-grid">
                 <div className="form-group">
-                  <label className="form-label">Item Code (Master Code)</label>
+                  <label className="form-label">ST ID (Master Item Code)</label>
                   <input
                     type="text"
                     className="form-input"
@@ -1941,6 +2021,42 @@ export default function SettingsView({
                 </div>
               </div>
 
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">PO Number (Purchase Order No)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={matPoNumber}
+                    onChange={(e) => setMatPoNumber(e.target.value)}
+                    placeholder="e.g. PO-84102, PO-1029..."
+                    list="settings-po-suggestions"
+                  />
+                  <datalist id="settings-po-suggestions">
+                    {poSuggestions.map((p, idx) => (
+                      <option key={idx} value={p} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Vendor / Supplier Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={matVendorName}
+                    onChange={(e) => setMatVendorName(e.target.value)}
+                    placeholder="e.g. YKK India, Vardhman, Apex Trims..."
+                    list="settings-vendor-suggestions"
+                  />
+                  <datalist id="settings-vendor-suggestions">
+                    {vendorSuggestions.map((v, idx) => (
+                      <option key={idx} value={v} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '20px' }}>
                 <button
                   type="button"
@@ -1990,11 +2106,11 @@ export default function SettingsView({
 
               <div className="form-grid">
                 <div className="form-group">
-                  <label className="form-label">Item Code (Master Code)</label>
+                  <label className="form-label">ST ID (Master Item Code)</label>
                   <input
                     type="text"
                     className="form-input"
-                    placeholder="e.g. ST00001 (or auto-generated)"
+                    placeholder="e.g. ST00001 (auto-generated if empty)"
                     value={matItemCode}
                     onChange={(e) => setMatItemCode(e.target.value)}
                     style={{ fontFamily: 'monospace', fontWeight: '700' }}
@@ -2117,6 +2233,42 @@ export default function SettingsView({
                     value={matLocation}
                     onChange={(e) => setMatLocation(e.target.value)}
                   />
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">PO Number (Purchase Order No)</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. PO-84102, PO-1029..."
+                    value={matPoNumber}
+                    onChange={(e) => setMatPoNumber(e.target.value)}
+                    list="settings-po-suggestions-add"
+                  />
+                  <datalist id="settings-po-suggestions-add">
+                    {poSuggestions.map((p, idx) => (
+                      <option key={idx} value={p} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Vendor / Supplier Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. YKK India, Vardhman, Apex Trims..."
+                    value={matVendorName}
+                    onChange={(e) => setMatVendorName(e.target.value)}
+                    list="settings-vendor-suggestions-add"
+                  />
+                  <datalist id="settings-vendor-suggestions-add">
+                    {vendorSuggestions.map((v, idx) => (
+                      <option key={idx} value={v} />
+                    ))}
+                  </datalist>
                 </div>
               </div>
 

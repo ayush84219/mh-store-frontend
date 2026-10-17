@@ -45,6 +45,7 @@ const OnlyCutting = lazy(() => import('./components/OnlyCutting'));
 const BoneIssueView = lazy(() => import('./components/BoneIssueView'));
 const ElasticIssueView = lazy(() => import('./components/ElasticIssueView'));
 const ElasticTapeIssueView = lazy(() => import('./components/ElasticTapeIssueView'));
+const ChallanView = lazy(() => import('./components/ChallanView'));
 const WithoutBomMaterialIssueView = lazy(() => import('./components/WithoutBomMaterialIssueView'));
 const AllIssuedAndAddedReport = lazy(() => import('./components/AllIssuedAndAddedReport'));
 import ErrorBoundary from './components/ErrorBoundary';
@@ -96,7 +97,8 @@ const hasTabAccess = (tabName, role) => {
       'po_verification',
       're_download',
       'only_cutting',
-      'item_codes'
+      'item_codes',
+      'challan'
     ].includes(tabName);
   }
   if (panel === 'designer') {
@@ -190,6 +192,7 @@ const TAB_ROUTES = {
   only_cutting: '/only-cutting',
   item_codes: '/item-codes',
   movement_report: '/movement-report',
+  challan: '/challan',
 };
 
 const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
@@ -215,7 +218,9 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/reports/all-issued-added': 'movement_report',
   '/reports/movement-register': 'movement_report',
   '/all-issued-added': 'movement_report',
-  '/movement-report': 'movement_report'
+  '/movement-report': 'movement_report',
+  '/challan': 'challan',
+  '/component-challan': 'challan'
 });
 
 export default function App() {
@@ -572,7 +577,8 @@ export default function App() {
       movement_report: 'All Issued & Added Report',
       settings: 'Setting',
       approval_queue: currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests',
-      item_codes: 'Item Code Generator'
+      item_codes: 'Item Code Generator',
+      challan: 'Component Issue Challan'
     };
     const title = pageTitles[activeTab] || 'MH Store';
     document.title = `Garment PDMS - ${title}`;
@@ -2232,6 +2238,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
                       <span className="sidebar-text">Elastic & Tape Issue</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'challan' ? 'active' : ''}`} onClick={() => handleTabClick('challan')} title="Component Challan">
+                      <span className="sidebar-text">📦 Component Challan</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                       <span className="sidebar-text">Extra Material Issue</span>
                     </li>
@@ -2387,6 +2396,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
                   <FileText size={18} />
                   <span className="sidebar-text">Elastic & Tape Issue</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'challan' ? 'active' : ''}`} onClick={() => handleTabClick('challan')} title="Component Challan">
+                  <FileSpreadsheet size={18} />
+                  <span className="sidebar-text">Component Challan</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                   <Sparkles size={18} />
@@ -2547,6 +2560,7 @@ export default function App() {
                 {(activeTab === 'bone_issue' || activeTab === 'bone_po') && 'Bone Issue'}
                 {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && 'Elastic Issue'}
                 {activeTab === 'elastic_tape_issue' && 'Elastic & Tape Issue'}
+                {activeTab === 'challan' && 'Component Issue Challan'}
                 {activeTab === 'generate_po' && 'Generate PO'}
                 {activeTab === 'item_codes' && 'Item Code Generator & Master Registry'}
                 {activeTab === 'history' && 'Production Work'}
@@ -3003,6 +3017,15 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'challan' && (
+                <ChallanView
+                  currentUser={currentUser}
+                  currencySymbol={currencySymbol}
+                  prefilledLotNo={prefilledLotNo}
+                  onNavigate={setActiveTab}
+                />
+              )}
+
               {activeTab === 'material_details' && (
                 <MaterialDetailsView
                   materials={materials}
@@ -3080,6 +3103,7 @@ export default function App() {
                 <SettingsView
                   currentUser={currentUser}
                   vendors={vendors}
+                  pos={pos}
                   onAddVendor={handleAddVendor}
                   onDeleteVendor={handleDeleteVendor}
                   currencySymbol={currencySymbol}

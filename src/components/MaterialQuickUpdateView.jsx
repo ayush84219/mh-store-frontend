@@ -1100,7 +1100,9 @@ export default function MaterialQuickUpdateView({
                         }}
                       >
                         <div>
-                          <strong style={{ color: '#059669', fontSize: '14px', marginRight: '8px' }}>{m.id}</strong>
+                          <strong style={{ color: '#059669', fontSize: '14px', marginRight: '8px' }}>
+                            {m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id))}
+                          </strong>
                           <span style={{ color: '#0f172a', fontWeight: '700', fontSize: '13px' }}>{m.name}</span>
                           <span style={{ color: '#64748b', fontSize: '11.5px', marginLeft: '8px' }}>({m.category || 'General'})</span>
                         </div>

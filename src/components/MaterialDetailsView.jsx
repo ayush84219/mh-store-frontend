@@ -3720,7 +3720,7 @@ export default function MaterialDetailsView({
                       {idx + 1}
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 6px', fontFamily: 'monospace', fontWeight: '800', fontSize: '10.5px' }}>
-                      {m.id}
+                      {m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id))}
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 8px' }}>
                       <div style={{ fontWeight: '700', fontSize: '10.5px' }}>{m.name}</div>

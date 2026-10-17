@@ -1,14 +1,677 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
-  ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale
+  ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale,
+  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import SmartSelectWithManual from './SmartSelectWithManual';
+
+// ── Accessory Unit Normalizer: Mtr, Roll, Pcs, Box, Pkt, Cone, Kg, etc. ──
+export const normalizeAccUnit = (rawUnit) => {
+  if (!rawUnit) return 'Roll';
+  const s = String(rawUnit).trim();
+  if (/^m(eter|tr)?s?$/i.test(s)) return 'Mtr';
+  if (/^p(ie)?ce?s?$/i.test(s)) return 'Pcs';
+  if (/^rolls?$/i.test(s)) return 'Roll';
+  if (/^box(es)?$/i.test(s)) return 'Box';
+  if (/^pkts?|packets?$/i.test(s)) return 'Pkt';
+  if (/^cones?$/i.test(s)) return 'Cone';
+  if (/^kg(s)?|kilograms?$/i.test(s)) return 'Kg';
+  if (/^doz(en)?s?$/i.test(s)) return 'Dozen';
+  if (/^gross$/i.test(s)) return 'Gross';
+  return s;
+};
+
+// ── Rich Searchable Material Selector with Photos, Live Search & Category Chips ──
+function SearchableMaterialSelect({
+  materials = [],
+  value = '',
+  onChange,
+  disabled = false,
+  placeholder = "-- Select Material --",
+  themeColor = '#7c3aed',
+  componentHint = '',
+  onPreviewPhoto = () => {},
+  compact = false,
+  showCategoryFilter = true
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 340, isAbove: false });
+  const containerRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  const selectedMaterial = useMemo(() => {
+    return (materials || []).find(m => String(m.id) === String(value));
+  }, [materials, value]);
+
+  // Extract unique categories for quick-filter tabs
+  const categories = useMemo(() => {
+    const counts = {};
+    (materials || []).forEach(m => {
+      const cat = (m.category || 'Accessory').trim();
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    const uniqueCats = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    return [{ name: 'ALL', count: (materials || []).length }, ...uniqueCats.map(c => ({ name: c, count: counts[c] }))];
+  }, [materials]);
+
+  // Handle escape key
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isOpen) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen]);
+
+  // Position calculation for popover portal
+  const updateCoords = () => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const isAbove = spaceBelow < 340 && rect.top > 340;
+      const desiredWidth = Math.min(680, Math.max(rect.width, 520));
+      setCoords({
+        top: isAbove ? rect.top : rect.bottom + 6,
+        left: Math.max(10, Math.min(rect.left, window.innerWidth - desiredWidth - 14)),
+        width: desiredWidth,
+        isAbove
+      });
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      updateCoords();
+      const handleReposition = () => updateCoords();
+      window.addEventListener('resize', handleReposition);
+      window.addEventListener('scroll', handleReposition, true);
+      const timer = setTimeout(() => {
+        if (searchInputRef.current) searchInputRef.current.focus();
+      }, 60);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener('resize', handleReposition);
+        window.removeEventListener('scroll', handleReposition, true);
+      };
+    }
+  }, [isOpen]);
+
+  // Click outside listener
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        containerRef.current && !containerRef.current.contains(event.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(event.target)
+      ) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isOpen]);
+
+  // Filtered materials
+  const filtered = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return (materials || []).filter(m => {
+      // 1. Category check
+      if (selectedCategory !== 'ALL') {
+        const cat = (m.category || '').toLowerCase();
+        if (cat !== selectedCategory.toLowerCase()) return false;
+      }
+      // 2. Query check
+      if (!q) return true;
+      const idStr = String(m.id || '').toLowerCase();
+      const itemCodeStr = String(m.itemCode || '').toLowerCase();
+      const nameStr = String(m.name || '').toLowerCase();
+      const catStr = String(m.category || '').toLowerCase();
+      const locStr = String(m.location || '').toLowerCase();
+      const colorStr = String(m.color || '').toLowerCase();
+      return idStr.includes(q) || itemCodeStr.includes(q) || nameStr.includes(q) || catStr.includes(q) || locStr.includes(q) || colorStr.includes(q);
+    }).sort((a, b) => {
+      const aHasImg = (a.imageUrl || a.image || a.photo || a.imgUrl) ? 1 : 0;
+      const bHasImg = (b.imageUrl || b.image || b.photo || b.imgUrl) ? 1 : 0;
+      const aStock = Number(a.stock) || 0;
+      const bStock = Number(b.stock) || 0;
+      if (aStock > 0 && bStock <= 0) return -1;
+      if (bStock > 0 && aStock <= 0) return 1;
+      if (bHasImg !== aHasImg) return bHasImg - aHasImg;
+      return bStock - aStock;
+    });
+  }, [materials, searchQuery, selectedCategory]);
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', width: '100%' }}>
+      {/* Trigger Box */}
+      <div
+        onClick={() => {
+          if (disabled) return;
+          if (!isOpen) {
+            updateCoords();
+            setSearchQuery('');
+          }
+          setIsOpen(!isOpen);
+        }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          width: '100%',
+          minHeight: compact ? '36px' : '46px',
+          padding: compact ? '4px 8px' : '6px 12px',
+          borderRadius: '8px',
+          border: `1.5px solid ${isOpen ? themeColor : '#cbd5e1'}`,
+          background: disabled ? '#f8fafc' : '#ffffff',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          boxShadow: isOpen ? `0 0 0 3px ${themeColor}22` : 'none',
+          boxSizing: 'border-box',
+          gap: '8px',
+          transition: 'all 0.15s ease'
+        }}
+      >
+        {selectedMaterial ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            {/* Selected Photo Thumbnail */}
+            {(() => {
+              const rawImg = selectedMaterial.imageUrl || selectedMaterial.image || selectedMaterial.photo || selectedMaterial.imgUrl;
+              const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+              return (
+                <div
+                  onClick={(e) => {
+                    if (cleanImg) {
+                      e.stopPropagation();
+                      onPreviewPhoto({
+                        url: cleanImg,
+                        title: selectedMaterial.name,
+                        code: selectedMaterial.itemCode || selectedMaterial.id,
+                        stock: `${selectedMaterial.stock || 0} ${normalizeAccUnit(selectedMaterial.unit)}`,
+                        location: selectedMaterial.location || 'Main Store'
+                      });
+                    }
+                  }}
+                  title={cleanImg ? "Click to view photo fullscreen" : "No photo available"}
+                  style={{
+                    width: compact ? '26px' : '34px',
+                    height: compact ? '26px' : '34px',
+                    borderRadius: '6px',
+                    border: cleanImg ? `1.5px solid ${themeColor}` : '1px dashed #cbd5e1',
+                    background: cleanImg ? '#ffffff' : '#f8fafc',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    overflow: 'hidden',
+                    cursor: cleanImg ? 'zoom-in' : 'pointer',
+                    position: 'relative'
+                  }}
+                >
+                  {cleanImg ? (
+                    <img src={cleanImg} alt={selectedMaterial.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <Package size={compact ? 13 : 16} color="#94a3b8" />
+                  )}
+                </div>
+              );
+            })()}
+
+            <span style={{
+              fontFamily: 'monospace',
+              fontWeight: '800',
+              fontSize: '11px',
+              color: themeColor,
+              background: `${themeColor}15`,
+              border: `1px solid ${themeColor}30`,
+              padding: '2px 6px',
+              borderRadius: '4px',
+              flexShrink: 0
+            }}>
+              {selectedMaterial.itemCode || selectedMaterial.id}
+            </span>
+
+            <span style={{
+              fontSize: compact ? '12px' : '13px',
+              fontWeight: '800',
+              color: '#0f172a',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis'
+            }}>
+              {selectedMaterial.name}
+            </span>
+
+            {selectedMaterial.category && (
+              <span style={{
+                fontSize: '10px',
+                fontWeight: '700',
+                color: '#475569',
+                background: '#f1f5f9',
+                padding: '1px 6px',
+                borderRadius: '4px',
+                flexShrink: 0
+              }}>
+                {selectedMaterial.category}
+              </span>
+            )}
+
+            <span style={{
+              fontSize: '11px',
+              fontWeight: '800',
+              color: (Number(selectedMaterial.stock) || 0) > 0 ? '#059669' : '#dc2626',
+              background: (Number(selectedMaterial.stock) || 0) > 0 ? '#ecfdf5' : '#fef2f2',
+              border: `1px solid ${(Number(selectedMaterial.stock) || 0) > 0 ? '#a7f3d0' : '#fecaca'}`,
+              padding: '1px 6px',
+              borderRadius: '4px',
+              flexShrink: 0
+            }}>
+              Stock: {selectedMaterial.stock || 0} {normalizeAccUnit(selectedMaterial.unit)}
+            </span>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: compact ? '12px' : '13px' }}>
+            <Search size={compact ? 13 : 15} color={themeColor} />
+            <span style={{ fontWeight: '600' }}>{placeholder}</span>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          {selectedMaterial && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange('');
+              }}
+              title="Clear selection"
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: '#94a3b8',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                borderRadius: '4px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <X size={14} />
+            </button>
+          )}
+          <ChevronDown
+            size={16}
+            color="#64748b"
+            style={{
+              transform: isOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 0.2s ease'
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Popover Dropdown Portal with Photos & Instant Search */}
+      {isOpen && !disabled && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            ...(coords.isAbove
+              ? { bottom: `${window.innerHeight - coords.top + 6}px` }
+              : { top: `${coords.top}px` }),
+            left: `${coords.left}px`,
+            width: `${coords.width}px`,
+            maxWidth: 'calc(100vw - 20px)',
+            border: '1.5px solid #cbd5e1',
+            borderRadius: '12px',
+            boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25), 0 4px 12px rgba(0, 0, 0, 0.08)',
+            backgroundColor: '#ffffff',
+            color: '#0f172a',
+            zIndex: 9999999,
+            padding: '12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            boxSizing: 'border-box',
+            animation: 'fadeIn 0.15s ease'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '4px', borderBottom: '1px solid #f1f5f9' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '800', color: themeColor, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                STORE INVENTORY ACCESSORIES
+              </span>
+              <span style={{ fontSize: '10px', background: `${themeColor}15`, color: themeColor, padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                {materials.length} Items
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              style={{
+                border: 'none', background: 'transparent', color: '#94a3b8',
+                cursor: 'pointer', padding: '2px', display: 'flex'
+              }}
+            >
+              <X size={15} />
+            </button>
+          </div>
+
+          {/* Search Input Box */}
+          <div style={{ position: 'relative', width: '100%' }}>
+            <Search size={15} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search by Item Code, Name, Category, Location, Color..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                width: '100%',
+                height: '36px',
+                padding: '4px 30px 4px 32px',
+                fontSize: '12.5px',
+                borderRadius: '8px',
+                border: `1.5px solid ${themeColor}`,
+                outline: 'none',
+                background: '#faf5ff',
+                color: '#0f172a',
+                boxSizing: 'border-box'
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)',
+                  border: 'none', background: 'transparent', color: '#94a3b8', cursor: 'pointer', padding: 0
+                }}
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {/* Category Filter Chips Bar */}
+          {showCategoryFilter && categories.length > 2 && (
+            <div style={{
+              display: 'flex',
+              gap: '4px',
+              overflowX: 'auto',
+              paddingBottom: '4px',
+              scrollbarWidth: 'thin'
+            }}>
+              {categories.map(cat => {
+                const isCatActive = selectedCategory === cat.name;
+                return (
+                  <button
+                    key={cat.name}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.name)}
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: '12px',
+                      border: isCatActive ? `1.5px solid ${themeColor}` : '1px solid #e2e8f0',
+                      background: isCatActive ? themeColor : '#f8fafc',
+                      color: isCatActive ? '#ffffff' : '#475569',
+                      fontSize: '10.5px',
+                      fontWeight: isCatActive ? '800' : '600',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <span>{cat.name}</span>
+                    <span style={{
+                      fontSize: '9px',
+                      opacity: 0.85,
+                      background: isCatActive ? 'rgba(255,255,255,0.25)' : '#e2e8f0',
+                      padding: '0 4px',
+                      borderRadius: '8px'
+                    }}>
+                      {cat.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Items Scrollable List with Photo Gallery */}
+          <div style={{
+            maxHeight: '340px',
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '3px',
+            paddingRight: '2px'
+          }}>
+            {/* Clear option */}
+            <div
+              onClick={() => {
+                onChange('');
+                setIsOpen(false);
+              }}
+              style={{
+                padding: '6px 10px',
+                fontSize: '11.5px',
+                cursor: 'pointer',
+                borderRadius: '6px',
+                color: '#64748b',
+                fontStyle: 'italic',
+                backgroundColor: value === '' ? `${themeColor}12` : '#f8fafc'
+              }}
+            >
+              -- Clear / Select Material --
+            </div>
+
+            {filtered.length === 0 ? (
+              <div style={{ padding: '24px 10px', fontSize: '12px', color: '#94a3b8', textAlign: 'center' }}>
+                <Package size={24} style={{ display: 'block', margin: '0 auto 6px auto', opacity: 0.6 }} />
+                No materials found matching "{searchQuery}"
+              </div>
+            ) : (
+              filtered.map(m => {
+                const isSelected = String(m.id) === String(value);
+                const rawImg = m.imageUrl || m.image || m.photo || m.imgUrl;
+                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                const inStock = (Number(m.stock) || 0) > 0;
+
+                return (
+                  <div
+                    key={m.id}
+                    onClick={() => {
+                      onChange(m.id);
+                      setIsOpen(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '7px 10px',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      background: isSelected ? `${themeColor}12` : '#ffffff',
+                      border: isSelected ? `1.5px solid ${themeColor}` : '1px solid #f1f5f9',
+                      borderLeft: isSelected ? `4px solid ${themeColor}` : '1px solid #f1f5f9',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = `${themeColor}0a`;
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isSelected) e.currentTarget.style.background = '#ffffff';
+                    }}
+                  >
+                    {/* Material Photo Thumbnail with Zoom Option */}
+                    <div
+                      onClick={(e) => {
+                        if (cleanImg) {
+                          e.stopPropagation();
+                          onPreviewPhoto({
+                            url: cleanImg,
+                            title: m.name,
+                            code: m.itemCode || m.id,
+                            stock: `${m.stock || 0} ${m.unit || 'Roll'}`,
+                            location: m.location || 'Main Store'
+                          });
+                        }
+                      }}
+                      title={cleanImg ? "Click to view photo fullscreen" : "No photo available"}
+                      style={{
+                        width: '42px',
+                        height: '42px',
+                        borderRadius: '7px',
+                        border: cleanImg ? `1.5px solid ${themeColor}` : '1px dashed #cbd5e1',
+                        background: cleanImg ? '#ffffff' : '#f8fafc',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        overflow: 'hidden',
+                        position: 'relative',
+                        cursor: cleanImg ? 'zoom-in' : 'pointer',
+                        boxShadow: cleanImg ? '0 2px 5px rgba(0,0,0,0.08)' : 'none'
+                      }}
+                    >
+                      {cleanImg ? (
+                        <>
+                          <img
+                            src={cleanImg}
+                            alt={m.name}
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          <div
+                            style={{
+                              position: 'absolute',
+                              inset: 0,
+                              background: 'rgba(0,0,0,0.3)',
+                              opacity: 0,
+                              transition: 'opacity 0.15s ease',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#ffffff'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.opacity = '0'; }}
+                          >
+                            <ZoomIn size={14} />
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: '#94a3b8' }}>
+                          <Package size={17} />
+                          <span style={{ fontSize: '7px', fontWeight: '700', textTransform: 'uppercase' }}>No Photo</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Material Information */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{
+                          fontSize: '11px',
+                          fontFamily: 'monospace',
+                          fontWeight: '800',
+                          color: themeColor,
+                          background: `${themeColor}15`,
+                          padding: '1px 5px',
+                          borderRadius: '4px',
+                          border: `1px solid ${themeColor}30`
+                        }}>
+                          {m.itemCode || m.id}
+                        </span>
+                        <span style={{
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          color: isSelected ? themeColor : '#0f172a',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          maxWidth: '300px'
+                        }}>
+                          {m.name}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                        {m.category && (
+                          <span style={{
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            color: '#475569',
+                            background: '#f1f5f9',
+                            padding: '1px 5px',
+                            borderRadius: '4px'
+                          }}>
+                            {m.category}
+                          </span>
+                        )}
+                        {m.color && m.color !== 'Default' && (
+                          <span style={{ fontSize: '10px', color: '#64748b' }}>
+                            • {m.color}
+                          </span>
+                        )}
+                        {m.location && (
+                          <span style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                            <MapPin size={9} color={themeColor} /> {m.location}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Stock badge & Selected indicator */}
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        color: inStock ? '#059669' : '#dc2626',
+                        background: inStock ? '#ecfdf5' : '#fef2f2',
+                        border: `1px solid ${inStock ? '#a7f3d0' : '#fecaca'}`,
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        display: 'inline-block'
+                      }}>
+                        {m.stock || 0} {normalizeAccUnit(m.unit)}
+                      </span>
+                      {isSelected && (
+                        <div style={{ fontSize: '10px', fontWeight: '800', color: themeColor, marginTop: '2px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '2px' }}>
+                          <Check size={11} /> Selected
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
 
 export default function ElasticIssueView({
   currencySymbol = '₹',
@@ -26,6 +689,79 @@ export default function ElasticIssueView({
   const [lotDetails, setLotDetails] = useState(null);
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
+
+  // ── Cutting Details Cache & 30-Minute Auto-Reload ───────────────────────────
+  const CUTTING_CACHE_MAX_ENTRIES = 100;
+  const CUTTING_CACHE_RELOAD_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+  const [cuttingHeaders, setCuttingHeaders] = useState([]);
+  const [lastCuttingCacheReload, setLastCuttingCacheReload] = useState(() => new Date());
+  const [isReloadingCuttingCache, setIsReloadingCuttingCache] = useState(false);
+  const [cuttingCacheRefreshCount, setCuttingCacheRefreshCount] = useState(0);
+  const [cacheReloadNotice, setCacheReloadNotice] = useState('');
+  const matrixCacheRef = useRef({});
+
+  // ── Active Lot Cutting Details State & Matrix ──
+  const [activeLotCutting, setActiveLotCutting] = useState(null);
+  const [loadingActiveLotCutting, setLoadingActiveLotCutting] = useState(false);
+  const [showActiveCuttingMatrix, setShowActiveCuttingMatrix] = useState(false);
+
+  // Reload cache function: empties in-memory matrix cache and reloads cutting headers from MySQL
+  const reloadCuttingCache = useCallback(async (manual = false) => {
+    setIsReloadingCuttingCache(true);
+    matrixCacheRef.current = {};
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCuttingHeaders(data);
+        }
+      }
+      setLastCuttingCacheReload(new Date());
+      setCuttingCacheRefreshCount(c => c + 1);
+      if (manual) {
+        setCacheReloadNotice('✓ Cache emptied & reloaded');
+        setTimeout(() => setCacheReloadNotice(''), 3500);
+      }
+    } catch (err) {
+      console.warn('Failed to reload cutting headers cache:', err);
+    } finally {
+      setIsReloadingCuttingCache(false);
+    }
+  }, []);
+
+  // Auto-reload every 30 minutes and on initial mount
+  useEffect(() => {
+    reloadCuttingCache(false);
+    const intervalId = setInterval(() => {
+      reloadCuttingCache(false);
+    }, CUTTING_CACHE_RELOAD_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [reloadCuttingCache]);
+
+  // Dynamically extract all distinct size columns present in cutting matrix rows
+  const activeSizes = useMemo(() => {
+    if (!activeLotCutting || !activeLotCutting.rows || activeLotCutting.rows.length === 0) return [];
+    const sizeSet = new Set();
+    activeLotCutting.rows.forEach(r => {
+      if (r.sizes && typeof r.sizes === 'object') {
+        Object.keys(r.sizes).forEach(sz => {
+          if (Number(r.sizes[sz]) > 0) sizeSet.add(sz);
+        });
+      }
+    });
+    const standardOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', 'XXL', '3XL', 'XXXL', '4XL', '5XL', 'FREE', 'FS'];
+    return Array.from(sizeSet).sort((a, b) => {
+      const idxA = standardOrder.indexOf(a.toUpperCase());
+      const idxB = standardOrder.indexOf(b.toUpperCase());
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [activeLotCutting]);
+
+
 
   // BOM & Design Verification States
   const [designs, setDesigns] = useState([]);
@@ -212,6 +948,7 @@ export default function ElasticIssueView({
   const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
   const [selectedOtherMaterialId, setSelectedOtherMaterialId] = useState('');
   const [otherEntryMode, setOtherEntryMode] = useState('choose'); // 'choose' | 'manual'
+  const [selectedOtherCategory, setSelectedOtherCategory] = useState('ALL'); // 'ALL' | 'Tape' | 'Button' | 'Lace' | 'Drawcord' | 'Zipper' | 'Label' | 'Badge' | 'Eyelet'
   const [customOtherNames, setCustomOtherNames] = useState(() => {
     try {
       const s = localStorage.getItem('gpdms_custom_other_names');
@@ -275,8 +1012,39 @@ export default function ElasticIssueView({
 
   // Filter materials to show Other Accessories (Trims & Accessories from store inventory)
   const otherMaterials = useMemo(() => {
-    return (materials || []);
-  }, [materials]);
+    if (!materials || materials.length === 0) return [];
+    if (selectedOtherCategory === 'ALL') return materials;
+    const filterKey = selectedOtherCategory.toLowerCase();
+    return materials.filter(m => {
+      const name = (m.name || '').toLowerCase();
+      const cat = (m.category || '').toLowerCase();
+      if (filterKey === 'tape') {
+        return name.includes('tape') || cat.includes('tape') || name.includes('ribbon') || cat.includes('ribbon') || name.includes('niwar');
+      }
+      if (filterKey === 'button') {
+        return name.includes('button') || cat.includes('button') || name.includes('snap') || cat.includes('snap') || name.includes('kaj');
+      }
+      if (filterKey === 'lace') {
+        return name.includes('lace') || cat.includes('lace') || name.includes('gota') || cat.includes('gota') || name.includes('crochet');
+      }
+      if (filterKey === 'drawcord') {
+        return name.includes('dori') || cat.includes('dori') || name.includes('cord') || cat.includes('cord') || name.includes('rope');
+      }
+      if (filterKey === 'zipper') {
+        return name.includes('zip') || cat.includes('zip') || name.includes('chain') || cat.includes('runner');
+      }
+      if (filterKey === 'label') {
+        return name.includes('label') || cat.includes('label') || name.includes('tag') || cat.includes('tag');
+      }
+      if (filterKey === 'badge') {
+        return name.includes('patch') || cat.includes('patch') || name.includes('badge') || cat.includes('badge') || name.includes('matel patch');
+      }
+      if (filterKey === 'eyelet') {
+        return name.includes('eyelet') || cat.includes('eyelet') || name.includes('grommet') || name.includes('ring');
+      }
+      return name.includes(filterKey) || cat.includes(filterKey);
+    });
+  }, [materials, selectedOtherCategory]);
 
   const currentOtherMaterial = useMemo(() => {
     return (materials || []).find(m => String(m.id) === String(selectedOtherMaterialId)) || null;
@@ -289,8 +1057,51 @@ export default function ElasticIssueView({
     if (mat) {
       setOtherMaterialName(mat.name);
       if (mat.unit) {
-        setOtherUnit(mat.unit);
+        const detectedUnit = normalizeAccUnit(mat.unit);
+        setOtherUnit(detectedUnit);
+        setIsManualOtherUnit(false);
       }
+    }
+  };
+
+  // Quick Component Category Picker (Tape, Button, Lace, Drawcord, Zipper, etc.)
+  const handleSelectComponentCategory = (catName, defaultUnit = 'Pcs') => {
+    setSelectedOtherCategory(catName);
+    if (catName === 'ALL') {
+      return;
+    }
+    const filterKey = catName.toLowerCase();
+    const matching = (materials || []).filter(m => {
+      const name = (m.name || '').toLowerCase();
+      const cat = (m.category || '').toLowerCase();
+      if (filterKey === 'tape') return name.includes('tape') || cat.includes('tape') || name.includes('ribbon') || cat.includes('ribbon') || name.includes('niwar');
+      if (filterKey === 'button') return name.includes('button') || cat.includes('button') || name.includes('snap') || cat.includes('snap');
+      if (filterKey === 'lace') return name.includes('lace') || cat.includes('lace') || name.includes('gota') || cat.includes('gota');
+      if (filterKey === 'drawcord') return name.includes('dori') || cat.includes('dori') || name.includes('cord') || cat.includes('cord');
+      if (filterKey === 'zipper') return name.includes('zip') || cat.includes('zip') || name.includes('chain') || cat.includes('runner');
+      if (filterKey === 'label') return name.includes('label') || cat.includes('label') || name.includes('tag') || cat.includes('tag');
+      if (filterKey === 'badge') return name.includes('patch') || cat.includes('patch') || name.includes('badge') || cat.includes('badge');
+      if (filterKey === 'eyelet') return name.includes('eyelet') || cat.includes('eyelet') || name.includes('ring');
+      return name.includes(filterKey) || cat.includes(filterKey);
+    });
+
+    if (matching.length > 0) {
+      setOtherEntryMode('choose');
+      const alreadyMatches = matching.some(m => String(m.id) === String(selectedOtherMaterialId));
+      if (!alreadyMatches) {
+        const first = matching[0];
+        setSelectedOtherMaterialId(first.id);
+        setOtherMaterialName(first.name);
+        if (first.unit) {
+          setOtherUnit(normalizeAccUnit(first.unit));
+          setIsManualOtherUnit(false);
+        }
+      }
+    } else {
+      // No materials in stock for this category: set name and smart default unit
+      setOtherMaterialName(catName);
+      setOtherUnit(defaultUnit);
+      setIsManualOtherUnit(false);
     }
   };
 
@@ -686,6 +1497,144 @@ export default function ElasticIssueView({
   useEffect(() => {
     triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, effectiveDivisor);
   }, [elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, lotDetails, issuePcs, elasticWidth, effectiveDivisor, effectiveTapeDivisor, withoutLotActive]);
+
+  // Synchronous INSTANT lookup from memory (0ms) + debounced background matrix fetch
+  useEffect(() => {
+    const rawLot = searchLotInput || lotDetails?.lotNo || prefilledLotNo || '';
+    const cleanLot = String(rawLot).trim();
+    if (!cleanLot) {
+      setActiveLotCutting(null);
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    const cleanLower = cleanLot.toLowerCase();
+
+    // 1. INSTANT (0ms) In-Memory Lookup from cuttingHeaders & designs
+    const headerMatch = (cuttingHeaders || []).find(ch => 
+      String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
+    );
+    const designMatch = (designs || []).find(d => 
+      String(d.id || '').trim().toLowerCase() === cleanLower ||
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLower
+    );
+
+    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || Number(lotDetails?.quantity) || 0;
+    const hasMemoryData = Boolean(headerMatch || designMatch || lotDetails);
+
+    setActiveLotCutting({
+      lotNumber: cleanLot,
+      totalPieces: memoryTotal,
+      style: headerMatch?.Style || designMatch?.category || lotDetails?.style || '',
+      fabric: headerMatch?.Fabric || lotDetails?.fabric || '',
+      brand: headerMatch?.Brand || designMatch?.brand || lotDetails?.brand || '',
+      partyName: headerMatch?.Party_Name || lotDetails?.partyName || '',
+      garmentType: headerMatch?.Garment_Type || lotDetails?.garmentType || '',
+      dateOfIssue: headerMatch?.Date_of_Issue || headerMatch?.JobOrder_Date || '',
+      shades: headerMatch?.Shades || lotDetails?.shade || '',
+      sizes: headerMatch?.Sizes || lotDetails?.size || '',
+      rows: matrixCacheRef.current[cleanLower]?.rows || [],
+      hasDetails: hasMemoryData
+    });
+
+    if (memoryTotal > 0) {
+      setIssuePcs(memoryTotal);
+      triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, { ...lotDetails, quantity: memoryTotal }, memoryTotal);
+    }
+    if (headerMatch?.Style || designMatch?.category) {
+      setWithoutLotStyle(headerMatch?.Style || designMatch?.category);
+    }
+
+    // If already cached in matrixCache, resolve immediately
+    if (matrixCacheRef.current[cleanLower]) {
+      const cached = matrixCacheRef.current[cleanLower];
+      const matrixRows = cached?.rows || [];
+      const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+      const resolvedTotal = matrixTotal > 0 ? matrixTotal : (memoryTotal > 0 ? memoryTotal : (Number(cached?.cuttingQty) || Number(cached?.header?.Cutting_Qty) || 0));
+      setActiveLotCutting(prev => ({
+        ...prev,
+        totalPieces: resolvedTotal,
+        rows: matrixRows,
+        hasDetails: true
+      }));
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    // 2. Debounced background fetch for detailed Color-Size Matrix (300ms)
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setLoadingActiveLotCutting(true);
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(cleanLot)}`);
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+
+        if (Object.keys(matrixCacheRef.current).length >= CUTTING_CACHE_MAX_ENTRIES) {
+          matrixCacheRef.current = {};
+        }
+
+        matrixCacheRef.current[cleanLower] = data;
+        const matrixRows = data?.rows || [];
+        const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+        const resolvedTotal = matrixTotal > 0 
+          ? matrixTotal 
+          : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
+
+        const styleVal = data?.style || data?.header?.Style || '';
+        const fabricVal = data?.fabric || data?.header?.Fabric || '';
+        const brandVal = data?.brand || data?.header?.Brand || '';
+        const partyVal = data?.partyName || data?.header?.Party_Name || '';
+        const shadesVal = data?.shades || data?.header?.Shades || '';
+        const sizesVal = data?.sizes || data?.header?.Sizes || '';
+
+        if (!isCancelled) {
+          setActiveLotCutting(prev => ({
+            ...prev,
+            totalPieces: resolvedTotal,
+            style: prev?.style || styleVal,
+            fabric: prev?.fabric || fabricVal,
+            brand: prev?.brand || brandVal,
+            partyName: prev?.partyName || partyVal,
+            shades: prev?.shades || shadesVal,
+            sizes: prev?.sizes || sizesVal,
+            rows: matrixRows,
+            hasDetails: true
+          }));
+
+          if (resolvedTotal > 0) {
+            setIssuePcs(resolvedTotal);
+            triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, { ...lotDetails, quantity: resolvedTotal }, resolvedTotal);
+          }
+          if (styleVal) {
+            setWithoutLotStyle(styleVal);
+          }
+          setLotDetails(prev => ({
+            ...(prev || {}),
+            lotNo: cleanLot,
+            quantity: resolvedTotal || prev?.quantity || 0,
+            style: styleVal || prev?.style || '',
+            fabric: fabricVal || prev?.fabric || '',
+            brand: brandVal || prev?.brand || '',
+            partyName: partyVal || prev?.partyName || '',
+            shade: shadesVal || prev?.shade || '',
+            size: sizesVal || prev?.size || ''
+          }));
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setActiveLotCutting(prev => (prev ? { ...prev, hasDetails: prev.hasDetails || hasMemoryData } : null));
+        }
+      } finally {
+        if (!isCancelled) setLoadingActiveLotCutting(false);
+      }
+    }, 300);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchLotInput, lotDetails, prefilledLotNo, cuttingHeaders, designs, cuttingCacheRefreshCount]);
 
   // Save new issue to history & database table
   const saveToHistory = async (record) => {
@@ -2422,17 +3371,17 @@ export default function ElasticIssueView({
               justifyContent: 'space-between',
               flexWrap: 'wrap',
               gap: '12px',
-              padding: '12px 18px',
-              borderRadius: '14px',
-              background: withoutLotActive ? '#fff7ed' : '#f0fdf4',
-              border: withoutLotActive ? '1.5px solid #fdba74' : '1.5px solid #86efac',
+              padding: '10px 16px',
+              borderRadius: '10px',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
               marginBottom: '16px'
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '13px', fontWeight: '800', color: withoutLotActive ? '#9a3412' : '#166534' }}>
-                  Select Issue Method:
+                <span style={{ fontSize: '11.5px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                  Issue Method:
                 </span>
-                <div style={{ display: 'inline-flex', background: '#ffffff', padding: '4px', borderRadius: '10px', border: '1px solid #cbd5e1', gap: '4px' }}>
+                <div style={{ display: 'inline-flex', background: '#ffffff', padding: '3px', borderRadius: '8px', border: '1px solid #cbd5e1', gap: '3px' }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -2443,21 +3392,21 @@ export default function ElasticIssueView({
                       setBomStatus('idle');
                     }}
                     style={{
-                      padding: '8px 18px',
-                      borderRadius: '8px',
+                      padding: '6px 14px',
+                      borderRadius: '6px',
                       border: 'none',
                       cursor: 'pointer',
-                      fontSize: '12.5px',
-                      fontWeight: '800',
-                      background: !withoutLotActive ? 'linear-gradient(135deg, #059669 0%, #047857 100%)' : 'transparent',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      background: !withoutLotActive ? '#0f172a' : 'transparent',
                       color: !withoutLotActive ? '#ffffff' : '#64748b',
-                      boxShadow: !withoutLotActive ? '0 2px 8px rgba(5, 150, 105, 0.3)' : 'none',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px'
+                      gap: '6px',
+                      transition: 'all 0.15s ease'
                     }}
                   >
-                    <ShieldCheck size={15} /> With BOM (BOM Approved)
+                    <ShieldCheck size={14} /> With BOM
                   </button>
                   <button
                     type="button"
@@ -2484,29 +3433,29 @@ export default function ElasticIssueView({
                       }
                     }}
                     style={{
-                      padding: '8px 18px',
-                      borderRadius: '8px',
+                      padding: '6px 14px',
+                      borderRadius: '6px',
                       border: 'none',
                       cursor: 'pointer',
-                      fontSize: '12.5px',
-                      fontWeight: '800',
-                      background: withoutLotActive ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'transparent',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      background: withoutLotActive ? '#0f172a' : 'transparent',
                       color: withoutLotActive ? '#ffffff' : '#64748b',
-                      boxShadow: withoutLotActive ? '0 2px 8px rgba(234, 88, 12, 0.35)' : 'none',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px'
+                      gap: '6px',
+                      transition: 'all 0.15s ease'
                     }}
                   >
-                    <Zap size={15} /> Without BOM (Direct Floor Issue - No Restriction)
+                    <Zap size={14} /> Without BOM (Direct Issue)
                   </button>
                 </div>
               </div>
 
-              <span style={{ fontSize: '12px', fontWeight: '700', color: withoutLotActive ? '#c2410c' : '#15803d' }}>
+              <span style={{ fontSize: '11.5px', fontWeight: '600', color: '#64748b' }}>
                 {withoutLotActive
-                  ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
-                  : '🏷️ With BOM: Search and verify Lot against approved BOM.'}
+                  ? 'Direct floor requisition without BOM'
+                  : 'Verify Lot against approved BOM'}
               </span>
             </div>
 
@@ -2516,8 +3465,9 @@ export default function ElasticIssueView({
                 marginBottom: '16px',
                 padding: '16px 20px',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
-                border: '1.5px solid #fdba74',
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '14px'
@@ -2525,25 +3475,25 @@ export default function ElasticIssueView({
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{
-                      width: '26px', height: '26px', borderRadius: '50%',
-                      background: '#ea580c', color: '#ffffff', display: 'flex',
-                      alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '800'
+                      width: '24px', height: '24px', borderRadius: '50%',
+                      background: '#0f172a', color: '#ffffff', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: '12px', fontWeight: '800'
                     }}>1</span>
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#9a3412' }}>
-                      Direct Floor Movement Details (Without BOM)
+                    <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a', letterSpacing: '0.2px' }}>
+                      Floor Movement Details (Without BOM)
                     </h3>
                   </div>
-                  <div style={{ fontSize: '12px', color: '#9a3412', fontWeight: '700' }}>
-                    Voucher No: <strong style={{ color: '#ea580c' }}>{issueSlipNo || 'Loading...'}</strong>
-                    <span style={{ marginLeft: '6px', fontSize: '10.5px', fontWeight: '800', background: '#ffffff', color: '#c2410c', padding: '2px 8px', borderRadius: '4px', border: '1px solid #fed7aa' }}>WITHOUT BOM</span>
+                  <div style={{ fontSize: '12px', color: '#64748b' }}>
+                    Voucher No: <strong style={{ color: '#0f172a' }}>{issueSlipNo || 'Loading...'}</strong>
+                    <span style={{ marginLeft: '8px', fontSize: '10px', fontWeight: '700', background: '#f1f5f9', color: '#475569', padding: '2px 7px', borderRadius: '4px', border: '1px solid #e2e8f0' }}>DIRECT ISSUE</span>
                   </div>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
                   {/* Lot Number (Required) */}
                   <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      LOT NUMBER (REQUIRED) <span style={{ color: '#dc2626' }}>*</span>:
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      LOT NUMBER <span style={{ color: '#ef4444' }}>*</span>
                     </label>
                     <input
                       type="text"
@@ -2553,41 +3503,47 @@ export default function ElasticIssueView({
                       required
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box'
+                        border: '1px solid #cbd5e1', background: '#ffffff',
+                        fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box',
+                        outline: 'none', transition: 'border-color 0.15s ease'
                       }}
+                      onFocus={(e) => { e.target.style.borderColor = '#2563eb'; }}
+                      onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; }}
                     />
                   </div>
 
                   {/* Style / Garment Name */}
                   <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      STYLE / GARMENT ITEM:
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      STYLE / GARMENT ITEM
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Lower, Tracksuit, Hoodie..."
+                      placeholder="e.g. Lower, Tracksuit, Shirt..."
                       value={withoutLotStyle}
                       onChange={(e) => setWithoutLotStyle(e.target.value)}
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1.5px solid #fdba74', background: '#ffffff',
-                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box'
+                        border: '1px solid #cbd5e1', background: '#ffffff',
+                        fontSize: '13px', fontWeight: '600', color: '#0f172a', boxSizing: 'border-box',
+                        outline: 'none', transition: 'border-color 0.15s ease'
                       }}
+                      onFocus={(e) => { e.target.style.borderColor = '#2563eb'; }}
+                      onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; }}
                     />
                   </div>
 
                   {/* Quantity Pcs / Weight */}
                   <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#9a3412', display: 'block', marginBottom: '4px' }}>
-                      {materialMode === 'bone' ? 'TARGET ISSUE WEIGHT (KGS):' : 'TARGET CUTTING / ISSUE PCS:'}
+                    <label style={{ fontSize: '11px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                      {materialMode === 'bone' ? 'TARGET ISSUE WEIGHT (KGS)' : 'TARGET CUTTING / ISSUE PCS'} <span style={{ color: '#ef4444' }}>*</span>
                     </label>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <input
                         type="number"
                         step={materialMode === 'bone' ? '0.01' : '1'}
                         min={materialMode === 'bone' ? '0.01' : '1'}
-                        placeholder={materialMode === 'bone' ? 'Enter Weight in Kg (e.g. 2.50)' : 'Enter Target Cutting Pcs'}
+                        placeholder={materialMode === 'bone' ? 'e.g. 2.50' : 'e.g. 3000'}
                         value={materialMode === 'bone' ? boneWeightKg : issuePcs}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -2604,33 +3560,20 @@ export default function ElasticIssueView({
                         }}
                         style={{
                           flex: 1, padding: '9px 12px', borderRadius: '8px',
-                          border: '1.5px solid #fdba74', background: '#ffffff',
-                          fontSize: '14px', fontWeight: '800', color: '#0f172a', boxSizing: 'border-box'
+                          border: '1px solid #cbd5e1', background: '#ffffff',
+                          fontSize: '13.5px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box',
+                          outline: 'none', transition: 'border-color 0.15s ease'
                         }}
+                        onFocus={(e) => { e.target.style.borderColor = '#2563eb'; }}
+                        onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; }}
                       />
                       {materialMode === 'bone' && (
-                        <span style={{ fontSize: '13px', fontWeight: '900', color: '#c2410c', background: '#ffedd5', padding: '8px 10px', borderRadius: '8px', border: '1px solid #fdba74' }}>
-                          Kgs
+                        <span style={{ fontSize: '12px', fontWeight: '800', color: '#475569', background: '#f1f5f9', padding: '9px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                          Kg
                         </span>
                       )}
                     </div>
                   </div>
-                </div>
-
-                <div style={{
-                  padding: '9px 14px',
-                  borderRadius: '8px',
-                  background: '#ffffff',
-                  border: '1px solid #fed7aa',
-                  fontSize: '12px',
-                  fontWeight: '700',
-                  color: '#c2410c',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px'
-                }}>
-                  <CheckCircle size={16} color="#ea580c" />
-                  <span>Unrestricted Mode: No BOM or PO required! Issue form is completely unlocked below.</span>
                 </div>
               </div>
             ) : (
@@ -2785,57 +3728,195 @@ export default function ElasticIssueView({
                   </div>
                 )}
 
-                {/* LOT DETAILS DISPLAY CARD */}
+                {/* BOM STATUS BANNER (APPROVAL WORKFLOW) */}
                 {lotDetails && (
                   <div style={{
                     marginTop: '16px',
                     padding: '16px 20px',
                     borderRadius: '12px',
-                    background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)',
-                    border: '1.5px solid #86efac'
+                    background: bomStatus === 'approved' ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)' : bomStatus === 'pending' ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)' : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                    border: bomStatus === 'approved' ? '1.5px solid #86efac' : bomStatus === 'pending' ? '1.5px solid #fcd34d' : '1.5px solid #fca5a5',
+                    boxShadow: 'var(--shadow-card)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{
-                          padding: '4px 10px', borderRadius: '6px',
-                          background: '#059669', color: '#ffffff',
-                          fontSize: '12.5px', fontWeight: '800', letterSpacing: '0.5px'
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '50%',
+                          background: bomStatus === 'approved' ? '#16a34a' : bomStatus === 'pending' ? '#d97706' : '#dc2626',
+                          color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}>
-                          LOT #{lotDetails.lotNo}
-                        </span>
-                        <span style={{ fontSize: '14px', fontWeight: '800', color: '#047857' }}>
-                          {lotDetails.style || 'Garment Design'}
-                        </span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          • {lotDetails.brand || 'Mohit Hosiery'}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#047857', background: '#ffffff', padding: '4px 10px', borderRadius: '6px', border: '1px solid #86efac' }}>
-                        Cutting Qty: <strong>{lotDetails.quantity || 0} Pcs</strong>
-                      </div>
-                    </div>
+                          {bomStatus === 'approved' ? <CheckCircle size={18} /> : bomStatus === 'pending' ? <Clock size={18} /> : <AlertTriangle size={18} />}
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <h4 style={{
+                              margin: 0,
+                              fontSize: '14px',
+                              fontWeight: '800',
+                              color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
+                            }}>
+                              {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
+                              {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
+                              {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
+                              {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
+                              {bomStatus === 'idle' && 'Verifying BOM Status...'}
+                            </h4>
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '800',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
+                              color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
+                            }}>
+                              {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                            </span>
+                          </div>
 
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                      gap: '12px',
-                      fontSize: '12px'
-                    }}>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>GARMENT TYPE</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.garmentType || 'N/A'}</strong>
+                          <p style={{
+                            margin: '3px 0 0 0',
+                            fontSize: '12px',
+                            color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
+                            fontWeight: '600',
+                            lineHeight: '1.4'
+                          }}>
+                            {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Elastic materials.`}
+                            {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Elastic materials can only be issued after approval.`}
+                            {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
+                            {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
+                            {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>FABRIC</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.fabric || 'N/A'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SHADE / COLOR</span>
-                        <strong style={{ color: '#0f172a' }}>{selectedShade || lotDetails.shade || 'Standard'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SIZES</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.size || 'M, L, XL, XXL'}</strong>
+
+                      {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {bomStatus === 'not_created' && (
+                          <button
+                            type="button"
+                            onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                            style={{
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
+                          </button>
+                        )}
+
+                        {bomStatus === 'pending' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleViewApprovalQueue}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                                color: '#ffffff',
+                                fontSize: '12.5px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}
+                            >
+                              Open Approval Queue
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                              style={{
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid #f59e0b',
+                                background: '#ffffff',
+                                color: '#b45309',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              View/Edit BOM
+                            </button>
+                          </>
+                        )}
+
+                        {bomStatus === 'rejected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                            style={{
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: '#dc2626',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            Revise BOM in Design View
+                          </button>
+                        )}
+
+                        {/* Quick 1-Click W/O PO Issue Bypass Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsWithoutPo(true);
+                            if (!lotDetails) {
+                              setLotDetails({
+                                lotNo: searchLotInput || 'W/O-PO-FLOOR',
+                                style: withoutLotStyle || 'Floor Issue',
+                                quantity: issuePcs || 0,
+                                brand: 'Mohit Hosiery',
+                                garmentType: withoutLotStyle || 'LOWER',
+                                fabric: 'Cotton Poly Blend',
+                                shade: 'Standard'
+                              });
+                            }
+                            if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
+                              handleSearchLot(searchLotInput.trim());
+                            }
+                          }}
+                          style={{
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                            color: '#ffffff',
+                            fontSize: '12.5px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                        >
+                          <Zap size={15} /> ⚡ Issue W/O BOM (Bypass BOM)
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -2843,212 +3924,287 @@ export default function ElasticIssueView({
               </>
             )}
 
-            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY - ONLY FOR WITH LOT MODE) */}
-            {!withoutLotActive && (lotDetails || searchLotInput.trim().length >= 3) && (
+            {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER (ALWAYS VISIBLE IN ALL MODES) ── */}
+            {Boolean((searchLotInput && searchLotInput.trim()) || lotDetails?.lotNo) && (
               <div style={{
-                marginTop: '14px',
-                padding: '16px 20px',
-                borderRadius: '12px',
-                border: bomStatus === 'approved'
-                  ? '1.5px solid #86efac'
-                  : bomStatus === 'pending'
-                    ? '1.5px solid #fcd34d'
-                    : '1.5px solid #fca5a5',
-                background: bomStatus === 'approved'
-                  ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'
-                  : bomStatus === 'pending'
-                    ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
-                    : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
+                marginTop: '16px',
+                marginBottom: '16px',
+                padding: '14px 18px',
+                borderRadius: '10px',
+                background: activeLotCutting?.hasDetails 
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+                  : '#f8fafc',
+                border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
+                boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
+                transition: 'all 0.2s ease'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {bomStatus === 'approved' ? (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)' }}>
-                        <ShieldCheck size={20} />
-                      </div>
-                    ) : bomStatus === 'pending' ? (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#d97706', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)' }}>
-                        <AlertTriangle size={20} />
-                      </div>
-                    ) : (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)' }}>
-                        <Lock size={20} />
-                      </div>
-                    )}
-
+                {/* Header of Cutting Card */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  borderBottom: '1px solid #e2e8f0',
+                  paddingBottom: '10px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '8px',
+                      background: activeLotCutting?.hasDetails ? '#dcfce7' : '#f1f5f9',
+                      color: activeLotCutting?.hasDetails ? '#15803d' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <Scissors size={18} />
+                    </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <h4 style={{
-                          margin: 0,
-                          fontSize: '14px',
-                          fontWeight: '800',
-                          color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
-                        }}>
-                          {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
-                          {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
-                          {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
-                          {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
-                          {bomStatus === 'idle' && 'Verifying BOM Status...'}
-                        </h4>
-                        <span style={{
-                          fontSize: '10.5px',
-                          fontWeight: '800',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
-                          color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
-                        }}>
-                          {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                        <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                          Cutting Details &amp; Batch Metrics
                         </span>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          fontFamily: 'monospace',
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          padding: '2px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          Lot #{searchLotInput?.trim() || lotDetails?.lotNo || '—'}
+                        </span>
+                        {activeLotCutting?.hasDetails ? (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#dcfce7',
+                            color: '#15803d',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <CheckCircle2 size={11} /> Verified Cutting Sheet
+                          </span>
+                        ) : loadingActiveLotCutting ? (
+                          <span style={{ fontSize: '11px', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <RefreshCw size={11} className="animate-spin" /> Checking cutting database...
+                          </span>
+                        ) : (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#fef3c7',
+                            color: '#b45309',
+                            padding: '2px 7px',
+                            borderRadius: '6px'
+                          }}>
+                            No cutting sheet in DB
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => reloadCuttingCache(true)}
+                          disabled={isReloadingCuttingCache}
+                          title="Empty in-memory cache & reload cutting database now (Auto-reloads every 30 minutes)"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 8px',
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            color: '#0284c7',
+                            background: '#f0f9ff',
+                            border: '1px solid #bae6fd',
+                            borderRadius: '6px',
+                            cursor: isReloadingCuttingCache ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <RefreshCw size={10} className={isReloadingCuttingCache ? "animate-spin" : ""} />
+                          {isReloadingCuttingCache ? 'Reloading...' : 'Reload (30m Auto)'}
+                        </button>
+                        {cacheReloadNotice && (
+                          <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: '700' }}>
+                            {cacheReloadNotice}
+                          </span>
+                        )}
                       </div>
-
-                      <p style={{
-                        margin: '3px 0 0 0',
-                        fontSize: '12px',
-                        color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
-                        fontWeight: '600',
-                        lineHeight: '1.4'
-                      }}>
-                        {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Elastic materials.`}
-                        {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Elastic materials can only be issued after approval.`}
-                        {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
-                        {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
-                        {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
-                      </p>
+                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        Production batch particulars automatically synchronized with Lot #{searchLotInput?.trim() || lotDetails?.lotNo || '—'} • Auto-refreshes every 30m
+                      </span>
                     </div>
                   </div>
 
-                  {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {bomStatus === 'not_created' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                      background: '#ffffff',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #86efac',
+                      boxShadow: '0 1px 3px rgba(34, 197, 94, 0.12)'
+                    }}>
+                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        TOTAL CUTTING QUANTITY
+                      </span>
+                      <strong style={{ fontSize: '17px', fontWeight: '900', color: '#15803d' }}>
+                        {(activeLotCutting?.totalPieces || (Number(lotDetails?.quantity) || 0)).toLocaleString()} <span style={{ fontSize: '12px' }}>Pcs</span>
+                      </strong>
+                    </div>
+
+                    {activeLotCutting?.rows && activeLotCutting.rows.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        onClick={() => setShowActiveCuttingMatrix(!showActiveCuttingMatrix)}
                         style={{
-                          padding: '8px 16px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-                          color: '#ffffff',
-                          fontSize: '12.5px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
-                          display: 'flex',
+                          display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px'
+                          gap: '5px',
+                          padding: '7px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          border: showActiveCuttingMatrix ? '1.5px solid #0284c7' : '1px solid #bae6fd',
+                          background: showActiveCuttingMatrix ? '#0284c7' : '#f0f9ff',
+                          color: showActiveCuttingMatrix ? '#ffffff' : '#0369a1',
+                          cursor: 'pointer',
+                          boxShadow: '0 1px 4px rgba(2, 132, 199, 0.15)',
+                          transition: 'all 0.15s ease'
                         }}
                       >
-                        <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
+                        <Eye size={13} />
+                        {showActiveCuttingMatrix ? 'Hide Matrix' : `Matrix Breakdown (${activeLotCutting.rows.length} Colors)`}
                       </button>
                     )}
-
-                    {bomStatus === 'pending' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleViewApprovalQueue}
-                          style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
-                            color: '#ffffff',
-                            fontSize: '12.5px',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px'
-                          }}
-                        >
-                          <ExternalLink size={15} /> Go to Approval Queue
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
-                          style={{
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '1px solid #f59e0b',
-                            background: '#ffffff',
-                            color: '#b45309',
-                            fontSize: '12px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          View/Edit BOM
-                        </button>
-                      </>
-                    )}
-
-                    {bomStatus === 'rejected' && (
-                      <button
-                        type="button"
-                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
-                        style={{
-                          padding: '8px 16px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: '#dc2626',
-                          color: '#ffffff',
-                          fontSize: '12.5px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        Revise BOM in Design View
-                      </button>
-                    )}
-
-                    {/* Quick 1-Click W/O PO Issue Bypass Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsWithoutPo(true);
-                        if (!lotDetails) {
-                          setLotDetails({
-                            lotNo: searchLotInput || 'W/O-PO-FLOOR',
-                            style: withoutLotStyle || 'Floor Issue',
-                            quantity: issuePcs || 0,
-                            brand: 'Mohit Hosiery',
-                            garmentType: withoutLotStyle || 'LOWER',
-                            fabric: 'Cotton Poly Blend',
-                            shade: 'Standard'
-                          });
-                        }
-                        if (searchLotInput.trim() && (!lotDetails || !lotDetails.quantity)) {
-                          handleSearchLot(searchLotInput.trim());
-                        }
-                        showToast(`⚡ Issue W/O PO enabled for Lot #${lotDetails?.lotNo || searchLotInput}. Issue form unlocked!`);
-                      }}
-                      style={{
-                        padding: '8px 16px',
-                        borderRadius: '8px',
-                        border: 'none',
-                        background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
-                        color: '#ffffff',
-                        fontSize: '12.5px',
-                        fontWeight: '800',
-                        cursor: 'pointer',
-                        boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      <Zap size={15} /> ⚡ Issue W/O BOM (Bypass BOM)
-                    </button>
                   </div>
                 </div>
+
+                {/* 6 Particulars Cards */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '8px'
+                }}>
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>GARMENT STYLE</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.style || lotDetails?.style || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>FABRIC</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.fabric || lotDetails?.fabric || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>BRAND / BUYER</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.brand || lotDetails?.brand || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>PARTY NAME</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.partyName || lotDetails?.partyName || 'Mohit Hosiery'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>SHADES</div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#0f172a', marginTop: '2px', wordBreak: 'break-word', maxHeight: '42px', overflowY: 'auto' }}>
+                      {activeLotCutting?.shades || (activeLotCutting?.rows?.map(r => `${r.color} [${r.totalPcs || 0}]`).join(', ')) || lotDetails?.shade || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>SIZES</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.sizes || (activeSizes.length > 0 ? activeSizes.join(', ') : (lotDetails?.size || '—'))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expandable Color-Size Cutting Matrix */}
+                {showActiveCuttingMatrix && activeLotCutting?.rows && activeLotCutting.rows.length > 0 && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px 14px',
+                    background: '#ffffff',
+                    borderRadius: '8px',
+                    border: '1.5px solid #bae6fd',
+                    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.08)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1' }}>
+                        Full Color-Size Cutting Matrix ({activeLotCutting.rows.length} Colors)
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        Source: MySQL `cutting` / Master Google Sheets
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                        <thead>
+                          <tr style={{ background: '#f0f9ff', borderBottom: '2px solid #bae6fd' }}>
+                            <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '800', color: '#0369a1' }}>Color / Shade</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '700', color: '#475569' }}>Table</th>
+                            {activeSizes.map(sz => (
+                              <th key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '800', color: '#0f172a' }}>{sz}</th>
+                            ))}
+                            <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>Total Pcs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeLotCutting.rows.map((row, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                              <td style={{ padding: '6px 10px', fontWeight: '800', color: '#0f172a' }}>{row.color}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center', color: '#64748b', fontSize: '10.5px' }}>{row.cuttingTable || '—'}</td>
+                              {activeSizes.map(sz => (
+                                <td key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: row.sizes?.[sz] ? '700' : '400', color: row.sizes?.[sz] ? '#0f172a' : '#cbd5e1' }}>
+                                  {row.sizes?.[sz] ? Number(row.sizes[sz]).toLocaleString() : '—'}
+                                </td>
+                              ))}
+                              <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>
+                                {(Number(row.totalPcs) || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '900', color: '#0f172a' }}>
+                            <td colSpan={2} style={{ padding: '7px 10px' }}>Grand Total</td>
+                            {activeSizes.map(sz => {
+                              const szSum = activeLotCutting.rows.reduce((sum, r) => sum + (Number(r.sizes?.[sz]) || 0), 0);
+                              return (
+                                <td key={sz} style={{ padding: '7px 8px', textAlign: 'center', fontWeight: '900', color: '#0f172a' }}>
+                                  {szSum.toLocaleString()}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '900', color: '#15803d' }}>
+                              {(activeLotCutting.totalPieces || 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -3289,11 +4445,11 @@ export default function ElasticIssueView({
                       {/* OTHER ACCESSORIES CARD */}
                       {materialMode === 'other' && (
                         <div style={{
-                          padding: '16px 18px',
-                          borderRadius: '12px',
-                          background: '#faf5ff',
-                          border: '1.5px solid #c084fc',
-                          boxShadow: '0 3px 12px rgba(124, 58, 237, 0.08)'
+                          padding: '18px 20px',
+                          borderRadius: '14px',
+                          background: 'linear-gradient(180deg, #fbf7ff 0%, #faf5ff 100%)',
+                          border: '2px solid #c084fc',
+                          boxShadow: '0 4px 16px rgba(124, 58, 237, 0.09)'
                         }}>
                           {/* Card Header with Dual-Mode Segmented Control */}
                           <div style={{
@@ -3304,40 +4460,40 @@ export default function ElasticIssueView({
                             flexWrap: 'wrap',
                             gap: '10px'
                           }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
                               <div style={{
-                                width: '28px', height: '28px', borderRadius: '7px',
+                                width: '32px', height: '32px', borderRadius: '8px',
                                 background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
                                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: '#ffffff', boxShadow: '0 2px 6px rgba(124, 58, 237, 0.3)'
+                                color: '#ffffff', boxShadow: '0 2px 6px rgba(124, 58, 237, 0.35)'
                               }}>
-                                <Package size={16} />
+                                <Package size={17} />
                               </div>
                               <div>
-                                <label style={{ fontSize: '13px', fontWeight: '800', color: '#581c87', margin: 0, display: 'block' }}>
+                                <label style={{ fontSize: '13.5px', fontWeight: '800', color: '#581c87', margin: 0, display: 'block', letterSpacing: '0.2px' }}>
                                   OTHER ACCESSORIES SPECIFICATION
                                 </label>
-                                <span style={{ fontSize: '10.5px', color: '#7e22ce' }}>
-                                  Choose from store inventory or type/save custom accessory name
+                                <span style={{ fontSize: '11px', color: '#7e22ce' }}>
+                                  Pick component (Tape, Button, Lace, etc.) from live stock or enter custom name
                                 </span>
                               </div>
                             </div>
 
-                            {/* Dual Toggle Pill: Choose Material vs Add Manually */}
+                            {/* Dual Mode Toggle: Choose Material vs Add Manually */}
                             <div style={{
                               display: 'flex',
                               alignItems: 'center',
                               background: '#f3e8ff',
                               padding: '3px',
                               borderRadius: '8px',
-                              border: '1px solid #d8b4fe',
+                              border: '1.5px solid #d8b4fe',
                               gap: '3px'
                             }}>
                               <button
                                 type="button"
                                 onClick={() => setOtherEntryMode('choose')}
                                 style={{
-                                  padding: '5px 12px',
+                                  padding: '6px 14px',
                                   borderRadius: '6px',
                                   border: 'none',
                                   background: otherEntryMode === 'choose' ? '#7c3aed' : 'transparent',
@@ -3353,14 +4509,14 @@ export default function ElasticIssueView({
                                 }}
                               >
                                 <Box size={13} />
-                                Choose Material
+                                📦 Choose Material ({otherMaterials.length})
                               </button>
 
                               <button
                                 type="button"
                                 onClick={() => setOtherEntryMode('manual')}
                                 style={{
-                                  padding: '5px 12px',
+                                  padding: '6px 14px',
                                   borderRadius: '6px',
                                   border: 'none',
                                   background: otherEntryMode === 'manual' ? '#7c3aed' : 'transparent',
@@ -3376,7 +4532,116 @@ export default function ElasticIssueView({
                                 }}
                               >
                                 <Edit2 size={13} />
-                                + Add Manually
+                                ✍️ + Add Manually
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* QUICK COMPONENT CATEGORY SELECTOR BAR (Tape, Button, Lace, Dori, Zipper, etc.) */}
+                          <div style={{
+                            background: '#ffffff',
+                            padding: '10px 12px',
+                            borderRadius: '10px',
+                            border: '1px solid #e9d5ff',
+                            marginBottom: '14px',
+                            boxShadow: '0 1px 4px rgba(124, 58, 237, 0.04)'
+                          }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginBottom: '8px',
+                              flexWrap: 'wrap',
+                              gap: '6px'
+                            }}>
+                              <span style={{ fontSize: '11px', fontWeight: '800', color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                <Sparkles size={13} color="#7c3aed" /> QUICK COMPONENT SELECTOR:
+                              </span>
+                              <span style={{ fontSize: '10.5px', color: '#64748b' }}>
+                                Click component to filter stock or set preset
+                              </span>
+                            </div>
+
+                            <div style={{
+                              display: 'flex',
+                              gap: '6px',
+                              flexWrap: 'wrap',
+                              alignItems: 'center'
+                            }}>
+                              {[
+                                { name: 'Tape', icon: '🎗️', label: 'Tape', defaultUnit: 'Mtr', hint: 'in Mtr/Roll' },
+                                { name: 'Button', icon: '🔘', label: 'Button', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'Lace', icon: '🕸️', label: 'Lace', defaultUnit: 'Mtr', hint: 'in Mtr' },
+                                { name: 'Drawcord', icon: '🧵', label: 'Dori / Cord', defaultUnit: 'Mtr', hint: 'in Mtr/Pcs' },
+                                { name: 'Zipper', icon: '🤐', label: 'Zipper', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'Label', icon: '🏷️', label: 'Label / Tag', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'Badge', icon: '🛡️', label: 'Badge / Patch', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'Eyelet', icon: '⭕', label: 'Eyelet', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'ALL', icon: '📦', label: 'All Inventory', defaultUnit: 'Roll', hint: (materials.length + ' Items') }
+                              ].map(chip => {
+                                const isActive = selectedOtherCategory === chip.name;
+                                return (
+                                  <button
+                                    key={chip.name}
+                                    type="button"
+                                    onClick={() => handleSelectComponentCategory(chip.name, chip.defaultUnit)}
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '7px',
+                                      border: isActive ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
+                                      background: isActive ? '#7c3aed' : '#faf5ff',
+                                      color: isActive ? '#ffffff' : '#581c87',
+                                      fontSize: '11px',
+                                      fontWeight: '800',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      boxShadow: isActive ? '0 2px 6px rgba(124, 58, 237, 0.3)' : 'none',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    <span>{chip.icon}</span>
+                                    <span>{chip.label}</span>
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      opacity: isActive ? 0.9 : 0.65,
+                                      fontWeight: '700',
+                                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f3e8ff',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px'
+                                    }}>
+                                      {chip.hint}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+
+                              {/* Manual button chip */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOtherEntryMode('manual');
+                                  if (!otherMaterialName || otherMaterialName === 'Drawcord / Other Accessory') {
+                                    setOtherMaterialName('');
+                                  }
+                                }}
+                                style={{
+                                  padding: '5px 11px',
+                                  borderRadius: '7px',
+                                  border: otherEntryMode === 'manual' ? '1.5px solid #7c3aed' : '1px dashed #c084fc',
+                                  background: otherEntryMode === 'manual' ? '#f3e8ff' : '#ffffff',
+                                  color: '#7c3aed',
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                              >
+                                <Edit2 size={12} />
+                                + Type Custom
                               </button>
                             </div>
                           </div>
@@ -3384,7 +4649,7 @@ export default function ElasticIssueView({
                           {/* 3-Column Specification Controls */}
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
                             gap: '14px',
                             background: '#ffffff',
                             padding: '16px',
@@ -3392,12 +4657,12 @@ export default function ElasticIssueView({
                             border: '1px solid #e9d5ff',
                             boxShadow: '0 2px 8px rgba(124, 58, 237, 0.04)'
                           }}>
-                            {/* 1. Material Specification (Choose or Manual) */}
+                            {/* 1. Material Specification (Choose from Stock or Manual) */}
                             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                               <div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                                   <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                                    1. {otherEntryMode === 'choose' ? 'CHOOSE MATERIAL:' : 'ENTER MATERIAL NAME:'}
+                                    1. {otherEntryMode === 'choose' ? `CHOOSE MATERIAL (${selectedOtherCategory}):` : 'ENTER MATERIAL NAME:'}
                                   </span>
                                   <button
                                     type="button"
@@ -3413,88 +4678,201 @@ export default function ElasticIssueView({
                                       padding: 0
                                     }}
                                   >
-                                    {otherEntryMode === 'choose' ? '+ Type Custom Name' : '📋 Pick from Inventory'}
+                                    {otherEntryMode === 'choose' ? '✍️ Type Custom Name' : '📋 Pick from Inventory'}
                                   </button>
                                 </div>
 
                                 {otherEntryMode === 'choose' ? (
                                   <div>
-                                    <select
+                                    <SearchableMaterialSelect
+                                      materials={otherMaterials}
                                       value={selectedOtherMaterialId}
-                                      onChange={(e) => handleSelectOtherMaterial(e.target.value)}
-                                      style={{
-                                        width: '100%',
-                                        boxSizing: 'border-box',
-                                        padding: '9px 12px',
-                                        borderRadius: '7px',
-                                        border: '1.5px solid #7c3aed',
-                                        fontSize: '12.5px',
-                                        fontWeight: '700',
-                                        color: '#0f172a',
-                                        background: '#ffffff',
-                                        outline: 'none',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      <option value="">— Select Material ({otherMaterials.length} Items Available) —</option>
-                                      {otherMaterials.map(m => (
-                                        <option key={m.id} value={m.id}>
-                                          {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.category || 'Accessory'}
-                                        </option>
-                                      ))}
-                                    </select>
+                                      onChange={handleSelectOtherMaterial}
+                                      placeholder={otherMaterials.length > 0 ? `— Select Material (${otherMaterials.length} ${selectedOtherCategory !== 'ALL' ? selectedOtherCategory : 'Items'}) —` : `— No ${selectedOtherCategory} items in store —`}
+                                      themeColor="#7c3aed"
+                                      onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                    />
 
-                                    {/* Selected Material Info Badge */}
+                                    {/* Notice when filter has 0 items */}
+                                    {otherMaterials.length === 0 && (
+                                      <div style={{
+                                        padding: '10px 12px',
+                                        background: '#faf5ff',
+                                        borderRadius: '8px',
+                                        border: '1.5px dashed #c084fc',
+                                        marginTop: '8px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        flexWrap: 'wrap',
+                                        gap: '8px'
+                                      }}>
+                                        <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: '700' }}>
+                                          No <strong>{selectedOtherCategory}</strong> in inventory.
+                                        </span>
+                                        <div style={{ display: 'flex', gap: '6px' }}>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setOtherEntryMode('manual');
+                                              setOtherMaterialName(selectedOtherCategory);
+                                            }}
+                                            style={{
+                                              padding: '4px 8px',
+                                              borderRadius: '5px',
+                                              border: 'none',
+                                              background: '#7c3aed',
+                                              color: '#ffffff',
+                                              fontSize: '10.5px',
+                                              fontWeight: '800',
+                                              cursor: 'pointer'
+                                            }}
+                                          >
+                                            ✍️ Type Manually
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleSelectComponentCategory('ALL')}
+                                            style={{
+                                              padding: '4px 8px',
+                                              borderRadius: '5px',
+                                              border: '1px solid #c084fc',
+                                              background: '#ffffff',
+                                              color: '#7c3aed',
+                                              fontSize: '10.5px',
+                                              fontWeight: '800',
+                                              cursor: 'pointer'
+                                            }}
+                                          >
+                                            Show All
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {/* Selected Material Info Badge & Photo Card */}
                                     {currentOtherMaterial ? (
                                       <div style={{
                                         display: 'flex',
                                         alignItems: 'center',
-                                        gap: '6px',
+                                        justifyContent: 'space-between',
+                                        gap: '8px',
                                         flexWrap: 'wrap',
-                                        marginTop: '8px',
-                                        padding: '6px 8px',
-                                        borderRadius: '6px',
+                                        marginTop: '10px',
+                                        padding: '8px 12px',
+                                        borderRadius: '8px',
                                         background: '#faf5ff',
-                                        border: '1px dashed #d8b4fe'
+                                        border: '1.5px dashed #c084fc'
                                       }}>
-                                        {/* Photo Swatch */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                          {/* Photo Swatch */}
+                                          {(() => {
+                                            const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
+                                            const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                            return cleanImg ? (
+                                              <div
+                                                onClick={() => setPreviewPhotoUrl({
+                                                  url: cleanImg,
+                                                  title: currentOtherMaterial.name,
+                                                  code: currentOtherMaterial.itemCode || currentOtherMaterial.id,
+                                                  stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}`,
+                                                  location: currentOtherMaterial.location
+                                                })}
+                                                title="Click to zoom material photo"
+                                                style={{
+                                                  width: '42px',
+                                                  height: '42px',
+                                                  borderRadius: '6px',
+                                                  border: '2px solid #7c3aed',
+                                                  overflow: 'hidden',
+                                                  cursor: 'zoom-in',
+                                                  flexShrink: 0,
+                                                  boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)',
+                                                  position: 'relative'
+                                                }}
+                                              >
+                                                <img src={cleanImg} alt={currentOtherMaterial.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                              </div>
+                                            ) : (
+                                              <div style={{
+                                                width: '42px',
+                                                height: '42px',
+                                                borderRadius: '6px',
+                                                border: '1px dashed #cbd5e1',
+                                                background: '#ffffff',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                color: '#94a3b8',
+                                                flexShrink: 0
+                                              }}>
+                                                <Package size={18} />
+                                              </div>
+                                            );
+                                          })()}
+
+                                          <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '1px 5px', borderRadius: '4px' }}>
+                                                ID: {currentOtherMaterial.itemCode || currentOtherMaterial.id}
+                                              </span>
+                                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>
+                                                {currentOtherMaterial.name}
+                                              </span>
+                                            </div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', fontSize: '10.5px', flexWrap: 'wrap' }}>
+                                              <span style={{ fontWeight: '800', color: (Number(currentOtherMaterial.stock) || 0) > 0 ? '#059669' : '#dc2626' }}>
+                                                Live Stock: <strong>{currentOtherMaterial.stock} {normalizeAccUnit(currentOtherMaterial.unit)}</strong>
+                                              </span>
+                                              <span style={{ fontSize: '10px', color: '#7c3aed', background: '#ede9fe', padding: '1px 5px', borderRadius: '4px', fontWeight: '700' }}>
+                                                ⚡ Auto-Unit: {normalizeAccUnit(currentOtherMaterial.unit)}
+                                              </span>
+                                              {currentOtherMaterial.location && (
+                                                <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                  <MapPin size={9} color="#7c3aed" /> {currentOtherMaterial.location}
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+
                                         {(() => {
                                           const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
                                           const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
                                           return cleanImg ? (
-                                            <div
+                                            <button
+                                              type="button"
                                               onClick={() => setPreviewPhotoUrl({
                                                 url: cleanImg,
                                                 title: currentOtherMaterial.name,
-                                                code: currentOtherMaterial.id,
-                                                stock: `${currentOtherMaterial.stock} ${currentOtherMaterial.unit || 'Roll'}`,
+                                                code: currentOtherMaterial.itemCode || currentOtherMaterial.id,
+                                                stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}`,
                                                 location: currentOtherMaterial.location
                                               })}
-                                              title="Click to view & zoom material photo"
                                               style={{
-                                                width: '28px', height: '28px', borderRadius: '4px',
-                                                border: '1px solid #7c3aed', overflow: 'hidden', cursor: 'zoom-in', flexShrink: 0
+                                                border: 'none',
+                                                background: '#7c3aed',
+                                                color: '#ffffff',
+                                                padding: '4px 10px',
+                                                borderRadius: '6px',
+                                                fontSize: '10.5px',
+                                                fontWeight: '800',
+                                                cursor: 'pointer',
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                gap: '4px',
+                                                boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
                                               }}
                                             >
-                                              <img src={cleanImg} alt={currentOtherMaterial.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                            </div>
+                                              <ZoomIn size={12} />
+                                              View Photo
+                                            </button>
                                           ) : null;
                                         })()}
-                                        <span style={{ fontSize: '10px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '1px 5px', borderRadius: '3px' }}>
-                                          ID: {currentOtherMaterial.id}
-                                        </span>
-                                        <span style={{ fontSize: '10px', fontWeight: '700', color: currentOtherMaterial.stock > 0 ? '#059669' : '#dc2626' }}>
-                                          Stock: {currentOtherMaterial.stock} {currentOtherMaterial.unit || 'Roll'}
-                                        </span>
-                                        {currentOtherMaterial.location && (
-                                          <span style={{ fontSize: '10px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                            <MapPin size={9} color="#7c3aed" /> {currentOtherMaterial.location}
-                                          </span>
-                                        )}
                                       </div>
                                     ) : (
                                       <div style={{ fontSize: '10.5px', color: '#9333ea', marginTop: '6px', fontStyle: 'italic' }}>
-                                        Select from store inventory, or switch to manual to type any custom item
+                                        Select from store inventory with live photos, or click component chips above
                                       </div>
                                     )}
                                   </div>
@@ -3506,7 +4884,7 @@ export default function ElasticIssueView({
                                         type="text"
                                         value={otherMaterialName}
                                         onChange={(e) => setOtherMaterialName(e.target.value)}
-                                        placeholder="e.g. Drawcord 5mm, Metal Zipper..."
+                                        placeholder="e.g. Tape Cotton 1 inch, Horn Button 24L, Lace GPO..."
                                         style={{
                                           flex: 1,
                                           boxSizing: 'border-box',
@@ -3525,7 +4903,7 @@ export default function ElasticIssueView({
                                         onClick={() => handleAddNewCustomName(otherMaterialName)}
                                         title="Save this name for fast one-click selection"
                                         style={{
-                                          padding: '0 10px',
+                                          padding: '0 12px',
                                           borderRadius: '6px',
                                           border: 'none',
                                           background: '#7c3aed',
@@ -3541,9 +4919,9 @@ export default function ElasticIssueView({
                                     </div>
 
                                     {/* Suggestions & Saved Names Chips */}
-                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px', maxHeight: '54px', overflowY: 'auto' }}>
+                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px', maxHeight: '68px', overflowY: 'auto' }}>
                                       {Array.from(new Set([
-                                        'Drawcord', 'Zipper', 'Button', 'Eyelet', 'Cuff Rib', 'Thread', 'Label', 'Piping', 'Velcro', 'Badge', 'Buckle',
+                                        'Tape Cotton 1"', 'Cello Tape', 'Button 18L (4-Hole)', 'Shirt Button', 'Metal Snap Button', 'Cotton Lace 1"', 'GPO Lace', 'Drawcord Dori', 'Metal Zipper #5', 'Woven Brand Label', 'Rubber Badge', 'Eyelet 8mm',
                                         ...customOtherNames
                                       ])).map(matSuggestion => {
                                         const isSavedCustom = customOtherNames.includes(matSuggestion);
@@ -3557,14 +4935,23 @@ export default function ElasticIssueView({
                                               gap: '2px',
                                               padding: '2px 7px',
                                               borderRadius: '4px',
-                                              border: isSelected ? '1px solid #7c3aed' : '1px solid #e9d5ff',
+                                              border: isSelected ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
                                               background: isSelected ? '#7c3aed' : '#f5f3ff',
                                               color: isSelected ? '#ffffff' : '#6b21a8',
                                               fontSize: '10px',
                                               fontWeight: '700',
                                               cursor: 'pointer'
                                             }}
-                                            onClick={() => setOtherMaterialName(matSuggestion)}
+                                            onClick={() => {
+                                              setOtherMaterialName(matSuggestion);
+                                              // Smart unit deduction
+                                              const sLower = matSuggestion.toLowerCase();
+                                              if (sLower.includes('tape') || sLower.includes('lace') || sLower.includes('dori')) {
+                                                setOtherUnit('Mtr');
+                                              } else if (sLower.includes('button') || sLower.includes('zipper') || sLower.includes('label') || sLower.includes('badge') || sLower.includes('eyelet')) {
+                                                setOtherUnit('Pcs');
+                                              }
+                                            }}
                                           >
                                             <span>{matSuggestion}</span>
                                             {isSavedCustom && (
@@ -3621,15 +5008,15 @@ export default function ElasticIssueView({
                               </div>
                             </div>
 
-                            {/* 3. Rolls / Material Issue Quantity & Unit */}
+                            {/* 3. Material Issue Quantity & Unit Selector */}
                             <div>
                               <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
                                 3. TOTAL MATERIAL / QUANTITY TO ISSUE:
                               </span>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: '6px', alignItems: 'center' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '6px', alignItems: 'center' }}>
                                 <input
                                   type="number"
-                                  min="1"
+                                  min="0.1"
                                   step="any"
                                   value={otherRollCount}
                                   onChange={(e) => setOtherRollCount(e.target.value)}
@@ -3641,7 +5028,7 @@ export default function ElasticIssueView({
                                   }}
                                 />
                                 <select
-                                  value={isManualOtherUnit ? 'manual' : otherUnit}
+                                  value={isManualOtherUnit ? 'manual' : normalizeAccUnit(otherUnit)}
                                   onChange={(e) => {
                                     if (e.target.value === 'manual') {
                                       setIsManualOtherUnit(true);
@@ -3659,16 +5046,16 @@ export default function ElasticIssueView({
                                     color: '#6b21a8', background: isManualOtherUnit ? '#f3e8ff' : '#ffffff', outline: 'none', cursor: 'pointer'
                                   }}
                                 >
-                                  <option value="Roll">Roll</option>
-                                  <option value="Pkt">Pkt</option>
-                                  <option value="Pcs">Pcs</option>
-                                  <option value="Cone">Cone</option>
-                                  <option value="Meter">Mtr</option>
-                                  <option value="Kg">Kg</option>
-                                  <option value="Box">Box</option>
-                                  <option value="Dozen">Dozen</option>
-                                  <option value="Gross">Gross</option>
-                                  <option value="manual">✏️ Manually</option>
+                                  <option value="Mtr">Mtr (Meters)</option>
+                                  <option value="Roll">Roll (Rolls)</option>
+                                  <option value="Pcs">Pcs (Pieces)</option>
+                                  <option value="Box">Box (Boxes)</option>
+                                  <option value="Pkt">Pkt (Packets)</option>
+                                  <option value="Cone">Cone (Cones)</option>
+                                  <option value="Kg">Kg (Kilograms)</option>
+                                  <option value="Dozen">Dozen (12 Pcs)</option>
+                                  <option value="Gross">Gross (144 Pcs)</option>
+                                  <option value="manual">✏️ Custom Unit</option>
                                 </select>
                               </div>
 
@@ -3736,7 +5123,7 @@ export default function ElasticIssueView({
                                 fontWeight: '800',
                                 color: '#6b21a8',
                                 background: '#f3e8ff',
-                                padding: '4px 8px',
+                                padding: '5px 8px',
                                 borderRadius: '6px',
                                 marginTop: '6px',
                                 display: 'flex',
@@ -3744,7 +5131,7 @@ export default function ElasticIssueView({
                                 justifyContent: 'space-between'
                               }}>
                                 <span>Total To Issue:</span>
-                                <strong>{otherRollCount || 1} {otherUnit || 'Roll'}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs</strong>
+                                <strong>{otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs</strong>
                               </div>
                             </div>
                           </div>
@@ -4917,30 +6304,15 @@ export default function ElasticIssueView({
 
                                           {/* Middle: Map to choose material dropdown */}
                                           <div style={{ marginBottom: '6px' }}>
-                                            <select
+                                            <SearchableMaterialSelect
+                                              materials={otherMaterials}
                                               value={selectedOtherMaterialId}
-                                              onChange={(e) => handleSelectOtherMaterial(e.target.value)}
-                                              title="Choose material from inventory to map stock & ID"
-                                              style={{
-                                                width: '100%',
-                                                padding: '5px 8px',
-                                                borderRadius: '6px',
-                                                border: '1px solid #cbd5e1',
-                                                background: '#ffffff',
-                                                fontSize: '11px',
-                                                fontWeight: '700',
-                                                color: '#0f172a',
-                                                outline: 'none',
-                                                cursor: 'pointer'
-                                              }}
-                                            >
-                                              <option value="">— Map to Store Material ({otherMaterials.length}) —</option>
-                                              {otherMaterials.map(m => (
-                                                <option key={m.id} value={m.id}>
-                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
-                                                </option>
-                                              ))}
-                                            </select>
+                                              onChange={handleSelectOtherMaterial}
+                                              placeholder={`— Map Store Material (${otherMaterials.length}) —`}
+                                              themeColor="#7c3aed"
+                                              compact={true}
+                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                            />
                                           </div>
 
                                           {/* Bottom: All material details according to issue */}
@@ -4960,7 +6332,7 @@ export default function ElasticIssueView({
                                                 ID: {currentOtherMaterial.id}
                                               </span>
                                               <span style={{ fontWeight: '700', color: currentOtherMaterial.stock > 0 ? '#059669' : '#dc2626' }}>
-                                                Stock: {currentOtherMaterial.stock} {currentOtherMaterial.unit || otherUnit || 'Roll'}
+                                                Stock: {currentOtherMaterial.stock} {normalizeAccUnit(currentOtherMaterial.unit || otherUnit || 'Roll')}
                                               </span>
                                               {currentOtherMaterial.location && (
                                                 <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
@@ -4978,7 +6350,7 @@ export default function ElasticIssueView({
                                                       url: cleanImg,
                                                       title: currentOtherMaterial.name,
                                                       code: currentOtherMaterial.id,
-                                                      stock: `${currentOtherMaterial.stock} ${currentOtherMaterial.unit || otherUnit || 'Roll'}`,
+                                                      stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit || otherUnit || 'Roll')}`,
                                                       location: currentOtherMaterial.location
                                                     })}
                                                     style={{
@@ -5010,7 +6382,7 @@ export default function ElasticIssueView({
                                       </div>
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                      Direct ({otherRollCount || 1} {otherUnit || 'Roll'})
+                                      Direct ({otherRollCount || 1} {normalizeAccUnit(otherUnit)})
                                     </td>
                                     <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'center' }}>
                                       <code style={{ background: '#f3e8ff', color: '#7c3aed', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
@@ -5025,13 +6397,13 @@ export default function ElasticIssueView({
                                     </td>
                                     <td style={{ padding: '10px 14px', textAlign: 'right', background: '#f3e8ff' }}>
                                       <div style={{ fontSize: '18px', fontWeight: '900', color: '#6b21a8', lineHeight: '1.1' }}>
-                                        {otherRollCount || 1} <span style={{ fontSize: '13px', fontWeight: '800' }}>{otherUnit || 'Roll'}(s)</span>
+                                        {otherRollCount || 1} <span style={{ fontSize: '13px', fontWeight: '800' }}>{normalizeAccUnit(otherUnit)}(s)</span>
                                       </div>
                                       <div style={{ fontSize: '11px', fontWeight: '700', color: '#7c3aed', marginTop: '2px' }}>
                                         Direct Floor Handover
                                       </div>
                                       <span style={{ fontSize: '10px', background: '#7c3aed', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
-                                        Total Issue: {otherRollCount || 1} {otherUnit || 'Roll'}(s)
+                                        Total Issue: {otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s)
                                       </span>
                                     </td>
                                   </tr>
@@ -5500,7 +6872,7 @@ export default function ElasticIssueView({
                             borderRadius: '4px',
                             fontWeight: '800'
                           }}>
-                            {otherUnit || 'Roll'}-Wise Floor Issue
+                            {normalizeAccUnit(otherUnit)}-Wise Floor Issue
                           </span>
                         </div>
 
@@ -5514,28 +6886,14 @@ export default function ElasticIssueView({
                               {otherMaterials.length} Items Available
                             </span>
                           </div>
-                          <select
+                          <SearchableMaterialSelect
+                            materials={otherMaterials}
                             value={selectedOtherMaterialId}
-                            onChange={(e) => handleSelectOtherMaterial(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '7px 10px',
-                              borderRadius: '6px',
-                              border: '1.5px solid #d8b4fe',
-                              fontSize: '12px',
-                              fontWeight: '700',
-                              color: '#0f172a',
-                              background: '#ffffff',
-                              outline: 'none'
-                            }}
-                          >
-                            <option value="">— Select Accessory Inventory Item —</option>
-                            {otherMaterials.map(m => (
-                              <option key={m.id} value={m.id}>
-                                {m.name} ({m.id}) • Stock: {m.stock} {m.unit || otherUnit || 'Roll'}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={handleSelectOtherMaterial}
+                            placeholder="— Select Accessory Inventory Item —"
+                            themeColor="#7c3aed"
+                            onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                          />
                         </div>
                       </div>
                     )}
@@ -5604,10 +6962,10 @@ export default function ElasticIssueView({
                       {/* Production Quick Details & Editable Issue Pcs */}
                       {withoutLotActive ? (
                         <div style={{
-                          background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
+                          background: '#f8fafc',
                           padding: '10px 14px',
                           borderRadius: '8px',
-                          border: '1.5px solid #fed7aa',
+                          border: '1px solid #e2e8f0',
                           marginBottom: '12px',
                           fontSize: '12.5px',
                           display: 'flex',
@@ -5615,22 +6973,23 @@ export default function ElasticIssueView({
                           justifyContent: 'space-between'
                         }}>
                           <div>
-                            <span style={{ fontSize: '10.5px', color: '#c2410c', display: 'block', fontWeight: '800', textTransform: 'uppercase' }}>
+                            <span style={{ fontSize: '10.5px', color: '#64748b', display: 'block', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
                               ISSUE MODE & LOT
                             </span>
-                            <strong style={{ color: '#9a3412', fontSize: '13.5px' }}>
-                              Without BOM — LOT #{searchLotInput || lotDetails?.lotNo || '—'} ({withoutLotStyle || 'Floor Issue'})
+                            <strong style={{ color: '#0f172a', fontSize: '13px' }}>
+                              LOT #{searchLotInput || lotDetails?.lotNo || '—'} {withoutLotStyle ? `(${withoutLotStyle})` : ''}
                             </strong>
                           </div>
                           <span style={{
-                            fontSize: '11px',
-                            fontWeight: '800',
-                            background: '#ea580c',
-                            color: '#ffffff',
-                            padding: '3px 8px',
-                            borderRadius: '6px'
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#f1f5f9',
+                            color: '#334155',
+                            padding: '2px 8px',
+                            borderRadius: '5px',
+                            border: '1px solid #cbd5e1'
                           }}>
-                            ⚡ DIRECT FLOOR ISSUE
+                            DIRECT ISSUE
                           </span>
                         </div>
                       ) : (
@@ -6221,8 +7580,16 @@ export default function ElasticIssueView({
                               <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
                                 ISSUE UNIT
                               </span>
-                              <span style={{ fontSize: '14px', fontWeight: '800', color: '#7c3aed' }}>
-                                {otherUnit || 'Roll'}
+                              <span style={{
+                                fontSize: '13px',
+                                fontWeight: '900',
+                                color: '#7c3aed',
+                                background: '#f3e8ff',
+                                border: '1px solid #d8b4fe',
+                                padding: '2px 8px',
+                                borderRadius: '6px'
+                              }}>
+                                {normalizeAccUnit(otherUnit)}
                               </span>
                             </div>
                           </div>
@@ -6252,16 +7619,16 @@ export default function ElasticIssueView({
                                   TOTAL ISSUE QUANTITY
                                 </div>
                                 <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                                  {otherMaterialName}: {otherRollCount || 1} {otherUnit || 'Roll'}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs
+                                  {otherMaterialName}: {otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s) for {issuePcs || lotDetails?.quantity || 0} Pcs
                                 </div>
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
-                                = {otherRollCount || 1} <span style={{ fontSize: '18px', fontWeight: '800' }}>{otherUnit || 'Roll'}(s)</span>
+                                = {otherRollCount || 1} <span style={{ fontSize: '18px', fontWeight: '800' }}>{normalizeAccUnit(otherUnit)}(s)</span>
                               </div>
                               <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                                Direct Floor Handover
+                                {currentOtherMaterial ? `Live Stock: ${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}` : 'Direct Floor Handover'}
                               </div>
                             </div>
                           </div>
@@ -6271,7 +7638,7 @@ export default function ElasticIssueView({
                       {/* Formula Note (Shown for Elastic, Tape & Other) */}
                       {materialMode !== 'bone' && (
                         <div style={{ fontSize: '11.5px', color: '#64748b', background: '#f8fafc', padding: '6px 10px', borderRadius: '6px' }}>
-                          Conversion Formula: <strong style={{ color: '#0f172a' }}>{materialMode === 'other' ? `Manual Material Issue: ${otherRollCount || 1} ${otherUnit || 'Roll'}(s) for ${issuePcs || 0} Pcs` : materialMode === 'tape' ? (calcResult.tapeFormula || `${issuePcs || lotDetails?.quantity || 0} Pcs ÷ 45 = ${calcResult.tapeRolls || Math.ceil((issuePcs || lotDetails?.quantity || 0) / 45)} Roll(s)`) : withoutLotActive ? `Without BOM: ${issuePcs || 0} Pcs ÷ ${effectiveDivisor} (${effectiveWidth}) = ${Math.ceil((parseInt(issuePcs, 10) || 0) / effectiveDivisor)} Roll(s)` : calcResult.formulaExplanation}</strong>
+                          Conversion Formula: <strong style={{ color: '#0f172a' }}>{materialMode === 'other' ? `Manual Material Issue: ${otherRollCount || 1} ${normalizeAccUnit(otherUnit)}(s) for ${issuePcs || 0} Pcs` : materialMode === 'tape' ? (calcResult.tapeFormula || `${issuePcs || lotDetails?.quantity || 0} Pcs ÷ 45 = ${calcResult.tapeRolls || Math.ceil((issuePcs || lotDetails?.quantity || 0) / 45)} Roll(s)`) : withoutLotActive ? `Without BOM: ${issuePcs || 0} Pcs ÷ ${effectiveDivisor} (${effectiveWidth}) = ${Math.ceil((parseInt(issuePcs, 10) || 0) / effectiveDivisor)} Roll(s)` : calcResult.formulaExplanation}</strong>
                         </div>
                       )}
                     </div>
@@ -7253,7 +8620,7 @@ export default function ElasticIssueView({
               overflow: 'auto'
             }}>
               <img
-                src={previewPhotoUrl.url}
+                src={previewPhotoUrl.url || previewPhotoUrl}
                 alt={previewPhotoUrl.title || 'Material'}
                 style={{
                   maxWidth: '100%',

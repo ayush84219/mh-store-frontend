@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Zap, 
@@ -45,6 +45,124 @@ export const getItemCodeDisplay = (m) => {
   const code = String(m.itemCode || m.stCode || m.item_code || m.materialCode || '').trim();
   if (!code || code.toUpperCase().startsWith('MT')) return '';
   return code;
+};
+
+// Helper to look up material store stock from materials inventory
+export const getMaterialStoreStock = (m, allMaterials = []) => {
+  if (!m) return 0;
+  // 1. Direct availableStock or stock on m
+  if (m.availableStock !== undefined && m.availableStock !== null && Number(m.availableStock) > 0) {
+    return Number(m.availableStock);
+  }
+  if (m.stock !== undefined && m.stock !== null && Number(m.stock) > 0) {
+    return Number(m.stock);
+  }
+
+  const matsList = Array.isArray(allMaterials) ? allMaterials : [];
+  if (matsList.length > 0) {
+    // 2. Look up by ID
+    const targetId = m.materialId || m.id;
+    if (targetId) {
+      const found = matsList.find(x => String(x.id).trim().toLowerCase() === String(targetId).trim().toLowerCase());
+      if (found && found.stock !== undefined && found.stock !== null) {
+        return Number(found.stock) || 0;
+      }
+    }
+
+    // 3. Look up by itemCode
+    const targetCode = String(m.itemCode || m.stCode || '').trim().toLowerCase();
+    if (targetCode) {
+      const found = matsList.find(x => {
+        const c = String(x.itemCode || x.stCode || '').trim().toLowerCase();
+        return c && c === targetCode;
+      });
+      if (found && found.stock !== undefined && found.stock !== null) {
+        return Number(found.stock) || 0;
+      }
+    }
+
+    // 4. Look up by name
+    const targetName = String(m.name || m.bomItemName || '').trim().toLowerCase();
+    if (targetName) {
+      const found = matsList.find(x => String(x.name || '').trim().toLowerCase() === targetName);
+      if (found && found.stock !== undefined && found.stock !== null) {
+        return Number(found.stock) || 0;
+      }
+    }
+  }
+
+  return Number(m.stock || m.availableStock || 0);
+};
+
+// Helper to calculate Total Pieces (Cutting Total Pieces according to lot wise), Issued Pcs, and Variance (Cutting - Issue)
+export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {}, designs = []) => {
+  if (!log) return { totalPieces: 0, issuePcs: 0, variance: 0, totalStoreStock: 0, stockBreakdown: [], cuttingVolume: 0, isDirect: true };
+  const mats = log.materials || [];
+  const issuePcs = mats.reduce((sum, m) => sum + (Number(m.qty) || 0), 0);
+
+  const cleanLot = String(log.lotId || '').trim().toLowerCase();
+  const isDirect = !cleanLot || cleanLot === 'direct-item' || cleanLot.includes('direct');
+
+  // 1. Resolve Cutting Total Pieces for this lot from cuttingMap (cutting_header database)
+  let cuttingVolume = 0;
+  if (!isDirect && cleanLot) {
+    if (cuttingMap && cuttingMap[cleanLot] !== undefined && cuttingMap[cleanLot] !== null) {
+      cuttingVolume = Number(cuttingMap[cleanLot]) || 0;
+    }
+  }
+
+  // 2. Fallback to designs prop (if design has garment quantity)
+  if (!cuttingVolume && !isDirect && cleanLot && Array.isArray(designs)) {
+    const dMatch = designs.find(d => 
+      String(d.id || '').trim().toLowerCase() === cleanLot || 
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLot
+    );
+    if (dMatch && Number(dMatch.quantity) > 0) {
+      cuttingVolume = Number(dMatch.quantity);
+    }
+  }
+
+  // 3. Fallback to log.volume / log.pieces if recorded
+  if (!cuttingVolume && !isDirect) {
+    const rawVol = Number(log.volume !== undefined && log.volume !== null ? log.volume : (log.pieces || 0));
+    if (rawVol > 0) {
+      cuttingVolume = rawVol;
+    }
+  }
+
+  // Stock breakdown for materials inventory reference
+  const stockBreakdown = mats.map(m => {
+    const matName = m.name || m.bomItemName || 'Material';
+    const unit = m.unit || 'Pcs';
+    const qty = Number(m.qty) || 0;
+    const storeStock = getMaterialStoreStock(m, allMaterials);
+    const itemCode = getItemCodeDisplay(m) || m.itemCode || '';
+    const location = m.location || '';
+    return {
+      name: matName,
+      unit,
+      qty,
+      storeStock,
+      itemCode,
+      location,
+      variance: storeStock - qty
+    };
+  });
+  const totalStoreStock = stockBreakdown.reduce((sum, item) => sum + (item.storeStock || 0), 0);
+
+  // Total Pieces shows ONLY cutting total pieces according to lot wise
+  const totalPieces = isDirect ? 0 : cuttingVolume;
+  const variance = totalPieces > 0 ? (totalPieces - issuePcs) : -issuePcs;
+
+  return { 
+    totalPieces, 
+    totalStoreStock, 
+    issuePcs, 
+    variance, 
+    stockBreakdown, 
+    cuttingVolume,
+    isDirect
+  };
 };
 
 // Sound feedback helper
@@ -925,23 +1043,231 @@ export default function WithoutBomMaterialIssueView({
     return Array.from(set).sort();
   }, [designs]);
 
-  // Auto-detect brand & style when user types or selects a lot
-  useEffect(() => {
-    if (!lotNo) return;
-    const cleanLot = String(lotNo).trim().toLowerCase();
-    const match = (designs || []).find(d => 
-      String(d.id).trim().toLowerCase() === cleanLot || 
-      String(d.lotNumber || '').trim().toLowerCase() === cleanLot
-    );
-    if (match) {
-      if (match.brand && !brandName) {
-        setBrandName(match.brand);
+  // ── Cutting Cache Management & 30-Minute Auto-Reload ───────────────────────
+  const CUTTING_CACHE_MAX_ENTRIES = 100;
+  const CUTTING_CACHE_RELOAD_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+  const [cuttingHeaders, setCuttingHeaders] = useState([]);
+  const [lastCuttingCacheReload, setLastCuttingCacheReload] = useState(() => new Date());
+  const [isReloadingCuttingCache, setIsReloadingCuttingCache] = useState(false);
+  const [cuttingCacheRefreshCount, setCuttingCacheRefreshCount] = useState(0);
+  const [cacheReloadNotice, setCacheReloadNotice] = useState('');
+
+  // ── In-Memory Matrix Cache to avoid repeat API hits ──
+  const matrixCacheRef = useRef({});
+
+  // Reload cache function: empties in-memory matrix cache and reloads cutting headers from MySQL
+  const reloadCuttingCache = useCallback(async (manual = false) => {
+    setIsReloadingCuttingCache(true);
+    // 1. If cache is full or on 30m reload, empty the cache
+    matrixCacheRef.current = {};
+    console.log('[Cutting Cache] Matrix cache emptied');
+
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCuttingHeaders(data);
+        }
       }
-      if (match.category && (!styleName || styleName === 'Direct Item Requisition' || styleName === 'Floor Batch Issue')) {
-        setStyleName(match.category);
+      setLastCuttingCacheReload(new Date());
+      setCuttingCacheRefreshCount(c => c + 1);
+      if (manual) {
+        setCacheReloadNotice('✓ Cache emptied & reloaded');
+        setTimeout(() => setCacheReloadNotice(''), 3500);
       }
+    } catch (err) {
+      console.warn('Failed to reload cutting headers cache:', err);
+    } finally {
+      setIsReloadingCuttingCache(false);
     }
-  }, [lotNo, designs]);
+  }, []);
+
+  // Auto-reload every 30 minutes and on initial mount
+  useEffect(() => {
+    reloadCuttingCache(false);
+
+    const intervalId = setInterval(() => {
+      console.log('[Cutting Cache] 30-minute interval timer fired: Emptying cache and reloading headers');
+      reloadCuttingCache(false);
+    }, CUTTING_CACHE_RELOAD_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [reloadCuttingCache]);
+
+  // Map of lowercase lot number -> Cutting Total Pieces
+  const cuttingLotMap = useMemo(() => {
+    const map = {};
+    (cuttingHeaders || []).forEach(ch => {
+      if (ch.Lot_Number) {
+        const k = String(ch.Lot_Number).trim().toLowerCase();
+        const q = Number(ch.Cutting_Qty) || 0;
+        if (q > 0) map[k] = q;
+      }
+    });
+    (designs || []).forEach(d => {
+      const q = Number(d.quantity) || 0;
+      if (q > 0) {
+        if (d.id) {
+          const k1 = String(d.id).trim().toLowerCase();
+          if (!map[k1]) map[k1] = q;
+        }
+        if (d.lotNumber) {
+          const k2 = String(d.lotNumber).trim().toLowerCase();
+          if (!map[k2]) map[k2] = q;
+        }
+      }
+    });
+    return map;
+  }, [cuttingHeaders, designs]);
+
+  // Effective cutting map from in-memory cuttingHeaders and designs (Instant 0ms, zero network lag)
+  const effectiveCuttingMap = cuttingLotMap;
+
+
+
+  // ── Active Lot Cutting Details State & Fetch ────────────────────────────────
+  const [activeLotCutting, setActiveLotCutting] = useState(null);
+  const [loadingActiveLotCutting, setLoadingActiveLotCutting] = useState(false);
+  const [showActiveCuttingMatrix, setShowActiveCuttingMatrix] = useState(false);
+
+  // Dynamically extract all distinct size columns present in cutting matrix rows
+  const activeSizes = useMemo(() => {
+    if (!activeLotCutting || !activeLotCutting.rows || activeLotCutting.rows.length === 0) return [];
+    const sizeSet = new Set();
+    activeLotCutting.rows.forEach(r => {
+      if (r.sizes && typeof r.sizes === 'object') {
+        Object.keys(r.sizes).forEach(sz => {
+          if (Number(r.sizes[sz]) > 0) sizeSet.add(sz);
+        });
+      }
+    });
+    const standardOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', 'XXL', '3XL', 'XXXL', '4XL', '5XL', 'FREE', 'FS'];
+    return Array.from(sizeSet).sort((a, b) => {
+      const idxA = standardOrder.indexOf(a.toUpperCase());
+      const idxB = standardOrder.indexOf(b.toUpperCase());
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [activeLotCutting]);
+
+  // Synchronous INSTANT lookup from memory (0ms) + debounced background matrix fetch
+  useEffect(() => {
+    const cleanLot = String(lotNo || '').trim();
+    if (!cleanLot) {
+      setActiveLotCutting(null);
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    const cleanLower = cleanLot.toLowerCase();
+
+    // 1. INSTANT (0ms) In-Memory Lookup from cuttingHeaders & designs
+    const headerMatch = (cuttingHeaders || []).find(ch => 
+      String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
+    );
+    const designMatch = (designs || []).find(d => 
+      String(d.id || '').trim().toLowerCase() === cleanLower ||
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLower
+    );
+
+    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || 0;
+    const hasMemoryData = Boolean(headerMatch || designMatch);
+
+    // Set immediate cutting details synchronously without waiting for network!
+    setActiveLotCutting({
+      lotNumber: cleanLot,
+      totalPieces: memoryTotal,
+      style: headerMatch?.Style || designMatch?.category || '',
+      fabric: headerMatch?.Fabric || '',
+      brand: headerMatch?.Brand || designMatch?.brand || '',
+      partyName: headerMatch?.Party_Name || '',
+      garmentType: headerMatch?.Garment_Type || '',
+      dateOfIssue: headerMatch?.Date_of_Issue || headerMatch?.JobOrder_Date || '',
+      shades: headerMatch?.Shades || '',
+      sizes: headerMatch?.Sizes || '',
+      rows: matrixCacheRef.current[cleanLower]?.rows || [],
+      hasDetails: hasMemoryData
+    });
+
+    // Auto-fill form fields immediately
+    if (headerMatch?.Brand || designMatch?.brand) {
+      setBrandName(headerMatch?.Brand || designMatch?.brand);
+    }
+    if (headerMatch?.Style || designMatch?.category) {
+      setStyleName(headerMatch?.Style || designMatch?.category);
+    }
+    if (memoryTotal > 0 && (!pieces || pieces === 1)) {
+      setPieces(memoryTotal);
+    }
+
+    // If already cached in matrixCache, we have full matrix!
+    if (matrixCacheRef.current[cleanLower]) {
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    // 2. Debounced background fetch for detailed Color-Size Matrix (350ms debounce to avoid typing lag)
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setLoadingActiveLotCutting(true);
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(cleanLot)}`);
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+        // If cache is full (capacity limit reached), empty cache to prevent memory bloat
+        if (Object.keys(matrixCacheRef.current).length >= CUTTING_CACHE_MAX_ENTRIES) {
+          console.log(`[Cutting Cache] Cache reached capacity (${CUTTING_CACHE_MAX_ENTRIES} entries). Emptying cache...`);
+          matrixCacheRef.current = {};
+        }
+
+        matrixCacheRef.current[cleanLower] = data;
+        const matrixRows = data?.rows || [];
+        const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+        const resolvedTotal = matrixTotal > 0 
+          ? matrixTotal 
+          : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
+
+        const styleVal = data?.style || data?.header?.Style || '';
+        const fabricVal = data?.fabric || data?.header?.Fabric || '';
+        const brandVal = data?.brand || data?.header?.Brand || '';
+        const partyVal = data?.partyName || data?.header?.Party_Name || '';
+        const shadesVal = data?.shades || data?.header?.Shades || '';
+        const sizesVal = data?.sizes || data?.header?.Sizes || '';
+        const dateVal = data?.dateOfIssue || data?.header?.Date_of_Issue || data?.jobOrderDate || '';
+
+        setActiveLotCutting(prev => ({
+          ...prev,
+          totalPieces: resolvedTotal,
+          style: prev?.style || styleVal,
+          fabric: prev?.fabric || fabricVal,
+          brand: prev?.brand || brandVal,
+          partyName: prev?.partyName || partyVal,
+          shades: prev?.shades || shadesVal,
+          sizes: prev?.sizes || sizesVal,
+          dateOfIssue: prev?.dateOfIssue || dateVal,
+          rows: matrixRows,
+          hasDetails: Boolean(hasMemoryData || matrixRows.length > 0 || resolvedTotal > 0 || styleVal || fabricVal)
+        }));
+
+        if (brandVal && !brandName) setBrandName(brandVal);
+        if (styleVal && (!styleName || styleName === 'Direct Item Requisition' || styleName === 'Floor Batch Issue')) setStyleName(styleVal);
+        if (resolvedTotal > 0 && (!pieces || pieces === 1)) setPieces(resolvedTotal);
+      } catch (err) {
+        // Silently keep the in-memory data
+      } finally {
+        if (!isCancelled) setLoadingActiveLotCutting(false);
+      }
+    }, 350);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [lotNo, cuttingHeaders, designs, cuttingCacheRefreshCount]);
 
   // Barcode quick-input
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -1094,27 +1420,35 @@ export default function WithoutBomMaterialIssueView({
   const [historyDateFrom, setHistoryDateFrom] = useState('');
   const [historyDateTo, setHistoryDateTo] = useState('');
   const [historyCategories, setHistoryCategories] = useState([]); // multi-select categories array e.g. ['TAG', 'LABEL']
-  const [historyPerson, setHistoryPerson] = useState(''); // '' | 'iss:pooja' | 'rec:KARAN'
+  const [historyPersons, setHistoryPersons] = useState([]); // multi-select person array e.g. ['iss:paras', 'rec:PINTU']
 
   // Scrollable Category Dropdown Menu State
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
   const categoryDropdownRef = useRef(null);
 
-  // Close category dropdown on outside click
+  // Scrollable Person Dropdown Menu State
+  const [personDropdownOpen, setPersonDropdownOpen] = useState(false);
+  const [personSearchTerm, setPersonSearchTerm] = useState('');
+  const personDropdownRef = useRef(null);
+
+  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(e.target)) {
         setCategoryDropdownOpen(false);
       }
+      if (personDropdownRef.current && !personDropdownRef.current.contains(e.target)) {
+        setPersonDropdownOpen(false);
+      }
     };
-    if (categoryDropdownOpen) {
+    if (categoryDropdownOpen || personDropdownOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [categoryDropdownOpen]);
+  }, [categoryDropdownOpen, personDropdownOpen]);
 
   // Category multi-select toggle (allows choosing 2-3+ categories together)
   const handleToggleHistoryCategory = (catName) => {
@@ -1126,6 +1460,24 @@ export default function WithoutBomMaterialIssueView({
         return [...prev, upper];
       }
     });
+  };
+
+  // Person multi-select toggle (allows choosing multiple store issuers / floor masters)
+  const handleToggleHistoryPerson = (personKey) => {
+    setHistoryPersons(prev => {
+      if (prev.includes(personKey)) {
+        return prev.filter(p => p !== personKey);
+      } else {
+        return [...prev, personKey];
+      }
+    });
+  };
+
+  const formatPersonKey = (key) => {
+    if (!key) return '';
+    if (key.startsWith('iss:')) return `Store: ${key.replace('iss:', '')}`;
+    if (key.startsWith('rec:')) return `Floor: ${key.replace('rec:', '')}`;
+    return key;
   };
 
   // Date Quick Preset Handlers
@@ -1153,7 +1505,9 @@ export default function WithoutBomMaterialIssueView({
     setHistoryDateFrom('');
     setHistoryDateTo('');
     setHistoryCategories([]);
-    setHistoryPerson('');
+    setHistoryPersons([]);
+    setPersonSearchTerm('');
+    setPersonDropdownOpen(false);
     setCategorySearchTerm('');
     setCategoryDropdownOpen(false);
   };
@@ -1240,25 +1594,48 @@ export default function WithoutBomMaterialIssueView({
     return availableHistoryCategories.filter(c => c.name.toLowerCase().includes(term));
   }, [availableHistoryCategories, categorySearchTerm]);
 
-  // Distinct issuers & receivers for person filter
+  // Distinct issuers & receivers for person filter with challan count
   const availablePeople = useMemo(() => {
-    const issuers = new Set();
-    const receivers = new Set();
+    const issuerCounts = {};
+    const receiverCounts = {};
     rawWithoutBomLogs.forEach(l => {
-      if (l.personName && typeof l.personName === 'string' && l.personName.trim()) {
-        issuers.add(l.personName.trim());
+      const iss = l.personName && typeof l.personName === 'string' ? l.personName.trim() : '';
+      if (iss) {
+        issuerCounts[iss] = (issuerCounts[iss] || 0) + 1;
       }
-      if (l.receiverName && typeof l.receiverName === 'string' && l.receiverName.trim()) {
-        receivers.add(l.receiverName.trim());
+      const rec = l.receiverName && typeof l.receiverName === 'string' ? l.receiverName.trim() : '';
+      if (rec) {
+        receiverCounts[rec] = (receiverCounts[rec] || 0) + 1;
       }
     });
+
+    const issuers = Object.keys(issuerCounts)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map(name => ({ key: `iss:${name}`, name, role: 'Store', count: issuerCounts[name] }));
+
+    const receivers = Object.keys(receiverCounts)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      .map(name => ({ key: `rec:${name}`, name, role: 'Floor', count: receiverCounts[name] }));
+
     return {
-      issuers: Array.from(issuers).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
-      receivers: Array.from(receivers).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+      issuers,
+      receivers,
+      total: issuers.length + receivers.length
     };
   }, [rawWithoutBomLogs]);
 
-  // Filtered without-bom issue logs based on search, dates, multi-select categories, and person
+  // Filtered issuers & receivers for person dropdown search
+  const filteredPeople = useMemo(() => {
+    if (!personSearchTerm.trim()) return availablePeople;
+    const term = personSearchTerm.trim().toLowerCase();
+    return {
+      issuers: availablePeople.issuers.filter(p => p.name.toLowerCase().includes(term) || `store: ${p.name}`.toLowerCase().includes(term)),
+      receivers: availablePeople.receivers.filter(p => p.name.toLowerCase().includes(term) || `floor: ${p.name}`.toLowerCase().includes(term)),
+      total: availablePeople.total
+    };
+  }, [availablePeople, personSearchTerm]);
+
+  // Filtered without-bom issue logs based on search, dates, multi-select categories, and multi-select persons
   const withoutBomLogs = useMemo(() => {
     return rawWithoutBomLogs.filter(l => {
       // 1. Date Range Filter
@@ -1282,20 +1659,23 @@ export default function WithoutBomMaterialIssueView({
         if (!hasMatchingCat) return false;
       }
 
-      // 3. Person Wise Filter (Issuer or Receiver)
-      if (historyPerson) {
-        if (historyPerson.startsWith('iss:')) {
-          const target = historyPerson.replace('iss:', '').trim().toLowerCase();
-          if (String(l.personName || '').trim().toLowerCase() !== target) return false;
-        } else if (historyPerson.startsWith('rec:')) {
-          const target = historyPerson.replace('rec:', '').trim().toLowerCase();
-          if (!String(l.receiverName || '').trim().toLowerCase().includes(target)) return false;
-        } else {
-          const target = historyPerson.trim().toLowerCase();
-          const issMatch = String(l.personName || '').trim().toLowerCase().includes(target);
-          const recMatch = String(l.receiverName || '').trim().toLowerCase().includes(target);
-          if (!issMatch && !recMatch) return false;
-        }
+      // 3. Person Wise Multi-Select Filter (Store Issuer or Floor Receiver)
+      if (historyPersons.length > 0) {
+        const matchesAnyPerson = historyPersons.some(hp => {
+          if (hp.startsWith('iss:')) {
+            const target = hp.replace('iss:', '').trim().toLowerCase();
+            return String(l.personName || '').trim().toLowerCase() === target;
+          } else if (hp.startsWith('rec:')) {
+            const target = hp.replace('rec:', '').trim().toLowerCase();
+            return String(l.receiverName || '').trim().toLowerCase().includes(target);
+          } else {
+            const target = hp.trim().toLowerCase();
+            const issMatch = String(l.personName || '').trim().toLowerCase().includes(target);
+            const recMatch = String(l.receiverName || '').trim().toLowerCase().includes(target);
+            return issMatch || recMatch;
+          }
+        });
+        if (!matchesAnyPerson) return false;
       }
 
       // 4. Free text search
@@ -1316,13 +1696,13 @@ export default function WithoutBomMaterialIssueView({
 
       return true;
     });
-  }, [rawWithoutBomLogs, historyDateFrom, historyDateTo, historyCategories, historyPerson, historySearch, materials]);
+  }, [rawWithoutBomLogs, historyDateFrom, historyDateTo, historyCategories, historyPersons, historySearch, materials]);
 
   // Total active filter criteria count
   const activeFiltersCount = (historyDateFrom ? 1 : 0) + 
     (historyDateTo ? 1 : 0) + 
     (historyCategories.length > 0 ? historyCategories.length : 0) + 
-    (historyPerson ? 1 : 0) + 
+    (historyPersons.length > 0 ? historyPersons.length : 0) + 
     (historySearch ? 1 : 0);
 
   // Base default accessory component types
@@ -2501,6 +2881,198 @@ export default function WithoutBomMaterialIssueView({
     }
   };
 
+  // Direct 1-Click Export of Individual Challan / Bill as PDF File
+  const handleDownloadChallanPdf = (log) => {
+    try {
+      const issueData = buildIssueDataFromLog(log);
+      const doc = generatePDFVoucher(issueData);
+      doc.save(`${log.id || 'Challan'}_Material_Issue_Slip.pdf`);
+    } catch (err) {
+      alert('Failed to export Challan PDF: ' + err.message);
+    }
+  };
+
+  // Direct 1-Click Export of Current Form Challan as PDF File
+  const handleSavePdfFromForm = () => {
+    setFormError('');
+    const issueData = buildIssueDataFromForm();
+    if (!issueData) return;
+    try {
+      const doc = generatePDFVoucher(issueData);
+      doc.save(`${issueData.voucherId || 'Challan'}_Material_Issue_Slip.pdf`);
+    } catch (err) {
+      setFormError('Failed to export Challan PDF: ' + err.message);
+    }
+  };
+
+  // Export Full History Audit Register as a Beautiful Multi-Page PDF Document
+  const handleExportFullReportPdf = () => {
+    if (!withoutBomLogs || withoutBomLogs.length === 0) {
+      alert('No Without-BOM challan records found to export.');
+      return;
+    }
+
+    try {
+      const doc = new jsPDF('l', 'mm', 'a4');
+      const pw = doc.internal.pageSize.getWidth();
+      const ph = doc.internal.pageSize.getHeight();
+      const margin = 10;
+
+      // Header Banner
+      doc.setFillColor(15, 23, 42); // slate-900
+      doc.rect(margin, margin, pw - (margin * 2), 22, 'F');
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.text('MOHIT HOSIERY — CENTRAL STORE & PRODUCTION ACCESSORIES', margin + 6, margin + 8);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(249, 115, 22); // orange-500
+      doc.text('WITHOUT-BOM & ITEM ISSUE AUDIT REGISTER', margin + 6, margin + 15);
+
+      const nowStr = new Date().toLocaleString('en-GB');
+      doc.setFontSize(8);
+      doc.setTextColor(203, 213, 225);
+      doc.text(`Generated: ${nowStr} | Total Records: ${withoutBomLogs.length}`, pw - margin - 6, margin + 15, { align: 'right' });
+
+      // Active Filter Summary
+      const filterParts = [];
+      if (historyDateFrom || historyDateTo) {
+        filterParts.push(`Dates: ${historyDateFrom || 'Start'} to ${historyDateTo || 'Today'}`);
+      }
+      if (historyCategories.length > 0) {
+        filterParts.push(`Categories: ${historyCategories.join(', ')}`);
+      }
+      if (historyPersons.length > 0) {
+        filterParts.push(`Persons: ${historyPersons.map(p => formatPersonKey(p)).join(', ')}`);
+      }
+      if (historySearch) {
+        filterParts.push(`Search: "${historySearch}"`);
+      }
+
+      let startTableY = margin + 26;
+      if (filterParts.length > 0) {
+        doc.setFillColor(255, 247, 237);
+        doc.setDrawColor(254, 215, 170);
+        doc.roundedRect(margin, startTableY, pw - (margin * 2), 7, 1.5, 1.5, 'FD');
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(194, 65, 12);
+        doc.text(`Active Filters: ${filterParts.join('  |  ')}`, margin + 4, startTableY + 4.8);
+        startTableY += 10;
+      }
+
+      // Prepare Table Data
+      let grandTotalPieces = 0;
+      let grandIssuePcs = 0;
+
+      const tableRows = withoutBomLogs.map((log, idx) => {
+        const dateStr = log.date || '—';
+        const rawLot = String(log.lotId || '').trim();
+        const isDirect = !rawLot || rawLot === 'DIRECT-ITEM' || rawLot.toLowerCase().includes('direct');
+        const lotDisplay = isDirect ? 'DIRECT REQUISITION' : `LOT #${rawLot}`;
+        const brandDisplay = log.brand || log.brandName || (isDirect ? 'Direct Material' : '—');
+
+        const mats = log.materials || [];
+        const matLines = mats.map(m => {
+          const c = getItemCodeDisplay(m);
+          const name = m.name || m.bomItemName || 'Material';
+          const qty = `${m.qty || 0} ${m.unit || 'Pcs'}`;
+          const loc = getMaterialLocation(m) || m.location;
+          return `${c ? `[${c}] ` : ''}${name}: ${qty}${loc ? ` (${loc})` : ''}`;
+        }).join('\n');
+
+        const { totalPieces, issuePcs, variance } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+        grandTotalPieces += totalPieces;
+        grandIssuePcs += issuePcs;
+        const varStr = variance > 0 ? `+${variance}` : `${variance}`;
+
+        const issuer = log.personName || 'Store Incharge';
+        const receiver = log.receiverName ? `${log.receiverName}${log.receiverDept ? `\n(${log.receiverDept})` : ''}` : 'Floor Master';
+        const remarks = log.remarks || '—';
+
+        const cuttingDetailStr = totalPieces > 0
+          ? `${totalPieces.toLocaleString()} Pcs\n(Cutting Qty)`
+          : '—';
+
+        return [
+          idx + 1,
+          log.id || `BILL-${idx + 1}`,
+          dateStr,
+          lotDisplay,
+          brandDisplay,
+          matLines || '—',
+          cuttingDetailStr,
+          `${issuePcs.toLocaleString()} Pcs`,
+          totalPieces > 0 ? `${varStr} Pcs` : '—',
+          issuer,
+          receiver,
+          remarks
+        ];
+      });
+
+      const grandVariance = grandTotalPieces - grandIssuePcs;
+      const grandVarStr = grandVariance > 0 ? `+${grandVariance.toLocaleString()}` : `${grandVariance.toLocaleString()}`;
+
+      autoTable(doc, {
+        startY: startTableY,
+        head: [['#', 'Challan No', 'Date', 'Lot Reference', 'Brand', 'Issued Materials', 'Total Pieces\n(Cutting)', 'Issue Pcs', 'Variance\n(Cutting - Issue)', 'Issued By', 'Received By', 'Remarks']],
+        body: tableRows,
+        foot: [['', 'TOTALS', '', '', '', `${withoutBomLogs.length} Challan(s)`, `${grandTotalPieces.toLocaleString()} Pcs Cutting`, `${grandIssuePcs.toLocaleString()} Pcs`, `${grandVarStr} Pcs Balance`, '', '', '']],
+        theme: 'grid',
+        styles: {
+          fontSize: 7,
+          cellPadding: 2,
+          valign: 'top',
+          overflow: 'linebreak'
+        },
+        headStyles: {
+          fillColor: [15, 23, 42],
+          textColor: 255,
+          fontStyle: 'bold',
+          halign: 'center'
+        },
+        footStyles: {
+          fillColor: [241, 245, 249],
+          textColor: [15, 23, 42],
+          fontStyle: 'bold'
+        },
+        columnStyles: {
+          0: { cellWidth: 7, halign: 'center' },
+          1: { cellWidth: 22, fontStyle: 'bold', textColor: [194, 65, 12] },
+          2: { cellWidth: 20 },
+          3: { cellWidth: 24, fontStyle: 'bold' },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 58 },
+          6: { cellWidth: 19, halign: 'right', fontStyle: 'bold' },
+          7: { cellWidth: 19, halign: 'right', fontStyle: 'bold', textColor: [234, 88, 12] },
+          8: { cellWidth: 24, halign: 'right', fontStyle: 'bold' },
+          9: { cellWidth: 20 },
+          10: { cellWidth: 22 },
+          11: { cellWidth: 22 }
+        }
+      });
+
+      // Add page numbers on all pages
+      const totalPages = doc.internal.getNumberOfPages();
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(148, 163, 184);
+        doc.text(`Page ${i} of ${totalPages}`, pw - margin, ph - 4, { align: 'right' });
+        doc.text('Mohit Hosiery Central Store • Material Issue Without BOM Official Audit Register', margin, ph - 4);
+      }
+
+      const fileName = `Without_BOM_Challan_Register_${new Date().toISOString().slice(0, 10)}.pdf`;
+      doc.save(fileName);
+    } catch (err) {
+      console.error('PDF Export failed:', err);
+      alert('Failed to export PDF: ' + err.message);
+    }
+  };
+
   // Handler to print full page report with detailed table, brand-wise, lot-wise summaries and photos
   const handlePrintFullHistoryReport = () => {
     if (!withoutBomLogs || withoutBomLogs.length === 0) {
@@ -2516,13 +3088,8 @@ export default function WithoutBomMaterialIssueView({
     if (historyCategories.length > 0) {
       filterParts.push(`Categories: ${historyCategories.join(', ')}`);
     }
-    if (historyPerson) {
-      const pText = historyPerson.startsWith('iss:') 
-        ? `Store/Issuer: ${historyPerson.replace('iss:', '')}` 
-        : historyPerson.startsWith('rec:') 
-        ? `Floor/Receiver: ${historyPerson.replace('rec:', '')}` 
-        : `Person: ${historyPerson}`;
-      filterParts.push(pText);
+    if (historyPersons.length > 0) {
+      filterParts.push(`Persons: ${historyPersons.map(p => formatPersonKey(p)).join(', ')}`);
     }
     if (historySearch) {
       filterParts.push(`Search: "${historySearch}"`);
@@ -2540,6 +3107,7 @@ export default function WithoutBomMaterialIssueView({
     const totalChallans = withoutBomLogs.length;
     let totalLineItems = 0;
     let totalQtyIssued = 0;
+    let grandTotalPieces = 0;
     const uniqueLots = new Set();
     const uniqueBrands = new Set();
 
@@ -2554,6 +3122,8 @@ export default function WithoutBomMaterialIssueView({
       const isDirect = !rawLot || rawLot === 'DIRECT-ITEM' || rawLot.toLowerCase().includes('direct');
       
       const effectiveLot = isDirect ? 'DIRECT REQUISITION' : `LOT #${rawLot}`;
+      const { totalPieces: logVol } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+      grandTotalPieces += logVol;
 
       if (rawBrand) {
         uniqueBrands.add(rawBrand);
@@ -2576,8 +3146,13 @@ export default function WithoutBomMaterialIssueView({
           isDirect: isDirect,
           brand: rawBrand || '',
           challans: new Set(),
-          materials: {}
+          materials: {},
+          totalPieces: logVol
         };
+      } else {
+        if (logVol > lotSummaryMap[effectiveLot].totalPieces) {
+          lotSummaryMap[effectiveLot].totalPieces = logVol;
+        }
       }
       if (rawBrand && !lotSummaryMap[effectiveLot].brand) {
         lotSummaryMap[effectiveLot].brand = rawBrand;
@@ -2644,11 +3219,14 @@ export default function WithoutBomMaterialIssueView({
       });
     });
 
+    const grandVariance = grandTotalPieces - totalQtyIssued;
+
     // Build Rows for Main Log Table
     const tableRowsHtml = withoutBomLogs.map((log, idx) => {
       const isDirect = !log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct');
       const lotDisplay = isDirect ? 'DIRECT REQUISITION' : `LOT #${log.lotId}`;
       const brandDisplay = (log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : '';
+      const { totalPieces, issuePcs, variance } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
 
       const materialsHtml = (log.materials || []).map(m => {
         const photo = getMaterialPhoto(m);
@@ -2683,6 +3261,24 @@ export default function WithoutBomMaterialIssueView({
             <div class="mat-list-container">
               ${materialsHtml}
             </div>
+          </td>
+          <td style="text-align: right; vertical-align: top; white-space: nowrap;">
+            <div style="font-weight: 900; font-size: 11.5px; color: #000000;">
+              ${totalPieces > 0 ? `${totalPieces.toLocaleString('en-IN')} Pcs` : '—'}
+            </div>
+            ${totalPieces > 0 ? `
+              <div style="font-size: 8.5px; font-weight: 800; color: #1d4ed8; margin-top: 1px;">
+                ✂️ CUTTING PCS
+              </div>
+            ` : ''}
+          </td>
+          <td style="text-align: right; font-weight: 900; font-size: 11.5px; color: #ea580c; white-space: nowrap; vertical-align: top;">
+            ${issuePcs.toLocaleString('en-IN')} Pcs
+          </td>
+          <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; vertical-align: top;">
+            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${variance === 0 ? '#bbf7d0' : variance > 0 ? '#bfdbfe' : '#fecaca'}; background: ${variance === 0 ? '#f0fdf4' : variance > 0 ? '#eff6ff' : '#fef2f2'}; color: ${variance === 0 ? '#15803d' : variance > 0 ? '#1d4ed8' : '#b91c1c'};">
+              ${variance > 0 ? `+${variance.toLocaleString('en-IN')}` : variance.toLocaleString('en-IN')} Pcs
+            </span>
           </td>
           <td style="font-size: 10px;">${log.personName || 'Store In-charge'}</td>
           <td style="font-size: 10px; font-weight: 700;">
@@ -2751,6 +3347,8 @@ export default function WithoutBomMaterialIssueView({
       const challansArr = Array.from(lData.challans);
       const matItems = Object.values(lData.materials);
       const lotTotalQty = matItems.reduce((acc, m) => acc + m.totalQty, 0);
+      const lotPieces = lData.totalPieces || 0;
+      const lotVariance = lotPieces - lotTotalQty;
 
       const lotMaterialsHtml = matItems.map(m => `
         <div class="mat-item-row" style="padding: 2px 0;">
@@ -2783,8 +3381,16 @@ export default function WithoutBomMaterialIssueView({
               ${lotMaterialsHtml}
             </div>
           </td>
-          <td style="text-align: right; font-weight: 900; font-size: 12.5px; color: #000000; white-space: nowrap;">
+          <td style="text-align: right; font-weight: 800; font-size: 11.5px; white-space: nowrap;">
+            ${lotPieces.toLocaleString('en-IN')} Pcs
+          </td>
+          <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap;">
             ${lotTotalQty.toLocaleString('en-IN')} Pcs
+          </td>
+          <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap;">
+            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${lotVariance === 0 ? '#bbf7d0' : lotVariance > 0 ? '#bfdbfe' : '#fecaca'}; background: ${lotVariance === 0 ? '#f0fdf4' : lotVariance > 0 ? '#eff6ff' : '#fef2f2'}; color: ${lotVariance === 0 ? '#15803d' : lotVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
+              ${lotVariance > 0 ? `+${lotVariance.toLocaleString('en-IN')}` : lotVariance.toLocaleString('en-IN')} Pcs
+            </span>
           </td>
         </tr>
       `;
@@ -3153,9 +3759,17 @@ export default function WithoutBomMaterialIssueView({
             <span>TOTAL LINE ITEMS</span>
             <strong>${totalLineItems}</strong>
           </div>
-          <div class="summary-card">
-            <span>TOTAL QUANTITY ISSUED</span>
-            <strong>${totalQtyIssued.toLocaleString('en-IN')} Units</strong>
+          <div class="summary-card" style="background: #f8fafc;">
+            <span style="color: #0f172a;">TOTAL PIECES (CUTTING)</span>
+            <strong style="color: #0f172a;">${grandTotalPieces.toLocaleString('en-IN')} Pcs</strong>
+          </div>
+          <div class="summary-card" style="background: #fff7ed;">
+            <span style="color: #c2410c;">ISSUE PCS</span>
+            <strong style="color: #c2410c;">${totalQtyIssued.toLocaleString('en-IN')} Pcs</strong>
+          </div>
+          <div class="summary-card" style="background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
+            <span style="color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">VARIANCE (CUTTING - ISSUE)</span>
+            <strong style="color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs</strong>
           </div>
           <div class="summary-card">
             <span>TOTAL UNIQUE LOTS</span>
@@ -3176,22 +3790,33 @@ export default function WithoutBomMaterialIssueView({
             <tr>
               <th style="width: 35px; text-align: center;">SEQ #</th>
               <th style="width: 105px;">CHALLAN NO</th>
-              <th style="width: 90px;">DATE</th>
-              <th style="width: 140px;">LOT &amp; BRAND</th>
+              <th style="width: 85px;">DATE</th>
+              <th style="width: 130px;">LOT &amp; BRAND</th>
               <th>ISSUED MATERIALS (WITH PHOTO &amp; QTY)</th>
-              <th style="width: 95px;">ISSUED BY</th>
-              <th style="width: 110px;">RECEIVED BY</th>
-              <th style="width: 120px;">REMARKS</th>
+              <th style="width: 115px; text-align: right;">TOTAL PIECES (CUTTING)</th>
+              <th style="width: 85px; text-align: right;">ISSUE PCS</th>
+              <th style="width: 105px; text-align: right;">VARIANCE (CUTTING - ISSUE)</th>
+              <th style="width: 90px;">ISSUED BY</th>
+              <th style="width: 105px;">RECEIVED BY</th>
+              <th style="width: 110px;">REMARKS</th>
             </tr>
           </thead>
           <tbody>
             ${tableRowsHtml}
           </tbody>
           <tfoot>
-            <tr style="background: #f8fafc; font-weight: 900; font-size: 11.5px; border-top: 2px solid #000000;">
-              <td colspan="4" style="text-align: right; text-transform: uppercase;">Register Total (${totalChallans} Challans):</td>
-              <td style="font-weight: 900; font-size: 13px; color: #000000; background: #f0fdf4;">
-                <span style="color: #15803d;">Total Pieces Issued:</span> <strong>${totalQtyIssued.toLocaleString('en-IN')} Units / Pcs</strong>
+            <tr style="background: #f8fafc; font-weight: 900; font-size: 11px; border-top: 2px solid #000000;">
+              <td colspan="5" style="text-align: right; text-transform: uppercase; font-size: 11.5px;">Register Total (${totalChallans} Challans):</td>
+              <td style="text-align: right; font-weight: 900; font-size: 12px; white-space: nowrap; background: #f8fafc;">
+                ${grandTotalPieces.toLocaleString('en-IN')} Pcs Cutting
+              </td>
+              <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap; background: #fff7ed;">
+                ${totalQtyIssued.toLocaleString('en-IN')} Pcs
+              </td>
+              <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
+                <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${grandVariance === 0 ? '#bbf7d0' : grandVariance > 0 ? '#bfdbfe' : '#fecaca'}; color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
+                  ${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs
+                </span>
               </td>
               <td colspan="3" style="font-size: 10px; color: #475569; font-weight: 700;">
                 ${totalLineItems} Material Item Rows Across ${uniqueLots.size} Lot(s)
@@ -3200,12 +3825,50 @@ export default function WithoutBomMaterialIssueView({
           </tfoot>
         </table>
 
+        <!-- Consolidated Lot-Wise Total Summary -->
+        <div style="margin-top: 18px; margin-bottom: 6px; font-weight: 800; font-size: 11.5px; text-transform: uppercase;">
+          2. Consolidated Lot-Wise Total Summary
+        </div>
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th style="width: 35px; text-align: center;">SEQ #</th>
+              <th style="width: 130px;">LOT REFERENCE</th>
+              <th style="width: 100px;">BRAND</th>
+              <th style="width: 140px;">CHALLAN NOS</th>
+              <th>MATERIALS ISSUED SUMMARY</th>
+              <th style="width: 115px; text-align: right;">TOTAL PIECES (CUTTING)</th>
+              <th style="width: 85px; text-align: right;">ISSUE PCS</th>
+              <th style="width: 105px; text-align: right;">VARIANCE (CUTTING - ISSUE)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${lotTableRowsHtml}
+          </tbody>
+          <tfoot>
+            <tr style="background: #f8fafc; font-weight: 900; font-size: 11px; border-top: 2px solid #000000;">
+              <td colspan="5" style="text-align: right; text-transform: uppercase; font-size: 11.5px;">All Lots Grand Total:</td>
+              <td style="text-align: right; font-weight: 900; font-size: 12px; white-space: nowrap; background: #f8fafc;">
+                ${grandTotalPieces.toLocaleString('en-IN')} Pcs Cutting
+              </td>
+              <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap; background: #fff7ed;">
+                ${totalQtyIssued.toLocaleString('en-IN')} Pcs
+              </td>
+              <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
+                <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${grandVariance === 0 ? '#bbf7d0' : grandVariance > 0 ? '#bfdbfe' : '#fecaca'}; color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
+                  ${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs
+                </span>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
         <!-- Page break for End Summary -->
         <div class="page-break"></div>
 
-        <!-- 2. Consolidated Material Grand Totals (With Location / Rack No) -->
+        <!-- 3. Consolidated Material Grand Totals (With Location / Rack No) -->
         <div class="section-banner">
-          <span>2. CONSOLIDATED MATERIAL GRAND TOTALS</span>
+          <span>3. CONSOLIDATED MATERIAL GRAND TOTALS</span>
           <span style="font-size: 10px; font-weight: 600;">(Complete Material-wise Issue Volume Across All Lots)</span>
         </div>
         <table class="report-table">
@@ -3686,6 +4349,285 @@ export default function WithoutBomMaterialIssueView({
                 />
               </div>
             </div>
+
+            {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER ── */}
+            {lotNo.trim() && (
+              <div style={{
+                marginTop: '16px',
+                padding: '14px 18px',
+                borderRadius: '10px',
+                background: activeLotCutting?.hasDetails 
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+                  : '#f8fafc',
+                border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
+                boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
+                transition: 'all 0.2s ease'
+              }}>
+                {/* Header of Cutting Card */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  borderBottom: '1px solid #e2e8f0',
+                  paddingBottom: '10px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '8px',
+                      background: activeLotCutting?.hasDetails ? '#dcfce7' : '#f1f5f9',
+                      color: activeLotCutting?.hasDetails ? '#15803d' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <Scissors size={18} />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                          Cutting Details &amp; Batch Metrics
+                        </span>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          fontFamily: 'monospace',
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          padding: '2px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          Lot #{lotNo.trim()}
+                        </span>
+                        {activeLotCutting?.hasDetails ? (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#dcfce7',
+                            color: '#15803d',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <CheckCircle2 size={11} /> Verified Cutting Sheet
+                          </span>
+                        ) : loadingActiveLotCutting ? (
+                          <span style={{ fontSize: '11px', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <RefreshCw size={11} className="animate-spin" /> Checking cutting database...
+                          </span>
+                        ) : (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#fef3c7',
+                            color: '#b45309',
+                            padding: '2px 7px',
+                            borderRadius: '6px'
+                          }}>
+                            No cutting sheet in DB
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => reloadCuttingCache(true)}
+                          disabled={isReloadingCuttingCache}
+                          title="Empty in-memory cache & reload cutting database now (Auto-reloads every 30 minutes)"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 8px',
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            color: '#0284c7',
+                            background: '#f0f9ff',
+                            border: '1px solid #bae6fd',
+                            borderRadius: '6px',
+                            cursor: isReloadingCuttingCache ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <RefreshCw size={10} className={isReloadingCuttingCache ? "animate-spin" : ""} />
+                          {isReloadingCuttingCache ? 'Reloading...' : 'Reload (30m Auto)'}
+                        </button>
+                        {cacheReloadNotice && (
+                          <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: '700' }}>
+                            {cacheReloadNotice}
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        Production batch particulars automatically synchronized with Lot #{lotNo.trim()} • Auto-refreshes every 30m
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Cutting Total Pieces Hero Badge + Matrix Toggle Button */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                      background: '#ffffff',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #86efac',
+                      boxShadow: '0 1px 3px rgba(34, 197, 94, 0.12)'
+                    }}>
+                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Total Cutting Quantity
+                      </span>
+                      <span style={{ fontSize: '16px', fontWeight: '900', color: '#14532d' }}>
+                        {(activeLotCutting?.totalPieces || 0).toLocaleString()} <span style={{ fontSize: '11px', fontWeight: '700' }}>Pcs</span>
+                      </span>
+                    </div>
+
+                    {activeLotCutting?.rows?.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowActiveCuttingMatrix(prev => !prev)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: '8px',
+                          border: '1px solid #0284c7',
+                          background: showActiveCuttingMatrix ? '#0284c7' : '#f0f9ff',
+                          color: showActiveCuttingMatrix ? '#ffffff' : '#0369a1',
+                          fontSize: '11.5px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <Eye size={13} />
+                        <span>{showActiveCuttingMatrix ? 'Hide Matrix' : `Matrix Breakdown (${activeLotCutting.rows.length} Colors)`}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Metadata Pills Grid */}
+                {activeLotCutting && (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                    gap: '10px',
+                    marginBottom: activeLotCutting?.rows?.length > 0 && showActiveCuttingMatrix ? '14px' : '0'
+                  }}>
+                    <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Garment Style</span>
+                      <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.style || '—'}</span>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fabric</span>
+                      <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.fabric || '—'}</span>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Brand / Buyer</span>
+                      <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.brand || brandName || '—'}</span>
+                    </div>
+                    <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Party Name</span>
+                      <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.partyName || '—'}</span>
+                    </div>
+                    {activeLotCutting.shades && (
+                      <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Shades</span>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting.shades}</span>
+                      </div>
+                    )}
+                    {activeLotCutting.sizes && (
+                      <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Sizes</span>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting.sizes}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Inline Expandable Cutting Color-Size Matrix Table */}
+                {showActiveCuttingMatrix && activeLotCutting?.rows?.length > 0 && (
+                  <div style={{
+                    marginTop: '12px',
+                    background: '#ffffff',
+                    borderRadius: '8px',
+                    border: '1px solid #cbd5e1',
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      padding: '8px 12px',
+                      background: '#f8fafc',
+                      borderBottom: '1px solid #e2e8f0',
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      color: '#334155',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span>Cutting Ratio &amp; Color Matrix Breakdown</span>
+                      <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600' }}>
+                        {activeLotCutting.rows.length} Colors &bull; Total {(activeLotCutting.totalPieces || 0).toLocaleString()} Pcs
+                      </span>
+                    </div>
+                    <div style={{ overflowX: 'auto', maxHeight: '220px' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                            <th style={{ padding: '6px 10px', fontWeight: '800' }}>Color / Shade</th>
+                            <th style={{ padding: '6px 8px', fontWeight: '800', textAlign: 'center' }}>Table</th>
+                            {activeSizes.map(sz => (
+                              <th key={sz} style={{ padding: '6px 8px', fontWeight: '800', textAlign: 'center' }}>{sz}</th>
+                            ))}
+                            <th style={{ padding: '6px 10px', fontWeight: '800', textAlign: 'right' }}>Total Pcs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeLotCutting.rows.map((row, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                              <td style={{ padding: '6px 10px', fontWeight: '700', color: '#0f172a' }}>{row.color || '—'}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>{row.cuttingTable || '—'}</td>
+                              {activeSizes.map(sz => (
+                                <td key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '600', color: Number(row.sizes?.[sz]) > 0 ? '#0f172a' : '#cbd5e1' }}>
+                                  {row.sizes?.[sz] || 0}
+                                </td>
+                              ))}
+                              <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>
+                                {(Number(row.totalPcs) || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '900', color: '#0f172a' }}>
+                            <td colSpan={2} style={{ padding: '7px 10px' }}>Grand Total</td>
+                            {activeSizes.map(sz => {
+                              const szSum = activeLotCutting.rows.reduce((sum, r) => sum + (Number(r.sizes?.[sz]) || 0), 0);
+                              return (
+                                <td key={sz} style={{ padding: '7px 8px', textAlign: 'center', fontWeight: '900', color: '#0f172a' }}>
+                                  {szSum.toLocaleString()}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '900', color: '#15803d' }}>
+                              {(activeLotCutting.totalPieces || 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 2. Materials Allocation Grid */}
@@ -4353,6 +5295,30 @@ export default function WithoutBomMaterialIssueView({
                 <span>🖨️ Print Challan</span>
               </button>
 
+              {/* Direct Save PDF Button */}
+              <button
+                type="button"
+                onClick={handleSavePdfFromForm}
+                style={{
+                  padding: '11px 18px',
+                  borderRadius: '10px',
+                  border: '1.5px solid #dc2626',
+                  background: '#fef2f2',
+                  color: '#dc2626',
+                  fontSize: '13px',
+                  fontWeight: '800',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  boxShadow: '0 2px 6px rgba(220, 38, 38, 0.1)'
+                }}
+                title="Save & Download Challan Slip as PDF"
+              >
+                <Download size={16} style={{ color: '#dc2626' }} />
+                <span>Save PDF</span>
+              </button>
+
               {/* Confirm & Issue Button */}
               <button
                 type="button"
@@ -4471,6 +5437,31 @@ export default function WithoutBomMaterialIssueView({
                 <Printer size={14} style={{ color: '#ea580c' }} />
                 <span>Print Full Report ({withoutBomLogs.length})</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleExportFullReportPdf}
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: '8px',
+                  border: '1.5px solid #dc2626',
+                  background: '#dc2626',
+                  color: '#ffffff',
+                  fontSize: '12.5px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 4px rgba(220, 38, 38, 0.2)',
+                  transition: 'all 0.15s ease',
+                  whiteSpace: 'nowrap'
+                }}
+                title="Export full filtered audit register with items, quantities, and departments to PDF document"
+              >
+                <Download size={14} style={{ color: '#ffffff' }} />
+                <span>Export PDF ({withoutBomLogs.length})</span>
+              </button>
             </div>
           </div>
 
@@ -4575,44 +5566,303 @@ export default function WithoutBomMaterialIssueView({
                 </div>
               </div>
 
-              {/* Person Filter */}
+              {/* Person Filter - Multi-Select Choose Option */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
                   <User size={14} style={{ color: '#0284c7' }} />
                   Person Wise:
                 </span>
-                <select
-                  value={historyPerson}
-                  onChange={(e) => setHistoryPerson(e.target.value)}
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: '8px',
-                    border: '1px solid #cbd5e1',
-                    fontSize: '12px',
-                    fontWeight: '600',
-                    color: '#0f172a',
-                    background: '#ffffff',
-                    cursor: 'pointer',
-                    outline: 'none',
-                    minWidth: '190px'
-                  }}
-                >
-                  <option value="">👤 All Persons (Any Role)</option>
-                  {availablePeople.issuers.length > 0 && (
-                    <optgroup label="Issued By (Store Team)">
-                      {availablePeople.issuers.map(name => (
-                        <option key={`iss_${name}`} value={`iss:${name}`}>Store: {name}</option>
-                      ))}
-                    </optgroup>
+
+                {/* Multi-Select Person Dropdown Menu Trigger Container */}
+                <div ref={personDropdownRef} style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    type="button"
+                    onClick={() => setPersonDropdownOpen(prev => !prev)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      border: historyPersons.length > 0 ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                      background: historyPersons.length > 0 ? '#f0f9ff' : '#ffffff',
+                      color: historyPersons.length > 0 ? '#0369a1' : '#0f172a',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      boxShadow: historyPersons.length > 0 ? '0 1px 4px rgba(2,132,199,0.18)' : '0 1px 2px rgba(0,0,0,0.04)',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Click to select multiple Store Issuers or Floor Receivers"
+                  >
+                    <User size={13} style={{ color: historyPersons.length > 0 ? '#0284c7' : '#64748b' }} />
+                    <span style={{ maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {historyPersons.length === 0
+                        ? `All Persons (${availablePeople.total})`
+                        : historyPersons.length === 1
+                        ? formatPersonKey(historyPersons[0])
+                        : `${formatPersonKey(historyPersons[0])} +${historyPersons.length - 1} more`}
+                    </span>
+                    {historyPersons.length > 0 && (
+                      <span style={{
+                        background: '#0284c7',
+                        color: '#ffffff',
+                        fontSize: '10px',
+                        fontWeight: '800',
+                        padding: '1px 6px',
+                        borderRadius: '10px'
+                      }}>
+                        {historyPersons.length}
+                      </span>
+                    )}
+                    <ChevronDown size={13} style={{ transform: personDropdownOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease', color: '#64748b', marginLeft: '2px' }} />
+                  </button>
+
+                  {/* The Floating Scrollable Person Dropdown Menu (Right-Aligned to prevent overflow) */}
+                  {personDropdownOpen && (
+                    <div style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      right: 0,
+                      zIndex: 150,
+                      width: '300px',
+                      maxWidth: 'calc(100vw - 24px)',
+                      background: '#ffffff',
+                      borderRadius: '10px',
+                      border: '1.5px solid #cbd5e1',
+                      boxShadow: '0 16px 36px -4px rgba(15, 23, 42, 0.22), 0 8px 16px -6px rgba(15, 23, 42, 0.12)',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column'
+                    }}>
+                      {/* Search & Quick Action Buttons */}
+                      <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+                        <div style={{ position: 'relative', marginBottom: '8px' }}>
+                          <input
+                            type="text"
+                            placeholder="Search Store or Floor person..."
+                            value={personSearchTerm}
+                            onChange={(e) => setPersonSearchTerm(e.target.value)}
+                            autoFocus
+                            style={{
+                              width: '100%',
+                              padding: '6px 26px 6px 26px',
+                              fontSize: '11.5px',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              boxSizing: 'border-box',
+                              outline: 'none',
+                              background: '#ffffff'
+                            }}
+                          />
+                          <Search size={12} style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                          {personSearchTerm && (
+                            <X
+                              size={12}
+                              style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', cursor: 'pointer' }}
+                              onClick={() => setPersonSearchTerm('')}
+                            />
+                          )}
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allKeys = [
+                                ...availablePeople.issuers.map(p => p.key),
+                                ...availablePeople.receivers.map(p => p.key)
+                              ];
+                              setHistoryPersons(allKeys);
+                            }}
+                            style={{
+                              border: 'none',
+                              background: '#e0f2fe',
+                              color: '#0369a1',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              transition: 'background 0.1s ease'
+                            }}
+                          >
+                            Select All ({availablePeople.total})
+                          </button>
+                          {historyPersons.length > 0 && (
+                            <span style={{ fontSize: '10.5px', color: '#0369a1', fontWeight: '800' }}>
+                              {historyPersons.length} selected
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setHistoryPersons([])}
+                            style={{
+                              border: 'none',
+                              background: historyPersons.length > 0 ? '#fee2e2' : 'transparent',
+                              color: historyPersons.length > 0 ? '#b91c1c' : '#64748b',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              padding: '3px 8px',
+                              borderRadius: '4px',
+                              transition: 'background 0.1s ease'
+                            }}
+                          >
+                            Clear Selection
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Scrollable Person List */}
+                      <div style={{
+                        maxHeight: '260px',
+                        overflowY: 'auto',
+                        padding: '6px 8px'
+                      }}>
+                        {/* Store Team Section */}
+                        {filteredPeople.issuers.length > 0 && (
+                          <div style={{ marginBottom: '8px' }}>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: '10px',
+                              fontWeight: '800',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              color: '#0369a1',
+                              background: '#f0f9ff',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              marginBottom: '3px'
+                            }}>
+                              <span>Issued By (Store Team)</span>
+                              <span>{filteredPeople.issuers.length}</span>
+                            </div>
+                            {filteredPeople.issuers.map(p => {
+                              const isChecked = historyPersons.includes(p.key);
+                              return (
+                                <div
+                                  key={p.key}
+                                  onClick={() => handleToggleHistoryPerson(p.key)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    background: isChecked ? '#e0f2fe' : 'transparent',
+                                    transition: 'background 0.1s ease',
+                                    fontSize: '12px',
+                                    userSelect: 'none'
+                                  }}
+                                  onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = '#f8fafc'; }}
+                                  onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = 'transparent'; }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'none' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      readOnly
+                                      style={{ cursor: 'pointer', accentColor: '#0284c7' }}
+                                    />
+                                    <span style={{ fontWeight: isChecked ? '800' : '600', color: isChecked ? '#0369a1' : '#334155' }}>
+                                      Store: {p.name}
+                                    </span>
+                                  </div>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    color: isChecked ? '#0284c7' : '#64748b',
+                                    background: isChecked ? '#bae6fd' : '#f1f5f9',
+                                    padding: '1px 6px',
+                                    borderRadius: '8px',
+                                    fontWeight: '700'
+                                  }}>
+                                    {p.count}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Floor / Masters Section */}
+                        {filteredPeople.receivers.length > 0 && (
+                          <div>
+                            <div style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: '10px',
+                              fontWeight: '800',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.05em',
+                              color: '#4338ca',
+                              background: '#eef2ff',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              marginBottom: '3px'
+                            }}>
+                              <span>Received By (Floor / Masters)</span>
+                              <span>{filteredPeople.receivers.length}</span>
+                            </div>
+                            {filteredPeople.receivers.map(p => {
+                              const isChecked = historyPersons.includes(p.key);
+                              return (
+                                <div
+                                  key={p.key}
+                                  onClick={() => handleToggleHistoryPerson(p.key)}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    padding: '6px 8px',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                    background: isChecked ? '#ede9fe' : 'transparent',
+                                    transition: 'background 0.1s ease',
+                                    fontSize: '12px',
+                                    userSelect: 'none'
+                                  }}
+                                  onMouseEnter={(e) => { if (!isChecked) e.currentTarget.style.background = '#f8fafc'; }}
+                                  onMouseLeave={(e) => { if (!isChecked) e.currentTarget.style.background = 'transparent'; }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', pointerEvents: 'none' }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      readOnly
+                                      style={{ cursor: 'pointer', accentColor: '#4338ca' }}
+                                    />
+                                    <span style={{ fontWeight: isChecked ? '800' : '600', color: isChecked ? '#4338ca' : '#334155' }}>
+                                      Floor: {p.name}
+                                    </span>
+                                  </div>
+                                  <span style={{
+                                    fontSize: '10px',
+                                    color: isChecked ? '#4338ca' : '#64748b',
+                                    background: isChecked ? '#ddd6fe' : '#f1f5f9',
+                                    padding: '1px 6px',
+                                    borderRadius: '8px',
+                                    fontWeight: '700'
+                                  }}>
+                                    {p.count}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {filteredPeople.issuers.length === 0 && filteredPeople.receivers.length === 0 && (
+                          <div style={{ padding: '20px 10px', textAlign: 'center', color: '#94a3b8', fontSize: '11.5px' }}>
+                            No person found matching "{personSearchTerm}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   )}
-                  {availablePeople.receivers.length > 0 && (
-                    <optgroup label="Received By (Floor / Masters)">
-                      {availablePeople.receivers.map(name => (
-                        <option key={`rec_${name}`} value={`rec:${name}`}>Floor: {name}</option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                </div>
 
                 {/* Reset Filters button if any filter active */}
                 {activeFiltersCount > 0 && (
@@ -4972,12 +6222,31 @@ export default function WithoutBomMaterialIssueView({
                     <X size={10} style={{ cursor: 'pointer' }} onClick={() => setHistoryCategories([])} />
                   </span>
                 )}
-                {historyPerson && (
-                  <span style={{ background: '#e0e7ff', color: '#4338ca', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                    👤 {historyPerson.startsWith('iss:') ? `Store: ${historyPerson.replace('iss:', '')}` : historyPerson.startsWith('rec:') ? `Floor: ${historyPerson.replace('rec:', '')}` : historyPerson}
-                    <X size={10} style={{ cursor: 'pointer' }} onClick={() => setHistoryPerson('')} />
+                {historyPersons.map(pKey => (
+                  <span
+                    key={pKey}
+                    style={{
+                      background: pKey.startsWith('iss:') ? '#e0f2fe' : '#ede9fe',
+                      color: pKey.startsWith('iss:') ? '#0369a1' : '#4338ca',
+                      border: pKey.startsWith('iss:') ? '1px solid #bae6fd' : '1px solid #ddd6fe',
+                      padding: '2px 7px',
+                      borderRadius: '4px',
+                      fontSize: '10.5px',
+                      fontWeight: '700',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    👤 {formatPersonKey(pKey)}
+                    <X
+                      size={10}
+                      style={{ cursor: 'pointer', strokeWidth: 2.5 }}
+                      onClick={() => handleToggleHistoryPerson(pKey)}
+                      title={`Remove ${formatPersonKey(pKey)}`}
+                    />
                   </span>
-                )}
+                ))}
                 {historySearch && (
                   <span style={{ background: '#f1f5f9', color: '#334155', padding: '2px 7px', borderRadius: '4px', fontSize: '10.5px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                     🔍 "{historySearch}"
@@ -5034,158 +6303,299 @@ export default function WithoutBomMaterialIssueView({
                     <th style={{ padding: '10px 12px' }}>Date</th>
                     <th style={{ padding: '10px 12px' }}>Lot Reference</th>
                     <th style={{ padding: '10px 12px' }}>Issued Materials</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Total Pieces (Cutting)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Issue Pcs</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Variance (Cutting - Issue)</th>
                     <th style={{ padding: '10px 12px' }}>Issued By</th>
                     <th style={{ padding: '10px 12px' }}>Received By</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {withoutBomLogs.map((log, idx) => (
-                    <tr key={log.id || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                      <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                        <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                          {log.id}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                        {log.date}
-                      </td>
-                      <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
-                        {!log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct') ? (
-                          <span style={{ fontSize: '11px', background: '#f0fdf4', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
-                            DIRECT ITEM REQUISITION
+                  {withoutBomLogs.map((log, idx) => {
+                    const { totalPieces, issuePcs, variance, isDirect } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+                    return (
+                      <tr key={log.id || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: '800' }}>
+                          <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                            {log.id}
                           </span>
-                        ) : (
-                          <span>LOT #{log.lotId}{(log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : ''}</span>
-                        )}
-                        <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', color: '#475569', fontWeight: '800' }}>
-                          W/O BOM
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                          {(log.materials || []).slice(0, 4).map((m, mIdx) => {
-                            const photoSrc = getMaterialPhoto(m);
-                            const categoryName = getMaterialCategory(m);
-                            const loc = getMaterialLocation(m);
-                            return (
-                              <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                {photoSrc ? (
-                                  <img
-                                    src={photoSrc}
-                                    alt={m.name || 'material'}
-                                    style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', flexShrink: 0 }}
-                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                  />
-                                ) : (
-                                  <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>📦</span>
-                                )}
-                                {categoryName && (
-                                  <span style={{
-                                    fontSize: '9.5px',
-                                    fontWeight: '800',
-                                    background: '#f1f5f9',
-                                    color: '#1e293b',
-                                    border: '1px solid #cbd5e1',
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                    textTransform: 'uppercase',
-                                    letterSpacing: '0.3px',
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    {categoryName}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                          {log.date}
+                        </td>
+                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
+                          {!log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct') ? (
+                            <span style={{ fontSize: '11px', background: '#f0fdf4', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                              DIRECT ITEM REQUISITION
+                            </span>
+                          ) : (
+                            <span>LOT #{log.lotId}{(log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : ''}</span>
+                          )}
+                          <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', color: '#475569', fontWeight: '800' }}>
+                            W/O BOM
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {(log.materials || []).slice(0, 4).map((m, mIdx) => {
+                              const photoSrc = getMaterialPhoto(m);
+                              const categoryName = getMaterialCategory(m);
+                              const loc = getMaterialLocation(m);
+                              return (
+                                <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                  {photoSrc ? (
+                                    <img
+                                      src={photoSrc}
+                                      alt={m.name || 'material'}
+                                      style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', flexShrink: 0 }}
+                                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                    />
+                                  ) : (
+                                    <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>📦</span>
+                                  )}
+                                  {categoryName && (
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      background: '#f1f5f9',
+                                      color: '#1e293b',
+                                      border: '1px solid #cbd5e1',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      textTransform: 'uppercase',
+                                      letterSpacing: '0.3px',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      {categoryName}
+                                    </span>
+                                  )}
+                                  <span style={{ fontSize: '12px', color: '#0f172a' }}>
+                                    <strong>{m.name || m.bomItemName}:</strong> {m.qty} {m.unit || 'pcs'}
                                   </span>
-                                )}
-                                <span style={{ fontSize: '12px', color: '#0f172a' }}>
-                                  <strong>{m.name || m.bomItemName}:</strong> {m.qty} {m.unit || 'pcs'}
+                                  {loc && (
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      background: '#fff7ed',
+                                      color: '#c2410c',
+                                      border: '1px solid #fed7aa',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      📍 {loc}
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {(log.materials || []).length > 4 && (
+                              <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '700', marginLeft: '4px' }}>
+                                +{(log.materials || []).length - 4} more item(s)
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                            {totalPieces > 0 ? (
+                              <>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
+                                  <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '13px' }}>
+                                    {totalPieces.toLocaleString('en-IN')}
+                                  </span>
+                                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Pcs</span>
+                                </div>
+                                <span style={{
+                                  fontSize: '9.5px',
+                                  fontWeight: '800',
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  border: '1px solid #bfdbfe',
+                                  padding: '1.5px 6px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'nowrap',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  ✂️ Cutting: {totalPieces.toLocaleString('en-IN')} Pcs
                                 </span>
-                                {loc && (
-                                  <span style={{
-                                    fontSize: '9.5px',
-                                    fontWeight: '800',
-                                    background: '#fff7ed',
-                                    color: '#c2410c',
-                                    border: '1px solid #fed7aa',
-                                    padding: '1px 5px',
-                                    borderRadius: '4px',
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    📍 {loc}
-                                  </span>
-                                )}
+                              </>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                <span style={{ fontWeight: '700', color: '#94a3b8', fontSize: '12px' }}>—</span>
+                                <span style={{ fontSize: '9px', color: '#64748b', background: '#f1f5f9', padding: '1px 5px', borderRadius: '3px' }}>
+                                  {isDirect ? 'Direct Issue' : 'No Lot Qty'}
+                                </span>
                               </div>
-                            );
-                          })}
-                          {(log.materials || []).length > 4 && (
-                            <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '700', marginLeft: '4px' }}>
-                              +{(log.materials || []).length - 4} more item(s)
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#ea580c', fontSize: '12.5px' }}>{issuePcs.toLocaleString('en-IN')}</span>
+                          <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '3px' }}>Pcs</span>
+                          <div style={{ fontSize: '9px', color: '#9a3412', fontWeight: '700', marginTop: '2px' }}>
+                            ISSUED
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
+                          {totalPieces > 0 ? (
+                            <>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '2px',
+                                padding: '2px 7px',
+                                borderRadius: '6px',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                border: '1px solid',
+                                background: variance === 0 ? '#f0fdf4' : variance > 0 ? '#eff6ff' : '#fef2f2',
+                                borderColor: variance === 0 ? '#bbf7d0' : variance > 0 ? '#bfdbfe' : '#fecaca',
+                                color: variance === 0 ? '#15803d' : variance > 0 ? '#1d4ed8' : '#b91c1c'
+                              }}>
+                                {variance > 0 ? `+${variance.toLocaleString('en-IN')}` : variance.toLocaleString('en-IN')} Pcs
+                              </span>
+                              <div style={{
+                                fontSize: '9px',
+                                fontWeight: '800',
+                                marginTop: '2px',
+                                color: variance === 0 ? '#166534' : variance > 0 ? '#1e40af' : '#991b1b'
+                              }}>
+                                {variance === 0 ? 'BALANCED' : variance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED'}
+                              </div>
+                            </>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                              —
                             </span>
                           )}
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
-                        {log.personName || 'Store In-charge'}
-                      </td>
-                      <td style={{ padding: '10px 12px', color: '#0f172a', fontWeight: '700' }}>
-                        {log.receiverName || 'Cutting Master'}
-                        {log.receiverDept && (
-                          <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
-                            {log.receiverDept}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', gap: '6px' }}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const issueData = buildIssueDataFromLog(log);
-                              handleDirectPrintWindow(issueData, log.id);
-                            }}
-                            style={{
-                              padding: '5px 12px',
-                              borderRadius: '6px',
-                              border: '1.5px solid #0f172a',
-                              background: '#0f172a',
-                              color: '#ffffff',
-                              fontSize: '11.5px',
-                              fontWeight: '700',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                            title="Direct 1-Click Print"
-                          >
-                            <Printer size={13} style={{ color: '#ea580c' }} />
-                            <span>Print</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleReprintHistory(log)}
-                            style={{
-                              padding: '5px 10px',
-                              borderRadius: '6px',
-                              border: '1px solid #cbd5e1',
-                              background: '#ffffff',
-                              color: '#475569',
-                              fontSize: '11.5px',
-                              fontWeight: '600',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}
-                            title="Preview on-screen and download PDF"
-                          >
-                            <Eye size={13} />
-                            <span>Preview</span>
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
+                          {log.personName || 'Store In-charge'}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#0f172a', fontWeight: '700' }}>
+                          {log.receiverName || 'Cutting Master'}
+                          {log.receiverDept && (
+                            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
+                              {log.receiverDept}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const issueData = buildIssueDataFromLog(log);
+                                handleDirectPrintWindow(issueData, log.id);
+                              }}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: '6px',
+                                border: '1.5px solid #0f172a',
+                                background: '#0f172a',
+                                color: '#ffffff',
+                                fontSize: '11.5px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="Direct 1-Click Print"
+                            >
+                              <Printer size={13} style={{ color: '#ea580c' }} />
+                              <span>Print</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadChallanPdf(log)}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                border: '1.5px solid #dc2626',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                fontSize: '11.5px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                transition: 'all 0.15s ease'
+                              }}
+                              title="Direct 1-Click Export Challan to PDF"
+                            >
+                              <Download size={13} style={{ color: '#dc2626' }} />
+                              <span>PDF</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleReprintHistory(log)}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                background: '#ffffff',
+                                color: '#475569',
+                                fontSize: '11.5px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="Preview on-screen and download PDF"
+                            >
+                              <Eye size={13} />
+                              <span>Preview</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
+                {(() => {
+                  const screenTotalPieces = withoutBomLogs.reduce((sum, log) => sum + getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs).totalPieces, 0);
+                  const screenIssuePcs = withoutBomLogs.reduce((sum, log) => sum + getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs).issuePcs, 0);
+                  const screenVariance = screenTotalPieces - screenIssuePcs;
+                  return (
+                    <tfoot>
+                      <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '800', fontSize: '12px' }}>
+                        <td colSpan={4} style={{ padding: '10px 12px', textAlign: 'right', color: '#475569', textTransform: 'uppercase' }}>
+                          Grand Total ({withoutBomLogs.length} Challans):
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#0f172a' }}>{screenTotalPieces.toLocaleString('en-IN')}</span> <span style={{ fontSize: '11px', color: '#64748b' }}>Pcs Cutting</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#ea580c' }}>{screenIssuePcs.toLocaleString('en-IN')}</span> <span style={{ fontSize: '11px', color: '#64748b' }}>Pcs</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '2px',
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '11.5px',
+                            fontWeight: '900',
+                            border: '1px solid',
+                            background: screenVariance === 0 ? '#f0fdf4' : screenVariance > 0 ? '#eff6ff' : '#fef2f2',
+                            borderColor: screenVariance === 0 ? '#bbf7d0' : screenVariance > 0 ? '#bfdbfe' : '#fecaca',
+                            color: screenVariance === 0 ? '#15803d' : screenVariance > 0 ? '#1d4ed8' : '#b91c1c'
+                          }}>
+                            {screenVariance > 0 ? `+${screenVariance.toLocaleString('en-IN')}` : screenVariance.toLocaleString('en-IN')} Pcs Balance
+                          </span>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           )}

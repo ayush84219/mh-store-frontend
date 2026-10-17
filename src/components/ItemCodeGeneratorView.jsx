@@ -141,6 +141,15 @@ export default function ItemCodeGeneratorView() {
     rate: ''
   });
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editUsageData, setEditUsageData] = useState(null);
+  const [loadingEditUsage, setLoadingEditUsage] = useState(false);
+
+  // Delete Item Code Modal State
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletingItem, setDeletingItem] = useState(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [deleteUsageData, setDeleteUsageData] = useState(null);
+  const [loadingDeleteUsage, setLoadingDeleteUsage] = useState(false);
 
   // Fetch Item Codes from MySQL Database
   const fetchItemCodes = useCallback(async () => {
@@ -401,7 +410,7 @@ export default function ItemCodeGeneratorView() {
     }
   };
 
-  const handleOpenEditModal = (item) => {
+  const handleOpenEditModal = async (item) => {
     setEditingItem(item);
     setEditForm({
       id: item.id,
@@ -415,6 +424,20 @@ export default function ItemCodeGeneratorView() {
       rate: item.rate !== undefined && item.rate !== null ? item.rate : ''
     });
     setShowEditModal(true);
+    setEditUsageData(null);
+    setLoadingEditUsage(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/item-codes/${item.id}/usage`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setEditUsageData(data);
+        }
+      }
+    } catch (_) {}
+    finally {
+      setLoadingEditUsage(false);
+    }
   };
 
   const handleSaveEditItem = async (e) => {
@@ -445,9 +468,14 @@ export default function ItemCodeGeneratorView() {
       if (res.ok && data.success) {
         setDbItemCodes(prev => prev.map(ic => ic.id === editForm.id ? { ...ic, ...data.itemCode } : ic));
         setShowEditModal(false);
+        const sync = data.itemCode?.synced;
+        let msg = `Item Code ${editForm.item_code} updated successfully!`;
+        if (sync && sync.totalSynced > 0) {
+          msg += ` Propagated to: ${sync.materials} Materials, ${sync.weightCapture} Weight Captures, ${sync.transfers} Transfers, and ${sync.ledger} Ledger entries.`;
+        }
         setCreatedItemCodePopup({
           code: editForm.item_code,
-          message: `Item Code ${editForm.item_code} updated successfully!`
+          message: msg
         });
         fetchItemCodes();
         fetchMappings();
@@ -458,6 +486,53 @@ export default function ItemCodeGeneratorView() {
       alert('Error updating Item Code: ' + err.message);
     } finally {
       setIsSavingEdit(false);
+    }
+  };
+
+  const handleOpenDeleteModal = async (item) => {
+    setDeletingItem(item);
+    setShowDeleteModal(true);
+    setDeleteUsageData(null);
+    setLoadingDeleteUsage(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/item-codes/${item.id}/usage`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setDeleteUsageData(data);
+        }
+      }
+    } catch (_) {}
+    finally {
+      setLoadingDeleteUsage(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingItem) return;
+    setIsDeletingItem(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/item-codes/${deletingItem.id}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDbItemCodes(prev => prev.filter(ic => ic.id !== deletingItem.id && ic.item_code !== deletingItem.item_code));
+        setShowDeleteModal(false);
+        setCreatedItemCodePopup({
+          code: deletingItem.item_code,
+          message: `🗑️ Item Code ${deletingItem.item_code} deleted successfully! (${data.unlinkedMaterials || 0} materials and ${data.unlinkedWeightCaptures || 0} captures safely unlinked)`
+        });
+        setDeletingItem(null);
+        fetchItemCodes();
+        fetchMappings();
+      } else {
+        alert('Failed to delete Item Code: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Error deleting Item Code: ' + err.message);
+    } finally {
+      setIsDeletingItem(false);
     }
   };
 
@@ -1480,6 +1555,17 @@ export default function ItemCodeGeneratorView() {
                           <Pencil size={12} color="#2563eb" />
                           <span>Edit</span>
                         </button>
+
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleOpenDeleteModal(ic)}
+                          style={{ padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '4px', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#dc2626', backgroundColor: 'rgba(239, 68, 68, 0.04)' }}
+                          title="Delete Item Code"
+                        >
+                          <Trash2 size={12} color="#dc2626" />
+                          <span>Delete</span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -2473,6 +2559,86 @@ export default function ItemCodeGeneratorView() {
               </button>
             </div>
 
+            {/* Linked System Places & Cascade Impact Display */}
+            <div style={{
+              background: 'var(--bg-secondary, #f8fafc)',
+              borderRadius: '12px',
+              border: '1.5px solid var(--border-color, #e2e8f0)',
+              padding: '14px 16px',
+              marginBottom: '20px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Layers size={15} style={{ color: 'var(--accent-color, #4f46e5)' }} />
+                  <span style={{ fontSize: '12.5px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                    Linked System Places & Cascade Impact
+                  </span>
+                </div>
+                {loadingEditUsage && (
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={11} className="animate-spin" /> Checking references...
+                  </span>
+                )}
+              </div>
+
+              {editUsageData ? (
+                <div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px', marginBottom: '10px' }}>
+                    <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-primary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>Materials Stock</span>
+                      <strong style={{ fontSize: '15px', color: editUsageData.materials?.length > 0 ? '#2563eb' : 'var(--text-main, #0f172a)' }}>
+                        {editUsageData.materials?.length || 0}
+                      </strong>
+                    </div>
+
+                    <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-primary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>Weight Captures</span>
+                      <strong style={{ fontSize: '15px', color: editUsageData.weightCaptureCount > 0 ? '#059669' : 'var(--text-main, #0f172a)' }}>
+                        {editUsageData.weightCaptureCount || 0}
+                      </strong>
+                    </div>
+
+                    <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-primary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>Transfers</span>
+                      <strong style={{ fontSize: '15px', color: editUsageData.transferCount > 0 ? '#d97706' : 'var(--text-main, #0f172a)' }}>
+                        {editUsageData.transferCount || 0}
+                      </strong>
+                    </div>
+
+                    <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-primary, #ffffff)', border: '1px solid var(--border-color, #cbd5e1)', textAlign: 'center' }}>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted, #64748b)', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>Ledger Records</span>
+                      <strong style={{ fontSize: '15px', color: editUsageData.ledgerCount > 0 ? '#7c3aed' : 'var(--text-main, #0f172a)' }}>
+                        {editUsageData.ledgerCount || 0}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {editUsageData.materials && editUsageData.materials.length > 0 && (
+                    <div style={{ marginBottom: '8px', fontSize: '11.5px', color: 'var(--text-main, #0f172a)' }}>
+                      <span style={{ fontWeight: '700', color: 'var(--text-muted, #64748b)' }}>Linked Material(s): </span>
+                      {editUsageData.materials.map(m => {
+                        const st = m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id));
+                        return (
+                          <span key={m.id} style={{ display: 'inline-block', background: 'rgba(37, 99, 235, 0.08)', border: '1px solid rgba(37, 99, 235, 0.25)', padding: '2px 8px', borderRadius: '4px', margin: '2px 4px', fontWeight: '700' }}>
+                            {st} - {m.name} ({m.stock} {m.unit || 'pcs'})
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <div style={{ fontSize: '11px', color: '#047857', background: 'rgba(16, 185, 129, 0.08)', padding: '6px 10px', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.25)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <CheckCircle2 size={13} style={{ color: '#10b981', flexShrink: 0 }} />
+                    <span>Editing will automatically synchronize and update name, category, and UOM across all {editUsageData.totalPlaces || 0} places above.</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748b)' }}>
+                  Loading linked system records...
+                </div>
+              )}
+            </div>
+
             <form onSubmit={handleSaveEditItem}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px', marginBottom: '20px' }}>
                 <div>
@@ -2638,10 +2804,142 @@ export default function ItemCodeGeneratorView() {
                   style={{ borderRadius: '8px', padding: '0 24px', height: '40px', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '8px', background: '#2563eb', borderColor: '#2563eb' }}
                 >
                   <Check size={16} />
-                  <span>{isSavingEdit ? 'Saving Changes...' : 'Save Changes'}</span>
+                  <span>{isSavingEdit ? 'Saving & Propagating...' : 'Save & Sync Everywhere'}</span>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL 6: Delete Item Code Confirmation ─────────────────────────── */}
+      {showDeleteModal && deletingItem && (
+        <div className="modal-overlay" style={{ zIndex: 1250 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '520px', width: '92%', borderRadius: '20px', padding: '26px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: 'rgba(239, 68, 68, 0.12)', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Trash2 size={24} />
+              </div>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: '800', margin: 0, color: '#0f172a' }}>
+                  Delete Item Code
+                </h3>
+                <span style={{ fontSize: '12px', color: '#64748b' }}>
+                  Confirm removal of item code from the master registry
+                </span>
+              </div>
+            </div>
+
+            {/* Target Item Code Card */}
+            <div style={{
+              background: '#f8fafc',
+              border: '1.5px solid #e2e8f0',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: '16px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                <span style={{ background: '#e0e7ff', color: '#4f46e5', padding: '3px 8px', borderRadius: '6px', fontWeight: '800', fontSize: '13px', fontFamily: 'monospace' }}>
+                  {deletingItem.item_code}
+                </span>
+                <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '600' }}>
+                  Category: <strong>{deletingItem.category}</strong>
+                </span>
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                {deletingItem.item_name}
+              </div>
+              {deletingItem.brand && (
+                <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                  Brand / Supplier: <strong>{deletingItem.brand}</strong>
+                </div>
+              )}
+            </div>
+
+            {/* Linked Usage Alert */}
+            {loadingDeleteUsage ? (
+              <div style={{ padding: '12px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>
+                <RefreshCw size={14} className="animate-spin" style={{ display: 'inline-block', marginRight: '6px' }} />
+                Checking linked inventory records...
+              </div>
+            ) : deleteUsageData && deleteUsageData.totalPlaces > 0 ? (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1.5px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '10px',
+                padding: '12px 14px',
+                marginBottom: '20px',
+                fontSize: '12px',
+                color: '#991b1b',
+                lineHeight: 1.5
+              }}>
+                <div style={{ fontWeight: '800', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertCircle size={15} style={{ color: '#dc2626' }} />
+                  Linked Inventory Detected ({deleteUsageData.totalPlaces} records):
+                </div>
+                <div style={{ paddingLeft: '20px' }}>
+                  {deleteUsageData.materials?.length > 0 && <div>• <strong>{deleteUsageData.materials.length}</strong> Warehouse Material(s)</div>}
+                  {deleteUsageData.weightCaptureCount > 0 && <div>• <strong>{deleteUsageData.weightCaptureCount}</strong> Weight Capture Inward Record(s)</div>}
+                  {deleteUsageData.transferCount > 0 && <div>• <strong>{deleteUsageData.transferCount}</strong> Stock Relocation Log(s)</div>}
+                </div>
+                <div style={{ marginTop: '8px', fontSize: '11px', color: '#7f1d1d' }}>
+                  ⚠️ Deleting this code will safely clear/unlink the itemCode reference from those records so no stock is lost.
+                </div>
+              </div>
+            ) : (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                marginBottom: '20px',
+                fontSize: '12px',
+                color: '#065f46',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}>
+                <CheckCircle2 size={16} style={{ color: '#10b981' }} />
+                <span>No active inventory or transactions linked. Safe to delete immediately.</span>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => { setShowDeleteModal(false); setDeletingItem(null); }}
+                disabled={isDeletingItem}
+                style={{ borderRadius: '8px', padding: '0 18px', height: '38px', fontWeight: '700' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeletingItem}
+                style={{
+                  borderRadius: '8px', padding: '0 20px', height: '38px', fontWeight: '800',
+                  background: '#dc2626', borderColor: '#dc2626', color: '#ffffff',
+                  border: 'none', cursor: isDeletingItem ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: '6px',
+                  boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)'
+                }}
+              >
+                {isDeletingItem ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Delete Item Code</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
   Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap,
-  Scale, MapPin, Edit2
+  Scale, MapPin, Edit2, CheckCircle2, Eye
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -29,6 +29,74 @@ export default function BoneIssueView({
   const [lotDetails, setLotDetails] = useState(null);
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
+
+  // ── Cutting Details Cache & 30-Minute Auto-Reload ───────────────────────────
+  const CUTTING_CACHE_MAX_ENTRIES = 100;
+  const CUTTING_CACHE_RELOAD_INTERVAL_MS = 30 * 60 * 1000;
+  const [cuttingHeaders, setCuttingHeaders] = useState([]);
+  const [lastCuttingCacheReload, setLastCuttingCacheReload] = useState(() => new Date());
+  const [isReloadingCuttingCache, setIsReloadingCuttingCache] = useState(false);
+  const [cuttingCacheRefreshCount, setCuttingCacheRefreshCount] = useState(0);
+  const [cacheReloadNotice, setCacheReloadNotice] = useState('');
+  const matrixCacheRef = useRef({});
+
+  // ── Active Lot Cutting Details State & Matrix ──
+  const [activeLotCutting, setActiveLotCutting] = useState(null);
+  const [loadingActiveLotCutting, setLoadingActiveLotCutting] = useState(false);
+  const [showActiveCuttingMatrix, setShowActiveCuttingMatrix] = useState(false);
+
+  const reloadCuttingCache = useCallback(async (manual = false) => {
+    setIsReloadingCuttingCache(true);
+    matrixCacheRef.current = {};
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setCuttingHeaders(data);
+      }
+      setLastCuttingCacheReload(new Date());
+      setCuttingCacheRefreshCount(c => c + 1);
+      if (manual) {
+        setCacheReloadNotice('✓ Cache emptied & reloaded');
+        setTimeout(() => setCacheReloadNotice(''), 3500);
+      }
+    } catch (err) {
+      console.warn('Failed to reload cutting headers cache:', err);
+    } finally {
+      setIsReloadingCuttingCache(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reloadCuttingCache(false);
+    const intervalId = setInterval(() => {
+      reloadCuttingCache(false);
+    }, CUTTING_CACHE_RELOAD_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [reloadCuttingCache]);
+
+  const activeSizes = useMemo(() => {
+    if (!activeLotCutting || !activeLotCutting.rows || activeLotCutting.rows.length === 0) return [];
+    const sizeSet = new Set();
+    activeLotCutting.rows.forEach(r => {
+      if (r.sizes && typeof r.sizes === 'object') {
+        Object.keys(r.sizes).forEach(sz => {
+          if (Number(r.sizes[sz]) > 0) sizeSet.add(sz);
+        });
+      }
+    });
+    const standardOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', 'XXL', '3XL', 'XXXL', '4XL', '5XL', 'FREE', 'FS'];
+    return Array.from(sizeSet).sort((a, b) => {
+      const idxA = standardOrder.indexOf(a.toUpperCase());
+      const idxB = standardOrder.indexOf(b.toUpperCase());
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [activeLotCutting]);
+
+
 
   // Step 2: Simple Issue Details (Direct Issue Weight in Kg & Cutting Pcs)
   const [boneWeightKg, setBoneWeightKg] = useState('2.50');
@@ -73,6 +141,133 @@ export default function BoneIssueView({
   const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
 
   const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    const rawLot = searchLotInput || lotDetails?.lotNo || prefilledLotNo || '';
+    const cleanLot = String(rawLot).trim();
+    if (!cleanLot) {
+      setActiveLotCutting(null);
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    const cleanLower = cleanLot.toLowerCase();
+    const headerMatch = (cuttingHeaders || []).find(ch => 
+      String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
+    );
+    const designMatch = (designs || []).find(d => 
+      String(d.id || '').trim().toLowerCase() === cleanLower ||
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLower
+    );
+
+    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || Number(lotDetails?.quantity) || 0;
+    const hasMemoryData = Boolean(headerMatch || designMatch || lotDetails);
+
+    setActiveLotCutting({
+      lotNumber: cleanLot,
+      totalPieces: memoryTotal,
+      style: headerMatch?.Style || designMatch?.category || lotDetails?.style || '',
+      fabric: headerMatch?.Fabric || lotDetails?.fabric || '',
+      brand: headerMatch?.Brand || designMatch?.brand || lotDetails?.brand || '',
+      partyName: headerMatch?.Party_Name || lotDetails?.partyName || '',
+      garmentType: headerMatch?.Garment_Type || lotDetails?.garmentType || '',
+      dateOfIssue: headerMatch?.Date_of_Issue || headerMatch?.JobOrder_Date || '',
+      shades: headerMatch?.Shades || lotDetails?.shade || '',
+      sizes: headerMatch?.Sizes || lotDetails?.size || '',
+      rows: matrixCacheRef.current[cleanLower]?.rows || [],
+      hasDetails: hasMemoryData
+    });
+
+    if (memoryTotal > 0 && (!issuePcs || Number(issuePcs) === 0)) {
+      setIssuePcs(memoryTotal);
+    }
+    
+
+    if (matrixCacheRef.current[cleanLower]) {
+      const cached = matrixCacheRef.current[cleanLower];
+      const matrixRows = cached?.rows || [];
+      const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+      const resolvedTotal = matrixTotal > 0 ? matrixTotal : (memoryTotal > 0 ? memoryTotal : (Number(cached?.cuttingQty) || Number(cached?.header?.Cutting_Qty) || 0));
+      setActiveLotCutting(prev => ({
+        ...prev,
+        totalPieces: resolvedTotal,
+        rows: matrixRows,
+        hasDetails: true
+      }));
+      setLoadingActiveLotCutting(false);
+      return;
+    }
+
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setLoadingActiveLotCutting(true);
+      try {
+        const res = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(cleanLot)}`);
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+
+        if (Object.keys(matrixCacheRef.current).length >= CUTTING_CACHE_MAX_ENTRIES) {
+          matrixCacheRef.current = {};
+        }
+
+        matrixCacheRef.current[cleanLower] = data;
+        const matrixRows = data?.rows || [];
+        const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+        const resolvedTotal = matrixTotal > 0 ? matrixTotal : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
+
+        const styleVal = data?.style || data?.header?.Style || '';
+        const fabricVal = data?.fabric || data?.header?.Fabric || '';
+        const brandVal = data?.brand || data?.header?.Brand || '';
+        const partyVal = data?.partyName || data?.header?.Party_Name || '';
+        const shadesVal = data?.shades || data?.header?.Shades || '';
+        const sizesVal = data?.sizes || data?.header?.Sizes || '';
+
+        if (!isCancelled) {
+          setActiveLotCutting(prev => ({
+            ...prev,
+            totalPieces: resolvedTotal,
+            style: prev?.style || styleVal,
+            fabric: prev?.fabric || fabricVal,
+            brand: prev?.brand || brandVal,
+            partyName: prev?.partyName || partyVal,
+            shades: prev?.shades || shadesVal,
+            sizes: prev?.sizes || sizesVal,
+            rows: matrixRows,
+            hasDetails: true
+          }));
+
+          if (resolvedTotal > 0) {
+            setIssuePcs(resolvedTotal);
+          }
+          if (styleVal) {
+            setWithoutLotStyle(styleVal);
+          }
+          setLotDetails(prev => ({
+            ...(prev || {}),
+            lotNo: cleanLot,
+            quantity: resolvedTotal || prev?.quantity || 0,
+            style: styleVal || prev?.style || '',
+            fabric: fabricVal || prev?.fabric || '',
+            brand: brandVal || prev?.brand || '',
+            partyName: partyVal || prev?.partyName || '',
+            shade: shadesVal || prev?.shade || '',
+            size: sizesVal || prev?.size || ''
+          }));
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setActiveLotCutting(prev => (prev ? { ...prev, hasDetails: prev.hasDetails || hasMemoryData } : null));
+        }
+      } finally {
+        if (!isCancelled) setLoadingActiveLotCutting(false);
+      }
+    }, 300);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchLotInput, lotDetails, prefilledLotNo, cuttingHeaders, designs, cuttingCacheRefreshCount]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -1527,233 +1722,447 @@ export default function BoneIssueView({
                   </div>
                 )}
 
-                {/* LOT DETAILS DISPLAY CARD */}
+                {/* BOM STATUS BANNER (APPROVAL WORKFLOW) */}
                 {lotDetails && (
                   <div style={{
                     marginTop: '16px',
                     padding: '16px 20px',
                     borderRadius: '12px',
-                    background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
-                    border: '1.5px solid #bae6fd'
+                    background: bomStatus === 'approved' ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)' : bomStatus === 'pending' ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)' : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
+                    border: bomStatus === 'approved' ? '1.5px solid #86efac' : bomStatus === 'pending' ? '1.5px solid #fcd34d' : '1.5px solid #fca5a5',
+                    boxShadow: 'var(--shadow-card)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        <span style={{
-                          padding: '4px 10px', borderRadius: '6px',
-                          background: '#0284c7', color: '#ffffff',
-                          fontSize: '12.5px', fontWeight: '800', letterSpacing: '0.5px'
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '50%',
+                          background: bomStatus === 'approved' ? '#16a34a' : bomStatus === 'pending' ? '#d97706' : '#dc2626',
+                          color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}>
-                          LOT #{lotDetails.lotNo}
-                        </span>
-                        <span style={{ fontSize: '14px', fontWeight: '800', color: '#0369a1' }}>
-                          {lotDetails.style || 'Garment Design'}
-                        </span>
-                        <span style={{ fontSize: '12px', color: '#64748b' }}>
-                          • {lotDetails.brand || 'Mohit Hosiery'}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#0369a1', background: '#ffffff', padding: '4px 10px', borderRadius: '6px', border: '1px solid #bae6fd' }}>
-                        Cutting Qty: <strong>{lotDetails.quantity || 0} Pcs</strong>
-                      </div>
-                    </div>
+                          {bomStatus === 'approved' ? <CheckCircle size={18} /> : bomStatus === 'pending' ? <Clock size={18} /> : <AlertTriangle size={18} />}
+                        </div>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <h4 style={{
+                              margin: 0,
+                              fontSize: '14px',
+                              fontWeight: '800',
+                              color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
+                            }}>
+                              {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
+                              {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
+                              {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
+                              {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
+                              {bomStatus === 'idle' && 'Verifying BOM Status...'}
+                            </h4>
+                            <span style={{
+                              fontSize: '10.5px',
+                              fontWeight: '800',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
+                              color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
+                            }}>
+                              {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                            </span>
+                          </div>
 
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                      gap: '12px',
-                      fontSize: '12px'
-                    }}>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>GARMENT TYPE</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.garmentType || 'N/A'}</strong>
+                          <p style={{
+                            margin: '3px 0 0 0',
+                            fontSize: '12px',
+                            color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
+                            fontWeight: '600',
+                            lineHeight: '1.4'
+                          }}>
+                            {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Bone pocketing.`}
+                            {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Bone materials can only be issued after approval.`}
+                            {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
+                            {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
+                            {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>FABRIC</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.fabric || 'N/A'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SHADE / COLOR</span>
-                        <strong style={{ color: '#0f172a' }}>{selectedShade || lotDetails.shade || 'Standard'}</strong>
-                      </div>
-                      <div>
-                        <span style={{ color: '#64748b', display: 'block', fontSize: '10.5px', fontWeight: '700' }}>SIZES</span>
-                        <strong style={{ color: '#0f172a' }}>{lotDetails.size || 'M, L, XL, XXL'}</strong>
+
+                      {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {bomStatus === 'not_created' && (
+                          <button
+                            type="button"
+                            onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                            style={{
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
+                          </button>
+                        )}
+
+                        {bomStatus === 'pending' && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleViewApprovalQueue}
+                              style={{
+                                padding: '8px 16px',
+                                borderRadius: '8px',
+                                border: 'none',
+                                background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                                color: '#ffffff',
+                                fontSize: '12.5px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px'
+                              }}
+                            >
+                              Open Approval Queue
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                              style={{
+                                padding: '8px 12px',
+                                borderRadius: '8px',
+                                border: '1px solid #f59e0b',
+                                background: '#ffffff',
+                                color: '#b45309',
+                                fontSize: '12px',
+                                fontWeight: '700',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              View/Edit BOM
+                            </button>
+                          </>
+                        )}
+
+                        {bomStatus === 'rejected' && (
+                          <button
+                            type="button"
+                            onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                            style={{
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: '#dc2626',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: '800',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                          >
+                            Revise BOM in Design View
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
                 )}
+              </div>
+            )}
 
-            {/* BOM APPROVAL STATUS CARD (MANDATORY GATEWAY - STRICTLY FOR WITH LOT MODE) */}
-            {!isWithoutLot && (lotDetails || searchLotInput.trim().length >= 3) && (
+            {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER (ALWAYS VISIBLE IN ALL MODES) ── */}
+            {Boolean((searchLotInput && searchLotInput.trim()) || lotDetails?.lotNo) && (
               <div style={{
-                marginTop: '14px',
-                padding: '16px 20px',
-                borderRadius: '12px',
-                border: bomStatus === 'approved'
-                  ? '1.5px solid #86efac'
-                  : bomStatus === 'pending'
-                    ? '1.5px solid #fcd34d'
-                    : '1.5px solid #fca5a5',
-                background: bomStatus === 'approved'
-                  ? 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)'
-                  : bomStatus === 'pending'
-                    ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
-                    : 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '10px'
+                marginTop: '16px',
+                marginBottom: '16px',
+                padding: '14px 18px',
+                borderRadius: '10px',
+                background: activeLotCutting?.hasDetails 
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+                  : '#f8fafc',
+                border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
+                boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
+                transition: 'all 0.2s ease'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    {bomStatus === 'approved' ? (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#16a34a', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)' }}>
-                        <ShieldCheck size={20} />
-                      </div>
-                    ) : bomStatus === 'pending' ? (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#d97706', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)' }}>
-                        <AlertTriangle size={20} />
-                      </div>
-                    ) : (
-                      <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: '#dc2626', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)' }}>
-                        <Lock size={20} />
-                      </div>
-                    )}
-
+                {/* Header of Cutting Card */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  borderBottom: '1px solid #e2e8f0',
+                  paddingBottom: '10px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '8px',
+                      background: activeLotCutting?.hasDetails ? '#dcfce7' : '#f1f5f9',
+                      color: activeLotCutting?.hasDetails ? '#15803d' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <Scissors size={18} />
+                    </div>
                     <div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <h4 style={{
-                          margin: 0,
-                          fontSize: '14px',
-                          fontWeight: '800',
-                          color: bomStatus === 'approved' ? '#166534' : bomStatus === 'pending' ? '#92400e' : '#991b1b'
-                        }}>
-                          {bomStatus === 'approved' && '✓ BOM Approved & Verified for Issue'}
-                          {bomStatus === 'pending' && `⏳ BOM Pending Approval (Status: ${bomDesign?.status || 'In Verification'})`}
-                          {bomStatus === 'not_created' && '⚠️ BOM Not Created for this Lot'}
-                          {bomStatus === 'rejected' && '❌ BOM Rejected by Admin'}
-                          {bomStatus === 'idle' && 'Verifying BOM Status...'}
-                        </h4>
-                        <span style={{
-                          fontSize: '10.5px',
-                          fontWeight: '800',
-                          padding: '2px 8px',
-                          borderRadius: '6px',
-                          background: bomStatus === 'approved' ? '#bbf7d0' : bomStatus === 'pending' ? '#fde68a' : '#fecaca',
-                          color: bomStatus === 'approved' ? '#14532d' : bomStatus === 'pending' ? '#78350f' : '#7f1d1d'
-                        }}>
-                          {bomStatus === 'approved' ? 'READY TO ISSUE' : 'ISSUE LOCKED'}
+                        <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                          Cutting Details &amp; Batch Metrics
                         </span>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          fontFamily: 'monospace',
+                          background: '#0f172a',
+                          color: '#ffffff',
+                          padding: '2px 8px',
+                          borderRadius: '6px'
+                        }}>
+                          Lot #{searchLotInput?.trim() || lotDetails?.lotNo || '—'}
+                        </span>
+                        {activeLotCutting?.hasDetails ? (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#dcfce7',
+                            color: '#15803d',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '3px'
+                          }}>
+                            <CheckCircle2 size={11} /> Verified Cutting Sheet
+                          </span>
+                        ) : loadingActiveLotCutting ? (
+                          <span style={{ fontSize: '11px', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <RefreshCw size={11} className="animate-spin" /> Checking cutting database...
+                          </span>
+                        ) : (
+                          <span style={{
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            background: '#fef3c7',
+                            color: '#b45309',
+                            padding: '2px 7px',
+                            borderRadius: '6px'
+                          }}>
+                            No cutting sheet in DB
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => reloadCuttingCache(true)}
+                          disabled={isReloadingCuttingCache}
+                          title="Empty in-memory cache & reload cutting database now (Auto-reloads every 30 minutes)"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '2px 8px',
+                            fontSize: '10.5px',
+                            fontWeight: '700',
+                            color: '#0284c7',
+                            background: '#f0f9ff',
+                            border: '1px solid #bae6fd',
+                            borderRadius: '6px',
+                            cursor: isReloadingCuttingCache ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <RefreshCw size={10} className={isReloadingCuttingCache ? "animate-spin" : ""} />
+                          {isReloadingCuttingCache ? 'Reloading...' : 'Reload (30m Auto)'}
+                        </button>
+                        {cacheReloadNotice && (
+                          <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: '700' }}>
+                            {cacheReloadNotice}
+                          </span>
+                        )}
                       </div>
-
-                      <p style={{
-                        margin: '3px 0 0 0',
-                        fontSize: '12px',
-                        color: bomStatus === 'approved' ? '#15803d' : bomStatus === 'pending' ? '#b45309' : '#b91c1c',
-                        fontWeight: '600',
-                        lineHeight: '1.4'
-                      }}>
-                        {bomStatus === 'approved' && `BOM verified with ${(bomDesign?.bom || []).length} accessory items configured (${bomDesign?.style || lotDetails?.style || 'Garment Design'}). You are authorized to issue Bone pocketing.`}
-                        {bomStatus === 'pending' && `A BOM design was submitted for Lot #${lotDetails?.lotNo || searchLotInput}, but it is awaiting Admin Approval in the Approval Queue. Bone materials can only be issued after approval.`}
-                        {bomStatus === 'not_created' && `No Bill of Materials (BOM) found for Lot #${lotDetails?.lotNo || searchLotInput}. Workflow Rule: BOM must be created and approved first in Design Management.`}
-                        {bomStatus === 'rejected' && `The BOM for Lot #${lotDetails?.lotNo || searchLotInput} was rejected. Please review and revise the BOM in Design Management.`}
-                        {bomStatus === 'idle' && 'Checking if a verified BOM exists for this lot...'}
-                      </p>
+                      <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                        Production batch particulars automatically synchronized with Lot #{searchLotInput?.trim() || lotDetails?.lotNo || '—'} • Auto-refreshes every 30m
+                      </span>
                     </div>
                   </div>
 
-                  {/* 1-Click Action Buttons for Unapproved or Missing BOM */}
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    {bomStatus === 'not_created' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-end',
+                      background: '#ffffff',
+                      padding: '5px 12px',
+                      borderRadius: '8px',
+                      border: '1.5px solid #86efac',
+                      boxShadow: '0 1px 3px rgba(34, 197, 94, 0.12)'
+                    }}>
+                      <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        TOTAL CUTTING QUANTITY
+                      </span>
+                      <strong style={{ fontSize: '17px', fontWeight: '900', color: '#15803d' }}>
+                        {(activeLotCutting?.totalPieces || (Number(lotDetails?.quantity) || 0)).toLocaleString()} <span style={{ fontSize: '12px' }}>Pcs</span>
+                      </strong>
+                    </div>
+
+                    {activeLotCutting?.rows && activeLotCutting.rows.length > 0 && (
                       <button
                         type="button"
-                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
+                        onClick={() => setShowActiveCuttingMatrix(!showActiveCuttingMatrix)}
                         style={{
-                          padding: '8px 16px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
-                          color: '#ffffff',
-                          fontSize: '12.5px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
-                          display: 'flex',
+                          display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px'
+                          gap: '5px',
+                          padding: '7px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          border: showActiveCuttingMatrix ? '1.5px solid #0284c7' : '1px solid #bae6fd',
+                          background: showActiveCuttingMatrix ? '#0284c7' : '#f0f9ff',
+                          color: showActiveCuttingMatrix ? '#ffffff' : '#0369a1',
+                          cursor: 'pointer',
+                          boxShadow: '0 1px 4px rgba(2, 132, 199, 0.15)',
+                          transition: 'all 0.15s ease'
                         }}
                       >
-                        <Plus size={15} /> Create BOM for Lot #{lotDetails?.lotNo || searchLotInput}
-                      </button>
-                    )}
-
-                    {bomStatus === 'pending' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={handleViewApprovalQueue}
-                          style={{
-                            padding: '8px 16px',
-                            borderRadius: '8px',
-                            border: 'none',
-                            background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
-                            color: '#ffffff',
-                            fontSize: '12.5px',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 8px rgba(217, 119, 6, 0.3)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px'
-                          }}
-                        >
-                          <ExternalLink size={15} /> Go to Approval Queue
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
-                          style={{
-                            padding: '8px 12px',
-                            borderRadius: '8px',
-                            border: '1px solid #f59e0b',
-                            background: '#ffffff',
-                            color: '#b45309',
-                            fontSize: '12px',
-                            fontWeight: '700',
-                            cursor: 'pointer'
-                          }}
-                        >
-                          View/Edit BOM
-                        </button>
-                      </>
-                    )}
-
-                    {bomStatus === 'rejected' && (
-                      <button
-                        type="button"
-                        onClick={() => handleCreateBOM(lotDetails?.lotNo || searchLotInput)}
-                        style={{
-                          padding: '8px 16px',
-                          borderRadius: '8px',
-                          border: 'none',
-                          background: '#dc2626',
-                          color: '#ffffff',
-                          fontSize: '12.5px',
-                          fontWeight: '800',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px'
-                        }}
-                      >
-                        Revise BOM in Design View
+                        <Eye size={13} />
+                        {showActiveCuttingMatrix ? 'Hide Matrix' : `Matrix Breakdown (${activeLotCutting.rows.length} Colors)`}
                       </button>
                     )}
                   </div>
                 </div>
+
+                {/* 6 Particulars Cards */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                  gap: '8px'
+                }}>
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>GARMENT STYLE</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.style || lotDetails?.style || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>FABRIC</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.fabric || lotDetails?.fabric || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>BRAND / BUYER</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.brand || lotDetails?.brand || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>PARTY NAME</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.partyName || lotDetails?.partyName || 'Mohit Hosiery'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>SHADES</div>
+                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#0f172a', marginTop: '2px', wordBreak: 'break-word', maxHeight: '42px', overflowY: 'auto' }}>
+                      {activeLotCutting?.shades || (activeLotCutting?.rows?.map(r => `${r.color} [${r.totalPcs || 0}]`).join(', ')) || lotDetails?.shade || '—'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: '#ffffff', padding: '8px 10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '9.5px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>SIZES</div>
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginTop: '2px' }}>
+                      {activeLotCutting?.sizes || (activeSizes.length > 0 ? activeSizes.join(', ') : (lotDetails?.size || '—'))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Expandable Color-Size Cutting Matrix */}
+                {showActiveCuttingMatrix && activeLotCutting?.rows && activeLotCutting.rows.length > 0 && (
+                  <div style={{
+                    marginTop: '12px',
+                    padding: '12px 14px',
+                    background: '#ffffff',
+                    borderRadius: '8px',
+                    border: '1.5px solid #bae6fd',
+                    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.08)'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#0369a1' }}>
+                        Full Color-Size Cutting Matrix ({activeLotCutting.rows.length} Colors)
+                      </span>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        Source: MySQL `cutting` / Master Google Sheets
+                      </span>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px' }}>
+                        <thead>
+                          <tr style={{ background: '#f0f9ff', borderBottom: '2px solid #bae6fd' }}>
+                            <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: '800', color: '#0369a1' }}>Color / Shade</th>
+                            <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '700', color: '#475569' }}>Table</th>
+                            {activeSizes.map(sz => (
+                              <th key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '800', color: '#0f172a' }}>{sz}</th>
+                            ))}
+                            <th style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>Total Pcs</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeLotCutting.rows.map((row, idx) => (
+                            <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#f8fafc' }}>
+                              <td style={{ padding: '6px 10px', fontWeight: '800', color: '#0f172a' }}>{row.color}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'center', color: '#64748b', fontSize: '10.5px' }}>{row.cuttingTable || '—'}</td>
+                              {activeSizes.map(sz => (
+                                <td key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: row.sizes?.[sz] ? '700' : '400', color: row.sizes?.[sz] ? '#0f172a' : '#cbd5e1' }}>
+                                  {row.sizes?.[sz] ? Number(row.sizes[sz]).toLocaleString() : '—'}
+                                </td>
+                              ))}
+                              <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>
+                                {(Number(row.totalPcs) || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '900', color: '#0f172a' }}>
+                            <td colSpan={2} style={{ padding: '7px 10px' }}>Grand Total</td>
+                            {activeSizes.map(sz => {
+                              const szSum = activeLotCutting.rows.reduce((sum, r) => sum + (Number(r.sizes?.[sz]) || 0), 0);
+                              return (
+                                <td key={sz} style={{ padding: '7px 8px', textAlign: 'center', fontWeight: '900', color: '#0f172a' }}>
+                                  {szSum.toLocaleString()}
+                                </td>
+                              );
+                            })}
+                            <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '900', color: '#15803d' }}>
+                              {(activeLotCutting.totalPieces || 0).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
-          </div>
-        )}
 
         {/* STEP 2: ISSUE DETAILS (DATE, ISSUER, RECEIVER & SUPERVISOR) */}
           <div className="panel" style={{
@@ -2411,8 +2820,8 @@ export default function BoneIssueView({
               <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '14px', borderTop: '1px solid #e2e8f0', paddingTop: '18px', flexWrap: 'wrap' }}>
                 <div style={{ fontSize: '13px', color: '#64748b' }}>
                   {isWithoutLot ? (
-                    <span style={{ color: '#c2410c', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Zap size={15} /> Without BOM Mode &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{boneWeightKg} Kg{boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''}</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (Supervisor: {supervisorName || 'ROHIT / MONU'})
+                    <span style={{ color: '#475569', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Zap size={14} color="#64748b" /> Direct Floor Issue &bull; LOT #{searchLotInput || lotDetails?.lotNo || '—'} &bull; Total: <strong style={{ color: '#ea580c' }}>{boneWeightKg} Kg{boneRollCount ? ` (${boneRollCount} Roll${Number(boneRollCount) > 1 ? 's' : ''})` : ''}</strong> to <strong>{receiverName || 'Cutting Master'}</strong> (Supervisor: {supervisorName || 'ROHIT / MONU'})
                     </span>
                   ) : bomStatus === 'approved' ? (
                     <span style={{ color: '#16a34a', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px' }}>
