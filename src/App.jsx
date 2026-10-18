@@ -98,7 +98,8 @@ const hasTabAccess = (tabName, role) => {
       're_download',
       'only_cutting',
       'item_codes',
-      'challan'
+      'challan',
+      'movement_report'
     ].includes(tabName);
   }
   if (panel === 'designer') {
@@ -124,7 +125,9 @@ const hasTabAccess = (tabName, role) => {
       'only_cutting',
       'material_details',
       're_download',
-      'item_codes'
+      'item_codes',
+      'challan',
+      'movement_report'
     ].includes(tabName);
   }
   if (panel === 'store') {
@@ -153,7 +156,9 @@ const hasTabAccess = (tabName, role) => {
       'elastic_po',
       'elastic_tape_issue',
       'only_cutting',
-      'item_codes'
+      'item_codes',
+      'challan',
+      'movement_report'
     ].includes(tabName);
   }
   return false;
@@ -2198,7 +2203,7 @@ export default function App() {
             {currentUser?.role === 'Admin' && (
               <>
                 <li
-                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'barcode_material_issue', 'without_bom_material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
+                  className={`sidebar-item ${['weight_capture', 'manually_weight_capture', 'material_issue', 'barcode_material_issue', 'without_bom_material_issue', 'extra_material_issue', 'return_material', 'material_details', 'material_transfer', 'warehouse_locations', 'history', 'scanner_logs', 'po_verification', 'rgp', 'generate_po', 'item_codes', 'challan', 'movement_report'].includes(activeTab) && activeTab !== 'history' ? 'active' : ''}`}
                   onClick={() => {
                     if (isSidebarCollapsed) {
                       setIsSidebarCollapsed(false);
@@ -2240,6 +2245,9 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'challan' ? 'active' : ''}`} onClick={() => handleTabClick('challan')} title="Component Challan">
                       <span className="sidebar-text">📦 Component Challan</span>
+                    </li>
+                    <li className={`sidebar-subitem ${activeTab === 'movement_report' ? 'active' : ''}`} onClick={() => handleTabClick('movement_report')} title="All Issued & Added Material Report">
+                      <span className="sidebar-text">📊 Movement Report (All Issues)</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'extra_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('extra_material_issue')} title="Extra Material Issue">
                       <span className="sidebar-text">Extra Material Issue</span>
@@ -2561,6 +2569,7 @@ export default function App() {
                 {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && 'Elastic Issue'}
                 {activeTab === 'elastic_tape_issue' && 'Elastic & Tape Issue'}
                 {activeTab === 'challan' && 'Component Issue Challan'}
+                {activeTab === 'movement_report' && 'Movement Report (All Issues)'}
                 {activeTab === 'generate_po' && 'Generate PO'}
                 {activeTab === 'item_codes' && 'Item Code Generator & Master Registry'}
                 {activeTab === 'history' && 'Production Work'}
