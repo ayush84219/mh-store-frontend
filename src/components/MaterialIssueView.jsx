@@ -2672,6 +2672,7 @@ export default function MaterialIssueView({
             if (tab === 'material_issue') setIssueWorkflowMode('lot_bom');
             else if (onRedirectToTab) onRedirectToTab(tab);
           }}
+          onSubmitApproval={onSubmitApproval}
         />
       ) : issueWorkflowMode === 'barcode_scan' ? (
         <BarcodeMaterialIssueView

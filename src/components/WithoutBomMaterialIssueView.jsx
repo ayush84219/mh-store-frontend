@@ -1013,7 +1013,8 @@ export default function WithoutBomMaterialIssueView({
   currentUser = null,
   currencySymbol = '₹',
   onSwitchToWithBom,
-  onRedirectToTab
+  onRedirectToTab,
+  onSubmitApproval = null
 }) {
   const [activeTab, setActiveTab] = useState('issue'); // 'issue' | 'history'
 
@@ -1268,6 +1269,46 @@ export default function WithoutBomMaterialIssueView({
       clearTimeout(timer);
     };
   }, [lotNo, cuttingHeaders, designs, cuttingCacheRefreshCount]);
+
+  // ── Cutting Pieces & 1% Extra Material Allowance ──
+  // Resolves cutting pieces from verified cutting sheet / cuttingHeaders / designs
+  const cuttingPieces = useMemo(() => {
+    const clean = String(lotNo || '').trim().toLowerCase();
+    if (!clean) return 0;
+    if (activeLotCutting?.totalPieces > 0) return Number(activeLotCutting.totalPieces);
+    if (effectiveCuttingMap && effectiveCuttingMap[clean] > 0) return Number(effectiveCuttingMap[clean]);
+    return 0;
+  }, [lotNo, activeLotCutting, effectiveCuttingMap]);
+
+  // Automatic 1% material addition: e.g. 1000 pieces -> 1% = 10 -> Total 1010 pieces
+  const onePercentAllowance = useMemo(() => {
+    if (cuttingPieces <= 0) return 0;
+    return Math.round(cuttingPieces * 0.01);
+  }, [cuttingPieces]);
+
+  // Default Issue Quantity: Cutting Pieces + 1% Extra (e.g. 1000 + 10 = 1010)
+  const defaultAutoIssueQty = useMemo(() => {
+    if (cuttingPieces <= 0) return 1;
+    return cuttingPieces + onePercentAllowance;
+  }, [cuttingPieces, onePercentAllowance]);
+
+  // Automatically update initial or unedited items when cutting quantity resolves with 1% extra
+  useEffect(() => {
+    if (defaultAutoIssueQty > 1) {
+      setItems(prev => prev.map(item => {
+        // If row is at initial default value (1) or 0, update to defaultAutoIssueQty
+        if (!item.totalQty || Number(item.totalQty) === 1) {
+          return { ...item, totalQty: defaultAutoIssueQty };
+        }
+        return item;
+      }));
+    }
+  }, [defaultAutoIssueQty]);
+
+  // 1% Threshold Exceeded Approval Modal State
+  const [approvalModalData, setApprovalModalData] = useState(null);
+  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [approvalReason, setApprovalReason] = useState('Extra floor material requisition exceeding 1% cutting allowance');
 
   // Barcode quick-input
   const [barcodeInput, setBarcodeInput] = useState('');
@@ -1847,7 +1888,7 @@ export default function WithoutBomMaterialIssueView({
         location: mat ? (mat.location || mat.warehouseLocation || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
         calcMode: 'direct',
         perPcReq: 0,
-        totalQty: 1
+        totalQty: defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1
       }
     ]);
   };
@@ -1969,7 +2010,7 @@ export default function WithoutBomMaterialIssueView({
             location: matched.location || 'Main Store',
             calcMode: 'direct',
             perPcReq: 0,
-            totalQty: 1
+            totalQty: defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1
           }
         ]);
       }
@@ -2217,6 +2258,9 @@ export default function WithoutBomMaterialIssueView({
       brandName: brandName.trim(),
       style: styleName || (issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Issue'),
       pieces: issueMode === 'item_only' ? 1 : (parseInt(pieces, 10) || 1),
+      cuttingPieces: cuttingPieces || (parseInt(pieces, 10) > 1 ? parseInt(pieces, 10) : 0),
+      onePercentAllowance: onePercentAllowance || 0,
+      defaultAutoIssueQty: defaultAutoIssueQty || 0,
       personName: personName.trim() || 'Store In-charge',
       receiverName: receiverName.trim() || 'Floor Master',
       receiverDept: receiverDept.trim() || 'Cutting',
@@ -2249,36 +2293,10 @@ export default function WithoutBomMaterialIssueView({
     }
   };
 
-  // Submit Issue
-  const handleSubmitIssue = async () => {
-    setFormError('');
-    setFormSuccess('');
-
+  // Helper to execute confirmed material issue and stock deduction
+  const executeConfirmedIssue = async (isAdminOverride = false) => {
     const effectiveLot = lotNo.trim();
-    if (!effectiveLot) {
-      setFormError('Please enter or select a Lot Number. Lot Number is required to issue materials.');
-      playFeedbackSound('error');
-      return;
-    }
-
-    if (!personName.trim()) {
-      setFormError('Please specify the Person Name (Issuer).');
-      playFeedbackSound('error');
-      return;
-    }
-
-    if (!receiverName.trim()) {
-      setFormError('Please specify the Receiver Name (Cutting Master / Tailor).');
-      playFeedbackSound('error');
-      return;
-    }
-
     const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
-    if (validItems.length === 0) {
-      setFormError('Please select at least one material item with an issue quantity greater than 0.');
-      playFeedbackSound('error');
-      return;
-    }
 
     // Check shortage warnings
     const shortageItems = validItems.filter(i => i.materialId && i.availableStock < i.totalQty);
@@ -2336,10 +2354,13 @@ export default function WithoutBomMaterialIssueView({
         brandName: brandName.trim(),
         style: styleName || (issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Issue'),
         pieces: issueMode === 'item_only' ? 1 : (parseInt(pieces, 10) || 1),
+        cuttingPieces: cuttingPieces || (parseInt(pieces, 10) > 1 ? parseInt(pieces, 10) : 0),
+        onePercentAllowance: onePercentAllowance || 0,
+        defaultAutoIssueQty: defaultAutoIssueQty || 0,
         personName: personName.trim(),
         receiverName: receiverName.trim(),
         receiverDept: receiverDept.trim(),
-        remarks: remarks.trim(),
+        remarks: remarks.trim() + (isAdminOverride ? ' [Admin Approved Excess Over 1%]' : ''),
         items: validItems.map(i => {
           const rawType = i.isCustomType ? (i.customComponentType?.trim() || 'Custom Accessory') : (i.componentType || 'DORI');
           if (rawType && rawType !== 'Custom Accessory') {
@@ -2373,33 +2394,7 @@ export default function WithoutBomMaterialIssueView({
       }, 100);
 
       // Process complete: refill and reset all columns/inputs back to clean state for next bill
-      setLotNo('');
-      setBrandName('');
-      setReceiverName('');
-      setReceiverDept('Cutting');
-      setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
-      setPieces(1);
-      setRemarks('');
-      setBarcodeInput('');
-      setItems([
-        {
-          id: Date.now(),
-          componentType: 'DORI',
-          customComponentType: '',
-          isCustomType: false,
-          entryMode: 'choose',
-          materialId: '',
-          materialName: '',
-          itemCode: '',
-          color: '',
-          unit: 'Mtr',
-          availableStock: 0,
-          location: '',
-          calcMode: 'direct',
-          perPcReq: 0,
-          totalQty: 1
-        }
-      ]);
+      handleResetForm();
 
       // Focus Lot Number input so user can type the next bill immediately
       setTimeout(() => {
@@ -2414,6 +2409,161 @@ export default function WithoutBomMaterialIssueView({
     } finally {
       setSubmitting(false);
     }
+  };
+
+  // Submit Issue with 1% Cutting Allowance Verification
+  const handleSubmitIssue = async () => {
+    setFormError('');
+    setFormSuccess('');
+
+    const effectiveLot = lotNo.trim();
+    if (!effectiveLot) {
+      setFormError('Please enter or select a Lot Number. Lot Number is required to issue materials.');
+      playFeedbackSound('error');
+      return;
+    }
+
+    if (!personName.trim()) {
+      setFormError('Please specify the Person Name (Issuer).');
+      playFeedbackSound('error');
+      return;
+    }
+
+    if (!receiverName.trim()) {
+      setFormError('Please specify the Receiver Name (Cutting Master / Tailor).');
+      playFeedbackSound('error');
+      return;
+    }
+
+    const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
+    if (validItems.length === 0) {
+      setFormError('Please select at least one material item with an issue quantity greater than 0.');
+      playFeedbackSound('error');
+      return;
+    }
+
+    // ── 1% CUTTING THRESHOLD VERIFICATION ──
+    // e.g. Cutting = 1,000 Pcs -> 1% = 10 Pcs -> Max = 1,010 Pcs.
+    // If quantity is <= 1,010 Pcs, it is OK and issues normally.
+    // If quantity > 1,010 Pcs, it requires Supervisor / Admin Approval!
+    if (cuttingPieces > 0) {
+      const exceeded = validItems.filter(i => Number(i.totalQty) > defaultAutoIssueQty);
+      if (exceeded.length > 0) {
+        setApprovalModalData({
+          lotNo: effectiveLot,
+          cuttingPieces,
+          onePercentAllowance,
+          defaultAutoIssueQty,
+          exceededItems: exceeded.map(i => {
+            const qty = Number(i.totalQty);
+            const excess = qty - defaultAutoIssueQty;
+            const excessPct = ((excess / cuttingPieces) * 100).toFixed(1);
+            return {
+              ...i,
+              qty,
+              excess,
+              excessPct
+            };
+          }),
+          allItems: validItems
+        });
+        return;
+      }
+    }
+
+    await executeConfirmedIssue();
+  };
+
+  // Handle Submit Approval for >1% Requisition
+  const handleConfirmSubmitApproval = async () => {
+    if (!approvalModalData) return;
+    setApprovalSubmitting(true);
+    const { lotNo: reqLot, cuttingPieces: pcs, defaultAutoIssueQty: maxAllowed, exceededItems } = approvalModalData;
+
+    const payloadItems = exceededItems.map(it => ({
+      materialId: it.materialId || '',
+      materialName: it.materialName || `${it.componentType} Item`,
+      bomItemName: it.componentType || 'Accessory',
+      totalRequired: it.qty,
+      unit: it.unit || 'Pcs',
+      itemCode: it.itemCode || '',
+      color: it.color || '',
+      availableStock: it.availableStock || 0,
+      location: it.location || '',
+      excessQty: it.excess,
+      excessPct: it.excessPct
+    }));
+
+    const maxExcess = Math.max(...exceededItems.map(i => i.excess));
+    const exceededSummary = exceededItems.map(i => `${i.materialName || i.componentType}: ${i.qty} ${i.unit} (1% max: ${maxAllowed}, +${i.excess} excess)`).join(', ');
+
+    const approvalRequestData = {
+      id: `AR${Date.now()}`,
+      type: 'material_issue',
+      subType: 'without_bom_excess_1pct',
+      lotId: reqLot,
+      category: styleName || 'Without-BOM Issue',
+      brand: brandName || 'Mohit Hosiery',
+      pieces: pcs,
+      cuttingPieces: pcs,
+      onePercentLimit: maxAllowed,
+      items: payloadItems,
+      isReissue: false,
+      isWithoutBom: true,
+      personName: personName.trim() || 'Store Staff',
+      receiverName: receiverName.trim() || 'Cutting Master',
+      receiverDept: receiverDept.trim() || 'Cutting',
+      exceedsLimit: true,
+      extraPercentage: ((maxExcess / pcs) * 100).toFixed(1),
+      reason: approvalReason || `Without-BOM Issue Exceeds 1% Limit: ${exceededSummary}`,
+      requesterName: currentUser?.name || personName || 'Store Staff',
+      requesterRole: currentUser?.role || 'Store',
+      status: 'pending',
+      date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+    };
+
+    try {
+      if (typeof onSubmitApproval === 'function') {
+        onSubmitApproval('material_issue', approvalRequestData, currentUser);
+      } else {
+        await fetch(`${getBackendUrl()}/api/approval-requests`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(approvalRequestData)
+        });
+      }
+
+      setFormSuccess(`✓ Approval Request submitted to Admin! Lot #${reqLot} issue (${exceededSummary}) is now pending Admin approval. Material can be issued after approval.`);
+      setApprovalModalData(null);
+      handleResetForm();
+      setTimeout(() => setFormSuccess(''), 8000);
+    } catch (err) {
+      console.error('Failed to submit approval request:', err);
+      setFormError('Failed to submit approval request: ' + err.message);
+    } finally {
+      setApprovalSubmitting(false);
+    }
+  };
+
+  // Adjust all items back to 1% limit
+  const handleAdjustAllTo1Percent = () => {
+    if (!approvalModalData) return;
+    const maxAllowed = approvalModalData.defaultAutoIssueQty;
+    setItems(prev => prev.map(item => {
+      if (Number(item.totalQty) > maxAllowed) {
+        return { ...item, totalQty: maxAllowed };
+      }
+      return item;
+    }));
+    setApprovalModalData(null);
+    setFormSuccess(`✓ Quantities adjusted to 1% limit (${maxAllowed.toLocaleString()} Pcs). You can now issue directly.`);
+    setTimeout(() => setFormSuccess(''), 4000);
+  };
+
+  // Admin Override
+  const handleAdminOverrideIssue = async () => {
+    setApprovalModalData(null);
+    await executeConfirmedIssue(true);
   };
 
   // Clear and refill all form columns/inputs for a fresh issue
@@ -2451,6 +2601,12 @@ export default function WithoutBomMaterialIssueView({
 
   // Helper to build issueData from a history log
   const buildIssueDataFromLog = (log) => {
+    const cleanLot = String(log.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+    const resolvedCutting = (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+      (log.volume > 1 ? Number(log.volume) : 0);
+    const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
+    const defaultQty = resolvedCutting + onePct;
+
     return {
       voucherId: log.id,
       date: log.date || new Date().toLocaleDateString('en-GB'),
@@ -2460,6 +2616,9 @@ export default function WithoutBomMaterialIssueView({
       brandName: log.brandName || log.brand || '',
       style: log.style || log.category || 'Store Issue',
       pieces: log.volume || 1,
+      cuttingPieces: resolvedCutting,
+      onePercentAllowance: onePct,
+      defaultAutoIssueQty: defaultQty,
       personName: log.personName || 'Store In-charge',
       receiverName: log.receiverName || 'Cutting Master',
       receiverDept: log.receiverDept || 'Cutting',
@@ -2477,13 +2636,28 @@ export default function WithoutBomMaterialIssueView({
     };
   };
 
-  // Generate complete, robust HTML for printable challan sheet (Dual Copy)
+  // Generate complete, robust HTML for printable challan sheet (Dual Copy - Pure Black & White)
   const generatePrintHtml = (issueData) => {
     const lotText = issueData.lotId ? `LOT #${issueData.lotId}` : 'LOT REQUIRED';
     const voucherId = issueData.voucherId || nextVoucherId || 'CHALLAN';
     const dateStr = issueData.date || new Date().toLocaleDateString('en-GB');
     const items = issueData.items || [];
     const remarksHtml = issueData.remarks ? `<div class="remarks"><strong>Remarks / Allocation Notes:</strong> ${issueData.remarks}</div>` : '';
+
+    const cleanLot = String(issueData.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+    const resolvedCutting = Number(issueData.cuttingPieces) || 
+      (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+      (activeLotCutting && String(activeLotCutting.lotNumber).trim().toLowerCase() === cleanLot ? Number(activeLotCutting.totalPieces) : 0) ||
+      (Number(issueData.pieces) > 1 ? Number(issueData.pieces) : 0);
+
+    const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
+    const totalAllowedWith1Pct = resolvedCutting + onePct;
+
+    // Check if any issued item includes 1% extra
+    const isOnePercentExtraIssued = items.some(it => {
+      const q = Number(it.totalQty);
+      return (resolvedCutting > 0 && q >= totalAllowedWith1Pct) || (resolvedCutting > 0 && q > resolvedCutting);
+    });
 
     const renderChallanCopy = (copyTitle) => `
       <div class="challan-card">
@@ -2507,7 +2681,19 @@ export default function WithoutBomMaterialIssueView({
           <div class="field"><span class="lbl">ISSUED BY (STORE):</span> <strong>${issueData.personName || 'Store In-charge'}</strong></div>
           <div class="field"><span class="lbl">RECEIVED BY:</span> <strong>${issueData.receiverName || 'Floor Master'} (${issueData.receiverDept || 'Cutting'})</strong></div>
           <div class="field"><span class="lbl">REQUISITION TYPE:</span> <span>${issueData.style || 'Direct Requisition'}</span></div>
-          <div class="field"><span class="lbl">BATCH VOLUME:</span> <span>${issueData.pieces > 1 ? `${issueData.pieces} Pcs` : 'Ad-Hoc Issue'}</span></div>
+          <div class="field">
+            <span class="lbl">CUTTING PIECES / VOLUME:</span>
+            ${resolvedCutting > 0 ? `
+              <strong class="volume-val">${resolvedCutting.toLocaleString()} Pcs</strong>
+              ${isOnePercentExtraIssued ? `
+                <div class="extra-badge">✓ +1% EXTRA MATERIAL ISSUED: ${totalAllowedWith1Pct.toLocaleString()} PCS</div>
+              ` : (onePct > 0 ? `
+                <div class="extra-badge-subtle">(1% Max Allowed: ${totalAllowedWith1Pct.toLocaleString()} Pcs)</div>
+              ` : '')}
+            ` : `
+              <strong class="volume-val">${issueData.pieces > 1 ? `${issueData.pieces} Pcs` : 'Ad-Hoc Issue'}</strong>
+            `}
+          </div>
           <div class="field"><span class="lbl">TOTAL LINE ITEMS:</span> <span>${items.length} Material Item(s)</span></div>
         </div>
 
@@ -2515,24 +2701,29 @@ export default function WithoutBomMaterialIssueView({
           <thead>
             <tr>
               <th style="width: 32px; text-align: center;">#</th>
-              <th style="width: 100px;">Component</th>
+              <th style="width: 110px;">Component</th>
               <th>Store Material Description</th>
               <th style="width: 90px;">Item Code</th>
-              <th style="width: 80px;">Rack Loc</th>
-              <th style="width: 90px; text-align: right;">Issued Qty</th>
+              <th style="width: 90px;">Rack Loc</th>
+              <th style="width: 120px; text-align: right;">Issued Qty</th>
             </tr>
           </thead>
           <tbody>
             ${items.map((item, idx) => {
               const code = getItemCodeDisplay(item) || item.itemCode || '-';
+              const qty = Number(item.totalQty);
+              const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
               return `
                 <tr>
-                  <td style="text-align: center;">${idx + 1}</td>
+                  <td style="text-align: center; font-weight: bold;">${idx + 1}</td>
                   <td><strong>${item.componentType || 'Accessory'}</strong></td>
                   <td>${item.materialName || 'Material'}</td>
                   <td style="font-family: monospace; font-weight: bold;">${code}</td>
                   <td>${item.location || 'Store'}</td>
-                  <td style="text-align: right; font-weight: bold;">${item.totalQty} ${item.unit || 'Pcs'}</td>
+                  <td style="text-align: right;">
+                    <span style="font-weight: 900; font-size: 11px;">${item.totalQty} ${item.unit || 'Pcs'}</span>
+                    ${isItemExtra ? `<div style="font-size: 8.5px; font-weight: 900; color: #000000; text-transform: uppercase;">[ +1% Extra Added ]</div>` : ''}
+                  </td>
                 </tr>
               `;
             }).join('')}
@@ -2574,47 +2765,51 @@ export default function WithoutBomMaterialIssueView({
         <style>
           * { box-sizing: border-box; }
           body {
-            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             margin: 0;
             padding: 12px;
-            color: #0f172a;
+            color: #000000;
             background: #ffffff;
             font-size: 11px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
           }
           @page {
             size: A4 portrait;
-            margin: 8mm 8mm;
+            margin: 7mm 7mm;
           }
           .challan-card {
-            border: 1.5px solid #0f172a;
+            border: 1.5px solid #000000;
             border-radius: 4px;
-            padding: 14px 18px;
+            padding: 12px 16px;
             margin-bottom: 12px;
             page-break-inside: avoid;
             background: #ffffff;
           }
           .cut-divider {
-            border-top: 1.5px dashed #64748b;
+            border-top: 1.5px dashed #000000;
             text-align: center;
-            margin: 14px 0;
+            margin: 12px 0;
             position: relative;
           }
           .cut-divider span {
             background: #ffffff;
-            padding: 0 10px;
+            padding: 2px 10px;
             font-size: 9px;
-            font-weight: bold;
-            color: #64748b;
+            font-weight: 900;
+            color: #000000;
             position: relative;
-            top: -8px;
-            letter-spacing: 1px;
+            top: -9px;
+            letter-spacing: 0.8px;
+            border: 1px solid #000000;
+            border-radius: 3px;
           }
           .header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            border-bottom: 2px solid #0f172a;
-            padding-bottom: 8px;
+            border-bottom: 2px solid #000000;
+            padding-bottom: 6px;
             margin-bottom: 8px;
           }
           .brand h1 {
@@ -2622,29 +2817,30 @@ export default function WithoutBomMaterialIssueView({
             font-size: 18px;
             font-weight: 900;
             letter-spacing: 0.5px;
-            color: #0f172a;
+            color: #000000;
           }
           .brand .dept {
             font-size: 9.5px;
             font-weight: 700;
-            color: #475569;
+            color: #000000;
             margin-top: 1px;
           }
           .brand .main-heading {
             display: inline-block;
-            background: #ea580c;
+            background: #000000;
             color: #ffffff;
             font-weight: 900;
-            font-size: 12px;
+            font-size: 11px;
             padding: 3px 8px;
             border-radius: 3px;
             margin-top: 4px;
             letter-spacing: 0.5px;
+            border: 1px solid #000000;
           }
           .brand .sub-heading {
             font-size: 9.5px;
             font-weight: 700;
-            color: #64748b;
+            color: #000000;
             margin-top: 2px;
           }
           .meta {
@@ -2654,84 +2850,113 @@ export default function WithoutBomMaterialIssueView({
             font-family: monospace;
             font-size: 14px;
             font-weight: 900;
-            color: #ea580c;
+            color: #000000;
           }
           .meta .date {
             font-size: 10px;
-            color: #334155;
+            color: #000000;
             font-weight: 600;
             margin-top: 2px;
           }
           .copy-badge {
             display: inline-block;
             margin-top: 4px;
-            padding: 2px 6px;
-            background: #0f172a;
+            padding: 2px 7px;
+            background: #000000;
             color: #ffffff;
             font-size: 9px;
-            font-weight: 800;
+            font-weight: 900;
             border-radius: 3px;
+            border: 1px solid #000000;
           }
           .status-badge {
             font-size: 9px;
-            font-weight: 800;
-            color: #059669;
+            font-weight: 900;
+            color: #000000;
             margin-top: 2px;
           }
           .particulars-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 6px;
-            background: #f8fafc;
-            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            border: 1.5px solid #000000;
             border-radius: 4px;
             padding: 8px 10px;
             margin-bottom: 10px;
             font-size: 11px;
           }
           .particulars-grid .field {
-            line-height: 1.3;
+            line-height: 1.35;
           }
           .particulars-grid .lbl {
-            font-size: 9.5px;
-            color: #64748b;
-            font-weight: 700;
+            font-size: 9px;
+            color: #000000;
+            font-weight: 900;
             display: block;
+            text-transform: uppercase;
           }
           .lot-val {
-            color: #ea580c;
+            color: #000000;
             font-size: 12px;
             font-weight: 900;
+          }
+          .volume-val {
+            color: #000000;
+            font-size: 12px;
+            font-weight: 900;
+          }
+          .extra-badge {
+            display: inline-block;
+            margin-top: 2px;
+            padding: 1px 5px;
+            font-size: 9px;
+            font-weight: 900;
+            color: #000000;
+            border: 1px solid #000000;
+            background: #f0f0f0;
+            border-radius: 2px;
+          }
+          .extra-badge-subtle {
+            font-size: 9px;
+            color: #000000;
+            font-weight: 700;
+            margin-top: 2px;
           }
           .items-table {
             width: 100%;
             border-collapse: collapse;
             font-size: 10.5px;
             margin-bottom: 8px;
+            border: 1.5px solid #000000;
           }
           .items-table th {
-            background: #f1f5f9;
-            border: 1px solid #0f172a;
+            background: #f0f0f0;
+            border: 1px solid #000000;
             padding: 5px 6px;
             text-align: left;
             font-size: 9.5px;
             text-transform: uppercase;
-            color: #0f172a;
+            color: #000000;
+            font-weight: 900;
           }
           .items-table td {
-            border: 1px solid #cbd5e1;
-            padding: 4px 6px;
+            border: 1px solid #000000;
+            padding: 5px 6px;
             vertical-align: middle;
+            color: #000000;
           }
-          .items-table tbody tr:nth-child(even) {
-            background: #f8fafc;
+          .items-table tbody tr {
+            background: #ffffff !important;
           }
           .remarks {
-            background: #fff7ed;
-            border-left: 3px solid #ea580c;
+            background: #ffffff;
+            border: 1px solid #000000;
+            border-left: 4px solid #000000;
             padding: 4px 8px;
             font-size: 10px;
             margin-bottom: 8px;
+            color: #000000;
           }
           .signatures {
             display: grid;
@@ -2739,44 +2964,58 @@ export default function WithoutBomMaterialIssueView({
             gap: 12px;
             margin-top: 14px;
             padding-top: 8px;
-            border-top: 1px solid #cbd5e1;
+            border-top: 1.5px solid #000000;
             text-align: center;
             font-size: 9.5px;
+            color: #000000;
           }
           .sig-box .sig-line {
             height: 22px;
-            border-bottom: 1px solid #0f172a;
+            border-bottom: 1.5px solid #000000;
             width: 75%;
             margin: 0 auto 4px auto;
           }
           .footer-note {
             text-align: center;
             font-size: 8.5px;
-            color: #94a3b8;
+            color: #000000;
             margin-top: 8px;
+            font-weight: 600;
           }
           .print-btn-bar {
             text-align: center;
             padding: 10px;
-            background: #f1f5f9;
+            background: #f0f0f0;
             margin-bottom: 12px;
             border-radius: 6px;
+            border: 1px solid #000000;
           }
           .btn-print {
-            background: #ea580c;
+            background: #000000;
             color: #ffffff;
-            border: none;
+            border: 1px solid #000000;
             padding: 8px 24px;
             font-size: 14px;
             font-weight: bold;
             border-radius: 6px;
             cursor: pointer;
-            box-shadow: 0 2px 6px rgba(234, 88, 12, 0.3);
           }
           @media print {
             .print-btn-bar, .cut-divider { page-break-after: avoid; }
             .print-btn-bar { display: none !important; }
             body { padding: 0; }
+            * { color: #000000 !important; }
+            .brand .main-heading, .copy-badge {
+              background: #000000 !important;
+              color: #ffffff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .items-table th {
+              background: #f0f0f0 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
           }
         </style>
       </head>
@@ -2853,6 +3092,26 @@ export default function WithoutBomMaterialIssueView({
   // Direct 1-Click Print from the Main Form
   const handleDirectPrintFromForm = () => {
     setFormError('');
+    if (cuttingPieces > 0) {
+      const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
+      const exceeded = validItems.filter(i => Number(i.totalQty) > defaultAutoIssueQty);
+      if (exceeded.length > 0) {
+        setApprovalModalData({
+          lotNo: lotNo.trim(),
+          cuttingPieces,
+          onePercentAllowance,
+          defaultAutoIssueQty,
+          exceededItems: exceeded.map(i => {
+            const qty = Number(i.totalQty);
+            const excess = qty - defaultAutoIssueQty;
+            const excessPct = ((excess / cuttingPieces) * 100).toFixed(1);
+            return { ...i, qty, excess, excessPct };
+          }),
+          allItems: validItems
+        });
+        return;
+      }
+    }
     const issueData = buildIssueDataFromForm();
     if (!issueData) return;
     handleDirectPrintWindow(issueData, issueData.voucherId);
@@ -2895,6 +3154,26 @@ export default function WithoutBomMaterialIssueView({
   // Direct 1-Click Export of Current Form Challan as PDF File
   const handleSavePdfFromForm = () => {
     setFormError('');
+    if (cuttingPieces > 0) {
+      const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
+      const exceeded = validItems.filter(i => Number(i.totalQty) > defaultAutoIssueQty);
+      if (exceeded.length > 0) {
+        setApprovalModalData({
+          lotNo: lotNo.trim(),
+          cuttingPieces,
+          onePercentAllowance,
+          defaultAutoIssueQty,
+          exceededItems: exceeded.map(i => {
+            const qty = Number(i.totalQty);
+            const excess = qty - defaultAutoIssueQty;
+            const excessPct = ((excess / cuttingPieces) * 100).toFixed(1);
+            return { ...i, qty, excess, excessPct };
+          }),
+          allItems: validItems
+        });
+        return;
+      }
+    }
     const issueData = buildIssueDataFromForm();
     if (!issueData) return;
     try {
@@ -4683,6 +4962,117 @@ export default function WithoutBomMaterialIssueView({
               </form>
             </div>
 
+            {/* ── CUTTING PIECES & 1% EXTRA MATERIAL BANNER ── */}
+            {cuttingPieces > 0 && (
+              <div style={{
+                marginBottom: '14px',
+                padding: '12px 16px',
+                background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                border: '1.5px solid #86efac',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '12px',
+                boxShadow: '0 1px 3px rgba(16, 185, 129, 0.08)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  <div style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '8px',
+                    background: '#10b981',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: '900',
+                    fontSize: '18px',
+                    flexShrink: 0
+                  }}>
+                    ✂️
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: '#065f46' }}>
+                        CUTTING QUANTITY &amp; 1% AUTO-ALLOWANCE ACTIVE
+                      </span>
+                      <span style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        background: '#d1fae5',
+                        color: '#047857',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        border: '1px solid #a7f3d0'
+                      }}>
+                        Lot #{lotNo.trim()}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#047857', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <span>
+                        Cutting Pieces: <strong>{cuttingPieces.toLocaleString()} Pcs</strong>
+                      </span>
+                      <span>+</span>
+                      <span>
+                        1% Auto Material: <strong>+{onePercentAllowance.toLocaleString()} Pcs</strong> (1%)
+                      </span>
+                      <span>=</span>
+                      <span style={{
+                        fontSize: '12.5px',
+                        fontWeight: '900',
+                        color: '#065f46',
+                        background: '#ffffff',
+                        padding: '2px 8px',
+                        borderRadius: '6px',
+                        border: '1px solid #86efac'
+                      }}>
+                        Auto Issue Qty: {defaultAutoIssueQty.toLocaleString()} Pcs
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <div style={{
+                    fontSize: '11px',
+                    color: '#065f46',
+                    background: '#ffffff',
+                    padding: '6px 10px',
+                    borderRadius: '8px',
+                    border: '1px solid #bbf7d0',
+                    fontWeight: '600',
+                    lineHeight: '1.4'
+                  }}>
+                    <div>✓ <strong>&le; {defaultAutoIssueQty.toLocaleString()} Pcs</strong>: Direct Issue OK</div>
+                    <div style={{ color: '#b91c1c' }}>⚠️ <strong>&gt; {defaultAutoIssueQty.toLocaleString()} Pcs</strong>: Admin Approval Needed</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setItems(prev => prev.map(item => ({ ...item, totalQty: defaultAutoIssueQty })));
+                      setFormSuccess(`✓ Set all items to 1% cutting quantity (${defaultAutoIssueQty.toLocaleString()} Pcs)`);
+                      setTimeout(() => setFormSuccess(''), 3000);
+                    }}
+                    style={{
+                      padding: '7px 12px',
+                      background: '#047857',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '7px',
+                      fontSize: '11.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    ⚡ Set 1% ({defaultAutoIssueQty}) on All
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Table */}
             <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
@@ -4720,7 +5110,14 @@ export default function WithoutBomMaterialIssueView({
                     <th style={{ padding: '10px 12px', minWidth: '260px' }}>Store Material Item</th>
                     <th style={{ padding: '10px 12px', width: '110px', textAlign: 'right' }}>Current Stock</th>
                     <th style={{ padding: '10px 12px', width: '130px' }}>Method</th>
-                    <th style={{ padding: '10px 12px', width: '130px', textAlign: 'right' }}>Issue Quantity</th>
+                    <th style={{ padding: '10px 12px', width: '145px', textAlign: 'right' }}>
+                      <div>Issue Quantity</div>
+                      {cuttingPieces > 0 && (
+                        <div style={{ fontSize: '9px', color: '#047857', fontWeight: '800', textTransform: 'none' }}>
+                          (1% Limit: {defaultAutoIssueQty})
+                        </div>
+                      )}
+                    </th>
                     <th style={{ padding: '10px 12px', width: '80px' }}>Unit</th>
                     <th style={{ padding: '10px 12px', width: '110px', textAlign: 'right' }}>Balance</th>
                     <th style={{ padding: '10px 12px', width: '45px', textAlign: 'center' }}></th>
@@ -5068,26 +5465,72 @@ export default function WithoutBomMaterialIssueView({
                                 = {item.totalQty} {item.unit}
                               </span>
                             </div>
-                          ) : (
-                            <input
-                              type="number"
-                              step="any"
-                              min="0.01"
-                              value={item.totalQty || ''}
-                              onChange={(e) => handleUpdateItem(item.id, 'totalQty', parseFloat(e.target.value) || 0)}
-                              style={{
-                                width: '90px',
-                                padding: '5px 8px',
-                                borderRadius: '6px',
-                                border: '1.5px solid #cbd5e1',
-                                textAlign: 'right',
-                                fontSize: '13px',
-                                fontWeight: '800',
-                                color: '#0f172a',
-                                boxSizing: 'border-box'
-                              }}
-                            />
-                          )}
+                          ) : (() => {
+                            const qty = Number(item.totalQty) || 0;
+                            const isExceeded = cuttingPieces > 0 && qty > defaultAutoIssueQty;
+                            const isWithin = cuttingPieces > 0 && qty > 0 && qty <= defaultAutoIssueQty;
+
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min="0.01"
+                                  value={item.totalQty || ''}
+                                  onChange={(e) => handleUpdateItem(item.id, 'totalQty', parseFloat(e.target.value) || 0)}
+                                  style={{
+                                    width: '100px',
+                                    padding: '5px 8px',
+                                    borderRadius: '6px',
+                                    border: isExceeded ? '2px solid #ef4444' : isWithin ? '1.5px solid #10b981' : '1.5px solid #cbd5e1',
+                                    background: isExceeded ? '#fef2f2' : isWithin ? '#f0fdf4' : '#ffffff',
+                                    textAlign: 'right',
+                                    fontSize: '13px',
+                                    fontWeight: '800',
+                                    color: isExceeded ? '#b91c1c' : '#0f172a',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
+                                {isExceeded && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      color: '#dc2626',
+                                      background: '#fee2e2',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      ⚠️ &gt;1% (+{qty - defaultAutoIssueQty}) Approval Req
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(item.id, 'totalQty', defaultAutoIssueQty)}
+                                      style={{
+                                        fontSize: '9.5px',
+                                        color: '#047857',
+                                        background: '#ecfdf5',
+                                        border: '1px solid #a7f3d0',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontWeight: '800',
+                                        padding: '1px 5px'
+                                      }}
+                                      title="Reset to 1% cutting allowance"
+                                    >
+                                      Set 1% ({defaultAutoIssueQty})
+                                    </button>
+                                  </div>
+                                )}
+                                {isWithin && (
+                                  <span style={{ fontSize: '9.5px', color: '#059669', fontWeight: '700' }}>
+                                    ✓ &le; 1% Allowed
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Unit */}
@@ -7122,158 +7565,206 @@ export default function WithoutBomMaterialIssueView({
         const printVid = previewModal?.voucherId || activePrintData?.voucherId || nextVoucherId;
         if (!printIssue) return null;
 
+        const cleanLot = String(printIssue.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+        const resolvedCutting = Number(printIssue.cuttingPieces) || 
+          (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+          (activeLotCutting && String(activeLotCutting.lotNumber).trim().toLowerCase() === cleanLot ? Number(activeLotCutting.totalPieces) : 0) ||
+          (Number(printIssue.pieces) > 1 ? Number(printIssue.pieces) : 0);
+        const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
+        const totalAllowedWith1Pct = resolvedCutting + onePct;
+        const isOnePercentExtraIssued = (printIssue.items || []).some(it => {
+          const q = Number(it.totalQty);
+          return (resolvedCutting > 0 && q >= totalAllowedWith1Pct) || (resolvedCutting > 0 && q > resolvedCutting);
+        });
+
+        const renderVolumeContent = () => {
+          if (resolvedCutting > 0) {
+            return (
+              <span>
+                <strong>{resolvedCutting.toLocaleString()} Pcs</strong>
+                {isOnePercentExtraIssued ? (
+                  <span style={{ fontWeight: 'bold', marginLeft: '4px' }}>
+                    (+1% Extra: {totalAllowedWith1Pct.toLocaleString()} Pcs)
+                  </span>
+                ) : (
+                  <span style={{ marginLeft: '4px' }}>(1% Max: {totalAllowedWith1Pct.toLocaleString()} Pcs)</span>
+                )}
+              </span>
+            );
+          }
+          return <span>{printIssue.pieces > 1 ? `${printIssue.pieces} Pcs` : 'Ad-Hoc Issue'}</span>;
+        };
+
         return (
           <div className="without-bom-print-container">
             {/* Copy 1: ORIGINAL (STORE COPY) */}
             <div className="without-bom-challan-sheet">
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '8px' }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>MOHIT HOSIERY</h2>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold' }}>CENTRAL STORE &amp; PRODUCTION ACCESSORIES DEPARTMENT</div>
-                  <div style={{ fontSize: '13px', fontWeight: '900', marginTop: '4px', letterSpacing: '0.5px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '900', color: '#000000' }}>MOHIT HOSIERY</h2>
+                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000' }}>CENTRAL STORE &amp; PRODUCTION ACCESSORIES DEPARTMENT</div>
+                  <div style={{ fontSize: '12px', fontWeight: '900', marginTop: '3px', letterSpacing: '0.5px', color: '#000000' }}>
                     MATERIAL ISSUE WITHOUT BOM
                   </div>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000' }}>
                     OFFICIAL STORE CHALLAN / STORE ISSUE BILL
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>CHALLAN NO: {printVid}</div>
-                  <div style={{ fontSize: '10px' }}>DATE: {printIssue.date}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold', marginTop: '3px' }}>[ ORIGINAL - STORE COPY ]</div>
+                  <div style={{ fontSize: '14px', fontWeight: '900', color: '#000000' }}>CHALLAN NO: {printVid}</div>
+                  <div style={{ fontSize: '10px', color: '#000000', fontWeight: '600' }}>DATE: {printIssue.date}</div>
+                  <div style={{ fontSize: '10px', fontWeight: '900', marginTop: '3px', color: '#000000' }}>[ ORIGINAL - STORE COPY ]</div>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1px solid #000', padding: '8px', marginBottom: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1.5px solid #000', padding: '8px', marginBottom: '10px', color: '#000000' }}>
                 <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}{(printIssue.brandName || printIssue.brand) ? ` • BRAND: ${printIssue.brandName || printIssue.brand}` : ''}</div>
                 <div><strong>ISSUED BY:</strong> {printIssue.personName}</div>
                 <div><strong>RECEIVED BY:</strong> {printIssue.receiverName} ({printIssue.receiverDept})</div>
                 <div><strong>REQUISITION:</strong> {printIssue.style}</div>
-                <div><strong>VOLUME:</strong> {printIssue.pieces > 1 ? `${printIssue.pieces} Pcs` : 'Ad-Hoc'}</div>
+                <div><strong>CUTTING PIECES / VOLUME:</strong> {renderVolumeContent()}</div>
                 <div><strong>STATUS:</strong> {printIssue.isPreviewOnly ? 'DRAFT PREVIEW' : 'REAL STOCK DEDUCTED'}</div>
               </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px', border: '1.5px solid #000' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f0f0f0' }}>
-                    <th style={{ padding: '4px', textAlign: 'center', width: '25px', border: '1px solid #000' }}>#</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Component</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Material Description</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Item Code</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Rack Loc</th>
-                    <th style={{ padding: '4px', textAlign: 'right', border: '1px solid #000', fontWeight: 'bold' }}>Issued Qty</th>
+                  <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f0f0f0', color: '#000000' }}>
+                    <th style={{ padding: '5px', textAlign: 'center', width: '25px', border: '1px solid #000' }}>#</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Component</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Material Description</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Item Code</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Rack Loc</th>
+                    <th style={{ padding: '5px', textAlign: 'right', border: '1px solid #000', fontWeight: 'bold' }}>Issued Qty</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(printIssue.items || []).map((item, idx) => (
-                    <tr key={idx}>
-                      <td style={{ padding: '4px', textAlign: 'center', border: '1px solid #000' }}>{idx + 1}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.componentType}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.materialName}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                        {getItemCodeDisplay(item) || item.itemCode || '-'}
-                      </td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
-                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>
-                        {item.totalQty} {item.unit || 'Pcs'}
-                      </td>
-                    </tr>
-                  ))}
+                  {(printIssue.items || []).map((item, idx) => {
+                    const qty = Number(item.totalQty);
+                    const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
+                    return (
+                      <tr key={idx} style={{ color: '#000000' }}>
+                        <td style={{ padding: '5px', textAlign: 'center', border: '1px solid #000', fontWeight: 'bold' }}>{idx + 1}</td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}><strong>{item.componentType}</strong></td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}>{item.materialName}</td>
+                        <td style={{ padding: '5px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                          {getItemCodeDisplay(item) || item.itemCode || '-'}
+                        </td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
+                        <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>
+                          <div>{item.totalQty} {item.unit || 'Pcs'}</div>
+                          {isItemExtra && (
+                            <div style={{ fontSize: '8.5px', fontWeight: '900', color: '#000000', textTransform: 'uppercase' }}>
+                              [ +1% Extra Added ]
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
               {printIssue.remarks && (
-                <div style={{ fontSize: '10px', marginBottom: '12px' }}>
+                <div style={{ fontSize: '10px', marginBottom: '12px', border: '1px solid #000', borderLeft: '4px solid #000', padding: '5px 8px', color: '#000000' }}>
                   <strong>Remarks:</strong> {printIssue.remarks}
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '16px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '10px', textAlign: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '16px', paddingTop: '10px', borderTop: '1.5px solid #000', fontSize: '10px', textAlign: 'center', color: '#000000' }}>
                 <div>
                   <div style={{ height: '24px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
+                  <div style={{ borderBottom: '1.5px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
                   <strong>Issued By ({printIssue.personName})</strong>
                 </div>
                 <div>
                   <div style={{ height: '24px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
+                  <div style={{ borderBottom: '1.5px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
                   <strong>Received By ({printIssue.receiverName})</strong>
                 </div>
                 <div>
                   <div style={{ height: '24px' }}></div>
-                  <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
+                  <div style={{ borderBottom: '1.5px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
                   <strong>Supervisor Sign &amp; Stamp</strong>
                 </div>
               </div>
             </div>
 
-            <div style={{ height: '20px' }}></div>
+            <div style={{ height: '18px' }}></div>
 
             {/* Copy 2: DUPLICATE (DEPARTMENT / RECEIVER COPY) */}
             <div className="without-bom-challan-sheet">
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '10px', marginBottom: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '2px solid #000', paddingBottom: '8px', marginBottom: '8px' }}>
                 <div>
-                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>MOHIT HOSIERY</h2>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold' }}>CENTRAL STORE &amp; PRODUCTION ACCESSORIES DEPARTMENT</div>
-                  <div style={{ fontSize: '13px', fontWeight: '900', marginTop: '4px', letterSpacing: '0.5px' }}>
+                  <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '900', color: '#000000' }}>MOHIT HOSIERY</h2>
+                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000' }}>CENTRAL STORE &amp; PRODUCTION ACCESSORIES DEPARTMENT</div>
+                  <div style={{ fontSize: '12px', fontWeight: '900', marginTop: '3px', letterSpacing: '0.5px', color: '#000000' }}>
                     MATERIAL ISSUE WITHOUT BOM
                   </div>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#475569' }}>
+                  <div style={{ fontSize: '10px', fontWeight: 'bold', color: '#000000' }}>
                     DUPLICATE DEPARTMENT COPY
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold' }}>CHALLAN NO: {printVid}</div>
-                  <div style={{ fontSize: '10px' }}>DATE: {printIssue.date}</div>
-                  <div style={{ fontSize: '10px', fontWeight: 'bold', marginTop: '3px' }}>[ DUPLICATE - RECEIVER COPY ]</div>
+                  <div style={{ fontSize: '14px', fontWeight: '900', color: '#000000' }}>CHALLAN NO: {printVid}</div>
+                  <div style={{ fontSize: '10px', color: '#000000', fontWeight: '600' }}>DATE: {printIssue.date}</div>
+                  <div style={{ fontSize: '10px', fontWeight: '900', marginTop: '3px', color: '#000000' }}>[ DUPLICATE - RECEIVER COPY ]</div>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1px solid #000', padding: '8px', marginBottom: '10px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', fontSize: '11px', border: '1.5px solid #000', padding: '8px', marginBottom: '10px', color: '#000000' }}>
                 <div><strong>LOT NO:</strong> LOT #{printIssue.lotId}{(printIssue.brandName || printIssue.brand) ? ` • BRAND: ${printIssue.brandName || printIssue.brand}` : ''}</div>
                 <div><strong>ISSUED BY:</strong> {printIssue.personName}</div>
                 <div><strong>RECEIVED BY:</strong> {printIssue.receiverName} ({printIssue.receiverDept})</div>
                 <div><strong>REQUISITION:</strong> {printIssue.style}</div>
-                <div><strong>VOLUME:</strong> {printIssue.pieces > 1 ? `${printIssue.pieces} Pcs` : 'Ad-Hoc'}</div>
+                <div><strong>CUTTING PIECES / VOLUME:</strong> {renderVolumeContent()}</div>
                 <div><strong>STATUS:</strong> {printIssue.isPreviewOnly ? 'DRAFT PREVIEW' : 'REAL STOCK DEDUCTED'}</div>
               </div>
 
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '12px', border: '1.5px solid #000' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f0f0f0' }}>
-                    <th style={{ padding: '4px', textAlign: 'center', width: '25px', border: '1px solid #000' }}>#</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Component</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Material Description</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Item Code</th>
-                    <th style={{ padding: '4px', textAlign: 'left', border: '1px solid #000' }}>Rack Loc</th>
-                    <th style={{ padding: '4px', textAlign: 'right', border: '1px solid #000', fontWeight: 'bold' }}>Issued Qty</th>
+                  <tr style={{ borderBottom: '1.5px solid #000', backgroundColor: '#f0f0f0', color: '#000000' }}>
+                    <th style={{ padding: '5px', textAlign: 'center', width: '25px', border: '1px solid #000' }}>#</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Component</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Material Description</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Item Code</th>
+                    <th style={{ padding: '5px', textAlign: 'left', border: '1px solid #000' }}>Rack Loc</th>
+                    <th style={{ padding: '5px', textAlign: 'right', border: '1px solid #000', fontWeight: 'bold' }}>Issued Qty</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(printIssue.items || []).map((item, idx) => (
-                    <tr key={idx}>
-                      <td style={{ padding: '4px', textAlign: 'center', border: '1px solid #000' }}>{idx + 1}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.componentType}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.materialName}</td>
-                      <td style={{ padding: '4px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                        {getItemCodeDisplay(item) || item.itemCode || '-'}
-                      </td>
-                      <td style={{ padding: '4px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
-                      <td style={{ padding: '4px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>
-                        {item.totalQty} {item.unit || 'Pcs'}
-                      </td>
-                    </tr>
-                  ))}
+                  {(printIssue.items || []).map((item, idx) => {
+                    const qty = Number(item.totalQty);
+                    const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
+                    return (
+                      <tr key={idx} style={{ color: '#000000' }}>
+                        <td style={{ padding: '5px', textAlign: 'center', border: '1px solid #000', fontWeight: 'bold' }}>{idx + 1}</td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}><strong>{item.componentType}</strong></td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}>{item.materialName}</td>
+                        <td style={{ padding: '5px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
+                          {getItemCodeDisplay(item) || item.itemCode || '-'}
+                        </td>
+                        <td style={{ padding: '5px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
+                        <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>
+                          <div>{item.totalQty} {item.unit || 'Pcs'}</div>
+                          {isItemExtra && (
+                            <div style={{ fontSize: '8.5px', fontWeight: '900', color: '#000000', textTransform: 'uppercase' }}>
+                              [ +1% Extra Added ]
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
               {printIssue.remarks && (
-                <div style={{ fontSize: '10px', marginBottom: '12px' }}>
+                <div style={{ fontSize: '10px', marginBottom: '12px', border: '1px solid #000', borderLeft: '4px solid #000', padding: '5px 8px', color: '#000000' }}>
                   <strong>Remarks:</strong> {printIssue.remarks}
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '16px', paddingTop: '10px', borderTop: '1px solid #000', fontSize: '10px', textAlign: 'center' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginTop: '16px', paddingTop: '10px', borderTop: '1.5px solid #000', fontSize: '10px', textAlign: 'center', color: '#000000' }}>
                 <div>
                   <div style={{ height: '24px' }}></div>
                   <div style={{ borderBottom: '1px solid #000', width: '80%', margin: '0 auto 4px auto' }}></div>
@@ -7294,6 +7785,283 @@ export default function WithoutBomMaterialIssueView({
           </div>
         );
       })()}
+
+      {/* ── 1% CUTTING THRESHOLD EXCEEDED - APPROVAL MODAL ── */}
+      {approvalModalData && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.75)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 999999,
+          padding: '20px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '14px',
+            width: '100%',
+            maxWidth: '620px',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            border: '2px solid #f87171',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              background: 'linear-gradient(135deg, #fee2e2 0%, #fef2f2 100%)',
+              padding: '16px 20px',
+              borderBottom: '1.5px solid #fca5a5',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '24px' }}>⚠️</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '900', color: '#991b1b' }}>
+                    Approval Required: Issue Exceeds 1% Cutting Allowance
+                  </h3>
+                  <div style={{ fontSize: '12px', color: '#b91c1c', marginTop: '2px' }}>
+                    Lot #{approvalModalData.lotNo} • Cutting Pieces: {approvalModalData.cuttingPieces.toLocaleString()} Pcs
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setApprovalModalData(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  fontSize: '20px',
+                  color: '#991b1b',
+                  cursor: 'pointer',
+                  fontWeight: '700'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '70vh', overflowY: 'auto' }}>
+              {/* Allowance Summary Box */}
+              <div style={{
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '8px',
+                padding: '12px 14px',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '10px',
+                textAlign: 'center'
+              }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>CUTTING PIECES</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: '#0f172a', marginTop: '2px' }}>
+                    {approvalModalData.cuttingPieces.toLocaleString()}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#047857', fontWeight: '700' }}>1% ALLOWED EXTRA</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: '#059669', marginTop: '2px' }}>
+                    +{approvalModalData.onePercentAllowance.toLocaleString()} Pcs
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: '#c2410c', fontWeight: '700' }}>MAX PERMITTED (1%)</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: '#ea580c', marginTop: '2px' }}>
+                    {approvalModalData.defaultAutoIssueQty.toLocaleString()} Pcs
+                  </div>
+                </div>
+              </div>
+
+              {/* Notice */}
+              <div style={{
+                background: '#fff1f2',
+                border: '1px solid #fecdd3',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                fontSize: '12px',
+                color: '#9f1239',
+                lineHeight: '1.5'
+              }}>
+                <strong>Store Issue Policy:</strong> Requisitions up to <strong>1% ({approvalModalData.defaultAutoIssueQty.toLocaleString()} Pcs)</strong> are issued automatically. The following item(s) exceed the 1% threshold and require official Admin approval or adjustment back to the 1% limit.
+              </div>
+
+              {/* Exceeded Items Table */}
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: '800', color: '#334155', marginBottom: '6px' }}>
+                  ITEMS EXCEEDING 1% THRESHOLD:
+                </div>
+                <div style={{ border: '1px solid #cbd5e1', borderRadius: '8px', overflow: 'hidden' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                    <thead>
+                      <tr style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', color: '#475569', fontWeight: '800', textTransform: 'uppercase', fontSize: '10.5px' }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'left' }}>Item / Component</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Requested Qty</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>1% Allowed Limit</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'right' }}>Excess (+%)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {approvalModalData.exceededItems.map((exItem, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                          <td style={{ padding: '8px 10px' }}>
+                            <div style={{ fontWeight: '800', color: '#0f172a' }}>{exItem.materialName || exItem.componentType}</div>
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>{exItem.componentType} {exItem.color ? `• ${exItem.color}` : ''}</div>
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '900', color: '#dc2626' }}>
+                            {exItem.qty} {exItem.unit}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '800', color: '#059669' }}>
+                            {approvalModalData.defaultAutoIssueQty} {exItem.unit}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                            <span style={{
+                              fontWeight: '900',
+                              color: '#b91c1c',
+                              background: '#fee2e2',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '11px'
+                            }}>
+                              +{exItem.excess} ({exItem.excessPct}%)
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Justification / Note for Admin */}
+              <div>
+                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#475569', marginBottom: '4px' }}>
+                  REASON / JUSTIFICATION FOR ADMIN APPROVAL:
+                </label>
+                <textarea
+                  rows={2}
+                  value={approvalReason}
+                  onChange={(e) => setApprovalReason(e.target.value)}
+                  placeholder="Enter reason for requesting more than 1% cutting extra..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '12px',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '14px 20px',
+              borderTop: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px'
+            }}>
+              <button
+                type="button"
+                onClick={() => setApprovalModalData(null)}
+                style={{
+                  padding: '9px 16px',
+                  borderRadius: '7px',
+                  border: '1.5px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕ Cancel / Edit Quantities
+              </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleAdjustAllTo1Percent}
+                  style={{
+                    padding: '9px 16px',
+                    borderRadius: '7px',
+                    border: '1.5px solid #86efac',
+                    background: '#f0fdf4',
+                    color: '#065f46',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  ⚡ Auto-Adjust to 1% ({approvalModalData.defaultAutoIssueQty}) &amp; Issue
+                </button>
+
+                {(currentUser?.role === 'Admin' || currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || currentUser?.role === 'owner') && (
+                  <button
+                    type="button"
+                    onClick={handleAdminOverrideIssue}
+                    style={{
+                      padding: '9px 16px',
+                      borderRadius: '7px',
+                      border: 'none',
+                      background: '#7c3aed',
+                      color: '#ffffff',
+                      fontSize: '12.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}
+                  >
+                    👑 Admin Direct Override
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleConfirmSubmitApproval}
+                  disabled={approvalSubmitting}
+                  style={{
+                    padding: '9px 18px',
+                    borderRadius: '7px',
+                    border: 'none',
+                    background: '#dc2626',
+                    color: '#ffffff',
+                    fontSize: '12.5px',
+                    fontWeight: '800',
+                    cursor: approvalSubmitting ? 'not-allowed' : 'pointer',
+                    opacity: approvalSubmitting ? 0.7 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    boxShadow: '0 2px 6px rgba(220, 38, 38, 0.3)'
+                  }}
+                >
+                  {approvalSubmitting ? 'Submitting...' : '📤 Submit for Admin Approval'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── EMBEDDED PRINT STYLESHEET ── */}
       <style>{`

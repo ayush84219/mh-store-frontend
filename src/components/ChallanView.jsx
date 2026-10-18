@@ -163,204 +163,323 @@ export default function ChallanView({
     }
   };
 
-  // ── Generate Formal PDF Challan ──
+  // ── Generate Formal PDF Challan (Original + Duplicate 2-in-1 on Single A4 Sheet) ──
   const generateChallanPDF = (challanData) => {
     const doc = new jsPDF('p', 'pt', 'a4');
-    const pw = doc.internal.pageSize.getWidth();
-    const ph = doc.internal.pageSize.getHeight();
-    const margin = 36;
-    const contentWidth = pw - margin * 2;
-    let y = margin;
+    const pw = doc.internal.pageSize.getWidth(); // 595.28
+    const ph = doc.internal.pageSize.getHeight(); // 841.89
 
-    // Header Border Box
-    doc.setDrawColor(30, 41, 59);
-    doc.setLineWidth(1.5);
-    doc.rect(margin, y, contentWidth, 70);
+    const margin = 26;
+    const contentWidth = pw - margin * 2; // 543.28
 
-    // Company Header
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(15, 23, 42);
-    doc.text('G_PDMS APPARELS - COMPONENT ISSUE CHALLAN', margin + 14, y + 26);
+    // Reusable function to render one complete voucher copy
+    const renderVoucherCopy = (startY, copyTitle, copyBadgeText) => {
+      let y = startY;
+      const voucherBoxY = y;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(71, 85, 105);
-    doc.text('Production Floor Material Movement & Delivery Handover Voucher', margin + 14, y + 42);
-    doc.text(`Issued On: ${challanData.date || challanDate} at ${challanData.time || challanTime}`, margin + 14, y + 56);
+      // ── Header Box ──
+      const headerH = 68;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1.2);
+      doc.setFillColor(255, 255, 255);
+      doc.rect(margin, y, contentWidth, headerH, 'FD');
 
-    // Challan Badge
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(15, 23, 42);
-    doc.text(challanData.challanNo || currentChallanNo, pw - margin - 14, y + 26, { align: 'right' });
-    doc.setFontSize(9);
-    doc.setTextColor(5, 150, 105);
-    doc.text('STATUS: ISSUED & DELIVERED', pw - margin - 14, y + 42, { align: 'right' });
+      // Right Side: Dedicated Challan Badge Box
+      const badgeW = 152;
+      const badgeH = 50;
+      const badgeX = pw - margin - badgeW - 10;
+      const badgeY = y + 9;
 
-    y += 84;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1);
+      doc.rect(badgeX, badgeY, badgeW, badgeH, 'FD');
 
-    // ── 1. LOT & GARMENT DETAILS SECTION ──
-    doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y, contentWidth, 20, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(30, 41, 59);
-    doc.text('1. PRODUCTION LOT SPECIFICATIONS', margin + 8, y + 14);
-    y += 20;
+      // Inside Challan Badge Box
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('CHALLAN NUMBER', badgeX + badgeW / 2, badgeY + 13, { align: 'center' });
 
-    doc.setDrawColor(203, 213, 225);
-    doc.setLineWidth(0.8);
-    doc.rect(margin, y, contentWidth, 42);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.challanNo || currentChallanNo, badgeX + badgeW / 2, badgeY + 26, { align: 'center' });
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text('LOT NUMBER:', margin + 12, y + 16);
-    doc.text('STYLE / GARMENT:', margin + 180, y + 16);
-    doc.text('COLOR / SHADE:', margin + 380, y + 16);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`[ ${copyBadgeText} ]`, badgeX + badgeW / 2, badgeY + 37, { align: 'center' });
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text(challanData.lotNo ? `#${challanData.lotNo}` : 'N/A (General Issue)', margin + 12, y + 32);
-    doc.text(challanData.styleName || 'Production Floor Item', margin + 180, y + 32);
-    doc.text(challanData.colorShade || 'Standard', margin + 380, y + 32);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('STATUS: ISSUED & DELIVERED', badgeX + badgeW / 2, badgeY + 46, { align: 'center' });
 
-    y += 56;
+      // Left Side: Company & Document Title
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(0, 0, 0);
+      doc.text('G_PDMS APPARELS', margin + 12, y + 21);
 
-    // ── 2. COMPONENT ISSUE PARTICULARS TABLE ──
-    doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y, contentWidth, 20, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(30, 41, 59);
-    doc.text('2. COMPONENT ISSUE & MATERIAL QUANTITY', margin + 8, y + 14);
-    y += 20;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`COMPONENT ISSUE CHALLAN  •  ${copyTitle}`, margin + 12, y + 36);
 
-    // Table Header
-    doc.setFillColor(248, 250, 252);
-    doc.rect(margin, y, contentWidth, 22, 'F');
-    doc.setDrawColor(203, 213, 225);
-    doc.rect(margin, y, contentWidth, 22);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Production Floor Material Movement & Delivery Handover Voucher', margin + 12, y + 49);
+      doc.text(`Issued On: ${challanData.date || challanDate} at ${challanData.time || challanTime}`, margin + 12, y + 60);
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(71, 85, 105);
-    doc.text('S.NO', margin + 10, y + 15);
-    doc.text('COMPONENT / MATERIAL NAME', margin + 50, y + 15);
-    doc.text('TYPE / CATEGORY', margin + 260, y + 15);
-    doc.text('UNIT', margin + 370, y + 15);
-    doc.text('ISSUE QUANTITY / PCS', pw - margin - 15, y + 15, { align: 'right' });
-    y += 22;
+      y += headerH + 8;
 
-    // Table Row
-    const rowH = 34;
-    doc.rect(margin, y, contentWidth, rowH);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(15, 23, 42);
-    doc.text('1', margin + 14, y + 21);
-    doc.text(challanData.componentName || 'Accessory Item', margin + 50, y + 21);
+      // ── 1. LOT & GARMENT DETAILS SECTION ──
+      doc.setFillColor(245, 245, 245);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, 18, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      doc.text('1. PRODUCTION LOT SPECIFICATIONS', margin + 8, y + 12);
+      y += 18;
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9.5);
-    doc.setTextColor(51, 65, 85);
-    doc.text(challanData.componentType || 'Trims & Accessories', margin + 260, y + 21);
-    doc.text(challanData.unit || 'Pcs', margin + 370, y + 21);
+      const specH = 38;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, specH, 'FD');
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`${challanData.issueQty || 0} ${challanData.unit || 'Pcs'}`, pw - margin - 15, y + 21, { align: 'right' });
-    y += rowH + 10;
+      const c1 = margin + 10;
+      const c2 = margin + 130;
+      const c3 = margin + 275;
+      const c4 = margin + 410;
 
-    // Remarks Box
-    if (challanData.remarks) {
-      doc.setFillColor(248, 250, 252);
-      doc.rect(margin, y, contentWidth, 26, 'F');
-      doc.setDrawColor(226, 232, 240);
-      doc.rect(margin, y, contentWidth, 26);
+      // Vertical column divider lines
+      doc.line(c2 - 8, y, c2 - 8, y + specH);
+      doc.line(c3 - 8, y, c3 - 8, y + specH);
+      doc.line(c4 - 8, y, c4 - 8, y + specH);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('LOT NUMBER:', c1, y + 13);
+      doc.text('STYLE / GARMENT:', c2, y + 13);
+      doc.text('BUYER / BRAND:', c3, y + 13);
+      doc.text('COLOR / SHADE:', c4, y + 13);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.lotNo ? `#${challanData.lotNo}` : 'N/A (General Issue)', c1, y + 27);
+      doc.text(challanData.styleName || 'Production Floor Item', c2, y + 27);
+      doc.text(challanData.brand || 'Mohit Hosiery', c3, y + 27);
+      doc.text(challanData.colorShade || 'Standard', c4, y + 27);
+
+      y += specH + 8;
+
+      // ── 2. COMPONENT ISSUE PARTICULARS TABLE ──
+      doc.setFillColor(245, 245, 245);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, 18, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      doc.text('2. COMPONENT ISSUE & MATERIAL QUANTITY', margin + 8, y + 12);
+      y += 18;
+
+      // Table Header
+      doc.setFillColor(240, 240, 240);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, 20, 'FD');
+
+      const tCol1 = margin + 40;
+      const tCol2 = margin + 250;
+      const tCol3 = margin + 365;
+
+      // Vertical divider lines in Header
+      doc.line(tCol1, y, tCol1, y + 20);
+      doc.line(tCol2, y, tCol2, y + 20);
+      doc.line(tCol3, y, tCol3, y + 20);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(0, 0, 0);
+      doc.text('S.NO', margin + 10, y + 13);
+      doc.text('COMPONENT / MATERIAL NAME', tCol1 + 10, y + 13);
+      doc.text('TYPE / CATEGORY', tCol2 + 10, y + 13);
+      doc.text('UNIT', tCol3 + 10, y + 13);
+      doc.text('ISSUE QUANTITY / PCS', pw - margin - 12, y + 13, { align: 'right' });
+      y += 20;
+
+      // Table Row
+      const rowH = 28;
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, rowH, 'FD');
+
+      // Vertical divider lines in Row
+      doc.line(tCol1, y, tCol1, y + rowH);
+      doc.line(tCol2, y, tCol2, y + rowH);
+      doc.line(tCol3, y, tCol3, y + rowH);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('1', margin + 16, y + 18);
+      doc.text(challanData.componentName || 'Accessory Item', tCol1 + 10, y + 18);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.componentType || 'Trims & Accessories', tCol2 + 10, y + 18);
+      doc.text(challanData.unit || 'Pcs', tCol3 + 10, y + 18);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`${(challanData.issueQty || 0).toLocaleString()} ${challanData.unit || 'Pcs'}`, pw - margin - 12, y + 18, { align: 'right' });
+      y += rowH + 8;
+
+      // Remarks Box (if provided)
+      if (challanData.remarks) {
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(0, 0, 0);
+        doc.setLineWidth(0.8);
+        doc.rect(margin, y, contentWidth, 22, 'FD');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(0, 0, 0);
+        doc.text('REMARKS / NOTE:', margin + 8, y + 14);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(0, 0, 0);
+        doc.text(challanData.remarks, margin + 95, y + 14);
+        y += 26;
+      }
+
+      // ── 3. FORMAL 3-SIGNATORY HANDOVER BOXES ──
+      doc.setFillColor(245, 245, 245);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, contentWidth, 16, 'FD');
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(8.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text('REMARKS / NOTE:', margin + 8, y + 17);
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(30, 41, 59);
-      doc.text(challanData.remarks, margin + 95, y + 17);
-      y += 34;
-    }
+      doc.setTextColor(0, 0, 0);
+      doc.text('3. AUTHORIZATION & HANDOVER ACKNOWLEDGEMENT', margin + 8, y + 11);
+      y += 16;
 
-    // Embed Photo thumbnail if provided
-    if (challanData.issuePhoto && typeof challanData.issuePhoto === 'string' && challanData.issuePhoto.startsWith('data:image')) {
-      try {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(9);
-        doc.setTextColor(71, 85, 105);
-        doc.text('ATTACHED MATERIAL PHOTO:', margin + 8, y + 12);
-        doc.addImage(challanData.issuePhoto, 'JPEG', margin + 8, y + 18, 90, 70);
-        y += 98;
-      } catch (err) {
-        console.warn('Could not embed photo in PDF:', err);
-      }
-    }
+      const colW = (contentWidth) / 3;
+      const signH = 64;
 
-    // ── 3. FORMAL 3-SIGNATORY HANDOVER BOXES ──
-    y = Math.max(y + 20, ph - margin - 110);
+      // Box 1: Issued By
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin, y, colW, signH, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('ISSUED BY (STORE):', margin + 8, y + 13);
+      doc.setFontSize(9.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.issuedBy || 'Store Incharge', margin + 8, y + 27);
 
-    doc.setFillColor(241, 245, 249);
-    doc.rect(margin, y, contentWidth, 18, 'F');
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineDashPattern([2, 2], 0);
+      doc.line(margin + 8, y + signH - 16, margin + colW - 8, y + signH - 16);
+      doc.setLineDashPattern([], 0);
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Authorized Signature & Date', margin + 8, y + signH - 6);
+
+      // Box 2: Received By
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin + colW, y, colW, signH, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('RECEIVED BY (FLOOR):', margin + colW + 8, y + 13);
+      doc.setFontSize(9.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.receivedBy || 'Floor Operator / Tailor', margin + colW + 8, y + 27);
+
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineDashPattern([2, 2], 0);
+      doc.line(margin + colW + 8, y + signH - 16, margin + colW * 2 - 8, y + signH - 16);
+      doc.setLineDashPattern([], 0);
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Receiver Signature & Date', margin + colW + 8, y + signH - 6);
+
+      // Box 3: Supervisor Name
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.8);
+      doc.rect(margin + colW * 2, y, colW, signH, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text('SUPERVISOR APPROVAL:', margin + colW * 2 + 8, y + 13);
+      doc.setFontSize(9.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(challanData.supervisorName || 'Floor Supervisor', margin + colW * 2 + 8, y + 27);
+
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineDashPattern([2, 2], 0);
+      doc.line(margin + colW * 2 + 8, y + signH - 16, margin + contentWidth - 8, y + signH - 16);
+      doc.setLineDashPattern([], 0);
+
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(7);
+      doc.setTextColor(0, 0, 0);
+      doc.text('Supervisor Signature & Seal', margin + colW * 2 + 8, y + signH - 6);
+
+      y += signH;
+
+      // ── Outer Framing Double Border for this Voucher Copy ──
+      const totalCopyH = y - voucherBoxY;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(1.4);
+      doc.rect(margin - 6, voucherBoxY - 6, contentWidth + 12, totalCopyH + 12);
+      doc.setLineWidth(0.5);
+      doc.rect(margin - 4, voucherBoxY - 4, contentWidth + 8, totalCopyH + 8);
+    };
+
+    // ── Render Top Copy: ORIGINAL (FLOOR COPY) ──
+    renderVoucherCopy(24, 'ORIGINAL (FLOOR COPY)', 'ORIGINAL COPY');
+
+    // ── Perforated Scissor Cut Line in the Exact Middle ──
+    const midY = 420;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    doc.setLineDashPattern([4, 3], 0);
+    doc.line(16, midY, pw - 16, midY);
+    doc.setLineDashPattern([], 0);
+
+    // Centered Cut badge
+    const badgeText = '✂   CUT / TEAR ALONG PERFORATION FOR DUPLICATE COPY   ✂';
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.6);
+    doc.rect(pw / 2 - 130, midY - 6, 260, 12, 'FD');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(30, 41, 59);
-    doc.text('3. AUTHORIZATION & HANDOVER ACKNOWLEDGEMENT', margin + 8, y + 13);
-    y += 18;
+    doc.setFontSize(7);
+    doc.setTextColor(0, 0, 0);
+    doc.text(badgeText, pw / 2, midY + 3, { align: 'center' });
 
-    const colW = (contentWidth) / 3;
-    const signH = 75;
-
-    // Box 1: Issued By
-    doc.setDrawColor(203, 213, 225);
-    doc.rect(margin, y, colW, signH);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text('ISSUED BY (STORE):', margin + 8, y + 14);
-    doc.setFontSize(10.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text(challanData.issuedBy || 'Store Incharge', margin + 8, y + 30);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Authorized Signature & Date', margin + 8, y + signH - 8);
-
-    // Box 2: Received By
-    doc.rect(margin + colW, y, colW, signH);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text('RECEIVED BY (FLOOR):', margin + colW + 8, y + 14);
-    doc.setFontSize(10.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text(challanData.receivedBy || 'Floor Operator / Tailor', margin + colW + 8, y + 30);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Receiver Signature & Date', margin + colW + 8, y + signH - 8);
-
-    // Box 3: Supervisor Name
-    doc.rect(margin + colW * 2, y, colW, signH);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text('SUPERVISOR APPROVAL:', margin + colW * 2 + 8, y + 14);
-    doc.setFontSize(10.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text(challanData.supervisorName || 'Floor Supervisor', margin + colW * 2 + 8, y + 30);
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(8);
-    doc.setTextColor(148, 163, 184);
-    doc.text('Supervisor Signature & Seal', margin + colW * 2 + 8, y + signH - 8);
+    // ── Render Bottom Copy: DUPLICATE (STORE COPY) ──
+    renderVoucherCopy(444, 'DUPLICATE (STORE COPY)', 'DUPLICATE COPY');
 
     return doc;
   };

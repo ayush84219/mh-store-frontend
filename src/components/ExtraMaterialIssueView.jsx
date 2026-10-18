@@ -1,6 +1,6 @@
 import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Layers, Search, CheckCircle2, AlertTriangle, Printer,
@@ -1053,6 +1053,78 @@ export default function ExtraMaterialIssueView({
   };
   const [showAllBom, setShowAllBom] = useState(false);
 
+  // ── Cutting Details & In-Memory Cache ─────────────────────────────────────
+  const CUTTING_CACHE_MAX_ENTRIES = 100;
+  const CUTTING_CACHE_RELOAD_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+
+  const [cuttingHeaders, setCuttingHeaders] = useState([]);
+  const [lastCuttingCacheReload, setLastCuttingCacheReload] = useState(() => new Date());
+  const [isReloadingCuttingCache, setIsReloadingCuttingCache] = useState(false);
+  const [cuttingCacheRefreshCount, setCuttingCacheRefreshCount] = useState(0);
+  const [cacheReloadNotice, setCacheReloadNotice] = useState('');
+
+  // In-Memory Matrix Cache to avoid repeat API hits
+  const matrixCacheRef = useRef({});
+
+  const reloadCuttingCache = useCallback(async (manual = false) => {
+    setIsReloadingCuttingCache(true);
+    matrixCacheRef.current = {};
+
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCuttingHeaders(data);
+        }
+      }
+      setLastCuttingCacheReload(new Date());
+      setCuttingCacheRefreshCount(c => c + 1);
+      if (manual) {
+        setCacheReloadNotice('✓ Cache emptied & reloaded');
+        setTimeout(() => setCacheReloadNotice(''), 3500);
+      }
+    } catch (err) {
+      console.warn('Failed to reload cutting headers cache:', err);
+    } finally {
+      setIsReloadingCuttingCache(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reloadCuttingCache(false);
+    const intervalId = setInterval(() => {
+      reloadCuttingCache(false);
+    }, CUTTING_CACHE_RELOAD_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, [reloadCuttingCache]);
+
+  const [activeLotCutting, setActiveLotCutting] = useState(null);
+  const [loadingActiveLotCutting, setLoadingActiveLotCutting] = useState(false);
+  const [showActiveCuttingMatrix, setShowActiveCuttingMatrix] = useState(false);
+
+  // Dynamically extract all distinct size columns present in cutting matrix rows
+  const activeSizes = useMemo(() => {
+    if (!activeLotCutting || !activeLotCutting.rows || activeLotCutting.rows.length === 0) return [];
+    const sizeSet = new Set();
+    activeLotCutting.rows.forEach(r => {
+      if (r.sizes && typeof r.sizes === 'object') {
+        Object.keys(r.sizes).forEach(sz => {
+          if (Number(r.sizes[sz]) > 0) sizeSet.add(sz);
+        });
+      }
+    });
+    const standardOrder = ['XS', 'S', 'M', 'L', 'XL', '2XL', 'XXL', '3XL', 'XXXL', '4XL', '5XL', 'FREE', 'FS'];
+    return Array.from(sizeSet).sort((a, b) => {
+      const idxA = standardOrder.indexOf(a.toUpperCase());
+      const idxB = standardOrder.indexOf(b.toUpperCase());
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.localeCompare(b);
+    });
+  }, [activeLotCutting]);
+
   // ── Without BOM Mode State & Handlers ─────────────────────────────────────
   const [issueMethod, setIssueMethod] = useState('with_bom'); // 'with_bom' | 'without_bom'
   const [woLotId, setWoLotId] = useState('');
@@ -1600,39 +1672,148 @@ export default function ExtraMaterialIssueView({
     return summary;
   }, [lotPreviousIssues]);
 
-  // Fetch pieces from cutting records or design default
+  // Unified Cutting Records & Live Matrix details according to entered/selected Lot
+  const activeLotForCutting = issueMethod === 'without_bom' ? String(woLotId || '') : String(selectedDesignId || '');
+
   useEffect(() => {
-    if (!selectedDesignId) {
-      setPieces(100);
-      setBomMappings([]);
+    const cleanLot = String(activeLotForCutting || '').trim();
+    if (!cleanLot) {
+      setActiveLotCutting(null);
+      setLoadingActiveLotCutting(false);
+      setIsLoadingPieces(false);
+      if (issueMethod === 'with_bom') {
+        setPieces(100);
+      }
       return;
     }
 
-    const fetchPieces = async () => {
-      setIsLoadingPieces(true);
+    const cleanLower = cleanLot.toLowerCase();
+
+    // 1. INSTANT (0ms) In-Memory Lookup from cuttingHeaders & designs
+    const headerMatch = (cuttingHeaders || []).find(ch => 
+      String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
+    );
+    const designMatch = (designs || []).find(d => 
+      String(d.id || '').trim().toLowerCase() === cleanLower ||
+      String(d.lotNumber || '').trim().toLowerCase() === cleanLower
+    );
+
+    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || 0;
+    const hasMemoryData = Boolean(headerMatch || designMatch);
+
+    // Set immediate cutting details synchronously without waiting for network
+    setActiveLotCutting({
+      lotNumber: cleanLot,
+      totalPieces: memoryTotal,
+      style: headerMatch?.Style || designMatch?.category || '',
+      fabric: headerMatch?.Fabric || '',
+      brand: headerMatch?.Brand || designMatch?.brand || '',
+      partyName: headerMatch?.Party_Name || '',
+      garmentType: headerMatch?.Garment_Type || '',
+      dateOfIssue: headerMatch?.Date_of_Issue || headerMatch?.JobOrder_Date || '',
+      shades: headerMatch?.Shades || '',
+      sizes: headerMatch?.Sizes || '',
+      rows: matrixCacheRef.current[cleanLower]?.rows || [],
+      hasDetails: hasMemoryData
+    });
+
+    if (issueMethod === 'without_bom') {
+      if (headerMatch?.Brand || designMatch?.brand) {
+        setWoBrand(headerMatch?.Brand || designMatch?.brand);
+      }
+      if (headerMatch?.Style || designMatch?.category) {
+        setWoLotStyle(headerMatch?.Style || designMatch?.category);
+      }
+      if (memoryTotal > 0 && (!woPieces || woPieces === 100 || woPieces === 1)) {
+        setWoPieces(memoryTotal);
+      }
+    } else {
+      if (memoryTotal > 0) {
+        setPieces(memoryTotal);
+      }
+    }
+
+    // If already cached in matrixCache, resolve immediately
+    if (matrixCacheRef.current[cleanLower]) {
+      const cached = matrixCacheRef.current[cleanLower];
+      const matrixRows = cached?.rows || [];
+      const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+      const resolvedTotal = matrixTotal > 0 ? matrixTotal : (memoryTotal > 0 ? memoryTotal : (Number(cached?.cuttingQty) || Number(cached?.header?.Cutting_Qty) || 0));
+      if (issueMethod === 'with_bom' && resolvedTotal > 0) {
+        setPieces(resolvedTotal);
+      }
+      setLoadingActiveLotCutting(false);
+      setIsLoadingPieces(false);
+      return;
+    }
+
+    // 2. Debounced background fetch for detailed Color-Size Matrix (300ms debounce)
+    let isCancelled = false;
+    setIsLoadingPieces(true);
+    setLoadingActiveLotCutting(true);
+
+    const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(selectedDesignId)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.header && Number(data.header.Total_Cutting_Pcs) > 0) {
-            setPieces(Number(data.header.Total_Cutting_Pcs));
-          } else if (data && data.totalPcs > 0) {
-            setPieces(Number(data.totalPcs));
-          } else {
-            setPieces(100);
-          }
+        const res = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(cleanLot)}`);
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+        if (Object.keys(matrixCacheRef.current).length >= CUTTING_CACHE_MAX_ENTRIES) {
+          matrixCacheRef.current = {};
+        }
+
+        matrixCacheRef.current[cleanLower] = data;
+        const matrixRows = data?.rows || [];
+        const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+        const resolvedTotal = matrixTotal > 0 
+          ? matrixTotal 
+          : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
+
+        const styleVal = data?.style || data?.header?.Style || '';
+        const fabricVal = data?.fabric || data?.header?.Fabric || '';
+        const brandVal = data?.brand || data?.header?.Brand || '';
+        const partyVal = data?.partyName || data?.header?.Party_Name || '';
+        const shadesVal = data?.shades || data?.header?.Shades || '';
+        const sizesVal = data?.sizes || data?.header?.Sizes || '';
+        const dateVal = data?.dateOfIssue || data?.header?.Date_of_Issue || data?.jobOrderDate || '';
+
+        setActiveLotCutting(prev => ({
+          ...prev,
+          totalPieces: resolvedTotal,
+          style: prev?.style || styleVal,
+          fabric: prev?.fabric || fabricVal,
+          brand: prev?.brand || brandVal,
+          partyName: prev?.partyName || partyVal,
+          shades: prev?.shades || shadesVal,
+          sizes: prev?.sizes || sizesVal,
+          dateOfIssue: prev?.dateOfIssue || dateVal,
+          rows: matrixRows,
+          hasDetails: Boolean(hasMemoryData || matrixRows.length > 0 || resolvedTotal > 0 || styleVal || fabricVal)
+        }));
+
+        if (issueMethod === 'without_bom') {
+          if (brandVal && (!woBrand || woBrand === 'Mohit Hosiery')) setWoBrand(brandVal);
+          if (styleVal && (!woLotStyle || woLotStyle === 'Floor Issue')) setWoLotStyle(styleVal);
+          if (resolvedTotal > 0 && (!woPieces || woPieces === 100 || woPieces === 1)) setWoPieces(resolvedTotal);
         } else {
-          setPieces(100);
+          if (resolvedTotal > 0) setPieces(resolvedTotal);
         }
       } catch (err) {
-        setPieces(100);
+        if (issueMethod === 'with_bom' && (!pieces || pieces <= 0)) {
+          setPieces(memoryTotal || 100);
+        }
       } finally {
-        setIsLoadingPieces(false);
+        if (!isCancelled) {
+          setLoadingActiveLotCutting(false);
+          setIsLoadingPieces(false);
+        }
       }
-    };
+    }, 300);
 
-    fetchPieces();
-  }, [selectedDesignId]);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeLotForCutting, issueMethod, cuttingHeaders, designs, cuttingCacheRefreshCount]);
 
   // Build BOM mappings when selected design changes
   useEffect(() => {
@@ -3294,6 +3475,290 @@ export default function ExtraMaterialIssueView({
     setPrintAuditModalData(lotAudit);
   };
 
+  // ── Render Cutting Details & Batch Metrics Card (Same as Material Issue) ──
+  const renderCuttingCard = (lotNumber, currentBrand = '') => {
+    const cleanLot = String(lotNumber || '').trim();
+    if (!cleanLot) return null;
+
+    return (
+      <div style={{
+        marginTop: '16px',
+        padding: '14px 18px',
+        borderRadius: '10px',
+        background: activeLotCutting?.hasDetails 
+          ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+          : '#f8fafc',
+        border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
+        boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
+        transition: 'all 0.2s ease'
+      }}>
+        {/* Header of Cutting Card */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          borderBottom: '1px solid #e2e8f0',
+          paddingBottom: '10px',
+          marginBottom: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: activeLotCutting?.hasDetails ? '#dcfce7' : '#f1f5f9',
+              color: activeLotCutting?.hasDetails ? '#15803d' : '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              <Scissors size={18} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#0f172a' }}>
+                  Cutting Details &amp; Batch Metrics
+                </span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  fontFamily: 'monospace',
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  padding: '2px 8px',
+                  borderRadius: '6px'
+                }}>
+                  Lot #{cleanLot}
+                </span>
+                {activeLotCutting?.hasDetails ? (
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: '700',
+                    background: '#dcfce7',
+                    color: '#15803d',
+                    padding: '2px 7px',
+                    borderRadius: '6px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px'
+                  }}>
+                    <CheckCircle2 size={11} /> Verified Cutting Sheet
+                  </span>
+                ) : loadingActiveLotCutting ? (
+                  <span style={{ fontSize: '11px', color: '#0284c7', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                    <RefreshCw size={11} className="animate-spin" /> Checking cutting database...
+                  </span>
+                ) : (
+                  <span style={{
+                    fontSize: '10.5px',
+                    fontWeight: '700',
+                    background: '#fef3c7',
+                    color: '#b45309',
+                    padding: '2px 7px',
+                    borderRadius: '6px'
+                  }}>
+                    No cutting sheet in DB
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => reloadCuttingCache(true)}
+                  disabled={isReloadingCuttingCache}
+                  title="Empty in-memory cache & reload cutting database now (Auto-reloads every 30 minutes)"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '2px 8px',
+                    fontSize: '10.5px',
+                    fontWeight: '700',
+                    color: '#0284c7',
+                    background: '#f0f9ff',
+                    border: '1px solid #bae6fd',
+                    borderRadius: '6px',
+                    cursor: isReloadingCuttingCache ? 'not-allowed' : 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  <RefreshCw size={10} className={isReloadingCuttingCache ? "animate-spin" : ""} />
+                  {isReloadingCuttingCache ? 'Reloading...' : 'Reload (30m Auto)'}
+                </button>
+                {cacheReloadNotice && (
+                  <span style={{ fontSize: '10.5px', color: '#16a34a', fontWeight: '700' }}>
+                    {cacheReloadNotice}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                Production batch particulars automatically synchronized with Lot #{cleanLot} • Auto-refreshes every 30m
+              </span>
+            </div>
+          </div>
+
+          {/* Cutting Total Pieces Hero Badge + Matrix Toggle Button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              background: '#ffffff',
+              padding: '5px 12px',
+              borderRadius: '8px',
+              border: '1.5px solid #86efac',
+              boxShadow: '0 1px 3px rgba(34, 197, 94, 0.12)'
+            }}>
+              <span style={{ fontSize: '9.5px', fontWeight: '800', color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Total Cutting Quantity
+              </span>
+              <span style={{ fontSize: '16px', fontWeight: '900', color: '#14532d' }}>
+                {(activeLotCutting?.totalPieces || 0).toLocaleString()} <span style={{ fontSize: '11px', fontWeight: '700' }}>Pcs</span>
+              </span>
+            </div>
+
+            {activeLotCutting?.rows?.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowActiveCuttingMatrix(prev => !prev)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid #0284c7',
+                  background: showActiveCuttingMatrix ? '#0284c7' : '#f0f9ff',
+                  color: showActiveCuttingMatrix ? '#ffffff' : '#0369a1',
+                  fontSize: '11.5px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Eye size={13} />
+                <span>{showActiveCuttingMatrix ? 'Hide Matrix' : `Matrix Breakdown (${activeLotCutting.rows.length} Colors)`}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Metadata Pills Grid */}
+        {activeLotCutting && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+            gap: '10px',
+            marginBottom: activeLotCutting?.rows?.length > 0 && showActiveCuttingMatrix ? '14px' : '0'
+          }}>
+            <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Garment Style</span>
+              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.style || '—'}</span>
+            </div>
+            <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fabric</span>
+              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.fabric || '—'}</span>
+            </div>
+            <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Brand / Buyer</span>
+              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.brand || currentBrand || '—'}</span>
+            </div>
+            <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Party Name</span>
+              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting.partyName || '—'}</span>
+            </div>
+            {activeLotCutting.shades && (
+              <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Shades</span>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting.shades}</span>
+              </div>
+            )}
+            {activeLotCutting.sizes && (
+              <div style={{ background: '#ffffff', padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                <span style={{ display: 'block', fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Sizes</span>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting.sizes}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Inline Expandable Cutting Color-Size Matrix Table */}
+        {showActiveCuttingMatrix && activeLotCutting?.rows?.length > 0 && (
+          <div style={{
+            marginTop: '12px',
+            background: '#ffffff',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              padding: '8px 12px',
+              background: '#f8fafc',
+              borderBottom: '1px solid #e2e8f0',
+              fontSize: '11.5px',
+              fontWeight: '800',
+              color: '#334155',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <span>Cutting Ratio &amp; Color Matrix Breakdown</span>
+              <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600' }}>
+                {activeLotCutting.rows.length} Colors &bull; Total {(activeLotCutting.totalPieces || 0).toLocaleString()} Pcs
+              </span>
+            </div>
+            <div style={{ overflowX: 'auto', maxHeight: '220px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11.5px', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                    <th style={{ padding: '6px 10px', fontWeight: '800' }}>Color / Shade</th>
+                    <th style={{ padding: '6px 8px', fontWeight: '800', textAlign: 'center' }}>Table</th>
+                    {activeSizes.map(sz => (
+                      <th key={sz} style={{ padding: '6px 8px', fontWeight: '800', textAlign: 'center' }}>{sz}</th>
+                    ))}
+                    <th style={{ padding: '6px 10px', fontWeight: '800', textAlign: 'right' }}>Total Pcs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeLotCutting.rows.map((row, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                      <td style={{ padding: '6px 10px', fontWeight: '700', color: '#0f172a' }}>{row.color || '—'}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>{row.cuttingTable || '—'}</td>
+                      {activeSizes.map(sz => (
+                        <td key={sz} style={{ padding: '6px 8px', textAlign: 'center', fontWeight: '600', color: Number(row.sizes?.[sz]) > 0 ? '#0f172a' : '#cbd5e1' }}>
+                          {row.sizes?.[sz] || 0}
+                        </td>
+                      ))}
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>
+                        {(Number(row.totalPcs) || 0).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '900', color: '#0f172a' }}>
+                    <td colSpan={2} style={{ padding: '7px 10px' }}>Grand Total</td>
+                    {activeSizes.map(sz => {
+                      const szSum = (activeLotCutting.rows || []).reduce((sum, r) => sum + (Number(r.sizes?.[sz]) || 0), 0);
+                      return (
+                        <td key={sz} style={{ padding: '7px 8px', textAlign: 'center', fontWeight: '900', color: '#0f172a' }}>
+                          {szSum.toLocaleString()}
+                        </td>
+                      );
+                    })}
+                    <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: '900', color: '#15803d' }}>
+                      {(activeLotCutting.totalPieces || 0).toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="extra-material-issue-container" style={{ padding: '16px', width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}>
       
@@ -3938,6 +4403,9 @@ export default function ExtraMaterialIssueView({
                       />
                     </div>
                   </div>
+
+                  {/* ── LIVE CUTTING DETAILS FOR SELECTED LOT (SAME AS MATERIAL ISSUE) ── */}
+                  {renderCuttingCard(selectedDesign?.id || selectedDesignId, selectedDesign?.brand)}
                 </div>
 
                 {/* BOM Components Table Card */}
@@ -4555,6 +5023,11 @@ export default function ExtraMaterialIssueView({
                       }}
                     />
                     <datalist id="recent-lots-list">
+                      {cuttingHeaders.slice(0, 100).map((ch, idx) => (
+                        <option key={`ch-${ch.Lot_Number || idx}`} value={ch.Lot_Number}>
+                          {ch.Style ? `${ch.Style} (${ch.Brand || 'Cutting'})` : (ch.Brand || 'Cutting Lot')}
+                        </option>
+                      ))}
                       {designs.map(d => (
                         <option key={d.id} value={d.id}>{d.name || d.style || d.category}</option>
                       ))}
@@ -4706,6 +5179,9 @@ export default function ExtraMaterialIssueView({
                     />
                   </div>
                 </div>
+
+                {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER (SAME AS MATERIAL ISSUE) ── */}
+                {renderCuttingCard(woLotId, woBrand)}
               </div>
 
               {/* Material Items Requisition Table Card */}

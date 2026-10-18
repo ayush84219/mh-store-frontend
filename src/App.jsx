@@ -2923,6 +2923,7 @@ export default function App() {
                   currentUser={currentUser}
                   onSwitchToWithBom={() => handleTabClick('material_issue')}
                   onRedirectToTab={(tab) => handleTabClick(tab)}
+                  onSubmitApproval={handleSubmitApprovalRequest}
                 />
               )}
 

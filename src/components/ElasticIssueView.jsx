@@ -5,7 +5,7 @@ import {
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
   ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale,
-  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye
+  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -948,7 +948,151 @@ export default function ElasticIssueView({
   const [selectedBoneMaterialId, setSelectedBoneMaterialId] = useState('ST00346');
   const [selectedOtherMaterialId, setSelectedOtherMaterialId] = useState('');
   const [otherEntryMode, setOtherEntryMode] = useState('choose'); // 'choose' | 'manual'
-  const [selectedOtherCategory, setSelectedOtherCategory] = useState('ALL'); // 'ALL' | 'Tape' | 'Button' | 'Lace' | 'Drawcord' | 'Zipper' | 'Label' | 'Badge' | 'Eyelet'
+  const [selectedOtherCategory, setSelectedOtherCategory] = useState('ALL'); // 'ALL' | 'DORI' | 'ELASTIC' | 'ZIP' | 'LABEL' | 'BUTTON' | ...
+
+  // Base default accessory component categories (Standard types: 1. DORI, 2. ELASTIC, 3. ZIP, 4. LABEL, 5. BUTTON, etc.)
+  const BASE_OTHER_COMPONENT_TYPES = useMemo(() => [
+    'DORI',
+    'ELASTIC',
+    'ZIP',
+    'LABEL',
+    'BUTTON',
+    'TAPE',
+    'LACE',
+    'BADGE',
+    'EYELET'
+  ], []);
+
+  // Custom accessory component types persisted in localStorage
+  const [customOtherComponentTypes, setCustomOtherComponentTypes] = useState(() => {
+    try {
+      const saved = localStorage.getItem('elastic_custom_component_types') || localStorage.getItem('without_bom_custom_component_types');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed.map(s => String(s).trim().toUpperCase()).filter(Boolean);
+      }
+    } catch (e) {
+      console.error('Failed to load custom component types', e);
+    }
+    return [];
+  });
+
+  const [showManageOtherTypesModal, setShowManageOtherTypesModal] = useState(false);
+  const [newOtherTypeNameInput, setNewOtherTypeNameInput] = useState('');
+  const [isAddingCustomCategory, setIsAddingCustomCategory] = useState(false);
+  const [inlineCustomCategoryInput, setInlineCustomCategoryInput] = useState('');
+
+  // Persist custom types whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('elastic_custom_component_types', JSON.stringify(customOtherComponentTypes));
+      localStorage.setItem('without_bom_custom_component_types', JSON.stringify(customOtherComponentTypes));
+    } catch (e) {}
+  }, [customOtherComponentTypes]);
+
+  // Helper to add custom component type
+  const addCustomOtherComponentType = (rawName) => {
+    if (!rawName) return '';
+    const clean = String(rawName).trim().toUpperCase();
+    if (!clean || clean === '__CUSTOM__' || clean === '__MANAGE__' || clean === 'ALL') return '';
+
+    const existsInBase = BASE_OTHER_COMPONENT_TYPES.some(t => t.toUpperCase() === clean);
+    const existsInCustom = customOtherComponentTypes.some(t => t.toUpperCase() === clean);
+
+    if (!existsInBase && !existsInCustom) {
+      setCustomOtherComponentTypes(prev => {
+        const updated = [...prev, clean];
+        try {
+          localStorage.setItem('elastic_custom_component_types', JSON.stringify(updated));
+          localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+    }
+    return clean;
+  };
+
+  // Helper to remove custom component type
+  const removeCustomOtherComponentType = (typeToRemove) => {
+    setCustomOtherComponentTypes(prev => {
+      const updated = prev.filter(t => t.toUpperCase() !== String(typeToRemove).toUpperCase());
+      try {
+        localStorage.setItem('elastic_custom_component_types', JSON.stringify(updated));
+        localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  };
+
+  // Unified list of all component types (1. DORI, 2. ELASTIC, 3. ZIP, 4. LABEL, 5. BUTTON, ...)
+  const allOtherComponentTypes = useMemo(() => {
+    const list = [...BASE_OTHER_COMPONENT_TYPES];
+    customOtherComponentTypes.forEach(t => {
+      const clean = String(t).trim().toUpperCase();
+      if (clean && !list.includes(clean)) {
+        list.push(clean);
+      }
+    });
+    return list;
+  }, [BASE_OTHER_COMPONENT_TYPES, customOtherComponentTypes]);
+
+  // Dropdown options matching Image 2
+  const otherComponentTypeOptions = useMemo(() => {
+    const opts = allOtherComponentTypes.map((type, idx) => ({
+      value: type,
+      label: `${idx + 1}. ${type}`
+    }));
+    opts.push({ value: '__custom__', label: '✏️ + Add Manually (Custom Type)' });
+    if (customOtherComponentTypes.length > 0) {
+      opts.push({ value: '__manage__', label: `⚙️ Manage Types (${customOtherComponentTypes.length})...` });
+    }
+    return opts;
+  }, [allOtherComponentTypes, customOtherComponentTypes]);
+
+  // Helper to get normalized select dropdown value
+  const getSelectedCategoryValue = () => {
+    if (!selectedOtherCategory || selectedOtherCategory === 'ALL') return 'ALL';
+    const upper = selectedOtherCategory.toUpperCase();
+    if (upper === 'DRAWCORD' || upper === 'DORI') return 'DORI';
+    if (upper === 'ZIPPER' || upper === 'ZIP') return 'ZIP';
+    const found = allOtherComponentTypes.find(t => t.toUpperCase() === upper);
+    return found || upper;
+  };
+
+  // Dropdown selection change handler
+  const handleCategorySelectChange = (val) => {
+    if (val === '__custom__') {
+      setIsAddingCustomCategory(true);
+      setInlineCustomCategoryInput('');
+    } else if (val === '__manage__') {
+      setShowManageOtherTypesModal(true);
+    } else if (val === 'ALL') {
+      handleSelectComponentCategory('ALL');
+    } else {
+      let unit = 'Pcs';
+      const u = val.toUpperCase();
+      if (u === 'DORI' || u === 'DRAWCORD' || u === 'ELASTIC' || u === 'TAPE' || u === 'LACE') {
+        unit = 'Mtr';
+      }
+      handleSelectComponentCategory(val, unit);
+    }
+  };
+
+  // Commit inline custom category
+  const commitInlineCustomCategory = (rawVal) => {
+    const clean = String(rawVal || '').trim().toUpperCase();
+    if (!clean) {
+      setIsAddingCustomCategory(false);
+      setInlineCustomCategoryInput('');
+      return;
+    }
+    addCustomOtherComponentType(clean);
+    handleSelectComponentCategory(clean, 'Pcs');
+    setIsAddingCustomCategory(false);
+    setInlineCustomCategoryInput('');
+    showToast(`Added custom category "${clean}"!`);
+  };
+
   const [customOtherNames, setCustomOtherNames] = useState(() => {
     try {
       const s = localStorage.getItem('gpdms_custom_other_names');
@@ -1013,11 +1157,13 @@ export default function ElasticIssueView({
   // Filter materials to show Other Accessories (Trims & Accessories from store inventory)
   const otherMaterials = useMemo(() => {
     if (!materials || materials.length === 0) return [];
-    if (selectedOtherCategory === 'ALL') return materials;
-    const filterKey = selectedOtherCategory.toLowerCase();
+    if (!selectedOtherCategory || selectedOtherCategory === 'ALL') return materials;
+    const filterKey = selectedOtherCategory.toLowerCase().trim();
     return materials.filter(m => {
       const name = (m.name || '').toLowerCase();
       const cat = (m.category || '').toLowerCase();
+      const subCat = (m.subCategory || '').toLowerCase();
+      const itemCode = (m.itemCode || '').toLowerCase();
       if (filterKey === 'tape') {
         return name.includes('tape') || cat.includes('tape') || name.includes('ribbon') || cat.includes('ribbon') || name.includes('niwar');
       }
@@ -1027,10 +1173,10 @@ export default function ElasticIssueView({
       if (filterKey === 'lace') {
         return name.includes('lace') || cat.includes('lace') || name.includes('gota') || cat.includes('gota') || name.includes('crochet');
       }
-      if (filterKey === 'drawcord') {
+      if (filterKey === 'drawcord' || filterKey === 'dori') {
         return name.includes('dori') || cat.includes('dori') || name.includes('cord') || cat.includes('cord') || name.includes('rope');
       }
-      if (filterKey === 'zipper') {
+      if (filterKey === 'zipper' || filterKey === 'zip') {
         return name.includes('zip') || cat.includes('zip') || name.includes('chain') || cat.includes('runner');
       }
       if (filterKey === 'label') {
@@ -1042,7 +1188,10 @@ export default function ElasticIssueView({
       if (filterKey === 'eyelet') {
         return name.includes('eyelet') || cat.includes('eyelet') || name.includes('grommet') || name.includes('ring');
       }
-      return name.includes(filterKey) || cat.includes(filterKey);
+      if (filterKey === 'elastic') {
+        return name.includes('elastic') || cat.includes('elastic') || name.includes('waistband');
+      }
+      return name.includes(filterKey) || cat.includes(filterKey) || subCat.includes(filterKey) || itemCode.includes(filterKey);
     });
   }, [materials, selectedOtherCategory]);
 
@@ -1067,22 +1216,25 @@ export default function ElasticIssueView({
   // Quick Component Category Picker (Tape, Button, Lace, Drawcord, Zipper, etc.)
   const handleSelectComponentCategory = (catName, defaultUnit = 'Pcs') => {
     setSelectedOtherCategory(catName);
-    if (catName === 'ALL') {
+    if (!catName || catName === 'ALL') {
       return;
     }
-    const filterKey = catName.toLowerCase();
+    const filterKey = catName.toLowerCase().trim();
     const matching = (materials || []).filter(m => {
       const name = (m.name || '').toLowerCase();
       const cat = (m.category || '').toLowerCase();
+      const subCat = (m.subCategory || '').toLowerCase();
+      const itemCode = (m.itemCode || '').toLowerCase();
       if (filterKey === 'tape') return name.includes('tape') || cat.includes('tape') || name.includes('ribbon') || cat.includes('ribbon') || name.includes('niwar');
       if (filterKey === 'button') return name.includes('button') || cat.includes('button') || name.includes('snap') || cat.includes('snap');
       if (filterKey === 'lace') return name.includes('lace') || cat.includes('lace') || name.includes('gota') || cat.includes('gota');
-      if (filterKey === 'drawcord') return name.includes('dori') || cat.includes('dori') || name.includes('cord') || cat.includes('cord');
-      if (filterKey === 'zipper') return name.includes('zip') || cat.includes('zip') || name.includes('chain') || cat.includes('runner');
+      if (filterKey === 'drawcord' || filterKey === 'dori') return name.includes('dori') || cat.includes('dori') || name.includes('cord') || cat.includes('cord');
+      if (filterKey === 'zipper' || filterKey === 'zip') return name.includes('zip') || cat.includes('zip') || name.includes('chain') || cat.includes('runner');
       if (filterKey === 'label') return name.includes('label') || cat.includes('label') || name.includes('tag') || cat.includes('tag');
       if (filterKey === 'badge') return name.includes('patch') || cat.includes('patch') || name.includes('badge') || cat.includes('badge');
       if (filterKey === 'eyelet') return name.includes('eyelet') || cat.includes('eyelet') || name.includes('ring');
-      return name.includes(filterKey) || cat.includes(filterKey);
+      if (filterKey === 'elastic') return name.includes('elastic') || cat.includes('elastic') || name.includes('waistband');
+      return name.includes(filterKey) || cat.includes(filterKey) || subCat.includes(filterKey) || itemCode.includes(filterKey);
     });
 
     if (matching.length > 0) {
@@ -2532,8 +2684,8 @@ export default function ElasticIssueView({
   // ── Generate Professional Original Issue Bill / PO / W/O PO Slip ─────────────────────────────
   const generateElasticIssueBill = async () => {
     const enteredLotNo = (lotDetails?.lotNo || searchLotInput || '').trim();
-    if (!enteredLotNo) {
-      showToast('Please enter a Lot Number (Required in all modes).', 'error');
+    if (!withoutLotActive && !enteredLotNo) {
+      showToast('Please enter a Lot Number for With BOM issue.', 'error');
       return;
     }
 
@@ -2568,7 +2720,7 @@ export default function ElasticIssueView({
       } else if (!currentSlipNo) {
         currentSlipNo = await fetchNextIssueSlipNo(false);
       }
-      const currentLotNo = enteredLotNo.toUpperCase();
+      const currentLotNo = (enteredLotNo || (withoutLotActive ? 'W/O LOT' : '')).toUpperCase();
       const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
       const calculatedTapeRolls = Math.ceil(currentQuantity / effectiveTapeDivisor) || 1;
       const calculatedElasticRolls = withoutLotActive
@@ -3490,17 +3642,16 @@ export default function ElasticIssueView({
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-                  {/* Lot Number (Required) */}
+                  {/* Lot Number (Optional) */}
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                      LOT NUMBER <span style={{ color: '#ef4444' }}>*</span>
+                      LOT NUMBER <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', textTransform: 'none' }}>(Optional)</span>
                     </label>
                     <input
                       type="text"
-                      placeholder="Enter Lot # (e.g. 62114)"
+                      placeholder="Enter Lot # (e.g. 62114) - Optional"
                       value={searchLotInput}
                       onChange={(e) => setSearchLotInput(e.target.value)}
-                      required
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
                         border: '1px solid #cbd5e1', background: '#ffffff',
@@ -4569,17 +4720,20 @@ export default function ElasticIssueView({
                               alignItems: 'center'
                             }}>
                               {[
-                                { name: 'Tape', icon: '🎗️', label: 'Tape', defaultUnit: 'Mtr', hint: 'in Mtr/Roll' },
-                                { name: 'Button', icon: '🔘', label: 'Button', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'Lace', icon: '🕸️', label: 'Lace', defaultUnit: 'Mtr', hint: 'in Mtr' },
-                                { name: 'Drawcord', icon: '🧵', label: 'Dori / Cord', defaultUnit: 'Mtr', hint: 'in Mtr/Pcs' },
-                                { name: 'Zipper', icon: '🤐', label: 'Zipper', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'Label', icon: '🏷️', label: 'Label / Tag', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'Badge', icon: '🛡️', label: 'Badge / Patch', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'Eyelet', icon: '⭕', label: 'Eyelet', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'DORI', icon: '🧵', label: 'Dori / Cord', defaultUnit: 'Mtr', hint: 'in Mtr/Pcs' },
+                                { name: 'ELASTIC', icon: '⚡', label: 'Elastic', defaultUnit: 'Mtr', hint: 'in Mtr' },
+                                { name: 'ZIP', icon: '🤐', label: 'Zipper', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'LABEL', icon: '🏷️', label: 'Label / Tag', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'BUTTON', icon: '🔘', label: 'Button', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'TAPE', icon: '🎗️', label: 'Tape', defaultUnit: 'Mtr', hint: 'in Mtr/Roll' },
+                                { name: 'LACE', icon: '🕸️', label: 'Lace', defaultUnit: 'Mtr', hint: 'in Mtr' },
+                                { name: 'BADGE', icon: '🛡️', label: 'Badge / Patch', defaultUnit: 'Pcs', hint: 'in Pcs' },
+                                { name: 'EYELET', icon: '⭕', label: 'Eyelet', defaultUnit: 'Pcs', hint: 'in Pcs' },
                                 { name: 'ALL', icon: '📦', label: 'All Inventory', defaultUnit: 'Roll', hint: (materials.length + ' Items') }
                               ].map(chip => {
-                                const isActive = selectedOtherCategory === chip.name;
+                                const isActive = selectedOtherCategory.toUpperCase() === chip.name.toUpperCase() ||
+                                  (chip.name === 'DORI' && (selectedOtherCategory.toUpperCase() === 'DRAWCORD' || selectedOtherCategory.toUpperCase() === 'DORI')) ||
+                                  (chip.name === 'ZIP' && (selectedOtherCategory.toUpperCase() === 'ZIPPER' || selectedOtherCategory.toUpperCase() === 'ZIP'));
                                 return (
                                   <button
                                     key={chip.name}
@@ -4617,20 +4771,58 @@ export default function ElasticIssueView({
                                 );
                               })}
 
-                              {/* Manual button chip */}
+                              {/* Dynamically render chips for custom types */}
+                              {customOtherComponentTypes.map(cType => {
+                                const isActive = selectedOtherCategory.toUpperCase() === cType.toUpperCase();
+                                return (
+                                  <button
+                                    key={cType}
+                                    type="button"
+                                    onClick={() => handleSelectComponentCategory(cType, 'Pcs')}
+                                    style={{
+                                      padding: '5px 10px',
+                                      borderRadius: '7px',
+                                      border: isActive ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
+                                      background: isActive ? '#7c3aed' : '#faf5ff',
+                                      color: isActive ? '#ffffff' : '#581c87',
+                                      fontSize: '11px',
+                                      fontWeight: '800',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '5px',
+                                      boxShadow: isActive ? '0 2px 6px rgba(124, 58, 237, 0.3)' : 'none',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    <span>✨</span>
+                                    <span>{cType}</span>
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      opacity: isActive ? 0.9 : 0.65,
+                                      fontWeight: '700',
+                                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f3e8ff',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px'
+                                    }}>
+                                      Custom
+                                    </span>
+                                  </button>
+                                );
+                              })}
+
+                              {/* Add Custom Type Button Chip */}
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setOtherEntryMode('manual');
-                                  if (!otherMaterialName || otherMaterialName === 'Drawcord / Other Accessory') {
-                                    setOtherMaterialName('');
-                                  }
+                                  setIsAddingCustomCategory(true);
+                                  setInlineCustomCategoryInput('');
                                 }}
                                 style={{
                                   padding: '5px 11px',
                                   borderRadius: '7px',
-                                  border: otherEntryMode === 'manual' ? '1.5px solid #7c3aed' : '1px dashed #c084fc',
-                                  background: otherEntryMode === 'manual' ? '#f3e8ff' : '#ffffff',
+                                  border: isAddingCustomCategory ? '1.5px solid #7c3aed' : '1px dashed #7c3aed',
+                                  background: isAddingCustomCategory ? '#f3e8ff' : '#ffffff',
                                   color: '#7c3aed',
                                   fontSize: '11px',
                                   fontWeight: '800',
@@ -4639,17 +4831,42 @@ export default function ElasticIssueView({
                                   alignItems: 'center',
                                   gap: '4px'
                                 }}
+                                title="Add a custom category type to list"
                               >
                                 <Edit2 size={12} />
                                 + Type Custom
                               </button>
+
+                              {/* Manage Types Chip */}
+                              {customOtherComponentTypes.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowManageOtherTypesModal(true)}
+                                  style={{
+                                    padding: '5px 9px',
+                                    borderRadius: '7px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#f8fafc',
+                                    color: '#475569',
+                                    fontSize: '10.5px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '3px'
+                                  }}
+                                  title="Manage Custom Component Types"
+                                >
+                                  <span>⚙️ Manage ({customOtherComponentTypes.length})</span>
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          {/* 3-Column Specification Controls */}
+                          {/* 2-Column Specification Controls */}
                           <div style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
                             gap: '14px',
                             background: '#ffffff',
                             padding: '16px',
@@ -4684,14 +4901,125 @@ export default function ElasticIssueView({
 
                                 {otherEntryMode === 'choose' ? (
                                   <div>
-                                    <SearchableMaterialSelect
-                                      materials={otherMaterials}
-                                      value={selectedOtherMaterialId}
-                                      onChange={handleSelectOtherMaterial}
-                                      placeholder={otherMaterials.length > 0 ? `— Select Material (${otherMaterials.length} ${selectedOtherCategory !== 'ALL' ? selectedOtherCategory : 'Items'}) —` : `— No ${selectedOtherCategory} items in store —`}
-                                      themeColor="#7c3aed"
-                                      onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                    />
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                      {/* Category Dropdown Box or Inline Custom Category Input */}
+                                      <div style={{ width: '165px', minWidth: '150px', flexShrink: 0 }}>
+                                        {isAddingCustomCategory ? (
+                                          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+                                            <input
+                                              type="text"
+                                              placeholder="Category..."
+                                              value={inlineCustomCategoryInput}
+                                              onChange={(e) => setInlineCustomCategoryInput(e.target.value.toUpperCase())}
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                  e.preventDefault();
+                                                  commitInlineCustomCategory(inlineCustomCategoryInput);
+                                                } else if (e.key === 'Escape') {
+                                                  setIsAddingCustomCategory(false);
+                                                  setInlineCustomCategoryInput('');
+                                                }
+                                              }}
+                                              autoFocus
+                                              style={{
+                                                width: '105px',
+                                                padding: '7px 8px',
+                                                borderRadius: '6px',
+                                                border: '1.5px solid #7c3aed',
+                                                fontSize: '11.5px',
+                                                fontWeight: '800',
+                                                background: '#faf5ff',
+                                                color: '#581c87',
+                                                outline: 'none',
+                                                boxSizing: 'border-box'
+                                              }}
+                                            />
+                                            <button
+                                              type="button"
+                                              onClick={() => commitInlineCustomCategory(inlineCustomCategoryInput)}
+                                              title="Save and select category"
+                                              style={{
+                                                background: '#059669',
+                                                color: '#ffffff',
+                                                border: 'none',
+                                                borderRadius: '5px',
+                                                cursor: 'pointer',
+                                                padding: '6px 8px',
+                                                fontSize: '11px',
+                                                fontWeight: '800'
+                                              }}
+                                            >
+                                              ✓
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                setIsAddingCustomCategory(false);
+                                                setInlineCustomCategoryInput('');
+                                              }}
+                                              title="Cancel"
+                                              style={{
+                                                background: '#f1f5f9',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '5px',
+                                                cursor: 'pointer',
+                                                padding: '6px 7px',
+                                                fontSize: '11px',
+                                                color: '#64748b'
+                                              }}
+                                            >
+                                              ✕
+                                            </button>
+                                          </div>
+                                        ) : (
+                                          <select
+                                            value={getSelectedCategoryValue()}
+                                            onChange={(e) => handleCategorySelectChange(e.target.value)}
+                                            style={{
+                                              width: '100%',
+                                              padding: '7px 9px',
+                                              borderRadius: '6px',
+                                              border: '1.5px solid #cbd5e1',
+                                              fontSize: '12px',
+                                              fontWeight: '700',
+                                              background: '#ffffff',
+                                              color: '#0f172a',
+                                              boxSizing: 'border-box',
+                                              cursor: 'pointer',
+                                              boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                            }}
+                                          >
+                                            <option value="ALL" style={{ fontWeight: '700', color: '#7c3aed' }}>
+                                              📦 All Inventory ({materials.length})
+                                            </option>
+                                            {otherComponentTypeOptions.map(opt => (
+                                              <option
+                                                key={opt.value}
+                                                value={opt.value}
+                                                style={{
+                                                  fontWeight: opt.value.startsWith('__') ? '600' : '700',
+                                                  color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
+                                                }}
+                                              >
+                                                {opt.label}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        )}
+                                      </div>
+
+                                      {/* Searchable Material Select */}
+                                      <div style={{ flex: 1, minWidth: '220px' }}>
+                                        <SearchableMaterialSelect
+                                          materials={otherMaterials}
+                                          value={selectedOtherMaterialId}
+                                          onChange={handleSelectOtherMaterial}
+                                          placeholder="🔍 Search & Choose Material (Name / Code)..."
+                                          themeColor="#7c3aed"
+                                          onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                        />
+                                      </div>
+                                    </div>
 
                                     {/* Notice when filter has 0 items */}
                                     {otherMaterials.length === 0 && (
@@ -4878,44 +5206,81 @@ export default function ElasticIssueView({
                                   </div>
                                 ) : (
                                   <div>
-                                    {/* Manual Input with Save Button */}
-                                    <div style={{ display: 'flex', gap: '6px' }}>
-                                      <input
-                                        type="text"
-                                        value={otherMaterialName}
-                                        onChange={(e) => setOtherMaterialName(e.target.value)}
-                                        placeholder="e.g. Tape Cotton 1 inch, Horn Button 24L, Lace GPO..."
-                                        style={{
-                                          flex: 1,
-                                          boxSizing: 'border-box',
-                                          padding: '8px 10px',
-                                          borderRadius: '6px',
-                                          border: '1.5px solid #7c3aed',
-                                          fontSize: '13px',
-                                          fontWeight: '800',
-                                          color: '#0f172a',
-                                          background: '#ffffff',
-                                          outline: 'none'
-                                        }}
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => handleAddNewCustomName(otherMaterialName)}
-                                        title="Save this name for fast one-click selection"
-                                        style={{
-                                          padding: '0 12px',
-                                          borderRadius: '6px',
-                                          border: 'none',
-                                          background: '#7c3aed',
-                                          color: '#ffffff',
-                                          fontSize: '11px',
-                                          fontWeight: '800',
-                                          cursor: 'pointer',
-                                          whiteSpace: 'nowrap'
-                                        }}
-                                      >
-                                        + Save
-                                      </button>
+                                    {/* Category Select + Manual Input with Save Button */}
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                      <div style={{ width: '165px', minWidth: '150px', flexShrink: 0 }}>
+                                        <select
+                                          value={getSelectedCategoryValue()}
+                                          onChange={(e) => handleCategorySelectChange(e.target.value)}
+                                          style={{
+                                            width: '100%',
+                                            padding: '7px 9px',
+                                            borderRadius: '6px',
+                                            border: '1.5px solid #cbd5e1',
+                                            fontSize: '12px',
+                                            fontWeight: '700',
+                                            background: '#ffffff',
+                                            color: '#0f172a',
+                                            boxSizing: 'border-box',
+                                            cursor: 'pointer',
+                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                                          }}
+                                        >
+                                          <option value="ALL" style={{ fontWeight: '700', color: '#7c3aed' }}>
+                                            📦 All Inventory ({materials.length})
+                                          </option>
+                                          {otherComponentTypeOptions.map(opt => (
+                                            <option
+                                              key={opt.value}
+                                              value={opt.value}
+                                              style={{
+                                                fontWeight: opt.value.startsWith('__') ? '600' : '700',
+                                                color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
+                                              }}
+                                            >
+                                              {opt.label}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                      <div style={{ flex: 1, minWidth: '220px', display: 'flex', gap: '6px' }}>
+                                        <input
+                                          type="text"
+                                          value={otherMaterialName}
+                                          onChange={(e) => setOtherMaterialName(e.target.value)}
+                                          placeholder="e.g. Tape Cotton 1 inch, Horn Button 24L, Lace GPO..."
+                                          style={{
+                                            flex: 1,
+                                            boxSizing: 'border-box',
+                                            padding: '8px 10px',
+                                            borderRadius: '6px',
+                                            border: '1.5px solid #7c3aed',
+                                            fontSize: '13px',
+                                            fontWeight: '800',
+                                            color: '#0f172a',
+                                            background: '#ffffff',
+                                            outline: 'none'
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => handleAddNewCustomName(otherMaterialName)}
+                                          title="Save this name for fast one-click selection"
+                                          style={{
+                                            padding: '0 12px',
+                                            borderRadius: '6px',
+                                            border: 'none',
+                                            background: '#7c3aed',
+                                            color: '#ffffff',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            cursor: 'pointer',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          + Save
+                                        </button>
+                                      </div>
                                     </div>
 
                                     {/* Suggestions & Saved Names Chips */}
@@ -4978,40 +5343,10 @@ export default function ElasticIssueView({
                               </div>
                             </div>
 
-                            {/* 2. Issue Pieces Input */}
+                            {/* 2. Material Issue Quantity & Unit Selector */}
                             <div>
                               <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
-                                2. ENTER / VERIFY PIECES:
-                              </span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={issuePcs}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
-                                  }}
-                                  placeholder="Enter Pcs..."
-                                  style={{
-                                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '7px',
-                                    border: '1.5px solid #7c3aed', fontSize: '15px', fontWeight: '800',
-                                    color: '#0f172a', background: '#fdf4ff', outline: 'none'
-                                  }}
-                                />
-                                <span style={{ fontSize: '13px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '8px 10px', borderRadius: '7px' }}>
-                                  Pcs
-                                </span>
-                              </div>
-                              <div style={{ fontSize: '10.5px', color: '#64748b', marginTop: '5px' }}>
-                                Total Cutting Qty: <strong>{lotDetails?.quantity || issuePcs || 0} Pcs</strong>
-                              </div>
-                            </div>
-
-                            {/* 3. Material Issue Quantity & Unit Selector */}
-                            <div>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
-                                3. TOTAL MATERIAL / QUANTITY TO ISSUE:
+                                2. TOTAL MATERIAL / QUANTITY TO ISSUE:
                               </span>
                               <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '6px', alignItems: 'center' }}>
                                 <input
@@ -7206,6 +7541,47 @@ export default function ElasticIssueView({
                             )}
                           </div>
                         </div>
+                      ) : materialMode === 'other' ? (
+                        <div style={{
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          background: '#faf5ff',
+                          border: '1.5px solid #d8b4fe',
+                          marginBottom: '14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          boxShadow: '0 1px 4px rgba(124, 58, 237, 0.05)'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{
+                              width: '28px', height: '28px', borderRadius: '6px',
+                              background: '#f3e8ff', color: '#7c3aed',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center'
+                            }}>
+                              <Scissors size={14} />
+                            </div>
+                            <div>
+                              <span style={{ fontSize: '10.5px', color: '#7c3aed', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block' }}>
+                                REAL ISSUE PIECES
+                              </span>
+                              <strong style={{ fontSize: '15px', fontWeight: '900', color: '#4c1d95' }}>
+                                {lotDetails?.quantity || issuePcs || 0} Pcs
+                              </strong>
+                            </div>
+                          </div>
+                          <span style={{
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            background: '#7c3aed',
+                            color: '#ffffff',
+                            padding: '3px 10px',
+                            borderRadius: '6px',
+                            boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
+                          }}>
+                            {withoutLotActive ? 'Direct Issue' : `Lot #${lotDetails?.lotNo || searchLotInput || '—'} Cutting Quantity`}
+                          </span>
+                        </div>
                       ) : (
                         <div style={{
                           padding: '10px 12px',
@@ -8630,6 +9006,228 @@ export default function ElasticIssueView({
                   boxShadow: '0 4px 14px rgba(0,0,0,0.1)'
                 }}
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MANAGE ACCESSORY COMPONENT TYPES MODAL */}
+      {showManageOtherTypesModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          zIndex: 99999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backdropFilter: 'blur(3px)',
+          padding: '16px'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '14px',
+            width: '100%',
+            maxWidth: '460px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+            overflow: 'hidden',
+            border: '1px solid #cbd5e1'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '14px 18px',
+              borderBottom: '1px solid #e2e8f0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              background: '#f8fafc'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Tag size={16} color="#7c3aed" />
+                <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                  Manage Accessory Component Types
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManageOtherTypesModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: '6px'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '18px' }}>
+              <p style={{ margin: '0 0 14px 0', fontSize: '12px', color: '#64748b' }}>
+                All custom accessory types entered are saved and shown in your dropdown list across other accessories issues.
+              </p>
+
+              {/* Add New Type input */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (newOtherTypeNameInput.trim()) {
+                    const added = addCustomOtherComponentType(newOtherTypeNameInput);
+                    if (added) {
+                      handleSelectComponentCategory(added, 'Pcs');
+                      showToast(`Added custom category "${added}"!`);
+                    }
+                    setNewOtherTypeNameInput('');
+                  }
+                }}
+                style={{ display: 'flex', gap: '6px', marginBottom: '14px' }}
+              >
+                <input
+                  type="text"
+                  placeholder="Type new category (e.g. VELCRO, BUCKLE)..."
+                  value={newOtherTypeNameInput}
+                  onChange={(e) => setNewOtherTypeNameInput(e.target.value.toUpperCase())}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    borderRadius: '7px',
+                    border: '1.5px solid #cbd5e1',
+                    fontSize: '12.5px',
+                    fontWeight: '700',
+                    outline: 'none'
+                  }}
+                  autoFocus
+                />
+                <button
+                  type="submit"
+                  disabled={!newOtherTypeNameInput.trim()}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: '7px',
+                    border: 'none',
+                    background: newOtherTypeNameInput.trim() ? '#7c3aed' : '#cbd5e1',
+                    color: '#ffffff',
+                    fontWeight: '700',
+                    fontSize: '12px',
+                    cursor: newOtherTypeNameInput.trim() ? 'pointer' : 'not-allowed'
+                  }}
+                >
+                  + Add
+                </button>
+              </form>
+
+              {/* Types List */}
+              <div style={{ maxHeight: '240px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px' }}>
+                {/* Default Standard Types */}
+                {BASE_OTHER_COMPONENT_TYPES.map((t, idx) => (
+                  <div
+                    key={t}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      borderBottom: '1px solid #f1f5f9',
+                      background: '#f8fafc',
+                      fontSize: '12px',
+                      fontWeight: '700',
+                      color: '#475569'
+                    }}
+                  >
+                    <span>{idx + 1}. {t}</span>
+                    <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: '600', background: '#e2e8f0', padding: '2px 6px', borderRadius: '4px' }}>
+                      Standard
+                    </span>
+                  </div>
+                ))}
+
+                {/* Custom Types */}
+                {customOtherComponentTypes.map((t, idx) => (
+                  <div
+                    key={t}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '9px 12px',
+                      borderBottom: '1px solid #f1f5f9',
+                      fontSize: '12px',
+                      fontWeight: '800',
+                      color: '#0f172a'
+                    }}
+                  >
+                    <span>{BASE_OTHER_COMPONENT_TYPES.length + idx + 1}. {t}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        removeCustomOtherComponentType(t);
+                        if (selectedOtherCategory.toUpperCase() === t.toUpperCase()) {
+                          handleSelectComponentCategory('ALL');
+                        }
+                        showToast(`Removed custom category "${t}".`);
+                      }}
+                      title={`Delete "${t}" from list`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        padding: '3px 6px',
+                        borderRadius: '4px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        fontSize: '11px',
+                        fontWeight: '700'
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      <span>Remove</span>
+                    </button>
+                  </div>
+                ))}
+
+                {customOtherComponentTypes.length === 0 && (
+                  <div style={{ padding: '14px', textAlign: 'center', color: '#94a3b8', fontSize: '12px' }}>
+                    No custom types added yet. Use "+ Add Manually (Custom Type)" in the dropdown or add one above!
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '12px 18px',
+              borderTop: '1px solid #e2e8f0',
+              background: '#f8fafc',
+              display: 'flex',
+              justifyContent: 'flex-end'
+            }}>
+              <button
+                type="button"
+                onClick={() => setShowManageOtherTypesModal(false)}
+                style={{
+                  padding: '7px 16px',
+                  borderRadius: '6px',
+                  border: 'none',
+                  background: '#0f172a',
+                  color: '#ffffff',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  cursor: 'pointer'
+                }}
+              >
+                Done
+              </button>
             </div>
           </div>
         </div>
