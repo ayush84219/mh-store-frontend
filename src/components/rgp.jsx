@@ -3610,6 +3610,21 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           </button>
           <button
             type="button"
+            onClick={() => navigate('/rgp-without-bom')}
+            style={{
+              ...styles.modeTab,
+              border: 'none',
+              margin: 0,
+              backgroundColor: '#fef3c7',
+              color: '#b45309',
+              fontWeight: '800'
+            }}
+          >
+            <Emoji size={16} mr={8}>⚡</Emoji>
+            Create RGP (Without BOM)
+          </button>
+          <button
+            type="button"
             onClick={() => navigate('/re-download?tab=rgp')}
             style={{
               ...styles.modeTab,

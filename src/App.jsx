@@ -35,6 +35,7 @@ const HistoryView = lazy(() => import('./components/HistoryView'));
 const PublicScanView = lazy(() => import('./components/PublicScanView'));
 const ScannerLogsView = lazy(() => import('./components/ScannerLogsView'));
 const FabricRgpForm = lazy(() => import('./components/rgp'));
+const RgpWithoutBom = lazy(() => import('./components/RgpWithoutBom'));
 const ReDownloadView = lazy(() => import('./components/ReDownloadView'));
 const WeightCapture = lazy(() => import('./components/WeightCapture'));
 const ManuallyWeightCapture = lazy(() => import('./components/ManuallyWeightCapture'));
@@ -71,6 +72,7 @@ const hasTabAccess = (tabName, role) => {
       'design',
       'material_verification',
       'rgp',
+      'rgp_without_bom',
       'zip_po',
       'dori_po',
       'bone_issue',
@@ -108,6 +110,7 @@ const hasTabAccess = (tabName, role) => {
       'design',
       'material_verification',
       'rgp',
+      'rgp_without_bom',
       'zip_po',
       'dori_po',
       'bone_issue',
@@ -148,6 +151,7 @@ const hasTabAccess = (tabName, role) => {
       'po_verification',
       'approval_queue',
       'rgp',
+      'rgp_without_bom',
       'generate_po',
       're_download',
       'bone_issue',
@@ -189,6 +193,7 @@ const TAB_ROUTES = {
   history: '/history',
   scanner_logs: '/scanner-logs',
   rgp: '/rgp',
+  rgp_without_bom: '/rgp-without-bom',
   weight_capture: '/weight-capture',
   manually_weight_capture: '/manually-weight-capture',
   material_transfer: '/material-transfer',
@@ -220,6 +225,9 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/without-bom-material-issue': 'without_bom_material_issue',
   '/material-issue-without-bom': 'without_bom_material_issue',
   '/without-bom': 'without_bom_material_issue',
+  '/rgp-without-bom': 'rgp_without_bom',
+  '/rgp_without_bom': 'rgp_without_bom',
+  '/create-rgp-without-bom': 'rgp_without_bom',
   '/reports/all-issued-added': 'movement_report',
   '/reports/movement-register': 'movement_report',
   '/all-issued-added': 'movement_report',
@@ -559,6 +567,7 @@ export default function App() {
       design: 'Below of Material',
       material_verification: 'Stock Accessories',
       rgp: 'Returnable Gate Pass',
+      rgp_without_bom: 'Create RGP (Without BOM)',
       zip_po: 'Zip Purcharge Orders',
       dori_po: 'Dori Purcharge Orders',
       bone_issue: 'Bone Issue',
@@ -2167,6 +2176,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                       <span className="sidebar-text">Returnable Gate Pass</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'rgp_without_bom' ? 'active' : ''}`} onClick={() => handleTabClick('rgp_without_bom')} title="Returnable Gate Pass (Without BOM)">
+                      <span className="sidebar-text">⚡ RGP (Without BOM)</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { handleTabClick('zip_po'); setPrefilledPoType('zip'); }} title="Zip Purcharge Orders">
                       <span className="sidebar-text">Zip Purcharge Orders</span>
                     </li>
@@ -2267,6 +2279,9 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                       <span className="sidebar-text">Returnable Gate Pass</span>
                     </li>
+                    <li className={`sidebar-subitem ${activeTab === 'rgp_without_bom' ? 'active' : ''}`} onClick={() => handleTabClick('rgp_without_bom')} title="Returnable Gate Pass (Without BOM)">
+                      <span className="sidebar-text">⚡ RGP (Without BOM)</span>
+                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
@@ -2308,6 +2323,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                   <Truck size={18} />
                   <span className="sidebar-text">Returnable Gate Pass</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'rgp_without_bom' ? 'active' : ''}`} onClick={() => handleTabClick('rgp_without_bom')} title="Returnable Gate Pass (Without BOM)">
+                  <Zap size={18} />
+                  <span className="sidebar-text">RGP (Without BOM)</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'zip_po' ? 'active' : ''}`} onClick={() => { handleTabClick('zip_po'); setPrefilledPoType('zip'); }} title="Zip Purcharge Orders">
                   <FileText size={18} />
@@ -2436,6 +2455,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'rgp' ? 'active' : ''}`} onClick={() => handleTabClick('rgp')} title="Returnable Gate Pass">
                   <Truck size={18} />
                   <span className="sidebar-text">Returnable Gate Pass</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'rgp_without_bom' ? 'active' : ''}`} onClick={() => handleTabClick('rgp_without_bom')} title="Returnable Gate Pass (Without BOM)">
+                  <Zap size={18} />
+                  <span className="sidebar-text">RGP (Without BOM)</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
@@ -3173,6 +3196,13 @@ export default function App() {
                   prefilledRgpData={prefilledRgpData}
                   setPrefilledRgpData={setPrefilledRgpData}
                   currentUser={currentUser}
+                />
+              )}
+
+              {activeTab === 'rgp_without_bom' && currentUser && (
+                <RgpWithoutBom
+                  currentUser={currentUser}
+                  onNavigate={handleTabClick}
                 />
               )}
 

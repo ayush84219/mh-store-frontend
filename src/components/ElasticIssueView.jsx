@@ -353,7 +353,7 @@ function SearchableMaterialSelect({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '4px', borderBottom: '1px solid #f1f5f9' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <span style={{ fontSize: '11px', fontWeight: '800', color: themeColor, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                STORE INVENTORY ACCESSORIES
+                {componentHint ? `${componentHint.toUpperCase()} INVENTORY` : 'STORE INVENTORY ACCESSORIES'}
               </span>
               <span style={{ fontSize: '10px', background: `${themeColor}15`, color: themeColor, padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
                 {materials.length} Items
@@ -784,6 +784,7 @@ export default function ElasticIssueView({
   const [boneWeightKg, setBoneWeightKg] = useState('2.50');
   const [boneWidth, setBoneWidth] = useState('1.5 Inch (Standard)');
   const [customBoneWidth, setCustomBoneWidth] = useState('');
+  const [boneEntryMode, setBoneEntryMode] = useState('choose'); // 'choose' | 'manual'
   const [withoutLotStyle, setWithoutLotStyle] = useState('Lower / Tracksuit');
   const [elasticSizeInput, setElasticSizeInput] = useState('50');
   const [elasticUnit, setElasticUnit] = useState('inch'); // 'inch' or 'cm'
@@ -1135,10 +1136,12 @@ export default function ElasticIssueView({
 
   // Filter materials to show Bone category
   const boneMaterials = useMemo(() => {
-    return (materials || []).filter(m =>
-      (m.category || '').toLowerCase().includes('bone') ||
-      (m.name || '').toLowerCase().includes('bone')
-    );
+    const matched = (materials || []).filter(m => {
+      const c = (m.category || '').toLowerCase();
+      const n = (m.name || '').toLowerCase();
+      return c.includes('bone') || n.includes('bone') || c.includes('pocketing') || n.includes('pocketing') || c.includes('piping') || n.includes('piping');
+    });
+    return matched.length > 0 ? matched : (materials || []);
   }, [materials]);
 
   // Active Selected Material Objects from Inventory
@@ -1304,6 +1307,10 @@ export default function ElasticIssueView({
   // Handler for selecting an Elastic item
   const handleSelectElasticMaterial = (id) => {
     setSelectedElasticMaterialId(id);
+    if (!id) {
+      setElasticMaterialName('');
+      return;
+    }
     const mat = elasticMaterials.find(m => String(m.id) === String(id));
     if (mat) {
       setElasticMaterialName(mat.name);
@@ -1317,6 +1324,10 @@ export default function ElasticIssueView({
   // Handler for selecting a Tape item
   const handleSelectTapeMaterial = (id) => {
     setSelectedTapeMaterialId(id);
+    if (!id) {
+      setTapeMaterialName('');
+      return;
+    }
     const mat = tapeMaterials.find(m => String(m.id) === String(id));
     if (mat) {
       setTapeMaterialName(mat.name);
@@ -1326,6 +1337,10 @@ export default function ElasticIssueView({
   // Handler for selecting a Bone item
   const handleSelectBoneMaterial = (id) => {
     setSelectedBoneMaterialId(id);
+    if (!id) {
+      setBoneMaterialName('');
+      return;
+    }
     const mat = boneMaterials.find(m => String(m.id) === String(id));
     if (mat) {
       setBoneMaterialName(mat.name);
@@ -2689,6 +2704,13 @@ export default function ElasticIssueView({
       return;
     }
 
+    // Lot Number is required for Elastic, Tape, Bone (only optional in Other Accessories)
+    if (withoutLotActive && materialMode !== 'other' && !enteredLotNo) {
+      const modeLabel = materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic';
+      showToast(`Lot Number is required for ${modeLabel} issue. Only Other Accessories can be issued without a Lot Number.`, 'error');
+      return;
+    }
+
     // MANDATORY WORKFLOW RULE: BOM MUST BE CREATED AND APPROVED (UNLESS WITHOUT BOM / W/O PO MODE)
     if (!withoutLotActive && bomStatus !== 'approved') {
       if (bomStatus === 'not_created') {
@@ -3642,24 +3664,34 @@ export default function ElasticIssueView({
                 </div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-                  {/* Lot Number (Optional) */}
+                  {/* Lot Number (Optional for Other Accessories, Required for Elastic / Tape / Bone) */}
                   <div>
                     <label style={{ fontSize: '11px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                      LOT NUMBER <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', textTransform: 'none' }}>(Optional)</span>
+                      LOT NUMBER {materialMode === 'other' ? (
+                        <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', textTransform: 'none' }}>(Optional)</span>
+                      ) : (
+                        <>
+                          <span style={{ color: '#ef4444' }}>*</span>{' '}
+                          <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: '700', textTransform: 'none' }}>
+                            (Required for {materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'})
+                          </span>
+                        </>
+                      )}
                     </label>
                     <input
                       type="text"
-                      placeholder="Enter Lot # (e.g. 62114) - Optional"
+                      placeholder={materialMode === 'other' ? "Enter Lot # (e.g. 62114) - Optional" : "Enter Lot # (e.g. 62114) * Required"}
                       value={searchLotInput}
                       onChange={(e) => setSearchLotInput(e.target.value)}
                       style={{
                         width: '100%', padding: '9px 12px', borderRadius: '8px',
-                        border: '1px solid #cbd5e1', background: '#ffffff',
+                        border: (withoutLotActive && materialMode !== 'other' && !searchLotInput) ? '1.5px solid #f87171' : '1px solid #cbd5e1',
+                        background: '#ffffff',
                         fontSize: '13px', fontWeight: '700', color: '#0f172a', boxSizing: 'border-box',
                         outline: 'none', transition: 'border-color 0.15s ease'
                       }}
                       onFocus={(e) => { e.target.style.borderColor = '#2563eb'; }}
-                      onBlur={(e) => { e.target.style.borderColor = '#cbd5e1'; }}
+                      onBlur={(e) => { e.target.style.borderColor = (withoutLotActive && materialMode !== 'other' && !searchLotInput) ? '#f87171' : '#cbd5e1'; }}
                     />
                   </div>
 
@@ -4379,7 +4411,7 @@ export default function ElasticIssueView({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>Material To Issue:</span>
                     <span style={{ fontSize: '11.5px', color: '#64748b' }}>
-                      {materialMode === 'bone' ? 'Bone Pocketing Selected • Direct Roll Issue (No Calculation Step Required)' : 'Select material type to configure consumption'}
+                      {materialMode === 'bone' ? 'Bone Pocketing Selected • Choose Material from Stock or Custom Entry' : 'Select material type to configure consumption'}
                     </span>
                   </div>
 
@@ -4537,64 +4569,409 @@ export default function ElasticIssueView({
                   </div>
                 </div>
 
-                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC, TAPE & OTHER ACCESSORIES) */}
-                {materialMode !== 'bone' && (
-                  <div style={{
-                    marginTop: '16px',
-                    padding: '18px 20px',
-                    borderRadius: '14px',
-                    background: '#ffffff',
-                    border: materialMode === 'other' ? '1.5px solid #7c3aed' : materialMode === 'tape' ? '1.5px solid #3b82f6' : '1.5px solid #059669',
-                    boxShadow: materialMode === 'other' ? '0 4px 14px rgba(124, 58, 237, 0.08)' : materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{
-                          width: '32px', height: '32px', borderRadius: '8px',
-                          background: materialMode === 'other'
-                            ? 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)'
-                            : materialMode === 'tape'
-                              ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC, TAPE, BONE & OTHER ACCESSORIES) */}
+                <div style={{
+                  marginTop: '16px',
+                  padding: '18px 20px',
+                  borderRadius: '14px',
+                  background: '#ffffff',
+                  border: materialMode === 'other' ? '1.5px solid #7c3aed' : materialMode === 'tape' ? '1.5px solid #3b82f6' : materialMode === 'bone' ? '1.5px solid #0284c7' : '1.5px solid #059669',
+                  boxShadow: materialMode === 'other' ? '0 4px 14px rgba(124, 58, 237, 0.08)' : materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : materialMode === 'bone' ? '0 4px 14px rgba(2, 132, 199, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <div style={{
+                        width: '32px', height: '32px', borderRadius: '8px',
+                        background: materialMode === 'other'
+                          ? 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)'
+                          : materialMode === 'tape'
+                            ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
+                            : materialMode === 'bone'
+                              ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
                               : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
-                        }}>
-                          {materialMode === 'other' ? <Package size={18} /> : <Calculator size={18} />}
-                        </div>
-                        <div>
-                          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
-                            {materialMode === 'other'
-                              ? 'Other Accessories Manual Allocation & Floor Issue'
-                              : materialMode === 'tape'
-                                ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)'
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
+                      }}>
+                        {materialMode === 'other' ? <Package size={18} /> : materialMode === 'bone' ? <Layers size={18} /> : <Calculator size={18} />}
+                      </div>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                          {materialMode === 'other'
+                            ? 'Other Accessories Manual Allocation & Floor Issue'
+                            : materialMode === 'tape'
+                              ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)'
+                              : materialMode === 'bone'
+                                ? 'Bone Pocketing Material Allocation & Floor Issue'
                                 : withoutLotActive
                                   ? `Elastic Without BOM Allocation `
                                   : 'Automated Backend Meter Conversion & Consumption'}
-                          </h4>
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>
-                            {materialMode === 'other'
-                              ? <span>Enter Material Name manually &bull; Enter Pieces &bull; Enter Total Material / Rolls To Issue</span>
-                              : materialMode === 'tape'
-                                ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
+                        </h4>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          {materialMode === 'other'
+                            ? <span>Enter Material Name manually &bull; Enter Pieces &bull; Enter Total Material / Rolls To Issue</span>
+                            : materialMode === 'tape'
+                              ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
+                              : materialMode === 'bone'
+                                ? <span>Direct Weight &amp; Roll Issue &bull; Choose bone material from inventory ({boneMaterials.length} items) or enter custom name</span>
                                 : withoutLotActive
                                   ? <span>Divisors: <strong>1 Inch ÷ 25</strong> &bull; <strong>1.5 Inch ÷ 23</strong> &bull; <strong>2 Inch ÷ 23</strong> &bull; Formula: <strong>Issue Pcs ÷ Inch Divisor = Total Rolls</strong></span>
                                   : <span>Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong> &bull; <strong>Tape: Pcs ÷ 45 = Rolls</strong></span>}
-                          </span>
-                        </div>
+                        </span>
                       </div>
                     </div>
+                  </div>
 
-                    {/* INPUT CONTROLS: ELASTIC, TAPE & OTHER (BASED ON SWITCH) */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
-                      gap: '16px',
-                      padding: '16px',
-                      borderRadius: '12px',
-                      background: '#f8fafc',
-                      border: '1px solid #e2e8f0'
-                    }}>
-                      {/* OTHER ACCESSORIES CARD */}
-                      {materialMode === 'other' && (
+                  {/* INPUT CONTROLS: ELASTIC, TAPE, BONE & OTHER (BASED ON SWITCH) */}
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
+                    gap: '16px',
+                    padding: '16px',
+                    borderRadius: '12px',
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0'
+                  }}>
+                    {/* BONE POCKETING SPECIFICATION CARD */}
+                    {materialMode === 'bone' && (
+                      <div style={{
+                        padding: '18px 20px',
+                        borderRadius: '14px',
+                        background: 'linear-gradient(180deg, #f0f9ff 0%, #e0f2fe 100%)',
+                        border: '2px solid #38bdf8',
+                        boxShadow: '0 4px 16px rgba(2, 132, 199, 0.09)'
+                      }}>
+                        {/* Card Header with Dual-Mode Toggle */}
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          marginBottom: '14px',
+                          flexWrap: 'wrap',
+                          gap: '10px'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
+                            <div style={{
+                              width: '32px', height: '32px', borderRadius: '8px',
+                              background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              color: '#ffffff', boxShadow: '0 2px 6px rgba(2, 132, 199, 0.35)'
+                            }}>
+                              <Package size={17} />
+                            </div>
+                            <div>
+                              <label style={{ fontSize: '13.5px', fontWeight: '800', color: '#0369a1', margin: 0, display: 'block', letterSpacing: '0.2px' }}>
+                                BONE / POCKETING SPECIFICATION
+                              </label>
+                              <span style={{ fontSize: '11px', color: '#0284c7' }}>
+                                Pick bone roll / pocketing from live stock or enter custom material name
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Dual Mode Toggle: Choose Material vs Add Manually */}
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            background: '#e0f2fe',
+                            padding: '3px',
+                            borderRadius: '8px',
+                            border: '1.5px solid #7dd3fc',
+                            gap: '3px'
+                          }}>
+                            <button
+                              type="button"
+                              onClick={() => setBoneEntryMode('choose')}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: boneEntryMode === 'choose' ? '#0284c7' : 'transparent',
+                                color: boneEntryMode === 'choose' ? '#ffffff' : '#0369a1',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                boxShadow: boneEntryMode === 'choose' ? '0 2px 6px rgba(2, 132, 199, 0.35)' : 'none',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <Box size={13} />
+                              📦 Choose Material ({boneMaterials.length})
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setBoneEntryMode('manual')}
+                              style={{
+                                padding: '6px 14px',
+                                borderRadius: '6px',
+                                border: 'none',
+                                background: boneEntryMode === 'manual' ? '#0284c7' : 'transparent',
+                                color: boneEntryMode === 'manual' ? '#ffffff' : '#0369a1',
+                                fontSize: '11.5px',
+                                fontWeight: '800',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                boxShadow: boneEntryMode === 'manual' ? '0 2px 6px rgba(2, 132, 199, 0.35)' : 'none',
+                                transition: 'all 0.15s ease'
+                              }}
+                            >
+                              <Edit2 size={13} />
+                              ✍️ + Add Manually
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2-Column Specification Controls */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                          gap: '14px',
+                          background: '#ffffff',
+                          padding: '16px',
+                          borderRadius: '10px',
+                          border: '1px solid #bae6fd',
+                          boxShadow: '0 2px 8px rgba(2, 132, 199, 0.04)'
+                        }}>
+                          {/* Col 1: Material Selection */}
+                          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                                  1. {boneEntryMode === 'choose' ? 'CHOOSE BONE MATERIAL FROM INVENTORY:' : 'ENTER BONE MATERIAL NAME:'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setBoneEntryMode(boneEntryMode === 'choose' ? 'manual' : 'choose')}
+                                  style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#0284c7',
+                                    fontSize: '10px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    textDecoration: 'underline',
+                                    padding: 0
+                                  }}
+                                >
+                                  {boneEntryMode === 'choose' ? '✍️ Type Custom Name' : '📋 Pick from Inventory'}
+                                </button>
+                              </div>
+
+                              {boneEntryMode === 'choose' ? (
+                                <div>
+                                  <div style={{ marginBottom: '10px' }}>
+                                    <SearchableMaterialSelect
+                                      materials={boneMaterials}
+                                      value={selectedBoneMaterialId}
+                                      onChange={handleSelectBoneMaterial}
+                                      placeholder="🔍 Search & Choose Bone Material (with Photos)..."
+                                      themeColor="#0284c7"
+                                      componentHint="Bone"
+                                      onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                      showCategoryFilter={false}
+                                    />
+                                  </div>
+
+                                  {/* Selected Material Card with Image Swatch */}
+                                  {currentBoneMaterial && (
+                                    <div style={{
+                                      display: 'flex',
+                                      gap: '10px',
+                                      alignItems: 'center',
+                                      background: '#f8fafc',
+                                      padding: '10px 12px',
+                                      borderRadius: '8px',
+                                      border: '1px solid #e2e8f0'
+                                    }}>
+                                      {(() => {
+                                        const rawImg = currentBoneMaterial.imageUrl || currentBoneMaterial.image || currentBoneMaterial.photo;
+                                        const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                        return cleanImg ? (
+                                          <img
+                                            src={cleanImg}
+                                            alt={currentBoneMaterial.name}
+                                            onClick={() => {
+                                              setPreviewPhotoUrl({
+                                                url: cleanImg,
+                                                title: currentBoneMaterial.name || boneMaterialName || 'Bone Material',
+                                                code: currentBoneMaterial.id || '',
+                                                stock: `${currentBoneMaterial.stock || 0} ${currentBoneMaterial.unit || 'Kg'}`,
+                                                location: currentBoneMaterial.location || ''
+                                              });
+                                            }}
+                                            style={{ width: '48px', height: '48px', borderRadius: '6px', objectFit: 'cover', border: '1px solid #cbd5e1', cursor: 'zoom-in' }}
+                                            title="Click to view & zoom material photo"
+                                          />
+                                        ) : (
+                                          <div style={{ width: '48px', height: '48px', borderRadius: '6px', background: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#0284c7' }}>
+                                            <Package size={22} />
+                                          </div>
+                                        );
+                                      })()}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: '13px', fontWeight: '800', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                          {currentBoneMaterial.name}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginTop: '3px', flexWrap: 'wrap' }}>
+                                          <span style={{ fontSize: '10.5px', background: '#e0f2fe', color: '#0369a1', padding: '1px 6px', borderRadius: '4px', fontWeight: '700' }}>
+                                            ID: {currentBoneMaterial.id}
+                                          </span>
+                                          <span style={{ fontSize: '10.5px', background: (parseFloat(currentBoneMaterial.stock) > 0 ? '#dcfce7' : '#fee2e2'), color: (parseFloat(currentBoneMaterial.stock) > 0 ? '#166534' : '#991b1b'), padding: '1px 6px', borderRadius: '4px', fontWeight: '800' }}>
+                                            Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Kg/Roll'}
+                                          </span>
+                                          {currentBoneMaterial.location && (
+                                            <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600' }}>
+                                              📍 {currentBoneMaterial.location}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div>
+                                  <input
+                                    type="text"
+                                    value={boneMaterialName}
+                                    onChange={(e) => setBoneMaterialName(e.target.value)}
+                                    placeholder="e.g. Bone Chinese 1.5 Inch (Beige)..."
+                                    style={{
+                                      width: '100%',
+                                      padding: '9px 12px',
+                                      borderRadius: '8px',
+                                      border: '1.5px solid #0284c7',
+                                      background: '#ffffff',
+                                      fontSize: '13px',
+                                      fontWeight: '700',
+                                      color: '#0f172a',
+                                      outline: 'none',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                  <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                                    Manually type the name of the bone / pocketing roll to issue.
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Col 2: Weight, Roll Count, and Summary */}
+                          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                            <div>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+                                2. ISSUE WEIGHT &amp; ROLL METRICS:
+                              </span>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                                <div>
+                                  <label style={{ fontSize: '10px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                                    TARGET WEIGHT (KG) <span style={{ color: '#ef4444' }}>*</span>
+                                  </label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0.01"
+                                    value={boneWeightKg}
+                                    onChange={(e) => setBoneWeightKg(e.target.value)}
+                                    placeholder="e.g. 2.50"
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      fontSize: '13px',
+                                      fontWeight: '800',
+                                      color: '#0369a1',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                </div>
+                                <div>
+                                  <label style={{ fontSize: '10px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                                    ROLL COUNT (ROLLS)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={boneRollCount}
+                                    onChange={(e) => setBoneRollCount(e.target.value ? Number(e.target.value) : 1)}
+                                    placeholder="1"
+                                    style={{
+                                      width: '100%',
+                                      padding: '8px 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      fontSize: '13px',
+                                      fontWeight: '800',
+                                      color: '#0369a1',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                </div>
+                              </div>
+
+                              <div style={{ marginTop: '10px' }}>
+                                <label style={{ fontSize: '10px', fontWeight: '700', color: '#475569', display: 'block', marginBottom: '3px' }}>
+                                  WIDTH / SPECIFICATION
+                                </label>
+                                <select
+                                  value={boneWidth}
+                                  onChange={(e) => setBoneWidth(e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '7px 10px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #cbd5e1',
+                                    fontSize: '12px',
+                                    fontWeight: '700',
+                                    color: '#0f172a',
+                                    background: '#ffffff',
+                                    boxSizing: 'border-box'
+                                  }}
+                                >
+                                  <option value="1.5 Inch (Standard)">1.5 Inch (Standard)</option>
+                                  <option value="1 Inch">1 Inch</option>
+                                  <option value="1.25 Inch">1.25 Inch</option>
+                                  <option value="1.75 Inch">1.75 Inch</option>
+                                  <option value="2 Inch">2 Inch</option>
+                                  <option value="Custom">Custom Width</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Real-time Summary Badge */}
+                            <div style={{
+                              marginTop: '12px',
+                              padding: '10px 12px',
+                              borderRadius: '8px',
+                              background: '#e0f2fe',
+                              border: '1px solid #bae6fd',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              flexWrap: 'wrap',
+                              gap: '6px'
+                            }}>
+                              <span style={{ fontSize: '11px', fontWeight: '800', color: '#0369a1' }}>
+                                📦 ISSUE SUMMARY:
+                              </span>
+                              <span style={{ fontSize: '12px', fontWeight: '900', color: '#0284c7' }}>
+                                {boneWeightKg || '2.50'} Kg &bull; {boneRollCount || 1} Roll(s) &bull; {boneMaterialName || 'Bone Pocketing'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* OTHER ACCESSORIES CARD */}
+                    {materialMode === 'other' && (
                         <div style={{
                           padding: '18px 20px',
                           borderRadius: '14px',
@@ -4688,180 +5065,6 @@ export default function ElasticIssueView({
                             </div>
                           </div>
 
-                          {/* QUICK COMPONENT CATEGORY SELECTOR BAR (Tape, Button, Lace, Dori, Zipper, etc.) */}
-                          <div style={{
-                            background: '#ffffff',
-                            padding: '10px 12px',
-                            borderRadius: '10px',
-                            border: '1px solid #e9d5ff',
-                            marginBottom: '14px',
-                            boxShadow: '0 1px 4px rgba(124, 58, 237, 0.04)'
-                          }}>
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              marginBottom: '8px',
-                              flexWrap: 'wrap',
-                              gap: '6px'
-                            }}>
-                              <span style={{ fontSize: '11px', fontWeight: '800', color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                <Sparkles size={13} color="#7c3aed" /> QUICK COMPONENT SELECTOR:
-                              </span>
-                              <span style={{ fontSize: '10.5px', color: '#64748b' }}>
-                                Click component to filter stock or set preset
-                              </span>
-                            </div>
-
-                            <div style={{
-                              display: 'flex',
-                              gap: '6px',
-                              flexWrap: 'wrap',
-                              alignItems: 'center'
-                            }}>
-                              {[
-                                { name: 'DORI', icon: '🧵', label: 'Dori / Cord', defaultUnit: 'Mtr', hint: 'in Mtr/Pcs' },
-                                { name: 'ELASTIC', icon: '⚡', label: 'Elastic', defaultUnit: 'Mtr', hint: 'in Mtr' },
-                                { name: 'ZIP', icon: '🤐', label: 'Zipper', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'LABEL', icon: '🏷️', label: 'Label / Tag', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'BUTTON', icon: '🔘', label: 'Button', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'TAPE', icon: '🎗️', label: 'Tape', defaultUnit: 'Mtr', hint: 'in Mtr/Roll' },
-                                { name: 'LACE', icon: '🕸️', label: 'Lace', defaultUnit: 'Mtr', hint: 'in Mtr' },
-                                { name: 'BADGE', icon: '🛡️', label: 'Badge / Patch', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'EYELET', icon: '⭕', label: 'Eyelet', defaultUnit: 'Pcs', hint: 'in Pcs' },
-                                { name: 'ALL', icon: '📦', label: 'All Inventory', defaultUnit: 'Roll', hint: (materials.length + ' Items') }
-                              ].map(chip => {
-                                const isActive = selectedOtherCategory.toUpperCase() === chip.name.toUpperCase() ||
-                                  (chip.name === 'DORI' && (selectedOtherCategory.toUpperCase() === 'DRAWCORD' || selectedOtherCategory.toUpperCase() === 'DORI')) ||
-                                  (chip.name === 'ZIP' && (selectedOtherCategory.toUpperCase() === 'ZIPPER' || selectedOtherCategory.toUpperCase() === 'ZIP'));
-                                return (
-                                  <button
-                                    key={chip.name}
-                                    type="button"
-                                    onClick={() => handleSelectComponentCategory(chip.name, chip.defaultUnit)}
-                                    style={{
-                                      padding: '5px 10px',
-                                      borderRadius: '7px',
-                                      border: isActive ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
-                                      background: isActive ? '#7c3aed' : '#faf5ff',
-                                      color: isActive ? '#ffffff' : '#581c87',
-                                      fontSize: '11px',
-                                      fontWeight: '800',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '5px',
-                                      boxShadow: isActive ? '0 2px 6px rgba(124, 58, 237, 0.3)' : 'none',
-                                      transition: 'all 0.15s ease'
-                                    }}
-                                  >
-                                    <span>{chip.icon}</span>
-                                    <span>{chip.label}</span>
-                                    <span style={{
-                                      fontSize: '9.5px',
-                                      opacity: isActive ? 0.9 : 0.65,
-                                      fontWeight: '700',
-                                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f3e8ff',
-                                      padding: '1px 4px',
-                                      borderRadius: '3px'
-                                    }}>
-                                      {chip.hint}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-
-                              {/* Dynamically render chips for custom types */}
-                              {customOtherComponentTypes.map(cType => {
-                                const isActive = selectedOtherCategory.toUpperCase() === cType.toUpperCase();
-                                return (
-                                  <button
-                                    key={cType}
-                                    type="button"
-                                    onClick={() => handleSelectComponentCategory(cType, 'Pcs')}
-                                    style={{
-                                      padding: '5px 10px',
-                                      borderRadius: '7px',
-                                      border: isActive ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
-                                      background: isActive ? '#7c3aed' : '#faf5ff',
-                                      color: isActive ? '#ffffff' : '#581c87',
-                                      fontSize: '11px',
-                                      fontWeight: '800',
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '5px',
-                                      boxShadow: isActive ? '0 2px 6px rgba(124, 58, 237, 0.3)' : 'none',
-                                      transition: 'all 0.15s ease'
-                                    }}
-                                  >
-                                    <span>✨</span>
-                                    <span>{cType}</span>
-                                    <span style={{
-                                      fontSize: '9.5px',
-                                      opacity: isActive ? 0.9 : 0.65,
-                                      fontWeight: '700',
-                                      background: isActive ? 'rgba(255,255,255,0.25)' : '#f3e8ff',
-                                      padding: '1px 4px',
-                                      borderRadius: '3px'
-                                    }}>
-                                      Custom
-                                    </span>
-                                  </button>
-                                );
-                              })}
-
-                              {/* Add Custom Type Button Chip */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setIsAddingCustomCategory(true);
-                                  setInlineCustomCategoryInput('');
-                                }}
-                                style={{
-                                  padding: '5px 11px',
-                                  borderRadius: '7px',
-                                  border: isAddingCustomCategory ? '1.5px solid #7c3aed' : '1px dashed #7c3aed',
-                                  background: isAddingCustomCategory ? '#f3e8ff' : '#ffffff',
-                                  color: '#7c3aed',
-                                  fontSize: '11px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                                title="Add a custom category type to list"
-                              >
-                                <Edit2 size={12} />
-                                + Type Custom
-                              </button>
-
-                              {/* Manage Types Chip */}
-                              {customOtherComponentTypes.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setShowManageOtherTypesModal(true)}
-                                  style={{
-                                    padding: '5px 9px',
-                                    borderRadius: '7px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#f8fafc',
-                                    color: '#475569',
-                                    fontSize: '10.5px',
-                                    fontWeight: '700',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '3px'
-                                  }}
-                                  title="Manage Custom Component Types"
-                                >
-                                  <span>⚙️ Manage ({customOtherComponentTypes.length})</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
 
                           {/* 2-Column Specification Controls */}
                           <div style={{
@@ -5938,30 +6141,17 @@ export default function ElasticIssueView({
 
                                           {/* Middle: Map to choose material dropdown (Elastic category only) */}
                                           <div style={{ marginBottom: '6px' }}>
-                                            <select
+                                            <SearchableMaterialSelect
+                                              materials={elasticMaterials}
                                               value={selectedElasticMaterialId}
-                                              onChange={(e) => handleSelectElasticMaterial(e.target.value)}
-                                              title="Choose material from inventory (Elastic items only)"
-                                              style={{
-                                                width: '100%',
-                                                padding: '5px 8px',
-                                                borderRadius: '6px',
-                                                border: '1px solid #cbd5e1',
-                                                background: '#ffffff',
-                                                fontSize: '11px',
-                                                fontWeight: '700',
-                                                color: '#0f172a',
-                                                outline: 'none',
-                                                cursor: 'pointer'
-                                              }}
-                                            >
-                                              <option value="">— Map to Elastic Item ({elasticMaterials.length}) —</option>
-                                              {elasticMaterials.map(m => (
-                                                <option key={m.id} value={m.id}>
-                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
-                                                </option>
-                                              ))}
-                                            </select>
+                                              onChange={handleSelectElasticMaterial}
+                                              placeholder="🔍 Map Elastic Item (with Photos)..."
+                                              themeColor="#059669"
+                                              componentHint="Elastic"
+                                              compact={true}
+                                              showCategoryFilter={false}
+                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                            />
                                           </div>
 
                                           {/* Bottom: All material details according to issue */}
@@ -6179,30 +6369,17 @@ export default function ElasticIssueView({
 
                                           {/* Middle: Map to choose material dropdown (Tape category only) */}
                                           <div style={{ marginBottom: '6px' }}>
-                                            <select
+                                            <SearchableMaterialSelect
+                                              materials={tapeMaterials}
                                               value={selectedTapeMaterialId}
-                                              onChange={(e) => handleSelectTapeMaterial(e.target.value)}
-                                              title="Choose material from inventory (Tape items only)"
-                                              style={{
-                                                width: '100%',
-                                                padding: '5px 8px',
-                                                borderRadius: '6px',
-                                                border: '1px solid #cbd5e1',
-                                                background: '#ffffff',
-                                                fontSize: '11px',
-                                                fontWeight: '700',
-                                                color: '#0f172a',
-                                                outline: 'none',
-                                                cursor: 'pointer'
-                                              }}
-                                            >
-                                              <option value="">— Map to Tape Item ({tapeMaterials.length}) —</option>
-                                              {tapeMaterials.map(m => (
-                                                <option key={m.id} value={m.id}>
-                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Mtr'} • {m.location || 'Store'}
-                                                </option>
-                                              ))}
-                                            </select>
+                                              onChange={handleSelectTapeMaterial}
+                                              placeholder="🔍 Map Tape Item (with Photos)..."
+                                              themeColor="#2563eb"
+                                              componentHint="Tape"
+                                              compact={true}
+                                              showCategoryFilter={false}
+                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                            />
                                           </div>
 
                                           {/* Bottom: All material details according to issue */}
@@ -6411,30 +6588,17 @@ export default function ElasticIssueView({
 
                                           {/* Middle: Map to choose material dropdown (Bone category only) */}
                                           <div style={{ marginBottom: '6px' }}>
-                                            <select
+                                            <SearchableMaterialSelect
+                                              materials={boneMaterials}
                                               value={selectedBoneMaterialId}
-                                              onChange={(e) => handleSelectBoneMaterial(e.target.value)}
-                                              title="Choose material from inventory (Bone items only)"
-                                              style={{
-                                                width: '100%',
-                                                padding: '5px 8px',
-                                                borderRadius: '6px',
-                                                border: '1px solid #cbd5e1',
-                                                background: '#ffffff',
-                                                fontSize: '11px',
-                                                fontWeight: '700',
-                                                color: '#0f172a',
-                                                outline: 'none',
-                                                cursor: 'pointer'
-                                              }}
-                                            >
-                                              <option value="">— Map to Bone Item ({boneMaterials.length}) —</option>
-                                              {boneMaterials.map(m => (
-                                                <option key={m.id} value={m.id}>
-                                                  {m.name} [{m.id}] • Stock: {m.stock} {m.unit || 'Roll'} • {m.location || 'Store'}
-                                                </option>
-                                              ))}
-                                            </select>
+                                              onChange={handleSelectBoneMaterial}
+                                              placeholder="🔍 Map Bone Item (with Photos)..."
+                                              themeColor="#0284c7"
+                                              componentHint="Bone"
+                                              compact={true}
+                                              showCategoryFilter={false}
+                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                            />
                                           </div>
 
                                           {/* Bottom: All material details according to issue */}
@@ -6854,7 +7018,6 @@ export default function ElasticIssueView({
                       </div>
                     </div>
                   </div>
-                )}
 
                 {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
                 <div style={{
