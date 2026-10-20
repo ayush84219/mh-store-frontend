@@ -3,39 +3,46 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import QRCode from "qrcode";
 import SmartSelectWithManual from "./SmartSelectWithManual";
 
 // MUST be your deployed /exec URL
 export const WEB_APP_URL =
   import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || "";
 
-// Enhanced QR code generation with multiple fallbacks
+// Enhanced local + offline QR code generator (Fast, zero network dependency)
 export const generateQRCode = async (url) => {
-  const services = [
-    `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`,
-    `https://quickchart.io/qr?text=${encodeURIComponent(url)}&size=300&margin=4`,
-    `https://chart.googleapis.com/chart?chs=300x300&cht=qr&chl=${encodeURIComponent(url)}&chld=L|1`
-  ];
+  if (!url) return null;
+  try {
+    return await QRCode.toDataURL(String(url), {
+      width: 300,
+      margin: 1,
+      color: { dark: "#000000", light: "#ffffff" }
+    });
+  } catch (err) {
+    console.warn("Local QRCode error, falling back to network services:", err);
+    const services = [
+      `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`,
+      `https://quickchart.io/qr?text=${encodeURIComponent(url)}&size=300&margin=4`
+    ];
 
-  for (let serviceUrl of services) {
-    try {
-      console.log(`Trying QR service: ${serviceUrl}`);
-      const response = await fetch(serviceUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result);
-          reader.readAsDataURL(blob);
-        });
+    for (let serviceUrl of services) {
+      try {
+        const response = await fetch(serviceUrl);
+        if (response.ok) {
+          const blob = await response.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch (e) {
+        continue;
       }
-    } catch (e) {
-      console.warn(`QR service failed: ${serviceUrl}`, e);
-      continue;
     }
+    return null;
   }
-
-  throw new Error('All QR code services are currently unavailable');
 };
 
 // Convert image URL to data URL with better error handling
@@ -109,13 +116,14 @@ const AUTHORIZED_BY_OPTIONS = [
 ];
 
 // Enhanced RGP PDF Generator - With Prepared By & Authorized By
+// Enhanced RGP PDF Generator - Multi-page, robust columns, and Scanners & Signatures on EVERY page
 export function generateRgpPDF({ payload, options = {} }) {
-  const { qrEntryImage = null, qrReturnImage = null, qrGateImage = null, qrSide = 96 } = options;
+  const { qrEntryImage = null, qrReturnImage = null, qrGateImage = null, qrSide = 78 } = options;
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   doc.setFont("helvetica", "normal");
   doc.setLineWidth(0.6);
 
-  const page = { w: doc.internal.pageSize.getWidth(), h: doc.internal.pageSize.getHeight(), m: 40, gap: 12 };
+  const page = { w: doc.internal.pageSize.getWidth(), h: doc.internal.pageSize.getHeight(), m: 32, gap: 10 };
   const setSize = (s) => doc.setFontSize(s);
   const bold = () => doc.setFont(undefined, "bold");
   const normal = () => doc.setFont(undefined, "normal");
@@ -123,10 +131,18 @@ export function generateRgpPDF({ payload, options = {} }) {
   const rtext = (t, x, y, opt = {}) => text(t, x, y, { align: "right", ...opt });
   const line = (x1, y1, x2, y2) => doc.line(x1, y1, x2, y2);
   const wrap = (str, w) => doc.splitTextToSize(String(str || ""), w);
-  const roundRect = (x, y, w, h, r = 7, style = "S") =>
+  const roundRect = (x, y, w, h, r = 6, style = "S") =>
     doc.roundedRect ? doc.roundedRect(x, y, w, h, r, r, style) : doc.rect(x, y, w, h, style);
 
-  // Check if this RGP pass or its materials were created manually
+  // Check if this RGP pass or its materials were created manually or without BOM
+  const isWithoutBom = Boolean(
+    payload.isWithoutBom === true ||
+    payload.rgpMode === "without_bom" ||
+    payload.mode === "without_bom" ||
+    payload.withoutBom === true ||
+    (payload.entries && payload.entries.length > 0 && payload.entries.some(e => e.isWithoutBom))
+  );
+
   const isManual = Boolean(
     payload.isManual === true ||
     payload.rgpMode === "manual" ||
@@ -138,48 +154,37 @@ export function generateRgpPDF({ payload, options = {} }) {
     }))
   );
 
-  const headingText = isManual ? "RETURNABLE GATE PASS (MANUAL)" : "RETURNABLE GATE PASS";
+  const headingText = isWithoutBom
+    ? "RETURNABLE GATE PASS (WITHOUT BOM)"
+    : (isManual ? "RETURNABLE GATE PASS (MANUAL)" : "RETURNABLE GATE PASS");
 
-  const drawFrame = () => roundRect(16, 16, page.w - 32, page.h - 32, 8, "S");
+  const SIG_H = 68;
+  const QR_TITLE_H = 15;
+  const QR_SIDE = qrSide || 74;
+  const BOTTOM_QR_H = 100;
+  const sigBottom = page.h - 38; // ~804 pt (safe margin from page bottom)
+  const sigTop = sigBottom - SIG_H; // ~736 pt
+  const blockBottom = sigTop - 8; // ~728 pt
+  const blockTop = blockBottom - BOTTOM_QR_H; // ~628 pt
+  const maxTableY = blockTop - 12; // ~616 pt
+
   let y = page.m;
 
-  const SIG_H = 92;
-  const QR_TITLE_H = 18;
-  const QR_SIDE = qrSide || 96;
-  const BOTTOM_QR_H = QR_TITLE_H + 8 + QR_SIDE + 10;
-  const RESERVED_BOTTOM = 18 + 8 + BOTTOM_QR_H + 12 + SIG_H + 8;
-
-  const needSpace = (h, withHeader = false) => {
-    const usableBottom = page.h - page.m - RESERVED_BOTTOM;
-    if (y + h > usableBottom) {
-      doc.addPage();
-      drawFrame();
-      y = page.m;
-      if (withHeader) {
-        setSize(13);
-        bold();
-        text(headingText, page.m, y);
-        normal();
-        line(page.m, y + 6, page.w - page.m, y + 6);
-        y += 18;
-      }
-      return true;
-    }
-    return false;
-  };
-
-  drawFrame();
-  setSize(20);
+  // Title on Page 1
+  setSize(17);
   bold();
-  text(headingText, page.w / 2, y, { align: "center" });
+  text(headingText, page.w / 2, y + 14, { align: "center" });
   normal();
-  line(page.m, y + 6, page.w - page.m, y + 6);
-  y += 26;
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(1.0);
+  line(page.m, y + 20, page.w - page.m, y + 20);
+  doc.setLineWidth(0.5);
+  y += 28;
 
-  // TOP ROW
+  // TOP ROW on Page 1
   (function topRow() {
     const innerW = page.w - 2 * page.m;
-    const rRGP = 0.40, rParty = 0.25, rGate = 0.35;
+    const rRGP = 0.38, rParty = 0.28, rGate = 0.34;
     const wAvail = innerW - page.gap * 2;
     const wRGP = Math.floor(wAvail * rRGP);
     const wParty = Math.floor(wAvail * rParty);
@@ -189,7 +194,7 @@ export function generateRgpPDF({ payload, options = {} }) {
     const x2 = x1 + wRGP + page.gap;
     const x3 = x2 + wParty + page.gap;
 
-    const metaPad = 12, lblW = 92;
+    const metaPad = 10, lblW = 76;
     const mRows = [
       ["RGP #", (payload.rgpNo || "").replace(/\s+/g, "")],
       ["Date", payload.date || ""],
@@ -197,9 +202,9 @@ export function generateRgpPDF({ payload, options = {} }) {
       ...(payload.expectedReturnDate ? [["Exp. Return", payload.expectedReturnDate]] : []),
       ...(payload.vehicleNo ? [["Vehicle No", payload.vehicleNo]] : []),
     ];
-    const metaH = 22 + mRows.length * 16 + 16;
+    const metaH = 18 + mRows.length * 15 + 8;
 
-    const partyPad = 12;
+    const partyPad = 10;
     const partyBodyW = wParty - partyPad * 2;
     const partyLines = [
       payload.vendor || "",
@@ -207,47 +212,78 @@ export function generateRgpPDF({ payload, options = {} }) {
       ...(payload.partyPhone ? [`Phone: ${payload.partyPhone}`] : []),
       ...(payload.partyContact ? [`Contact: ${payload.partyContact}`] : []),
     ];
-    const partyH = 22 + partyLines.filter(Boolean).length * 12 + 16;
+    const partyH = 18 + partyLines.filter(Boolean).length * 12 + 8;
 
-    const gateH = QR_TITLE_H + 8 + QR_SIDE + 10;
-    const blockH = Math.max(metaH, partyH, gateH);
-    needSpace(blockH);
+    const gateH = QR_TITLE_H + 5 + QR_SIDE + 8;
+    const blockH = Math.max(metaH, partyH, gateH, 106);
 
-    roundRect(x1, y, wRGP, blockH, 7, "S");
-    setSize(10);
-    bold(); text("RGP DETAILS", x1 + 12, y + 14); normal();
-    line(x1 + 12, y + 18, x1 + wRGP - 12, y + 18);
-    let my = y + 30;
+    // Box 1: RGP Details - Crisp Black and White
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x1, y, wRGP, blockH, 5, "S");
+    setSize(9.5); bold();
+    text("RGP DETAILS", x1 + 10, y + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x1 + 10, y + 17, x1 + wRGP - 10, y + 17);
+    let my = y + 28;
+    setSize(8.5);
     mRows.forEach(([label, value]) => {
       bold(); text(`${label}:`, x1 + metaPad, my);
       normal(); text(value || "", x1 + metaPad + lblW, my, { maxWidth: wRGP - metaPad * 2 - lblW });
-      my += 16;
+      my += 15;
     });
 
-    roundRect(x2, y, wParty, blockH, 7, "S");
-    setSize(10);
-    bold(); text("PARTY / VENDOR", x2 + 12, y + 14); normal();
-    line(x2 + 12, y + 18, x2 + wParty - 12, y + 18);
-    let py = y + 30;
-    partyLines.forEach((ln) => { if (ln) { text(ln, x2 + partyPad, py); py += 12; } });
+    // Box 2: Party / Vendor - Crisp Black and White
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x2, y, wParty, blockH, 5, "S");
+    setSize(9.5); bold();
+    text("PARTY / VENDOR", x2 + 10, y + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x2 + 10, y + 17, x2 + wParty - 10, y + 17);
+    let py = y + 28;
+    setSize(8.5);
+    partyLines.forEach((ln, idx) => {
+      if (ln) {
+        if (idx === 0) bold(); else normal();
+        text(ln, x2 + partyPad, py, { maxWidth: partyBodyW });
+        py += 12;
+      }
+    });
+    normal();
 
-    roundRect(x3, y, wGate, blockH, 7, "S");
-    setSize(10);
-    bold(); text("MATERIAL OUT — SCAN", x3 + 12, y + 14); normal();
-    line(x3 + 12, y + 18, x3 + wGate - 12, y + 18);
+    // Box 3: Material Out Scan - Crisp Black and White
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x3, y, wGate, blockH, 5, "S");
+    setSize(9.5); bold();
+    text("MATERIAL OUT — SCAN", x3 + 10, y + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x3 + 10, y + 17, x3 + wGate - 10, y + 17);
     if (qrEntryImage) {
-      const qx = x3 + 12 + (wGate - 24 - QR_SIDE) / 2;
-      const qy = y + 18 + 10;
+      const qx = x3 + (wGate - QR_SIDE) / 2;
+      const qy = y + 20;
       try { doc.addImage(qrEntryImage, "PNG", qx, qy, QR_SIDE, QR_SIDE); } catch { }
+    } else {
+      const qx = x3 + (wGate - QR_SIDE) / 2;
+      const qy = y + 20;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
+      doc.rect(qx, qy, QR_SIDE, QR_SIDE, "S");
+      setSize(8); normal();
+      text("Scan Out at Gate", x3 + wGate / 2, y + 56, { align: "center" });
     }
 
-    y += blockH + 16;
+    y += blockH + 12;
   })();
 
-  // ITEMS TABLE
+  // Table & Continuation Layout
   (function drawTable() {
-    const x0 = page.m, innerW = page.w - 2 * page.m;
-    setSize(10); normal();
+    const x0 = page.m;
+    const innerW = page.w - 2 * page.m;
 
     const rows = (payload.entries || []).map((r, i) => {
       const qty1 = (+r.qty1 || 0).toLocaleString();
@@ -263,154 +299,299 @@ export function generateRgpPDF({ payload, options = {} }) {
       };
     });
 
-    const measureMax = (arr, key) => arr.reduce((m, r) => Math.max(m, doc.getTextWidth(String(r[key] || ""))), 0);
+    const totalRowsCount = rows.length;
+    let currentPageNum = 1;
 
-    const MIN = {
-      line: 28, lotNo: 50, department: 80, description: 120,
-      purpose: 70, uom: 45, qty1: 40, qty2: 40, totalQty: 45
-    };
+    // Dynamically calculate row height so table comfortably covers available space
+    // instead of leaving a large blank void on the page
+    const headerH = 20;
+    const totalH = 22;
+    const availableRowSpace = maxTableY - y - headerH - totalH;
+    const idealRowH = Math.floor((availableRowSpace - 8) / Math.max(1, totalRowsCount));
+    // For 1-8 rows: row height 32-38 pt (generous, elegant, covers space)
+    // For 9-14 rows: row height 26-30 pt (all 14 rows fit cleanly on Page 1)
+    // For 15+ rows: row height 21-23 pt (compact, paginates naturally)
+    const baseRowH = Math.min(38, Math.max(21, idealRowH));
 
-    const qty1W = Math.max(MIN.qty1, measureMax(rows, "_qty1Str") + 14);
-    const qty2W = Math.max(MIN.qty2, measureMax(rows, "_qty2Str") + 14);
-    const totalQtyW = Math.max(MIN.totalQty, measureMax(rows, "_totalQtyStr") + 16);
-    const lotNoW = Math.max(MIN.lotNo, measureMax(rows, "lotNo") + 10);
-
-    const lineW = MIN.line, depW = MIN.department, purposeW = MIN.purpose, uomW = MIN.uom;
-    const used = lineW + lotNoW + depW + purposeW + uomW + qty1W + qty2W + totalQtyW;
-    const descW = Math.max(MIN.description, innerW - used);
-    const diff = innerW - (used + descW);
-    const adjTotalQtyW = totalQtyW + diff;
+    const lineW = 22;
+    const lotNoW = 54;
+    const depW = 68;
+    const purposeW = 60;
+    const uomW = 32;
+    const qty1W = 40;
+    const qty2W = 38;
+    const totalQtyW = 45;
+    const fixedUsed = lineW + lotNoW + depW + purposeW + uomW + qty1W + qty2W + totalQtyW;
+    const descW = innerW - fixedUsed;
 
     const cols = [
-      { key: "line", title: "#", w: lineW, align: "right" },
-      { key: "lotNo", title: "LOT NO.", w: lotNoW },
-      { key: "department", title: "DEPARTMENT", w: depW },
-      { key: "description", title: "DESCRIPTION", w: descW },
-      { key: "purpose", title: "PURPOSE", w: purposeW },
+      { key: "line", title: "#", w: lineW, align: "center" },
+      { key: "lotNo", title: "LOT NO.", w: lotNoW, align: "left" },
+      { key: "department", title: "DEPARTMENT", w: depW, align: "left" },
+      { key: "description", title: "DESCRIPTION", w: descW, align: "left" },
+      { key: "purpose", title: "PURPOSE", w: purposeW, align: "left" },
       { key: "uom", title: "UOM", w: uomW, align: "center" },
       { key: "qty1", title: "QTY 1", w: qty1W, align: "right" },
       { key: "qty2", title: "BAGS", w: qty2W, align: "right" },
-      { key: "totalQty", title: "T.QTY", w: adjTotalQtyW, align: "right" },
+      { key: "totalQty", title: "T.QTY", w: totalQtyW, align: "right" },
     ];
-    const xs = [x0]; cols.forEach((c, i) => xs.push(xs[i] + c.w));
-
-    const headerH = 26, baseH = 20;
+    const xs = [x0];
+    cols.forEach((c, i) => xs.push(xs[i] + c.w));
 
     const drawHeader = () => {
-      needSpace(headerH, true);
-      doc.rect(x0, y, innerW, headerH);
-      setSize(10); bold();
+      // Crisp light gray background with solid black border for B&W printing
+      doc.setFillColor(235, 235, 235);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.75);
+      doc.rect(x0, y, innerW, headerH, "FD");
+      setSize(8);
+      bold();
       cols.forEach((c, i) => {
-        const cx = c.align === "right" ? xs[i + 1] - 6 : c.align === "center" ? (xs[i] + xs[i + 1]) / 2 : xs[i] + 6;
+        const cx = c.align === "right"
+          ? xs[i + 1] - 4
+          : c.align === "center"
+            ? (xs[i] + xs[i + 1]) / 2
+            : xs[i] + 4;
         const opt = c.align === "right" ? { align: "right" } : c.align === "center" ? { align: "center" } : {};
-        text(c.title, cx, y + 17, opt);
-        if (i > 0) line(xs[i], y, xs[i], y + headerH);
+        text(c.title, cx, y + 13, opt);
+        if (i > 0) {
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.5);
+          line(xs[i], y, xs[i], y + headerH);
+        }
       });
-      normal(); y += headerH;
+      normal();
+      doc.setDrawColor(0, 0, 0);
+    };
+
+    const drawContinuationHeader = () => {
+      setSize(13);
+      bold();
+      text(headingText, page.m, page.m + 13);
+      setSize(8.5);
+      normal();
+      const rgpNoStr = (payload.rgpNo || "").replace(/\s+/g, "");
+      const sub = `RGP #: ${rgpNoStr}   |   Date: ${payload.date || ""}   |   Party: ${payload.vendor || ""}`;
+      rtext(sub, page.w - page.m, page.m + 13);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.75);
+      line(page.m, page.m + 18, page.w - page.m, page.m + 18);
+      y = page.m + 25;
     };
 
     const drawRow = (r, idx) => {
-      const descLines = doc.splitTextToSize(r.itemDesc || r.description || "", cols[3].w - 8);
-      const purposeLines = doc.splitTextToSize(r.purpose || "", cols[4].w - 8);
-      const rowH = Math.max(baseH, Math.max(descLines.length, purposeLines.length) * 12 + 8);
-      needSpace(rowH, true);
-      doc.rect(x0, y, innerW, rowH);
-      for (let i = 1; i < xs.length - 1; i++) line(xs[i], y, xs[i], y + rowH);
-      const yy = y + 12;
+      const descText = String(r.itemDesc || r.description || "").trim();
+      const purposeText = String(r.purpose || r.department || "").trim();
 
-      rtext(r._i, xs[1] - 6, yy);
-      text(r.lotNo || "", xs[1] + 6, yy);
-      text(r.department || "", xs[2] + 6, yy);
-      descLines.forEach((ln, j) => text(ln, xs[3] + 6, yy + j * 12));
-      purposeLines.forEach((ln, j) => text(ln, xs[4] + 6, yy + j * 12));
-      text(r.uom || "", (xs[5] + xs[6]) / 2, yy, { align: "center" });
-      rtext(r._qty1Str, xs[7] - 6, yy);
-      rtext(r._qty2Str, xs[8] - 6, yy);
-      rtext(r._totalQtyStr, xs[9] - 6, yy);
+      const descLines = doc.splitTextToSize(descText, cols[3].w - 8);
+      const purposeLines = doc.splitTextToSize(purposeText, cols[4].w - 8);
+      const maxLines = Math.max(1, descLines.length, purposeLines.length);
+      const minTextH = maxLines * 11 + 8;
+      const rowH = Math.max(baseRowH, minTextH);
+
+      const shouldBreak = y + rowH > maxTableY;
+
+      if (shouldBreak) {
+        doc.addPage();
+        currentPageNum++;
+        drawContinuationHeader();
+        drawHeader();
+        y += headerH;
+      }
+
+      // Crisp pure white background with solid black border for B&W printing
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
+      doc.rect(x0, y, innerW, rowH, "FD");
+
+      // Solid black vertical column divider lines
+      for (let i = 1; i < xs.length - 1; i++) {
+        line(xs[i], y, xs[i], y + rowH);
+      }
+
+      // Vertically center text in the row
+      const textBlockH = maxLines * 11;
+      const yy = y + Math.max(11, Math.floor((rowH - textBlockH) / 2) + 9);
+      const fontSize = rowH >= 26 ? 9 : 8.5;
+      setSize(fontSize);
+      normal();
+
+      text(String(r._i), (xs[0] + xs[1]) / 2, yy, { align: "center", maxWidth: cols[0].w - 2 });
+      text(r.lotNo || "", xs[1] + 4, yy, { maxWidth: cols[1].w - 6 });
+      text(r.department || "", xs[2] + 4, yy, { maxWidth: cols[2].w - 6 });
+      descLines.forEach((ln, j) => {
+        text(ln, xs[3] + 4, yy + j * 11, { maxWidth: cols[3].w - 8 });
+      });
+      purposeLines.forEach((ln, j) => {
+        text(ln, xs[4] + 4, yy + j * 11, { maxWidth: cols[4].w - 8 });
+      });
+      text(r.uom || "", (xs[5] + xs[6]) / 2, yy, { align: "center", maxWidth: cols[5].w - 4 });
+      rtext(r._qty1Str, xs[7] - 4, yy, { maxWidth: cols[6].w - 6 });
+      rtext(r._qty2Str, xs[8] - 4, yy, { maxWidth: cols[7].w - 6 });
+      bold();
+      rtext(r._totalQtyStr, xs[9] - 4, yy, { maxWidth: cols[8].w - 6 });
+      normal();
+
       y += rowH;
       return r._totalQty;
     };
 
     drawHeader();
-    let totalQuantity = 0;
-    rows.forEach((r, i) => { totalQuantity += drawRow(r, i); });
+    y += headerH;
 
-    const totalH = 26;
-    needSpace(totalH, true);
-    doc.rect(x0, y, innerW, totalH);
+    let totalQuantity = 0;
+    rows.forEach((r, i) => {
+      totalQuantity += drawRow(r, i);
+    });
+
+    if (y + totalH > maxTableY) {
+      doc.addPage();
+      drawContinuationHeader();
+      drawHeader();
+      y += headerH;
+    }
+    doc.setFillColor(235, 235, 235);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    doc.rect(x0, y, innerW, totalH, "FD");
     line(xs[xs.length - 2], y, xs[xs.length - 2], y + totalH);
-    setSize(11); bold();
-    text("TOTAL QUANTITY", x0 + 8, y + 17);
-    rtext(totalQuantity.toLocaleString(), xs[9] - 8, y + 17);
-    normal(); y += totalH;
+    setSize(9.5);
+    bold();
+    text("TOTAL QUANTITY", x0 + 8, y + 15);
+    rtext(totalQuantity.toLocaleString(), xs[9] - 4, y + 15);
+    normal();
+    y += totalH;
   })();
 
-  // BOTTOM BLOCKS with Prepared By & Authorized By
-  (function bottomBlocks() {
+  // BOTTOM BLOCKS on EVERY PAGE - Crisp Solid Black and White
+  const drawBottomBlocks = (pageIndex, totalPages) => {
     const innerW = page.w - 2 * page.m;
     const colW = (innerW - page.gap * 2) / 3;
-    const x1 = page.m, x2 = x1 + colW + page.gap, x3 = x2 + colW + page.gap;
+    const x1 = page.m;
+    const x2 = x1 + colW + page.gap;
+    const x3 = x2 + colW + page.gap;
 
-    const sigTop = page.h - page.m - SIG_H;
-    const blockTop = sigTop - 12 - BOTTOM_QR_H;
-
-    // Left box: MATERIAL RETURN SCAN
-    roundRect(x1, blockTop, colW, BOTTOM_QR_H, 7, "S");
-    setSize(10);
-    bold(); text("MATERIAL RETURN", x1 + 10, blockTop + 14); normal();
-    line(x1 + 10, blockTop + 18, x1 + colW - 10, blockTop + 18);
+    // Left box: MATERIAL RETURN SCAN - Solid Black
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x1, blockTop, colW, BOTTOM_QR_H, 5, "S");
+    setSize(9.5);
+    bold();
+    text("MATERIAL RETURN", x1 + 8, blockTop + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x1 + 8, blockTop + 17, x1 + colW - 8, blockTop + 17);
     if (qrReturnImage) {
-      const qx = x1 + 10 + (colW - 20 - QR_SIDE) / 2;
-      const qy = blockTop + 18 + 10;
+      const qx = x1 + (colW - QR_SIDE) / 2;
+      const qy = blockTop + 20;
       try { doc.addImage(qrReturnImage, "PNG", qx, qy, QR_SIDE, QR_SIDE); } catch { }
+    } else {
+      const qx = x1 + (colW - QR_SIDE) / 2;
+      const qy = blockTop + 20;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
+      doc.rect(qx, qy, QR_SIDE, QR_SIDE, "S");
+      setSize(8);
+      normal();
+      text("Scan on Return", x1 + colW / 2, blockTop + 56, { align: "center" });
     }
 
-    // Center box: GATE ENTRY SCAN
-    roundRect(x2, blockTop, colW, BOTTOM_QR_H, 7, "S");
-    setSize(10);
-    bold(); text("GATE ENTRY", x2 + 10, blockTop + 14); normal();
-    line(x2 + 10, blockTop + 18, x2 + colW - 10, blockTop + 18);
+    // Center box: GATE ENTRY SCAN - Solid Black
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x2, blockTop, colW, BOTTOM_QR_H, 5, "S");
+    setSize(9.5);
+    bold();
+    text("GATE ENTRY", x2 + 8, blockTop + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x2 + 8, blockTop + 17, x2 + colW - 8, blockTop + 17);
     if (qrGateImage) {
-      const qx = x2 + 10 + (colW - 20 - QR_SIDE) / 2;
-      const qy = blockTop + 18 + 10;
+      const qx = x2 + (colW - QR_SIDE) / 2;
+      const qy = blockTop + 20;
       try { doc.addImage(qrGateImage, "PNG", qx, qy, QR_SIDE, QR_SIDE); } catch { }
+    } else {
+      const qx = x2 + (colW - QR_SIDE) / 2;
+      const qy = blockTop + 20;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
+      doc.rect(qx, qy, QR_SIDE, QR_SIDE, "S");
+      setSize(8);
+      normal();
+      text("Scan at Gate", x2 + colW / 2, blockTop + 56, { align: "center" });
     }
 
-    // Right box: REMARKS
-    roundRect(x3, blockTop, colW, BOTTOM_QR_H, 7, "S");
-    setSize(10);
-    bold(); text("REMARKS", x3 + 10, blockTop + 14); normal();
-    line(x3 + 10, blockTop + 18, x3 + colW - 10, blockTop + 18);
+    // Right box: REMARKS - Solid Black
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    roundRect(x3, blockTop, colW, BOTTOM_QR_H, 5, "S");
+    setSize(9.5);
+    bold();
+    text("REMARKS", x3 + 8, blockTop + 13);
+    normal();
+    doc.setLineWidth(0.5);
+    line(x3 + 8, blockTop + 17, x3 + colW - 8, blockTop + 17);
+    setSize(8);
     if (payload.remarks) {
-      const remarkLines = wrap(payload.remarks, colW - 20);
-      let ry = blockTop + 30;
-      remarkLines.forEach((line) => {
-        text(line, x3 + 10, ry);
-        ry += 12;
+      const remarkLines = wrap(payload.remarks, colW - 16);
+      let ry = blockTop + 26;
+      remarkLines.slice(0, 5).forEach((line) => {
+        text(line, x3 + 8, ry, { maxWidth: colW - 16 });
+        ry += 11;
       });
     }
 
-    // Signatures with Prepared By & Authorized By
-    [x1, x2, x3].forEach((x) => roundRect(x, sigTop, colW, SIG_H, 7, "S"));
+    // Signatures: PREPARED BY, AUTHORIZED BY, SECURITY - Solid Black
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.75);
+    [x1, x2, x3].forEach((x) => roundRect(x, sigTop, colW, SIG_H, 5, "S"));
+    setSize(9);
     bold();
-    text("PREPARED BY", x1 + 10, sigTop + 16);
-    text("AUTHORIZED BY", x2 + 10, sigTop + 16);
-    text("SECURITY", x3 + 10, sigTop + 16);
+    text("PREPARED BY", x1 + 8, sigTop + 13);
+    text("AUTHORIZED BY", x2 + 8, sigTop + 13);
+    text("SECURITY", x3 + 8, sigTop + 13);
     normal();
 
-    const writeSig = (x, showPrepared = false, showAuthorized = false) => {
-      const baseY = sigTop + SIG_H - 26;
-      text("Signature", x + 10, baseY - 10);
-      line(x + 10, baseY - 8, x + colW - 10, baseY - 8);
-      text("Name:", x + 10, baseY + 2);
-      if (showPrepared && payload.preparedBy) text(payload.preparedBy, x + 46, baseY + 2);
-      if (showAuthorized && payload.authorizedBy) text(payload.authorizedBy, x + 46, baseY + 2);
-      text("Date:", x + 10, baseY + 14);
+    const writeSig = (x, name) => {
+      setSize(7.5);
+      normal();
+      text("Signature:", x + 8, sigTop + 28);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.5);
+      line(x + 48, sigTop + 28, x + colW - 8, sigTop + 28);
+      text("Name:", x + 8, sigTop + 42);
+      if (name) {
+        bold();
+        text(String(name), x + 38, sigTop + 42, { maxWidth: colW - 46 });
+        normal();
+      }
+      text("Date:", x + 8, sigTop + 55);
+      if (payload.date) {
+        text(String(payload.date), x + 38, sigTop + 55);
+      }
     };
-    writeSig(x1, true, false); // Prepared By
-    writeSig(x2, false, true); // Authorized By
-    writeSig(x3, false, false); // Security
-  })();
+
+    writeSig(x1, payload.preparedBy || "ADMIN");
+    writeSig(x2, payload.authorizedBy || "");
+    writeSig(x3, "");
+
+    // Page indicator - placed safely inside bottom margin
+    setSize(8);
+    normal();
+    doc.setTextColor(0, 0, 0);
+    text(`Page ${pageIndex} of ${totalPages}`, page.w - page.m - 4, page.h - 22, { align: "right" });
+  };
+
+  // Stamp Outer Frame and Bottom Blocks on EVERY page
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.8);
+    roundRect(14, 14, page.w - 28, page.h - 28, 5, "S");
+    drawBottomBlocks(p, totalPages);
+  }
 
   return doc;
 }
@@ -420,22 +601,43 @@ function PreviewModal({ payload, onClose, onConfirm, loading }) {
   const [previewPdfUrl, setPreviewPdfUrl] = useState(null);
 
   useEffect(() => {
-    const generatePreview = () => {
+    let isMounted = true;
+    const generatePreview = async () => {
       try {
+        const previewRgpNo = !payload.rgpNo || payload.rgpNo === "(auto)" ? "RGP-PREVIEW-001" : payload.rgpNo;
         const previewPayload = {
           ...payload,
-          rgpNo: payload.rgpNo === "(auto)" ? "RGP-PREVIEW-001" : payload.rgpNo
+          rgpNo: previewRgpNo
         };
-        const doc = generateRgpPDF({ payload: previewPayload, options: { qrEntryImage: null, qrReturnImage: null, qrGateImage: null } });
+
+        const host = window.location.origin;
+        const entryUrl = `${host}/?action=rgpEntryForm&rgp=${encodeURIComponent(previewRgpNo)}`;
+        const returnUrl = `${host}/?action=rgpReturnForm&rgp=${encodeURIComponent(previewRgpNo)}`;
+        const gateUrl = `${host}/?action=gateForm&rgp=${encodeURIComponent(previewRgpNo)}`;
+
+        let entryQR = null, returnQR = null, gateQR = null;
+        try {
+          [entryQR, returnQR, gateQR] = await Promise.all([
+            generateQRCode(entryUrl),
+            generateQRCode(returnUrl),
+            generateQRCode(gateUrl)
+          ]);
+        } catch (_) {}
+
+        if (!isMounted) return;
+        const doc = generateRgpPDF({
+          payload: previewPayload,
+          options: { qrEntryImage: entryQR, qrReturnImage: returnQR, qrGateImage: gateQR }
+        });
         const pdfBlob = doc.output('blob');
         const pdfUrl = URL.createObjectURL(pdfBlob);
         setPreviewPdfUrl(pdfUrl);
-        return () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); };
       } catch (error) {
         console.error("Failed to generate preview:", error);
       }
     };
     generatePreview();
+    return () => { isMounted = false; };
   }, [payload]);
 
   return (
@@ -513,7 +715,7 @@ const modalStyles = {
   },
 };
 
-export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, prefilledRgpData = null, setPrefilledRgpData = null, currentUser = null }) {
+export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, prefilledRgpData = null, setPrefilledRgpData = null, currentUser = null, initialMode = "automatic" }) {
   const navigate = useNavigate();
   const toYMD = (d) =>
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -550,9 +752,15 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const [preparedByCustomValue, setPreparedByCustomValue] = useState("");
   const [authorizedByCustomValue, setAuthorizedByCustomValue] = useState("");
 
-  // Multi-mode configuration: "automatic", "manual", or "report"
-  const [rgpMode, setRgpMode] = useState("automatic");
+  // Multi-mode configuration: "automatic", "without_bom", "manual", or "report"
+  const [rgpMode, setRgpMode] = useState(initialMode || "automatic");
   const [wizardStep, setWizardStep] = useState(1); // 1 = Lot Search, 2 = Config & Matrix, 3 = Details & Review
+
+  useEffect(() => {
+    if (initialMode && (initialMode === "without_bom" || initialMode === "automatic" || initialMode === "manual" || initialMode === "report")) {
+      setRgpMode(initialMode);
+    }
+  }, [initialMode]);
 
   // RGP All Entries Master Report Tab State
   const [reportSearch, setReportSearch] = useState('');
@@ -893,6 +1101,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const [searchedMatrix, setSearchedMatrix] = useState(null);
   const [selectedBomItem, setSelectedBomItem] = useState(null);
   const [qtyPerPiece, setQtyPerPiece] = useState("1");
+  const [rowPerPiece, setRowPerPiece] = useState({});
+  const [rowDescriptions, setRowDescriptions] = useState({});
+  const [showDescriptionColumn, setShowDescriptionColumn] = useState(false);
+  const [commonDescription, setCommonDescription] = useState("");
   const [itemUom, setItemUom] = useState("PCS");
   const [itemDepartment, setItemDepartment] = useState("Stitching");
   const [itemBags, setItemBags] = useState("0");
@@ -1025,8 +1237,99 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     setSearchedMatrix(null);
     setSelectedBomItem(null);
     setSelectedMatrixRows(new Set());
+    setRowPerPiece({});
+    setRowDescriptions({});
+    setShowDescriptionColumn(false);
+    setCommonDescription("");
 
     try {
+      if (rgpMode === "without_bom") {
+        const cleanLot = searchLotNo.trim();
+        // 1. Fetch cutting matrix directly
+        let cuttingData = null;
+        try {
+          const cuttingRes = await fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(cleanLot)}`);
+          if (cuttingRes.ok) {
+            cuttingData = await cuttingRes.json();
+          }
+        } catch (e) {
+          console.warn("Cutting fetch error:", e);
+        }
+
+        // 2. Fetch cutting-headers to find style/fabric/party if needed
+        let headerFound = null;
+        try {
+          const hRes = await fetch(`${getBackendUrl()}/api/cutting-headers`);
+          if (hRes.ok) {
+            const hList = await hRes.json();
+            if (Array.isArray(hList)) {
+              headerFound = hList.find(h => String(h.lotNo || h.lot_no || '').trim().toLowerCase() === cleanLot.toLowerCase());
+            }
+          }
+        } catch (e) {
+          console.warn("Headers fetch error:", e);
+        }
+
+        // 3. Optional design fetch (read style/category if design happens to exist, but NEVER enforce approval or fail if missing!)
+        let designData = null;
+        try {
+          const dRes = await fetch(`${getBackendUrl()}/api/public/lot/${encodeURIComponent(cleanLot)}`);
+          if (dRes.ok) {
+            designData = await dRes.json();
+          }
+        } catch (_) {}
+
+        const resolvedStyle = cuttingData?.style || cuttingData?.header?.Style || headerFound?.style || designData?.style || 'Garment Lot';
+        const resolvedFabric = cuttingData?.fabric || cuttingData?.header?.Fabric || headerFound?.fabric || designData?.category || 'Without BOM';
+        const resolvedBrand = cuttingData?.brand || cuttingData?.header?.Brand || headerFound?.brand || '';
+        const resolvedParty = cuttingData?.partyName || cuttingData?.header?.Party_Name || headerFound?.partyName || '';
+        const matrixRows = cuttingData?.rows || [];
+        const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+        const resolvedTotalPcs = matrixTotal > 0 ? matrixTotal : (Number(cuttingData?.cuttingQty) || Number(headerFound?.totalPcs) || Number(headerFound?.cuttingQty) || 0);
+
+        const syntheticDesign = {
+          id: cleanLot,
+          style: resolvedStyle,
+          category: resolvedFabric,
+          fabric: resolvedFabric,
+          brand: resolvedBrand,
+          partyName: resolvedParty,
+          totalPcs: resolvedTotalPcs,
+          isWithoutBom: true,
+          bom: []
+        };
+
+        setSearchedDesign(syntheticDesign);
+
+        if (cuttingData && matrixRows.length > 0) {
+          setSearchedMatrix(cuttingData);
+          const initialColors = new Set(matrixRows.map(r => r.color));
+          setSelectedMatrixRows(initialColors);
+          setUseMatrix(true);
+        } else {
+          setSearchedMatrix({ rows: [] });
+          setUseMatrix(false);
+        }
+
+        // Set default initial item configuration
+        const defaultItem = {
+          name: "Elastic",
+          description: `${resolvedStyle} - Elastic`,
+          detail: "1",
+          isWithoutBom: true
+        };
+        setSelectedBomItem(defaultItem);
+        update("rgpType", "Elastic");
+        setItemUom("MTR");
+        setItemDepartment("Stitching");
+        setFlatDescription(`${resolvedStyle} - Elastic`);
+        setQtyPerPiece("1");
+
+        setWizardStep(2);
+        return;
+      }
+
+      // STANDARD AUTOMATIC RGP MODE (Requires approved design/BOM)
       // 1. Fetch design/BOM requirements
       const designRes = await fetch(`${getBackendUrl()}/api/public/lot/${searchLotNo.trim()}`);
       let designData = null;
@@ -1086,6 +1389,9 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   function handleSelectBomItem(item) {
     setSelectedBomItem(item);
     update("rgpType", item.name);
+    setRowPerPiece({});
+    setRowDescriptions({});
+    setCommonDescription("");
 
     const detailNum = parseFloat(item.detail);
     if (!isNaN(detailNum) && detailNum > 0) {
@@ -1109,10 +1415,21 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const handleAddMatrixRowsToRgp = () => {
     if (!searchedDesign || !selectedBomItem) return;
 
-    const qtyMultiplier = parseFloat(qtyPerPiece) || 0;
-    if (useMatrix && qtyMultiplier <= 0) {
-      alert("Please enter a valid Quantity per piece (> 0).");
-      return;
+    if (useMatrix) {
+      if (selectedMatrixRows.size === 0) {
+        alert("Please select at least one color row from the matrix table.");
+        return;
+      }
+      const anyInvalid = Array.from(selectedMatrixRows).some(color => {
+        const rowMultiplier = rowPerPiece[color] !== undefined && rowPerPiece[color] !== ""
+          ? parseFloat(rowPerPiece[color])
+          : parseFloat(qtyPerPiece) || 0;
+        return isNaN(rowMultiplier) || rowMultiplier <= 0;
+      });
+      if (anyInvalid) {
+        alert("Please enter a valid Per Piece quantity (> 0) for all selected rows.");
+        return;
+      }
     }
 
     const rowsToAdd = [];
@@ -1120,16 +1437,31 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
     if (useMatrix && searchedMatrix && searchedMatrix.rows && searchedMatrix.rows.length > 0) {
       searchedMatrix.rows.forEach(row => {
         if (selectedMatrixRows.has(row.color)) {
-          const qty = (row.totalPcs || 0) * qtyMultiplier;
+          const rowMultiplier = rowPerPiece[row.color] !== undefined && rowPerPiece[row.color] !== ""
+            ? parseFloat(rowPerPiece[row.color])
+            : parseFloat(qtyPerPiece) || 0;
+          const qty = (row.totalPcs || 0) * (rowMultiplier || 0);
           if (qty > 0) {
+            let desc = selectedBomItem.name || flatDescription || "Item";
+            if (showDescriptionColumn) {
+              if (rowDescriptions[row.color] !== undefined && String(rowDescriptions[row.color]).trim()) {
+                desc = String(rowDescriptions[row.color]).trim();
+              } else if (commonDescription && commonDescription.trim()) {
+                desc = commonDescription.trim();
+              }
+            }
             rowsToAdd.push({
               lotNo: searchedDesign.id,
-              itemDesc: `${selectedBomItem.name} - ${row.color} (${row.totalPcs} pcs x ${qtyMultiplier})`,
+              color: row.color,
+              cuttingPcs: row.totalPcs,
+              perPiece: rowMultiplier,
+              itemDesc: `${desc} - ${row.color} (${row.totalPcs} cut pcs x ${rowMultiplier}/pc)`,
               qty1: String(qty),
               qty2: itemBags || "0",
               uom: itemUom || "PCS",
               department: itemDepartment || form.department || "Stitching",
-              purpose: form.purpose || "Stitching"
+              purpose: form.purpose || "Stitching",
+              isWithoutBom: rgpMode === "without_bom"
             });
           }
         }
@@ -1147,7 +1479,8 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         qty2: itemBags || "0",
         uom: itemUom || "PCS",
         department: itemDepartment || form.department || "Stitching",
-        purpose: form.purpose || "Stitching"
+        purpose: form.purpose || "Stitching",
+        isWithoutBom: rgpMode === "without_bom"
       });
     }
 
@@ -1167,7 +1500,16 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       };
     });
 
-    setSelectedBomItem(null);
+    if (rgpMode === "without_bom") {
+      setSelectedBomItem({
+        name: "Elastic",
+        description: "",
+        detail: "1",
+        isWithoutBom: true
+      });
+    } else {
+      setSelectedBomItem(null);
+    }
     setFlatQuantity("");
     setFlatDescription("");
     setWizardStep(3);
@@ -1330,20 +1672,22 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
     const first = (form.entries || [])[0] || {};
     const legacyQty = (Number(first.qty1) || 0) || "";
-    const activeRgpType = rgpMode === "automatic" && selectedBomItem ? selectedBomItem.name : form.rgpType;
+    const activeRgpType = (rgpMode === "automatic" || rgpMode === "without_bom") && selectedBomItem ? selectedBomItem.name : form.rgpType;
     const rgpTypeFinal = activeRgpType === "Other" ? customRgpType.trim() : activeRgpType;
 
     // Get final Prepared By and Authorized By values
     const finalPreparedBy = isPreparedByCustom ? preparedByCustomValue : form.preparedBy;
     const finalAuthorizedBy = isAuthorizedByCustom ? authorizedByCustomValue : form.authorizedBy;
 
-    const isManualMode = rgpMode === "manual" || !selectedBomItem || (form.entries || []).some(e => {
+    const isWithoutBomMode = rgpMode === "without_bom" || (form.entries || []).some(e => e.isWithoutBom);
+    const isManualMode = !isWithoutBomMode && (rgpMode === "manual" || !selectedBomItem || (form.entries || []).some(e => {
       const lot = String(e.lotNo || "").trim().toUpperCase();
       return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
-    });
+    }));
 
     const payload = {
       rgpMode: rgpMode,
+      isWithoutBom: isWithoutBomMode,
       isManual: isManualMode,
       date: form.date,
       vendor: form.vendor,
@@ -1361,7 +1705,8 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         uom: r.uom || "",
         department: r.department || "",
         purpose: r.purpose || "",
-        isManual: !r.lotNo || String(r.lotNo).trim() === '' || String(r.lotNo).toUpperCase() === 'N/A' || isManualMode
+        isWithoutBom: isWithoutBomMode || r.isWithoutBom,
+        isManual: !isWithoutBomMode && (!r.lotNo || String(r.lotNo).trim() === '' || String(r.lotNo).toUpperCase() === 'N/A' || isManualMode)
       })),
       expectedReturnDate: form.expectedReturnDate,
       vehicleNo: form.vehicleNo,
@@ -1369,6 +1714,10 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       authorizedBy: finalAuthorizedBy,
       remarks: form.remarks,
       createdAt: new Date().toISOString(),
+      meta: {
+        poNumber: form.rgpNo && form.rgpNo !== "(auto)" ? form.rgpNo : "RGP-" + String(new Date().getTime()).slice(-6),
+        rgpNo: form.rgpNo && form.rgpNo !== "(auto)" ? form.rgpNo : "RGP-" + String(new Date().getTime()).slice(-6)
+      }
     };
 
     const saveRgpToDatabase = async (rgpNoVal) => {
@@ -1389,10 +1738,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
     setSubmitting(true);
 
-    // Bypassing Google Sheets if WEB_APP_URL is empty
-    if (!WEB_APP_URL || !WEB_APP_URL.includes("/exec")) {
-      console.log("WEB_APP_URL is empty or invalid. Generating local RGP print and completing.");
-
+    try {
       const localRgpNo = form.rgpNo && form.rgpNo !== "(auto)" ? form.rgpNo : "RGP-" + String(new Date().getTime()).slice(-6);
 
       if (localRgpNo.startsWith("RGP-")) {
@@ -1403,83 +1749,53 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
         }
       }
 
-      const payloadWithNo = { ...payload, rgpNo: localRgpNo };
+      let assignedRgpNo = localRgpNo;
 
-      // Save RGP number to scans database and dedicated rgp table
-      await saveRgpToDatabase(localRgpNo);
-
-      let localSystemUrl = `${window.location.origin}/`;
-      const isLocalHostOrIP =
-        window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1' ||
-        window.location.hostname.startsWith('192.168.') ||
-        window.location.hostname.startsWith('10.') ||
-        window.location.hostname.startsWith('172.');
-
-      if (isLocalHostOrIP) {
-        let serverIp = window.location.hostname;
+      // Optional Google Sheet sync (with safe error handling so it never blocks RGP creation)
+      if (WEB_APP_URL && WEB_APP_URL.includes("/exec")) {
         try {
-          const res = await fetch(`${getBackendUrl()}/api/public/server-ip`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data.ip) {
-              serverIp = data.ip;
+          console.log("Submitting payload to Google Sheet Web App:", WEB_APP_URL);
+          const sheetPayload = {
+            ...payload,
+            rgpNo: localRgpNo,
+            meta: {
+              poNumber: localRgpNo,
+              rgpNo: localRgpNo
             }
+          };
+          const res = await fetch(WEB_APP_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "Accept": "application/json" },
+            body: "data=" + encodeURIComponent(JSON.stringify(sheetPayload)),
+          });
+
+          if (res.ok) {
+            const text = await res.text();
+            try {
+              const json = JSON.parse(text);
+              if (json && json.ok && json.rgpNo) {
+                assignedRgpNo = json.rgpNo;
+              }
+            } catch (_) { }
           }
-        } catch (err) {
-          console.warn("Failed to fetch server IP, falling back to hostname:", err);
+        } catch (sheetErr) {
+          console.warn("Google Sheet sync warning (continuing with local creation):", sheetErr.message);
         }
-        const port = window.location.port ? `:${window.location.port}` : '';
-        localSystemUrl = `http://${serverIp}${port}/`;
       }
 
-      const entryUrl = `${localSystemUrl}?action=rgpEntryForm&rgp=${encodeURIComponent(localRgpNo)}`;
-      const returnUrl = `${localSystemUrl}?action=rgpReturnForm&rgp=${encodeURIComponent(localRgpNo)}`;
-      const gateUrl = `${localSystemUrl}?action=gateForm&rgp=${encodeURIComponent(localRgpNo)}`;
+      const payloadWithNo = {
+        ...payload,
+        rgpNo: assignedRgpNo,
+        meta: {
+          poNumber: assignedRgpNo,
+          rgpNo: assignedRgpNo
+        }
+      };
 
-      let entryQR, returnQR, gateQR;
-      try { entryQR = await generateQRCode(entryUrl); } catch (qrError) { console.error("Failed to generate entry QR:", qrError); }
-      try { returnQR = await generateQRCode(returnUrl); } catch (qrError) { console.error("Failed to generate return QR:", qrError); }
-      try { gateQR = await generateQRCode(gateUrl); } catch (qrError) { console.error("Failed to generate gate QR:", qrError); }
+      // 1. Save RGP number to scans database and dedicated rgp table
+      await saveRgpToDatabase(assignedRgpNo);
 
-      let entryQRDataUrl = entryQR, returnQRDataUrl = returnQR, gateQRDataUrl = gateQR;
-      if (entryQR && entryQR.startsWith('blob:')) { try { entryQRDataUrl = await toDataURL(entryQR); } catch (error) { console.warn("Failed to convert entry QR to data URL:", error); } }
-      if (returnQR && returnQR.startsWith('blob:')) { try { returnQRDataUrl = await toDataURL(returnQR); } catch (error) { console.warn("Failed to convert return QR to data URL:", error); } }
-      if (gateQR && gateQR.startsWith('blob:')) { try { gateQRDataUrl = await toDataURL(gateQR); } catch (error) { console.warn("Failed to convert gate QR to data URL:", error); } }
-
-      setForm((f) => ({ ...f, rgpNo: localRgpNo }));
-      if (onSubmit) onSubmit(payloadWithNo);
-
-      const pdfDoc = generateRgpPDF({ payload: payloadWithNo, options: { qrEntryImage: entryQRDataUrl, qrReturnImage: returnQRDataUrl, qrGateImage: gateQRDataUrl } });
-      pdfDoc.save(`RGP-${localRgpNo}.pdf`);
-
-      setShowPreview(false);
-      alert(`✅ RGP PDF Generated Locally!\nPDF has been downloaded.`);
-      setSubmitting(false);
-      silentRefresh();
-      return;
-    }
-
-    try {
-      console.log("Submitting payload to:", WEB_APP_URL);
-
-      const res = await fetch(WEB_APP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "Accept": "application/json" },
-        body: "data=" + encodeURIComponent(JSON.stringify(payload)),
-      });
-
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-
-      const text = await res.text();
-      let json;
-      try { json = JSON.parse(text); } catch (parseError) { throw new Error('Invalid response from server'); }
-
-      if (!json.ok) throw new Error(json.error || "Save failed");
-
-      const assignedRgpNo = json.rgpNo;
-      console.log("RGP created successfully:", assignedRgpNo);
-
+      // 2. Generate URLs and QR codes
       let localSystemUrl = `${window.location.origin}/`;
       const isLocalHostOrIP =
         window.location.hostname === 'localhost' ||
@@ -1520,22 +1836,21 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       if (gateQR && gateQR.startsWith('blob:')) { try { gateQRDataUrl = await toDataURL(gateQR); } catch (error) { console.warn("Failed to convert gate QR to data URL:", error); } }
 
       setForm((f) => ({ ...f, rgpNo: assignedRgpNo }));
-      if (onSubmit) onSubmit({ ...payload, rgpNo: assignedRgpNo });
+      if (onSubmit) onSubmit(payloadWithNo);
 
-      // Save RGP number to scans database and dedicated rgp table
-      await saveRgpToDatabase(assignedRgpNo);
-
-      const pdfDoc = generateRgpPDF({ payload: { ...payload, rgpNo: assignedRgpNo }, options: { qrEntryImage: entryQRDataUrl, qrReturnImage: returnQRDataUrl, qrGateImage: gateQRDataUrl } });
+      // 3. Generate and download PDF
+      const pdfDoc = generateRgpPDF({ payload: payloadWithNo, options: { qrEntryImage: entryQRDataUrl, qrReturnImage: returnQRDataUrl, qrGateImage: gateQRDataUrl } });
       const safeNo = assignedRgpNo.replace(/[^\w\-]+/g, "-");
       pdfDoc.save(`RGP-${safeNo}.pdf`);
 
       setShowPreview(false);
       alert(`✅ RGP Created Successfully!\nRGP No: ${assignedRgpNo}\nPDF has been downloaded.`);
+      setSubmitting(false);
       silentRefresh();
 
     } catch (err) {
       console.error("Submit error:", err);
-      alert(`❌ Error: ${err.message}\n\nData was saved to sheet but PDF generation failed.`);
+      alert(`❌ Error creating RGP: ${err.message}`);
       setSubmitting(false);
     }
   };
@@ -1925,6 +2240,16 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                         🏷️ Lot: <strong>{row.lotNo}</strong>
                       </span>
                     )}
+                    {row.color && (
+                      <span style={styles.metaBadgeLot}>
+                        🎨 Color: <strong>{row.color}</strong>
+                      </span>
+                    )}
+                    {row.cuttingPcs !== undefined && row.perPiece !== undefined && (
+                      <span style={styles.metaBadgeDept}>
+                        ✂️ {row.cuttingPcs} pcs × {row.perPiece}/pc
+                      </span>
+                    )}
                     <span style={styles.metaBadgeDept}>
                       🏢 Dept: <strong>{row.department}</strong>
                     </span>
@@ -1979,10 +2304,12 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
       <div style={{ textAlign: 'center', marginBottom: '24px' }}>
         <Emoji size={48} mr={0}>🔍</Emoji>
         <h2 style={{ fontSize: '1.8rem', fontWeight: '700', color: '#0f2b3d', marginTop: '12px', marginBottom: '8px' }}>
-          Begin Automatic RGP
+          {rgpMode === "without_bom" ? "Begin RGP (Without BOM)" : "Begin Automatic RGP"}
         </h2>
         <p style={{ fontSize: '0.95rem', color: '#64748b', maxWidth: '400px', margin: '0 auto' }}>
-          Enter a style or production lot number to automatically load BOM accessories requirements & cutting sizes.
+          {rgpMode === "without_bom"
+            ? "Enter a style or production lot number to automatically load cutting sizes, fabric, and matrix without requiring pre-created BOM."
+            : "Enter a style or production lot number to automatically load BOM accessories requirements & cutting sizes."}
         </p>
       </div>
 
@@ -2045,48 +2372,158 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
       <div style={styles.designSummaryCard}>
         <div style={{ borderBottom: '1.5px solid #e2e8f0', paddingBottom: '12px', marginBottom: '12px' }}>
-          <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#0f2b3d' }}>
-            Lot: {searchedDesign.id}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+            <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#0f2b3d' }}>
+              Lot: {searchedDesign.id}
+            </div>
+            {rgpMode === "without_bom" && (
+              <span style={{ fontSize: '11px', fontWeight: '800', background: '#fef3c7', color: '#b45309', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                ⚡ WITHOUT BOM MODE (NO DESIGN REQUIRED)
+              </span>
+            )}
           </div>
           {searchedDesign.style && (
             <div style={{ fontSize: '0.9rem', color: '#475569', marginTop: '4px' }}>
               Style: <strong>{searchedDesign.style}</strong>
             </div>
           )}
-          {searchedDesign.category && (
+          {(searchedDesign.fabric || searchedDesign.category) && (
             <div style={{ fontSize: '0.9rem', color: '#475569', marginTop: '2px' }}>
-              Category: <strong>{searchedDesign.category}</strong>
+              Fabric / Type: <strong>{searchedDesign.fabric || searchedDesign.category}</strong>
+            </div>
+          )}
+          {searchedDesign.totalPcs > 0 && (
+            <div style={{ fontSize: '0.9rem', color: '#059669', fontWeight: '700', marginTop: '2px' }}>
+              Total Cutting Pieces: <strong>{Number(searchedDesign.totalPcs).toLocaleString()} Pcs</strong>
             </div>
           )}
         </div>
 
-        <div>
-          <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-            Choose One of BOM Details:
+        {rgpMode === "without_bom" ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: '800', color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                ⚡ Select Material to Issue (Without BOM):
+              </span>
+            </div>
+
+            {/* Quick Component Selection Chips */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+              {[
+                { name: 'Elastic', uom: 'MTR', dept: 'Stitching' },
+                { name: 'Twill Tape', uom: 'MTR', dept: 'Stitching' },
+                { name: 'Bone / Pocketing', uom: 'KG', dept: 'Cutting Room' },
+                { name: 'Zipper', uom: 'PCS', dept: 'Stitching' },
+                { name: 'Button', uom: 'PCS', dept: 'Finishing' },
+                { name: 'Dori / Drawcord', uom: 'MTR', dept: 'Stitching' },
+                { name: 'Label / Tag', uom: 'PCS', dept: 'Finishing' },
+                { name: 'Cut Fabric Panels', uom: 'PCS', dept: 'Cutting' },
+                { name: 'Fabric Roll', uom: 'MTR', dept: 'Fabric Store' },
+                { name: 'Lace / Border', uom: 'MTR', dept: 'Stitching' },
+                { name: 'Packing Box / Polybag', uom: 'PCS', dept: 'Packing' },
+                { name: 'Sample / Garment Piece', uom: 'PCS', dept: 'Sampling' }
+              ].map((comp, idx) => {
+                const isActive = selectedBomItem?.name === comp.name;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      const itemObj = {
+                        name: comp.name,
+                        description: `${searchedDesign.style} - ${comp.name}`,
+                        detail: qtyPerPiece || "1",
+                        isWithoutBom: true
+                      };
+                      setSelectedBomItem(itemObj);
+                      update("rgpType", comp.name);
+                      setItemUom(comp.uom);
+                      if (comp.dept) setItemDepartment(comp.dept);
+                      setFlatDescription(`${searchedDesign.style} - ${comp.name}`);
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '20px',
+                      fontSize: '11.5px',
+                      fontWeight: isActive ? '800' : '600',
+                      cursor: 'pointer',
+                      border: isActive ? '2px solid #b45309' : '1px solid #cbd5e1',
+                      background: isActive ? '#fef3c7' : '#ffffff',
+                      color: isActive ? '#b45309' : '#334155',
+                      boxShadow: isActive ? '0 2px 6px rgba(245, 158, 11, 0.25)' : 'none',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {comp.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Item Name / Detail input */}
+            <div style={{ marginTop: '10px', background: '#ffffff', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <label style={{ fontSize: '11px', fontWeight: '800', color: '#475569', display: 'block', marginBottom: '4px' }}>
+                ✏️ Item Name / Specification:
+              </label>
+              <input
+                type="text"
+                value={selectedBomItem?.name || ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const itemObj = {
+                    name: val,
+                    description: `${searchedDesign.style} - ${val}`,
+                    detail: qtyPerPiece || "1",
+                    isWithoutBom: true
+                  };
+                  setSelectedBomItem(itemObj);
+                  update("rgpType", val || "Without BOM Material");
+                  setFlatDescription(`${searchedDesign.style} - ${val}`);
+                }}
+                placeholder="e.g. 1.5 Inch Elastic (White), Brass Metal Zipper..."
+                style={{
+                  width: '100%',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  border: '1.5px solid #cbd5e1',
+                  fontSize: '13px',
+                  fontWeight: '700',
+                  color: '#0f2b3d',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
           </div>
-          {searchedDesign.bom && searchedDesign.bom.filter(item => item.status && item.status.toLowerCase() === 'yes').length > 0 ? (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-              {searchedDesign.bom.filter(item => item.status && item.status.toLowerCase() === 'yes').map((item, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectBomItem(item)}
-                  className="bom-pill"
-                  style={{
-                    ...styles.bomPill,
-                    ...(selectedBomItem?.name === item.name ? styles.bomPillActive : {})
-                  }}
-                >
-                  {item.name} {item.detail ? `(${item.detail})` : ''}
-                </button>
-              ))}
+        ) : (
+          <div>
+            <div style={{ fontSize: '0.85rem', fontWeight: '700', color: '#64748b', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              Choose One of BOM Details:
             </div>
-          ) : (
-            <div style={{ fontSize: '0.9rem', color: '#64748b', fontStyle: 'italic', padding: '12px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
-              No BOM accessory requirements found. Use direct entry on the right.
-            </div>
-          )}
-        </div>
+            {searchedDesign.bom && searchedDesign.bom.filter(item => item.status && item.status.toLowerCase() === 'yes').length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {searchedDesign.bom.filter(item => item.status && item.status.toLowerCase() === 'yes').map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectBomItem(item)}
+                    className="bom-pill"
+                    style={{
+                      ...styles.bomPill,
+                      ...(selectedBomItem?.name === item.name ? styles.bomPillActive : {})
+                    }}
+                  >
+                    {item.name} {item.detail ? `(${item.detail})` : ''}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.9rem', color: '#64748b', fontStyle: 'italic', padding: '12px', backgroundColor: '#f1f5f9', borderRadius: '8px' }}>
+                No BOM accessory requirements found. Use direct entry on the right.
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2126,13 +2563,16 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           {/* Matrix Row Inputs */}
           <div style={styles.matrixFormGrid}>
             <div style={styles.formGroupCompact}>
-              <label style={styles.labelCompact}>Qty Per Piece <span style={styles.requiredStar}>*</span></label>
+              <label style={styles.labelCompact}>Qty Per Piece (Default) <span style={styles.requiredStar}>*</span></label>
               <input
                 type="number"
                 min="0"
-                step="0.01"
+                step="any"
                 value={qtyPerPiece}
-                onChange={(e) => setQtyPerPiece(e.target.value)}
+                onChange={(e) => {
+                  setQtyPerPiece(e.target.value);
+                  setRowPerPiece({});
+                }}
                 style={styles.inputCompact}
               />
             </div>
@@ -2161,13 +2601,88 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
             </div>
           </div>
 
-          {/* Cutting Matrix Table */}
+          {/* Small Box Toggle for Description Column */}
           {searchedMatrix && searchedMatrix.rows && searchedMatrix.rows.length > 0 && (
-            <div style={{ marginTop: '16px', border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden' }}>
-              <table className="matrixTable" style={styles.matrixTable}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px',
+              marginTop: '14px',
+              marginBottom: '6px',
+              padding: '8px 14px',
+              backgroundColor: showDescriptionColumn ? '#eff6ff' : '#f8fafc',
+              borderRadius: '10px',
+              border: showDescriptionColumn ? '1.5px solid #93c5fd' : '1px solid #e2e8f0',
+              transition: 'all 0.2s ease'
+            }}>
+              <label style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: '700',
+                color: showDescriptionColumn ? '#1e40af' : '#334155'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={showDescriptionColumn}
+                  onChange={(e) => setShowDescriptionColumn(e.target.checked)}
+                  style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#2563eb' }}
+                />
+                <span>📝 Need Description (Show &amp; Edit)</span>
+              </label>
+
+              {showDescriptionColumn && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: '600' }}>Apply to all:</span>
+                  <input
+                    type="text"
+                    placeholder="Enter common description..."
+                    value={commonDescription}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCommonDescription(val);
+                      if (searchedMatrix && searchedMatrix.rows) {
+                        const updated = {};
+                        searchedMatrix.rows.forEach(r => { updated[r.color] = val; });
+                        setRowDescriptions(updated);
+                      }
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: '12px',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      width: '220px',
+                      outline: 'none',
+                      backgroundColor: '#ffffff'
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Cutting Matrix Table with optional editable Description, Color, Cutting Pcs, Per Piece Input, and Total Pcs Calculated */}
+          {searchedMatrix && searchedMatrix.rows && searchedMatrix.rows.length > 0 && (
+            <div style={{
+              marginTop: '10px',
+              border: '1px solid #e2e8f0',
+              borderRadius: '12px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              WebkitOverflowScrolling: 'touch',
+              width: '100%',
+              maxWidth: '100%',
+              boxSizing: 'border-box'
+            }}>
+              <table className="matrixTable" style={{ ...styles.matrixTable, width: '100%', minWidth: showDescriptionColumn ? '850px' : '650px' }}>
                 <thead>
                   <tr style={styles.matrixTableHeaderRow}>
-                    <th style={{ width: '40px', textAlign: 'center' }}>
+                    <th style={{ width: '38px', textAlign: 'center', padding: '10px 4px' }}>
                       <input
                         type="checkbox"
                         checked={selectedMatrixRows.size === searchedMatrix.rows.length}
@@ -2180,25 +2695,36 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                         }}
                       />
                     </th>
-                    <th>Color</th>
-                    <th style={{ textAlign: 'right' }}>Table</th>
-                    <th style={{ textAlign: 'right' }}>M</th>
-                    <th style={{ textAlign: 'right' }}>L</th>
-                    <th style={{ textAlign: 'right' }}>XL</th>
-                    <th style={{ textAlign: 'right' }}>XXL</th>
-                    <th style={{ textAlign: 'right' }}>Pcs</th>
-                    <th style={{ textAlign: 'right', fontWeight: 'bold', color: '#0f2b3d' }}>Req Qty</th>
+                    {showDescriptionColumn && (
+                      <th style={{ textAlign: 'left', minWidth: '160px', padding: '10px 8px', color: '#1e40af' }}>
+                        Description (Editable)
+                      </th>
+                    )}
+                    <th style={{ textAlign: 'left', minWidth: '90px', padding: '10px 6px' }}>Color</th>
+                    <th style={{ textAlign: 'right', padding: '10px 6px' }}>Table</th>
+                    <th style={{ textAlign: 'right', padding: '10px 5px' }}>M</th>
+                    <th style={{ textAlign: 'right', padding: '10px 5px' }}>L</th>
+                    <th style={{ textAlign: 'right', padding: '10px 5px' }}>XL</th>
+                    <th style={{ textAlign: 'right', padding: '10px 5px' }}>XXL</th>
+                    <th style={{ textAlign: 'right', minWidth: '75px', fontWeight: 'bold', padding: '10px 6px' }}>Cutting Pcs</th>
+                    <th style={{ textAlign: 'center', minWidth: '85px', color: '#1e40af', padding: '10px 6px' }}>Per Piece</th>
+                    <th style={{ textAlign: 'right', minWidth: '85px', fontWeight: 'bold', color: '#059669', padding: '10px 8px' }}>Total Pcs</th>
                   </tr>
                 </thead>
                 <tbody>
                   {searchedMatrix.rows.map((row, idx) => {
-                    const calculated = (row.totalPcs || 0) * (parseFloat(qtyPerPiece) || 0);
+                    const currentRowVal = rowPerPiece[row.color] !== undefined ? rowPerPiece[row.color] : qtyPerPiece;
+                    const multiplier = parseFloat(currentRowVal) || 0;
+                    const calculated = (row.totalPcs || 0) * multiplier;
+                    const isSelected = selectedMatrixRows.has(row.color);
+                    const currentDesc = rowDescriptions[row.color] ?? "";
+
                     return (
-                      <tr key={idx} style={styles.matrixTableRow}>
-                        <td style={{ textAlign: 'center' }}>
+                      <tr key={idx} style={{ ...styles.matrixTableRow, backgroundColor: isSelected ? '#f8fafc' : '#ffffff' }}>
+                        <td style={{ textAlign: 'center', padding: '8px 4px' }}>
                           <input
                             type="checkbox"
-                            checked={selectedMatrixRows.has(row.color)}
+                            checked={isSelected}
                             onChange={(e) => {
                               const newSet = new Set(selectedMatrixRows);
                               if (e.target.checked) newSet.add(row.color);
@@ -2207,14 +2733,70 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                             }}
                           />
                         </td>
-                        <td><strong>{row.color}</strong></td>
-                        <td style={{ textAlign: 'right' }}>{row.cuttingTable ?? '-'}</td>
-                        <td style={{ textAlign: 'right' }}>{row.sizes?.M ?? 0}</td>
-                        <td style={{ textAlign: 'right' }}>{row.sizes?.L ?? 0}</td>
-                        <td style={{ textAlign: 'right' }}>{row.sizes?.XL ?? 0}</td>
-                        <td style={{ textAlign: 'right' }}>{row.sizes?.XXL ?? 0}</td>
-                        <td style={{ textAlign: 'right' }}><strong>{row.totalPcs ?? 0}</strong></td>
-                        <td style={{ textAlign: 'right', fontWeight: 'bold', color: '#10b981' }}>{calculated.toLocaleString()}</td>
+                        {showDescriptionColumn && (
+                          <td style={{ textAlign: 'left', padding: '6px 8px' }}>
+                            <input
+                              type="text"
+                              value={currentDesc}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setRowDescriptions(prev => ({ ...prev, [row.color]: val }));
+                              }}
+                              placeholder="Enter description..."
+                              style={{
+                                width: '100%',
+                                minWidth: '150px',
+                                padding: '5px 8px',
+                                fontSize: '12px',
+                                fontWeight: '600',
+                                color: '#1e293b',
+                                borderRadius: '6px',
+                                border: '1.5px solid #93c5fd',
+                                backgroundColor: '#ffffff',
+                                outline: 'none',
+                                boxSizing: 'border-box'
+                              }}
+                            />
+                          </td>
+                        )}
+                        <td style={{ textAlign: 'left', padding: '8px 6px', whiteSpace: 'nowrap' }}>
+                          <strong style={{ color: '#0f2b3d', fontSize: '12px' }}>{row.color}</strong>
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#64748b', padding: '8px 6px' }}>{row.cuttingTable ?? '-'}</td>
+                        <td style={{ textAlign: 'right', color: '#64748b', padding: '8px 5px' }}>{row.sizes?.M ?? 0}</td>
+                        <td style={{ textAlign: 'right', color: '#64748b', padding: '8px 5px' }}>{row.sizes?.L ?? 0}</td>
+                        <td style={{ textAlign: 'right', color: '#64748b', padding: '8px 5px' }}>{row.sizes?.XL ?? 0}</td>
+                        <td style={{ textAlign: 'right', color: '#64748b', padding: '8px 5px' }}>{row.sizes?.XXL ?? 0}</td>
+                        <td style={{ textAlign: 'right', fontWeight: '700', color: '#1e293b', padding: '8px 6px' }}>
+                          {row.totalPcs ?? 0}
+                        </td>
+                        <td style={{ textAlign: 'center', padding: '8px 6px' }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={currentRowVal}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setRowPerPiece(prev => ({ ...prev, [row.color]: val }));
+                            }}
+                            style={{
+                              width: '65px',
+                              padding: '4px 6px',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              textAlign: 'center',
+                              borderRadius: '6px',
+                              border: '1.5px solid #93c5fd',
+                              backgroundColor: '#eff6ff',
+                              color: '#1e40af',
+                              outline: 'none'
+                            }}
+                          />
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: '800', color: '#10b981', fontSize: '13px', padding: '8px 8px' }}>
+                          {calculated.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        </td>
                       </tr>
                     );
                   })}
@@ -2301,7 +2883,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
   const renderWizardStepsIndicator = () => {
     const steps = [
       { num: 1, label: "Search Lot" },
-      { num: 2, label: "Select BOM & Matrix" },
+      { num: 2, label: rgpMode === "without_bom" ? "Select Material & Matrix" : "Select BOM & Matrix" },
       { num: 3, label: "Fill Details & Review" }
     ];
 
@@ -2316,7 +2898,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                 ...(wizardStep > s.num ? styles.wizardStepNodeCompleted : {})
               }}
               onClick={() => {
-                if (searchedDesign || s.num === 1) {
+                if (searchedDesign || searchedMatrix || s.num === 1) {
                   setWizardStep(s.num);
                 }
               }}
@@ -2947,10 +3529,26 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
                                 {row.rawRgp && (
                                   <button
                                     type="button"
-                                    onClick={() => {
+                                    onClick={async () => {
                                       try {
-                                        const doc = generateRgpPDF({ payload: row.rawRgp, options: { qrEntryImage: null, qrReturnImage: null, qrGateImage: null } });
-                                        doc.save(`${row.rgpNo}.pdf`);
+                                        const rgpNo = row.rgpNo || row.rawRgp?.rgpNo;
+                                        const host = window.location.origin;
+                                        const entryUrl = `${host}/?action=rgpEntryForm&rgp=${encodeURIComponent(rgpNo)}`;
+                                        const returnUrl = `${host}/?action=rgpReturnForm&rgp=${encodeURIComponent(rgpNo)}`;
+                                        const gateUrl = `${host}/?action=gateForm&rgp=${encodeURIComponent(rgpNo)}`;
+                                        let entryQR = null, returnQR = null, gateQR = null;
+                                        try {
+                                          [entryQR, returnQR, gateQR] = await Promise.all([
+                                            generateQRCode(entryUrl),
+                                            generateQRCode(returnUrl),
+                                            generateQRCode(gateUrl)
+                                          ]);
+                                        } catch (_) {}
+                                        const doc = generateRgpPDF({
+                                          payload: row.rawRgp,
+                                          options: { qrEntryImage: entryQR, qrReturnImage: returnQR, qrGateImage: gateQR }
+                                        });
+                                        doc.save(`${rgpNo}.pdf`);
                                       } catch (err) {
                                         console.error('PDF error:', err);
                                       }
@@ -3552,7 +4150,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           <div style={styles.headerCenter}>
             <h1 style={styles.headerTitle}>
               <Emoji size={28} mr={12}>📋</Emoji>
-              Returnable Gate Pass
+              {rgpMode === "without_bom" ? "Returnable Gate Pass (Without BOM)" : "Returnable Gate Pass"}
             </h1>
             <p style={styles.headerSubtitle}>
               <Emoji size={14} mr={6}>🏭</Emoji>
@@ -3610,14 +4208,23 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           </button>
           <button
             type="button"
-            onClick={() => navigate('/rgp-without-bom')}
+            onClick={() => {
+              setRgpMode("without_bom");
+              setWizardStep(1);
+              setSearchLotNo("");
+              setSearchedDesign(null);
+              setSearchedMatrix(null);
+              setSelectedBomItem(null);
+              setSelectedMatrixRows(new Set());
+            }}
             style={{
               ...styles.modeTab,
-              border: 'none',
+              border: rgpMode === "without_bom" ? '2px solid #f59e0b' : '1px solid #fde68a',
               margin: 0,
-              backgroundColor: '#fef3c7',
+              backgroundColor: rgpMode === "without_bom" ? '#fef3c7' : '#fffbeb',
               color: '#b45309',
-              fontWeight: '800'
+              fontWeight: '800',
+              boxShadow: rgpMode === "without_bom" ? '0 2px 8px rgba(245, 158, 11, 0.25)' : 'none'
             }}
           >
             <Emoji size={16} mr={8}>⚡</Emoji>
@@ -3695,11 +4302,11 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
 
             {/* Step 2: Configure Matrix & Accessories */}
             {wizardStep === 2 && (
-              <div style={styles.formBody}>
+              <div style={{ ...styles.formBody, gridTemplateColumns: '360px minmax(0, 1fr)' }}>
                 <div style={styles.leftColumn}>
                   {renderLotSummaryAndBomPillsCard()}
                 </div>
-                <div style={styles.rightColumn}>
+                <div style={{ ...styles.rightColumn, minWidth: 0, overflowX: 'hidden' }}>
                   {selectedBomItem ? renderAccessoryConfigAndMatrixCard() : (
                     <div style={{ ...styles.section, textAlign: 'center', padding: '64px 32px', color: '#64748b' }}>
                       <Emoji size={48} mr={0}>👉</Emoji>
@@ -3762,6 +4369,7 @@ export default function FabricRgpForm({ today = new Date(), onSubmit, onBack, pr
           payload={{
             ...form,
             rgpMode: rgpMode,
+            isWithoutBom: rgpMode === "without_bom" || (form.entries || []).some(e => e.isWithoutBom),
             isManual: rgpMode === "manual" || !selectedBomItem || (form.entries || []).some(e => {
               const lot = String(e.lotNo || "").trim().toUpperCase();
               return !lot || lot === "N/A" || lot === "NA" || lot === "MANUAL" || e.isManual;
@@ -3890,20 +4498,29 @@ const styles = {
   },
   formBody: {
     display: "grid",
-    gridTemplateColumns: "480px 1fr",
+    gridTemplateColumns: "360px minmax(0, 1fr)",
     gap: "0",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
     "@media (max-width: 1200px)": {
       gridTemplateColumns: "1fr",
     },
   },
   leftColumn: {
-    padding: "28px",
+    padding: "24px",
     borderRight: "1px solid #e2e8f0",
     backgroundColor: "#ffffff",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
   rightColumn: {
-    padding: "28px",
+    padding: "24px",
     backgroundColor: "#ffffff",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    overflowX: "hidden",
   },
   section: {
     marginBottom: "32px",

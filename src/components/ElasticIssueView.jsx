@@ -841,7 +841,8 @@ export default function ElasticIssueView({
   const [issueHistory, setIssueHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
-  const [historyLineFilter, setHistoryLineFilter] = useState('all'); // 'all' | 'elastic_wo' | 'tape_wo' | 'bone_wo' | 'standard'
+  const [historyDateFilter, setHistoryDateFilter] = useState(''); // 'YYYY-MM-DD' or '' for all dates
+  const [historyLineFilter, setHistoryLineFilter] = useState('all'); // 'all' | 'elastic_wo' | 'tape_wo' | 'bone_wo' | 'other_wo' | 'standard'
   const [historySortMode, setHistorySortMode] = useState('seq_asc'); // 'seq_asc' | 'seq_desc' | 'date_desc'
   const [previewPhotoUrl, setPreviewPhotoUrl] = useState(null); // { url, title, code, stock, location }
 
@@ -869,29 +870,40 @@ export default function ElasticIssueView({
     return { line: 'standard', label: 'With LOT', seq: num, color: '#059669', bg: '#f0fdf4', border: '#bbf7d0', badgeText: 'WITH LOT' };
   };
 
-  // Counts of each line in history
+  // Counts of each line in history (dynamically updates when date filter is chosen)
   const historyLineCounts = useMemo(() => {
-    const counts = { all: issueHistory.length, elastic_wo: 0, tape_wo: 0, bone_wo: 0, other_wo: 0, standard: 0 };
+    const counts = { all: 0, elastic_wo: 0, tape_wo: 0, bone_wo: 0, other_wo: 0, standard: 0 };
     (issueHistory || []).forEach(h => {
+      if (historyDateFilter) {
+        const itemDateStr = String(h.date || h.issueDate || '').slice(0, 10);
+        if (itemDateStr !== historyDateFilter) return;
+      }
+      counts.all++;
       const meta = getSlipMeta(h.slipNo);
       if (counts[meta.line] !== undefined) {
         counts[meta.line]++;
       }
     });
     return counts;
-  }, [issueHistory]);
+  }, [issueHistory, historyDateFilter]);
 
-  // Line-wise and sequence-sorted history list
+  // Line-wise, date-filtered and sequence-sorted history list
   const processedHistory = useMemo(() => {
     let list = (issueHistory || []).filter(h => {
       const meta = getSlipMeta(h.slipNo);
       if (historyLineFilter !== 'all' && meta.line !== historyLineFilter) return false;
+      if (historyDateFilter) {
+        const itemDateStr = String(h.date || h.issueDate || '').slice(0, 10);
+        if (itemDateStr !== historyDateFilter) return false;
+      }
       if (!historySearch) return true;
       const q = historySearch.toLowerCase();
       return String(h.slipNo || '').toLowerCase().includes(q) ||
         String(h.lotNo || '').toLowerCase().includes(q) ||
         String(h.receiverName || '').toLowerCase().includes(q) ||
         String(h.issuerName || '').toLowerCase().includes(q) ||
+        String(h.otherMaterialName || '').toLowerCase().includes(q) ||
+        String(h.date || '').toLowerCase().includes(q) ||
         String(h.style || '').toLowerCase().includes(q);
     });
 
@@ -930,7 +942,7 @@ export default function ElasticIssueView({
       const dateB = new Date(b.date || b.issueDate || 0).getTime();
       return dateB - dateA;
     });
-  }, [issueHistory, historyLineFilter, historySortMode, historySearch]);
+  }, [issueHistory, historyLineFilter, historyDateFilter, historySortMode, historySearch]);
 
   const searchInputRef = useRef(null);
 
@@ -2864,16 +2876,23 @@ export default function ElasticIssueView({
   const handleReprintFromHistory = async (item) => {
     try {
       const isItemWithoutLot = Boolean(item.isWithoutLot || item.isWithoutPo || !item.lotNo || item.lotNo === 'W/O-LOT' || item.lotNo === 'W/O-PO-FLOOR' || String(item.slipNo).toLowerCase().includes('-w/o-'));
-      const itemMode = String(item.slipNo || '').toLowerCase().startsWith('tape')
-        ? 'tape'
-        : String(item.slipNo || '').toLowerCase().startsWith('bone')
-          ? 'bone'
-          : String(item.slipNo || '').toLowerCase().startsWith('elastic')
-            ? 'elastic'
-            : (item.materialMode || materialMode);
+      const isOther = String(item.slipNo || '').toLowerCase().startsWith('other');
+      const itemMode = isOther
+        ? 'other'
+        : String(item.slipNo || '').toLowerCase().startsWith('tape')
+          ? 'tape'
+          : String(item.slipNo || '').toLowerCase().startsWith('bone')
+            ? 'bone'
+            : String(item.slipNo || '').toLowerCase().startsWith('elastic')
+              ? 'elastic'
+              : (item.materialMode || materialMode);
 
       const doc = await createElasticIssuePDFDocument({
         ...item,
+        otherMaterialName: item.otherMaterialName || 'Other Accessory',
+        otherRollCount: item.otherRollCount || item.rolls || 1,
+        otherUnit: item.otherUnit || 'Roll',
+        selectedOtherMaterialId: item.selectedOtherMaterialId || '',
         slipNo: item.slipNo,
         lotNo: item.lotNo,
         isWithoutLot: isItemWithoutLot,
@@ -2946,6 +2965,7 @@ export default function ElasticIssueView({
       elastic_wo: 'Elastic W/O BOM (Internal Roll Issue)',
       tape_wo: 'Tape W/O BOM (Drawcord / Tape Issue)',
       bone_wo: 'Bone W/O BOM (Chinese Piping Issue)',
+      other_wo: 'Other Accessories W/O BOM (Direct Issue)',
       standard: 'With LOT (BOM Approved Issue)'
     };
     const activeFilterLabel = filterLabels[historyLineFilter] || 'All Slips';
@@ -8340,7 +8360,7 @@ export default function ElasticIssueView({
                 Elastic Issue Slips History
               </h3>
               <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                Sequence-tracked records of all material issue slips (Elastic, Tape, Bone & Standard)
+                Sequence-tracked records of all material issue slips (Elastic, Tape, Bone, Other Accessories & Standard)
               </p>
             </div>
 
@@ -8400,8 +8420,82 @@ export default function ElasticIssueView({
                 </button>
               </div>
 
+              {/* Date Choose Filter Picker */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                background: historyDateFilter ? '#eff6ff' : '#f8fafc',
+                border: historyDateFilter ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                borderRadius: '8px',
+                padding: '4px 9px',
+                transition: 'all 0.15s ease'
+              }}>
+                <Calendar size={13} style={{ color: historyDateFilter ? '#2563eb' : '#64748b' }} />
+                <span style={{ fontSize: '11px', fontWeight: '800', color: historyDateFilter ? '#1d4ed8' : '#475569' }}>
+                  Date:
+                </span>
+                <input
+                  type="date"
+                  value={historyDateFilter}
+                  onChange={(e) => setHistoryDateFilter(e.target.value)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    fontSize: '11.5px',
+                    fontWeight: '700',
+                    color: '#0f172a',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                  title="Choose a specific date to filter slips"
+                />
+                {historyDateFilter ? (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter('')}
+                    title="Clear date filter (show all slips)"
+                    style={{
+                      border: 'none',
+                      background: '#ef4444',
+                      color: '#ffffff',
+                      borderRadius: '50%',
+                      width: '16px',
+                      height: '16px',
+                      fontSize: '10px',
+                      fontWeight: '900',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0
+                    }}
+                  >
+                    ✕
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setHistoryDateFilter(new Date().toISOString().split('T')[0])}
+                    title="Filter by Today's slips"
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      background: '#ffffff',
+                      color: '#2563eb',
+                      borderRadius: '5px',
+                      padding: '2px 6px',
+                      fontSize: '10.5px',
+                      fontWeight: '800',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Today
+                  </button>
+                )}
+              </div>
+
               {/* Search Box */}
-              <div style={{ position: 'relative', width: '220px' }}>
+              <div style={{ position: 'relative', width: '200px' }}>
                 <input
                   type="text"
                   placeholder="Search Slip / Lot / Receiver..."
@@ -8476,7 +8570,7 @@ export default function ElasticIssueView({
             </div>
           </div>
 
-          {/* Line-Wise Filter Tabs */}
+          {/* Line-Wise Filter Tabs & Active Date Filter Status */}
           <div style={{
             display: 'flex',
             gap: '8px',
@@ -8494,6 +8588,7 @@ export default function ElasticIssueView({
               { id: 'elastic_wo', label: 'Elastic W/O', count: historyLineCounts.elastic_wo, color: '#c2410c', bg: '#fff7ed', border: '#fed7aa' },
               { id: 'tape_wo', label: 'Tape W/O', count: historyLineCounts.tape_wo, color: '#1d4ed8', bg: '#eff6ff', border: '#bfdbfe' },
               { id: 'bone_wo', label: 'Bone W/O', count: historyLineCounts.bone_wo, color: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' },
+              { id: 'other_wo', label: 'Other Acc W/O', count: historyLineCounts.other_wo, color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
               { id: 'standard', label: 'With LOT (BOM)', count: historyLineCounts.standard, color: '#059669', bg: '#f0fdf4', border: '#bbf7d0' }
             ].map(tab => {
               const isActive = historyLineFilter === tab.id;
@@ -8532,6 +8627,43 @@ export default function ElasticIssueView({
                 </button>
               );
             })}
+
+            {historyDateFilter && (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: '#eff6ff',
+                border: '1px solid #93c5fd',
+                color: '#1d4ed8',
+                padding: '4px 10px',
+                borderRadius: '8px',
+                fontSize: '11.5px',
+                fontWeight: '700',
+                marginLeft: 'auto'
+              }}>
+                <Calendar size={12} />
+                <span>Date: <strong>{historyDateFilter}</strong> ({processedHistory.length} slips)</span>
+                <button
+                  type="button"
+                  onClick={() => setHistoryDateFilter('')}
+                  style={{
+                    border: 'none',
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    borderRadius: '4px',
+                    padding: '1px 6px',
+                    fontSize: '10px',
+                    fontWeight: '800',
+                    cursor: 'pointer',
+                    marginLeft: '4px'
+                  }}
+                  title="Clear date filter"
+                >
+                  Clear ✕
+                </button>
+              </div>
+            )}
           </div>
 
           {/* History Table */}
@@ -8673,20 +8805,24 @@ export default function ElasticIssueView({
                               {item.quantity || item.issuePcs ? `${item.quantity || item.issuePcs} Pcs` : '—'}
                             </td>
                             <td style={{ padding: '10px 12px', fontWeight: '800', color: '#047857' }}>
-                              {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
-                                ? '1/45 Roll'
-                                : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
-                                  ? '18 CM Cut'
-                                  : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—')}
+                              {String(item.slipNo || '').toLowerCase().includes('other-')
+                                ? (item.otherMaterialName ? item.otherMaterialName : 'Direct Issue')
+                                : String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+                                  ? '1/45 Roll'
+                                  : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+                                    ? '18 CM Cut'
+                                    : (item.elasticPerPcMtr || item.elastic_per_pc_mtr ? `${item.elasticPerPcMtr || item.elastic_per_pc_mtr} Mtr` : '—')}
                             </td>
                           </>
                         )}
                         <td style={{ padding: '10px 12px', fontWeight: '900', color: '#065f46', background: '#f0fdf4' }}>
-                          {String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
-                            ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
-                            : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
-                              ? `${item.boneRolls || item.rolls || 1} Roll(s)`
-                              : (item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : `${item.rolls || 1} Roll(s)`)}
+                          {String(item.slipNo || '').toLowerCase().includes('other-')
+                            ? `${item.otherRollCount || item.rolls || 1} ${item.otherUnit || 'Roll'}(s)`
+                            : String(item.slipNo || '').toLowerCase().includes('tape-') || item.tapeRolls
+                              ? `${item.tapeRolls || item.rolls || Math.ceil((item.quantity || item.issuePcs || 0) / 45)} Roll(s)`
+                              : String(item.slipNo || '').toLowerCase().includes('bone-') || item.boneRolls
+                                ? `${item.boneRolls || item.rolls || 1} Roll(s)`
+                                : (item.totalElasticMtr || item.total_elastic_mtr ? `${item.totalElasticMtr || item.total_elastic_mtr} Mtr` : `${item.rolls || 1} Roll(s)`)}
                         </td>
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
                           {item.issuerName || 'STORE STAFF'}
