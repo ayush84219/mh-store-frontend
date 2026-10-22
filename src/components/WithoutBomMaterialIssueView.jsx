@@ -1263,7 +1263,7 @@ export default function WithoutBomMaterialIssueView({
         }));
 
         if (brandVal && !brandName) setBrandName(brandVal);
-        if (styleVal && (!styleName || styleName === 'Direct Item Requisition' || styleName === 'Floor Batch Issue')) setStyleName(styleVal);
+        if (styleVal && (!styleName || styleName === 'Direct Item Requisition')) setStyleName(styleVal);
         if (resolvedTotal > 0 && (!pieces || pieces === 1)) setPieces(resolvedTotal);
       } catch (err) {
         // Silently keep the in-memory data
@@ -2619,7 +2619,7 @@ export default function WithoutBomMaterialIssueView({
     setBrandName('');
     setReceiverName('');
     setReceiverDept('Cutting');
-    setStyleName(issueMode === 'item_only' ? 'Direct Item Requisition' : 'Floor Batch Issue');
+    setStyleName('Direct Item Requisition');
     setPieces(1);
     setRemarks('');
     setBarcodeInput('');
@@ -4323,57 +4323,24 @@ export default function WithoutBomMaterialIssueView({
             gap: '10px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>Select Requisition Type:</span>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIssueMode('item_only');
-                    setStyleName('Direct Item Requisition');
-                  }}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: '7px',
-                    border: 'none',
-                    background: issueMode === 'item_only' ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : '#f1f5f9',
-                    color: issueMode === 'item_only' ? '#ffffff' : '#475569',
-                    fontWeight: '700',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: issueMode === 'item_only' ? '0 2px 6px rgba(234, 88, 12, 0.25)' : 'none'
-                  }}
-                >
-                  <Tag size={14} />
-                  <span>🏷️ Direct Item Issue</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIssueMode('floor_lot');
-                    setStyleName('Floor Batch Issue');
-                  }}
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: '7px',
-                    border: 'none',
-                    background: issueMode === 'floor_lot' ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : '#f1f5f9',
-                    color: issueMode === 'floor_lot' ? '#ffffff' : '#475569',
-                    fontWeight: '700',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: issueMode === 'floor_lot' ? '0 2px 6px rgba(2, 132, 199, 0.25)' : 'none'
-                  }}
-                >
-                  <Package size={14} />
-                  <span>📦 Floor Batch Issue</span>
-                </button>
+              <span style={{ fontSize: '12.5px', fontWeight: '800', color: '#0f172a' }}>Requisition Type:</span>
+              <div
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: '7px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                  color: '#ffffff',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 6px rgba(234, 88, 12, 0.25)'
+                }}
+              >
+                <Tag size={14} />
+                <span>🏷️ Direct Item Issue</span>
               </div>
             </div>
 

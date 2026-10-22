@@ -178,11 +178,13 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
     { location: '', count: 1 }
   ]);
 
-  // Pure Manual Inward Form (Direct Quantity Input, No Weight Machinery)
   const [form, setForm] = useState({
     materialName: '',
     materialCode: `MT${BASE_CODE}`,
+    brand: '',
     category: '',
+    rate: '',
+    price: '',
     unit: 'Pcs',
     pieces: '',
     packets: '1',
@@ -329,12 +331,16 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
     const matched = itemCodesList.find(i => i.item_code === code);
     if (matched) {
       const meta = getItemCodeMeta(matched);
+      const codeRate = (matched.rate != null && matched.rate !== '') ? String(matched.rate) : '';
       setForm(prev => ({
         ...prev,
         materialCode: matched.item_code,
         materialName: matched.item_name,
+        brand: matched.brand || prev.brand || '',
         category: matched.category || prev.category,
         unit: matched.uom || prev.unit,
+        rate: codeRate || prev.rate || '',
+        price: codeRate || prev.price || '',
         storeLocation: (meta.location && (!prev.storeLocation || prev.storeLocation === 'Main Store - Rack 1')) ? meta.location : prev.storeLocation,
         imageUrl: (meta.photo && !prev.imageUrl) ? meta.photo : prev.imageUrl
       }));
@@ -430,6 +436,9 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                 id: item.id,
                 materialCode: item.itemCode || item.materialCode,
                 itemCode: item.itemCode || item.materialCode,
+                brand: item.brand || '',
+                rate: item.rate != null ? item.rate : (item.cost || 0),
+                price: item.rate != null ? item.rate : (item.cost || 0),
                 time: item.capturedAt ? new Date(item.capturedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '00:00:00',
                 date: item.capturedAt ? new Date(item.capturedAt).toLocaleDateString('en-IN') : '',
                 po: item.poNumber || 'N/A',
@@ -682,6 +691,9 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
       setPrintTargetData({
         materialName: form.materialName,
         materialCode: form.materialCode,
+        brand: form.brand || '',
+        rate: form.rate || form.price || 0,
+        price: form.rate || form.price || 0,
         category: form.category || 'ACCESSORY',
         supplier: form.supplier || 'Vendor',
         poNumber: form.poNumber || 'N/A',
@@ -705,6 +717,9 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         body: JSON.stringify({
           materialCode: form.materialCode,
           materialName: form.materialName,
+          brand: form.brand || '',
+          rate: Number(form.rate || form.price) || 0,
+          price: Number(form.rate || form.price) || 0,
           unit: form.unit,
           category: form.category,
           supplier: form.supplier,
@@ -971,16 +986,27 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
       totalPackets += Number(r.packets) || 0;
     });
 
-    const rowsHtml = filteredCaptures.map((r, i) => `
+    const rowsHtml = filteredCaptures.map((r, i) => {
+      const photoRaw = r.imageUrl || itemCodesList.find(item => item.item_code === r.itemCode || item.item_code === r.materialCode || (item.item_name && r.material && item.item_name.toLowerCase() === r.material.toLowerCase()))?.imageUrl || itemCodesList.find(item => item.item_code === r.itemCode || item.item_code === r.materialCode || (item.item_name && r.material && item.item_name.toLowerCase() === r.material.toLowerCase()))?.image_url || '';
+      const cleanPhoto = photoRaw ? getCleanImageUrl(photoRaw) : '';
+      const displayBrand = r.brand || itemCodesList.find(item => item.item_code === r.itemCode || item.item_code === r.materialCode || (item.item_name && r.material && item.item_name.toLowerCase() === r.material.toLowerCase()))?.brand || '-';
+
+      return `
       <tr>
         <td style="text-align: center; font-weight: bold;">${i + 1}</td>
-        <td style="font-weight: bold; font-family: monospace; font-size: 11.5px;">${r.materialCode || '-'}</td>
+        <td style="font-weight: bold; font-family: monospace; font-size: 11px;">${r.materialCode || '-'}</td>
+        <td style="text-align: center; vertical-align: middle; padding: 3px;">
+          ${cleanPhoto ? `
+            <img src="${cleanPhoto}" alt="Photo" class="material-thumb" onerror="this.style.display='none'" />
+          ` : `<span style="color: #999; font-size: 8px;">—</span>`}
+        </td>
         <td>
           <div style="font-weight: 600;">${r.time || ''}</div>
-          <div style="font-size: 9.5px; color: #444;">${r.date || ''}</div>
+          <div style="font-size: 9px; color: #444;">${r.date || ''}</div>
         </td>
         <td>${r.po || 'N/A'}</td>
         <td style="font-weight: 600;">${r.material || '-'}</td>
+        <td style="font-weight: 600;">${displayBrand}</td>
         <td>${r.category || '-'}</td>
         <td style="text-align: right; font-weight: bold;">${r.pieces !== undefined ? Number(r.pieces).toLocaleString() : '-'} ${r.unit || 'Pcs'}</td>
         <td style="text-align: right; font-weight: bold;">${r.packets || 1} Pkts</td>
@@ -989,7 +1015,8 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         <td>${r.operator || 'Store'}</td>
         <td style="text-align: center; font-weight: 600;">${r.status || 'Manually'}</td>
       </tr>
-    `).join('');
+      `;
+    }).join('');
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -1051,7 +1078,22 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             }
             body {
               padding: 0;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
             }
+            img {
+              max-width: 100% !important;
+              page-break-inside: avoid;
+            }
+          }
+          .material-thumb {
+            width: 36px;
+            height: 36px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #777;
+            display: block;
+            margin: 0 auto;
           }
           .print-frame {
             border: 2px solid #000000;
@@ -1168,17 +1210,19 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
             <thead>
               <tr>
                 <th style="width: 22px; text-align: center;">#</th>
-                <th style="width: 70px;">Code</th>
-                <th style="width: 75px;">Time / Date</th>
-                <th style="width: 80px;">PO Number</th>
+                <th style="width: 65px;">Code</th>
+                <th style="width: 44px; text-align: center;">Photo</th>
+                <th style="width: 70px;">Time / Date</th>
+                <th style="width: 75px;">PO Number</th>
                 <th>Material Name</th>
-                <th style="width: 85px;">Category</th>
-                <th style="width: 80px; text-align: right;">Quantity</th>
-                <th style="width: 65px; text-align: right;">Packets</th>
-                <th style="width: 100px;">Location</th>
-                <th style="width: 75px;">Bill No</th>
-                <th style="width: 70px;">Operator</th>
-                <th style="width: 70px; text-align: center;">Mode</th>
+                <th style="width: 75px;">Brand</th>
+                <th style="width: 75px;">Category</th>
+                <th style="width: 75px; text-align: right;">Quantity</th>
+                <th style="width: 55px; text-align: right;">Packets</th>
+                <th style="width: 90px;">Location</th>
+                <th style="width: 65px;">Bill No</th>
+                <th style="width: 65px;">Operator</th>
+                <th style="width: 60px; text-align: center;">Mode</th>
               </tr>
             </thead>
             <tbody>
@@ -1206,7 +1250,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
           window.onload = function() {
             setTimeout(function() {
               window.print();
-            }, 300);
+            }, 600);
           };
         </script>
       </body>
@@ -1260,14 +1304,18 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
 
   const filteredCaptures = useMemo(() => {
     const ql = debouncedQ.toLowerCase();
+    const getRowBrand = (r) => r.brand || itemCodesList.find(i => i.item_code === r.itemCode || i.item_code === r.materialCode || (i.item_name && r.material && i.item_name.toLowerCase() === r.material.toLowerCase()))?.brand || '';
+
     return captures
       .filter(r => {
+        const rowBrand = getRowBrand(r);
         const matchesQ = !ql ||
           (r.material && r.material.toLowerCase().includes(ql)) ||
           (r.category && r.category.toLowerCase().includes(ql)) ||
           (r.po && r.po.toLowerCase().includes(ql)) ||
           (r.operator && r.operator.toLowerCase().includes(ql)) ||
           (r.status && r.status.toLowerCase().includes(ql)) ||
+          (rowBrand && rowBrand.toLowerCase().includes(ql)) ||
           (r.materialCode && r.materialCode.toLowerCase().includes(ql));
 
         const matchesCategory = !filterCategory || (r.category && r.category.toLowerCase() === filterCategory.toLowerCase());
@@ -1279,13 +1327,14 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
         return matchesQ && matchesCategory && matchesPo && matchesLocation && matchesOperator && matchesDate;
       })
       .sort((a, b) => {
-        let av = a[orderBy] ?? '', bv = b[orderBy] ?? '';
+        let av = orderBy === 'brand' ? getRowBrand(a) : (a[orderBy] ?? '');
+        let bv = orderBy === 'brand' ? getRowBrand(b) : (b[orderBy] ?? '');
         if (typeof av === 'string') { av = av.toLowerCase(); bv = bv.toLowerCase(); }
         if (av < bv) return order === 'asc' ? -1 : 1;
         if (av > bv) return order === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [captures, debouncedQ, orderBy, order, filterCategory, filterPo, filterLocation, filterOperator, filterDate]);
+  }, [captures, debouncedQ, orderBy, order, filterCategory, filterPo, filterLocation, filterOperator, filterDate, itemCodesList]);
 
   const paginatedData = useMemo(() => {
     const start = page * rpp;
@@ -1856,7 +1905,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
               </div>
             ) : (
               <div style={{ fontSize: '11.5px', color: '#059669', marginTop: '6px', fontWeight: '700' }}>
-                ✓ Mapped: Material Code = <strong>{selectedItemCode}</strong> | Material Name = <strong>{form.materialName}</strong> | Category = <strong>{form.category}</strong> | UOM = <strong>{form.unit}</strong>
+                ✓ Mapped: Material Code = <strong>{selectedItemCode}</strong> | Material Name = <strong>{form.materialName}</strong> | Brand = <strong>{form.brand || 'N/A'}</strong> | Category = <strong>{form.category}</strong> | UOM = <strong>{form.unit}</strong>{Number(form.rate || form.price) > 0 ? ` | Price = ₹${form.rate || form.price}` : ''}
               </div>
             )}
           </div>
@@ -1888,6 +1937,22 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
               readOnly={true}
               placeholder="Auto-mapped from Item Code"
               style={{ height: '40px', fontFamily: 'monospace', fontWeight: '900', backgroundColor: '#f1f5f9', color: '#1e293b', cursor: 'not-allowed', border: '1.5px solid #cbd5e1' }}
+            />
+          </div>
+
+          {/* Brand Name Auto-mapped from Item Code */}
+          <div className="form-group">
+            <label className="wcs-label">
+              Brand Name
+              <span style={{ fontSize: '10px', color: '#64748b', marginLeft: '6px', fontWeight: 'bold' }}>(Locked)</span>
+            </label>
+            <input
+              type="text"
+              className="wcs-input"
+              value={form.brand || ''}
+              readOnly={true}
+              placeholder="Auto-mapped from Item Code"
+              style={{ height: '40px', fontSize: '14px', fontWeight: '800', backgroundColor: '#f1f5f9', color: '#1e293b', cursor: 'not-allowed', border: '1.5px solid #cbd5e1' }}
             />
           </div>
 
@@ -1955,6 +2020,30 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
               onChange={setF('pieces')}
               placeholder="e.g. 3000"
               style={{ height: '42px', fontSize: '16px', fontWeight: '900', color: '#1d4ed8' }}
+            />
+          </div>
+
+          {/* Price / Rate of Item Input */}
+          <div className="form-group" style={{ background: 'rgba(16, 185, 129, 0.05)', padding: '12px', borderRadius: '8px', border: '1.5px solid #a7f3d0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+              <label className="wcs-label" style={{ color: '#047857', fontWeight: '900', margin: 0 }}>
+                Price of Item (Rate / Unit ₹)
+              </label>
+              {Number(form.rate || form.price) > 0 && Number(form.pieces) > 0 && (
+                <span style={{ fontSize: '11px', color: '#059669', fontWeight: '800' }}>
+                  Total: ₹{(Number(form.pieces) * Number(form.rate || form.price)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                </span>
+              )}
+            </div>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className="wcs-input"
+              value={form.rate ?? form.price ?? ''}
+              onChange={e => setForm(p => ({ ...p, rate: e.target.value, price: e.target.value }))}
+              placeholder="e.g. 25.50"
+              style={{ height: '42px', fontSize: '15px', fontWeight: '800', color: '#065f46' }}
             />
           </div>
 
@@ -2499,7 +2588,7 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                   ['MATERIAL NAME', 'material'],
                   ['CATEGORY', 'category'],
                   ['QUANTITY (PIECES)', 'pieces'],
-                  ['PACKETS', 'packets'],
+                  ['BRAND NAME', 'brand'],
                   ['LOCATION', 'location'],
                   ['STATUS', 'status'],
                   ['ACTIONS', null]
@@ -2625,17 +2714,36 @@ export default function ManuallyWeightCapture({ racks = [], currentUser = null, 
                         <div style={{ fontWeight: '900', color: '#2563eb', fontSize: '15px' }}>
                           {row.pieces.toLocaleString()} <span style={{ fontSize: '12px', color: '#64748b', fontWeight: '700' }}>{row.unit || 'Pcs'}</span>
                         </div>
+                        {parseInt(row.packets, 10) > 1 && (
+                          <div style={{ fontSize: '10.5px', color: '#7e22ce', fontWeight: '700', marginTop: '2px' }}>
+                            📦 {row.packets} Pkts
+                          </div>
+                        )}
+                        {Number(row.rate || row.price) > 0 && (
+                          <div style={{ fontSize: '11px', color: '#059669', fontWeight: '700', marginTop: '2px' }}>
+                            @ ₹{row.rate || row.price}/unit
+                            {Number(row.pieces) > 0 && ` (₹${(Number(row.pieces) * Number(row.rate || row.price)).toLocaleString('en-IN', { maximumFractionDigits: 2 })})`}
+                          </div>
+                        )}
                       </td>
 
-                      {/* PACKETS */}
+                      {/* BRAND NAME (in place of PACKETS) */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: '3px',
-                          padding: '3px 8px', borderRadius: '4px', background: '#f3e8ff',
-                          color: '#7e22ce', fontSize: '11.5px', fontWeight: '800'
-                        }}>
-                          📦 {row.packets} Packets
-                        </span>
+                        {(() => {
+                          const displayBrand = row.brand || itemCodesList.find(i => i.item_code === row.itemCode || i.item_code === row.materialCode || (i.item_name && row.material && i.item_name.toLowerCase() === row.material.toLowerCase()))?.brand || '';
+                          return displayBrand ? (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '4px',
+                              padding: '4px 10px', borderRadius: '6px',
+                              background: '#eff6ff', color: '#1d4ed8', fontWeight: '800',
+                              fontSize: '11.5px', border: '1px solid #bfdbfe'
+                            }}>
+                              🏢 {displayBrand}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                          );
+                        })()}
                       </td>
 
                       {/* LOCATION */}

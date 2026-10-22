@@ -9,6 +9,41 @@ import {
 } from 'lucide-react';
 import SearchableWarehouseSlotSelect from './SearchableWarehouseSlotSelect';
 
+// Helper to format unit of measure based on quantity (e.g. Roll, BEG, Box, Pcs)
+export const formatItemUnit = (unitStr, qty = 1) => {
+  if (!unitStr) return 'Pcs';
+  const u = String(unitStr).trim();
+  const upper = u.toUpperCase();
+  if (upper === 'PCS' || upper === 'PIECE' || upper === 'PIECES' || upper === 'PC') {
+    return 'Pcs';
+  }
+  if (upper === 'ROLL' || upper === 'ROLLS') {
+    return Number(qty) === 1 ? 'Roll' : 'Rolls';
+  }
+  if (upper === 'BEG' || upper === 'BAG' || upper === 'BAGS') {
+    return 'BEG';
+  }
+  if (upper === 'BOX' || upper === 'BOXES') {
+    return Number(qty) === 1 ? 'Box' : 'Boxes';
+  }
+  if (upper === 'BUNDLE' || upper === 'BUNDLES') {
+    return Number(qty) === 1 ? 'Bundle' : 'Bundles';
+  }
+  if (upper === 'MTR' || upper === 'METER' || upper === 'METERS') {
+    return 'Mtr';
+  }
+  if (upper === 'YDS' || upper === 'YARDS' || upper === 'YARD') {
+    return 'Yds';
+  }
+  if (upper === 'DOZEN' || upper === 'DZN') {
+    return 'Dozen';
+  }
+  if (upper === 'PKT' || upper === 'PACKET' || upper === 'PACKETS') {
+    return Number(qty) === 1 ? 'Pkt' : 'Pkts';
+  }
+  return u;
+};
+
 export default function WarehouseLocationView({
   racks = [],
   materials = [],
@@ -415,7 +450,9 @@ export default function WarehouseLocationView({
 
       matchedMaterialsEntries.forEach(({ material: m, effectivePkts, totalPkts }) => {
         currentPackets += effectivePkts;
-        totalQty += Math.round((Number(m.stock) / totalPkts) * effectivePkts);
+        const safeTotalPkts = Math.max(1, totalPkts || 1);
+        const itemSlotQty = Math.round((Number(m.stock || 0) / safeTotalPkts) * Math.max(1, effectivePkts));
+        totalQty += itemSlotQty;
         unit = m.unit || 'Pcs';
         const matLabel = m.color && m.color !== 'Default' ? `${m.name} (${m.color})` : m.name;
         const capMatch = matchedCaptures.find(c => String(c.materialCode) === String(m.id) || String(c.barcodeId) === String(m.id) || (m.itemCode && String(c.itemCode) === String(m.itemCode)));
@@ -431,6 +468,7 @@ export default function WarehouseLocationView({
           color: m.color,
           packets: effectivePkts,
           stock: m.stock,
+          quantity: itemSlotQty > 0 ? itemSlotQty : (Number(m.stock) || 0),
           unit: m.unit || 'Pcs',
           poNumber: m.poNumber,
           imageUrl: resolvedImage,
@@ -481,7 +519,7 @@ export default function WarehouseLocationView({
         matchedMaterials: matchedMaterialsEntries.map(e => e.material),
         poNumber: poNumbers[0] || (matchedMaterialsEntries[0]?.material?.poNumber || 'N/A'),
         lotNumber: lotNumbers[0] || 'N/A',
-        weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : (totalQty > 0 ? `${totalQty} ${unit || 'Pcs'}` : '0 kg'),
+        weight: totalWeightKg > 0 ? `${totalWeightKg.toFixed(1)} kg` : (totalQty > 0 ? `${totalQty} ${formatItemUnit(unit, totalQty)}` : '0 kg'),
         storeIncharge: storeIncharges[0] || 'Store Team',
         lastUpdated: lastUpdated || 'Active'
       });
@@ -1729,7 +1767,7 @@ export default function WarehouseLocationView({
                                 <div>
                                   <div style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <Box size={16} style={{ color: '#4f46e5' }} />
-                                    <span>{loc.qty.toLocaleString()} {loc.unit}</span>
+                                    <span>{loc.qty.toLocaleString()} {formatItemUnit(loc.unit, loc.qty)}</span>
                                     {loc.weight && loc.weight !== '0 kg' && (
                                       <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', marginLeft: 'auto' }}>
                                         ⚖️ {loc.weight}
@@ -1850,7 +1888,7 @@ export default function WarehouseLocationView({
                         {loc.status !== 'Empty' ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-main)', fontWeight: '700' }}>
                             <Box size={14} color="#4f46e5" />
-                            <span>{loc.qty.toLocaleString()} {loc.unit}</span>
+                            <span>{loc.qty.toLocaleString()} {formatItemUnit(loc.unit, loc.qty)}</span>
                           </div>
                         ) : (
                           <span style={{ color: '#10b981' }}>Free Slot</span>
@@ -1926,7 +1964,7 @@ export default function WarehouseLocationView({
                             {loc.materialName}
                           </td>
                           <td style={{ padding: '15px 18px', fontWeight: '800', color: 'var(--text-main)' }}>
-                            {loc.qty > 0 ? `${loc.qty.toLocaleString()} ${loc.unit}` : '-'}
+                            {loc.qty > 0 ? `${loc.qty.toLocaleString()} ${formatItemUnit(loc.unit, loc.qty)}` : '-'}
                           </td>
                           <td style={{ padding: '15px 18px' }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -2487,9 +2525,11 @@ export default function WarehouseLocationView({
                       {sourceMaterials.length > 0 ? (
                         sourceMaterials.map((m) => {
                           const cat = m.category || m.fullMaterial?.category;
+                          const mQty = Number(m.quantity !== undefined ? m.quantity : m.stock) || 0;
+                          const mUnit = formatItemUnit(m.unit || m.fullMaterial?.unit || 'Pcs', mQty);
                           return (
                             <option key={m.id} value={m.id}>
-                              {cat ? `[${cat.toUpperCase()}] ` : ''}{m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — {m.itemCode || m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({m.packets} Pkts Available)
+                              {cat ? `[${cat.toUpperCase()}] ` : ''}{m.name} {m.color && m.color !== 'Default' ? `(${m.color})` : ''} — {m.itemCode || m.id} {m.poNumber && m.poNumber !== 'N/A' ? `• PO: ${m.poNumber} ` : ''}• ({mQty > 0 ? `${mQty.toLocaleString()} ${mUnit}` : `${m.packets} Pkts`} Available)
                             </option>
                           );
                         })
@@ -2886,7 +2926,7 @@ export default function WarehouseLocationView({
                       Status: {selectedLocation.status}
                     </span>
                     <span style={{ fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
-                      {selectedLocation.qty.toLocaleString()} {selectedLocation.unit}
+                      {selectedLocation.qty.toLocaleString()} {formatItemUnit(selectedLocation.unit, selectedLocation.qty)}
                     </span>
                   </div>
 
@@ -3017,34 +3057,48 @@ export default function WarehouseLocationView({
                                 )}
                               </div>
                             </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <div style={{ textAlign: 'right' }}>
-                                <div style={{ fontSize: '13px', fontWeight: '800', color: '#4f46e5' }}>
-                                  {item.packets} Pkts
+                            {(() => {
+                              const itemQty = Number(item.quantity !== undefined ? item.quantity : item.stock) || 0;
+                              const rawUnit = item.unit || item.fullMaterial?.unit || 'Pcs';
+                              const formattedUnit = formatItemUnit(rawUnit, itemQty);
+                              const isPktUnit = ['PKT', 'PACKET', 'PACKETS'].includes(String(rawUnit).trim().toUpperCase());
+                              const hasSeparatePkts = item.packets > 0 && !isPktUnit && item.packets !== itemQty;
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <div style={{ textAlign: 'right' }}>
+                                    <div style={{ fontSize: '13.5px', fontWeight: '800', color: '#4f46e5', whiteSpace: 'nowrap' }}>
+                                      {itemQty.toLocaleString()} {formattedUnit}
+                                    </div>
+                                    {hasSeparatePkts && (
+                                      <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', marginTop: '1px' }}>
+                                        {item.packets} Pkt{item.packets > 1 ? 's' : ''}
+                                      </div>
+                                    )}
+                                  </div>
+                                  {/* Quick Transfer Item Button */}
+                                  <button
+                                    onClick={() => handleOpenTransferModal(selectedLocation, item)}
+                                    style={{
+                                      padding: '5px 9px',
+                                      borderRadius: '8px',
+                                      border: '1px solid #4f46e5',
+                                      backgroundColor: 'rgba(79, 70, 229, 0.08)',
+                                      color: '#4f46e5',
+                                      fontSize: '11px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}
+                                    title="Transfer this material to another rack"
+                                  >
+                                    <ArrowLeftRight size={12} />
+                                    Move
+                                  </button>
                                 </div>
-                              </div>
-                              {/* Quick Transfer Item Button */}
-                              <button
-                                onClick={() => handleOpenTransferModal(selectedLocation, item)}
-                                style={{
-                                  padding: '5px 9px',
-                                  borderRadius: '8px',
-                                  border: '1px solid #4f46e5',
-                                  backgroundColor: 'rgba(79, 70, 229, 0.08)',
-                                  color: '#4f46e5',
-                                  fontSize: '11px',
-                                  fontWeight: '700',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
-                                title="Transfer this material to another rack"
-                              >
-                                <ArrowLeftRight size={12} />
-                                Move
-                              </button>
-                            </div>
+                              );
+                            })()}
                           </div>
                         ))}
                       </div>
