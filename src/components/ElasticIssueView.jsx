@@ -2844,6 +2844,7 @@ export default function ElasticIssueView({
         currentSlipNo = await fetchNextIssueSlipNo(false);
       }
       const currentLotNo = (enteredLotNo || (withoutLotActive ? 'W/O LOT' : '')).toUpperCase();
+      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || activeLotCutting?.totalPieces || (materialMode === 'other' ? otherRollCount : 0) || 0, 10);
       const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
       const calculatedTapeRolls = Math.ceil(currentQuantity / effTapeDiv) || 1;
       const calculatedElasticRolls = withoutLotActive
