@@ -1388,6 +1388,24 @@ export default function ElasticTapeIssueView({
     return withStock[0] || candidates[0] || inventoryTape[0] || null;
   };
 
+  const getBestOtherMaterial = (matName, selectedId, reqQty = 0) => {
+    if (selectedId) {
+      const match = (materials || []).find(m => String(m.id) === String(selectedId) || String(m.itemCode) === String(selectedId));
+      if (match) return match;
+    }
+    if (matName) {
+      const clean = String(matName).toLowerCase().trim();
+      const match = (materials || []).find(m => (m.name || '').toLowerCase().trim() === clean || (m.name || '').toLowerCase().includes(clean));
+      if (match) return match;
+    }
+    if (reqQty > 0) {
+      const sufficient = (materials || []).filter(i => (i.stock || 0) >= reqQty);
+      if (sufficient.length > 0) return sufficient[0];
+    }
+    const withStock = (materials || []).filter(i => (i.stock || 0) > 0);
+    return withStock[0] || (materials || [])[0] || null;
+  };
+
   // ── Open Issue Actual Material Modal ──────────────────────────────────────
   const handleOpenIssueModal = (bill) => {
     setIssueModalBill(bill);
@@ -1396,22 +1414,27 @@ export default function ElasticTapeIssueView({
     const isElasticBill = bill.billType === 'elastic' || bill.billType === 'both';
     const isTapeBill = bill.billType === 'tape' || bill.billType === 'both';
     const isBoneBill = bill.billType === 'bone';
+    const isOtherBill = bill.billType === 'other';
 
     const reqElastic = isElasticBill ? (bill.elasticRolls > 0 ? bill.elasticRolls : (bill.totalElasticMtr > 0 ? bill.totalElasticMtr : 1)) : 0;
     const reqTape = isTapeBill ? (bill.totalTapeMtr > 0 ? bill.totalTapeMtr : (bill.tapeRolls || 1)) : 0;
     const reqBone = isBoneBill ? (bill.boneRolls > 0 ? bill.boneRolls : (parseFloat(bill.boneWeightKg) || 2.50)) : 0;
+    const reqOther = isOtherBill ? (parseFloat(bill.otherRollCount) || parseFloat(bill.rolls) || 1) : 0;
 
     const matchedElastic = isElasticBill ? getBestElasticMaterial(bill.elasticWidth, reqElastic) : null;
     const matchedTape = isTapeBill ? getBestTapeMaterial(bill.tapeWidth, reqTape) : null;
     const matchedBone = isBoneBill ? getBestBoneMaterial(reqBone) : null;
+    const matchedOther = isOtherBill ? getBestOtherMaterial(bill.otherMaterialName, bill.selectedOtherMaterialId, reqOther) : null;
 
     setIssueForm({
       elasticMaterialId: matchedElastic ? matchedElastic.id : (isElasticBill ? (inventoryElastic[0]?.id || '') : ''),
       tapeMaterialId: matchedTape ? matchedTape.id : (isTapeBill ? (inventoryTape[0]?.id || '') : ''),
       boneMaterialId: matchedBone ? matchedBone.id : (isBoneBill ? (inventoryBone[0]?.id || '') : ''),
+      otherMaterialId: matchedOther ? matchedOther.id : (isOtherBill ? (materials[0]?.id || '') : ''),
       customElasticQty: reqElastic,
       customTapeQty: reqTape,
       customBoneQty: reqBone,
+      customOtherQty: reqOther,
       receiverName: bill.receiverName !== '—' ? bill.receiverName : 'ROHIT',
       receiverDept: 'CUTTING',
       notes: `Actual Store Issue against Bill #${bill.billNo} (Lot #${bill.lotNo})`
@@ -1608,6 +1631,23 @@ export default function ElasticTapeIssueView({
           bomItemName: 'Bone / Piping',
           totalRequired: qty,
           unit: mat.unit || 'Roll',
+          location: mat.location || 'Main Store',
+          stockBefore: mat.stock || 0,
+          stockAfter: Math.max(0, Math.round(((mat.stock || 0) - qty) * 100) / 100)
+        });
+      }
+    }
+
+    if (bill.billType === 'other') {
+      const mat = materials.find(m => String(m.id) === String(issueForm.otherMaterialId)) || getBestOtherMaterial(bill.otherMaterialName, bill.selectedOtherMaterialId);
+      const qty = parseFloat(issueForm.customOtherQty) || parseFloat(bill.otherRollCount) || parseFloat(bill.rolls) || 1;
+      if (mat && qty > 0) {
+        itemsToDeduct.push({
+          materialId: mat.id,
+          materialName: mat.name,
+          bomItemName: bill.otherMaterialName || mat.name || 'Other Accessory',
+          totalRequired: qty,
+          unit: mat.unit || bill.otherUnit || 'Roll',
           location: mat.location || 'Main Store',
           stockBefore: mat.stock || 0,
           stockAfter: Math.max(0, Math.round(((mat.stock || 0) - qty) * 100) / 100)
@@ -4427,6 +4467,192 @@ export default function ElasticTapeIssueView({
                       step="any"
                       value={issueForm.customBoneQty}
                       onChange={(e) => setIssueForm({ ...issueForm, customBoneQty: e.target.value })}
+                      style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: '700' }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Material 4: Other Accessory Actual Issue */}
+            {issueModalBill.billType === 'other' && (() => {
+              const selectedOther = materials.find(m => String(m.id) === String(issueForm.otherMaterialId)) || materials[0];
+              const qty = parseFloat(issueForm.customOtherQty) || parseFloat(issueModalBill.otherRollCount) || parseFloat(issueModalBill.rolls) || 1;
+              const curStock = selectedOther ? (selectedOther.stock || 0) : 0;
+              const remStock = Math.max(0, Math.round((curStock - qty) * 100) / 100);
+              const isLowStock = curStock < qty;
+
+              return (
+                <div style={{ border: '2px solid #a855f7', background: '#faf5ff', borderRadius: '14px', padding: '18px', marginBottom: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <span style={{ fontSize: '14px', fontWeight: '800', color: '#7e22ce' }}>
+                      Other Accessory Actual Material Issue:
+                    </span>
+                    <span style={{ fontSize: '12px', fontWeight: '700', background: '#f3e8ff', color: '#7e22ce', padding: '3px 10px', borderRadius: '6px' }}>
+                      Bill Required: {issueModalBill.otherRollCount || 1} {issueModalBill.otherUnit || 'Roll'}(s) [{issueModalBill.otherMaterialName || 'Other Accessory'}]
+                    </span>
+                  </div>
+
+                  {/* Searchable Material Chooser with Photo, Category, Stock & Location */}
+                  <div style={{ marginBottom: '14px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '800', color: '#475569', marginBottom: '6px' }}>
+                      Choose Real Stock Item from Store Inventory to Deduct:
+                    </label>
+                    <SearchableMaterialSelect
+                      materials={materials}
+                      value={issueForm.otherMaterialId || selectedOther?.id}
+                      onChange={(val) => setIssueForm({ ...issueForm, otherMaterialId: val })}
+                      placeholder="🔍 Choose Real Stock Item..."
+                      componentHint={issueModalBill.otherMaterialName || 'Other Accessory'}
+                      recommendedMaterials={(() => {
+                        const best = getBestOtherMaterial(issueModalBill.otherMaterialName, issueModalBill.selectedOtherMaterialId, qty);
+                        return best ? [best] : [];
+                      })()}
+                      reqQty={qty}
+                      onPreviewPhoto={(url) => setPreviewPhotoUrl(url)}
+                    />
+                  </div>
+
+                  {/* ── PHOTO & CATEGORY VERIFICATION CARD ─────────────────────── */}
+                  {selectedOther && (
+                    <div style={{
+                      background: '#ffffff',
+                      borderRadius: '12px',
+                      border: isLowStock ? '2px solid #fca5a5' : '1.5px solid #d8b4fe',
+                      padding: '12px 14px',
+                      marginBottom: '12px',
+                      display: 'flex',
+                      gap: '14px',
+                      alignItems: 'center',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
+                    }}>
+                      {/* Photo Thumbnail */}
+                      <div
+                        onClick={() => selectedOther.imageUrl && setPreviewPhotoUrl(selectedOther.imageUrl)}
+                        title={selectedOther.imageUrl ? 'Click to Zoom Photo' : 'No photo uploaded'}
+                        style={{
+                          width: '74px',
+                          height: '74px',
+                          borderRadius: '10px',
+                          overflow: 'hidden',
+                          border: '2px solid #cbd5e1',
+                          background: '#f8fafc',
+                          flexShrink: 0,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          position: 'relative',
+                          cursor: selectedOther.imageUrl ? 'pointer' : 'default'
+                        }}
+                      >
+                        {selectedOther.imageUrl ? (
+                          <>
+                            <img
+                              src={getCleanImageUrl(selectedOther.imageUrl)}
+                              alt={selectedOther.name}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '2px',
+                              right: '2px',
+                              background: 'rgba(0,0,0,0.6)',
+                              color: '#ffffff',
+                              borderRadius: '4px',
+                              padding: '2px 3px',
+                              fontSize: '8px',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}>
+                              <Eye size={10} />
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ textAlign: 'center', color: '#94a3b8' }}>
+                            <Package size={22} />
+                            <div style={{ fontSize: '8px', fontWeight: '800', marginTop: '2px' }}>NO PHOTO</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Material Specs & Category Tag */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '3px' }}>
+                          <span style={{
+                            background: '#f3e8ff',
+                            color: '#7e22ce',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            padding: '2px 7px',
+                            borderRadius: '5px'
+                          }}>
+                            🏷️ CATEGORY: {selectedOther.category || 'OTHER'}
+                          </span>
+                          <span style={{
+                            background: '#f1f5f9',
+                            color: '#334155',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            padding: '2px 7px',
+                            borderRadius: '5px'
+                          }}>
+                            CODE: {selectedOther.itemCode || selectedOther.id}
+                          </span>
+                          {selectedOther.color && (
+                            <span style={{
+                              background: '#f8fafc',
+                              color: '#475569',
+                              border: '1px solid #e2e8f0',
+                              fontSize: '11px',
+                              fontWeight: '600',
+                              padding: '2px 6px',
+                              borderRadius: '5px'
+                            }}>
+                              🎨 {selectedOther.color}
+                            </span>
+                          )}
+                        </div>
+
+                        <div style={{ fontSize: '14px', fontWeight: '800', color: '#1e293b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {selectedOther.name}
+                        </div>
+
+                        <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>
+                          📍 <strong>Store Location:</strong> {selectedOther.location || 'Main Store'}
+                        </div>
+                      </div>
+
+                      {/* Stock Status Badge */}
+                      <div style={{
+                        background: isLowStock ? '#fef2f2' : '#f0fdf4',
+                        border: `1px solid ${isLowStock ? '#fecaca' : '#d8b4fe'}`,
+                        padding: '8px 12px',
+                        borderRadius: '8px',
+                        textAlign: 'right',
+                        flexShrink: 0
+                      }}>
+                        <div style={{ fontSize: '10px', fontWeight: '800', color: isLowStock ? '#b91c1c' : '#15803d' }}>
+                          {isLowStock ? '⚠️ LOW STOCK' : '✓ AVAILABLE'}
+                        </div>
+                        <div style={{ fontSize: '14px', fontWeight: '900', color: isLowStock ? '#dc2626' : '#166534', marginTop: '1px' }}>
+                          {curStock} {selectedOther.unit || 'Roll'}
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#475569', marginTop: '2px' }}>
+                          After Issue: <strong>{remStock} {selectedOther.unit || 'Roll'}</strong>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: '700', color: '#475569', marginBottom: '5px' }}>
+                      Actual Quantity to Deduct from Stock ({selectedOther?.unit || issueModalBill.otherUnit || 'Units'}):
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={issueForm.customOtherQty}
+                      onChange={(e) => setIssueForm({ ...issueForm, customOtherQty: e.target.value })}
                       style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #cbd5e1', fontSize: '14px', fontWeight: '700' }}
                     />
                   </div>

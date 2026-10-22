@@ -717,6 +717,9 @@ function SearchableMaterialSelect({
 }
 
 export default function ElasticIssueView({
+  materials: initialMaterialsProp = [],
+  onUpdateMaterial,
+  syncMaterialsToDb,
   currencySymbol = '₹',
   currentUser = null,
   prefilledLotNo = '',
@@ -995,7 +998,13 @@ export default function ElasticIssueView({
   };
 
   // Materials list & mapped items (Elastic, Tape, Bone, Other Accessories)
-  const [materials, setMaterials] = useState([]);
+  const [materials, setMaterials] = useState(Array.isArray(initialMaterialsProp) && initialMaterialsProp.length > 0 ? initialMaterialsProp : []);
+
+  useEffect(() => {
+    if (Array.isArray(initialMaterialsProp) && initialMaterialsProp.length > 0) {
+      setMaterials(initialMaterialsProp);
+    }
+  }, [initialMaterialsProp]);
   const [elasticMaterialName, setElasticMaterialName] = useState('Elastic');
   const [selectedElasticMaterialId, setSelectedElasticMaterialId] = useState('');
   const [tapeMaterialName, setTapeMaterialName] = useState('Tape');
@@ -1858,15 +1867,160 @@ export default function ElasticIssueView({
     };
   }, [searchLotInput, lotDetails, prefilledLotNo, cuttingHeaders, designs, cuttingCacheRefreshCount]);
 
-  // Save new issue to history & database table
+  // Save new issue to history, deduct stock from inventory & sync to database
   const saveToHistory = async (record) => {
     try {
+      const mode = record.materialMode || materialMode;
+
+      // 1. Determine all materials to deduct for this issue bill
+      const itemsToDeduct = [];
+
+      // Elastic item deduction
+      if (mode === 'elastic' || mode === 'both' || mode === 'all') {
+        const matId = record.selectedElasticMaterialId || selectedElasticMaterialId;
+        if (matId) {
+          const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+          const isMtr = mat && normalizeAccUnit(mat.unit).toLowerCase() === 'mtr';
+          const qty = (isMtr && parseFloat(record.totalElasticMtr) > 0)
+            ? parseFloat(record.totalElasticMtr)
+            : (parseFloat(record.rolls) || 1);
+          itemsToDeduct.push({
+            materialId: mat ? mat.id : matId,
+            materialName: mat ? mat.name : (record.elasticMaterialName || 'Elastic Waistband Roll'),
+            itemCode: formatItemCode(matId, mat, materials),
+            bomItemName: 'Elastic',
+            unit: mat?.unit || (isMtr ? 'Mtr' : 'Roll'),
+            totalRequired: qty,
+            location: mat?.location || 'Main Store',
+            stockBefore: mat ? (Number(mat.stock) || 0) : 0
+          });
+        }
+      }
+
+      // Tape item deduction
+      if (mode === 'tape' || mode === 'both' || mode === 'all') {
+        const matId = record.selectedTapeMaterialId || selectedTapeMaterialId;
+        if (matId) {
+          const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+          const isMtr = mat && normalizeAccUnit(mat.unit).toLowerCase() === 'mtr';
+          const qty = (isMtr && parseFloat(record.totalTapeMtr) > 0)
+            ? parseFloat(record.totalTapeMtr)
+            : (parseFloat(record.tapeRolls) || parseFloat(record.rolls) || 1);
+          itemsToDeduct.push({
+            materialId: mat ? mat.id : matId,
+            materialName: mat ? mat.name : (record.tapeMaterialName || 'Tape Roll'),
+            itemCode: formatItemCode(matId, mat, materials),
+            bomItemName: 'Tape',
+            unit: mat?.unit || (isMtr ? 'Mtr' : 'Roll'),
+            totalRequired: qty,
+            location: mat?.location || 'Main Store',
+            stockBefore: mat ? (Number(mat.stock) || 0) : 0
+          });
+        }
+      }
+
+      // Bone item deduction
+      if (mode === 'bone' || mode === 'all') {
+        const matId = record.selectedBoneMaterialId || selectedBoneMaterialId;
+        if (matId) {
+          const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+          const isKg = mat && normalizeAccUnit(mat.unit).toLowerCase() === 'kg';
+          const qty = (isKg && parseFloat(record.boneWeightKg) > 0)
+            ? parseFloat(record.boneWeightKg)
+            : (parseFloat(record.boneRollCount) || parseFloat(record.rolls) || 1);
+          itemsToDeduct.push({
+            materialId: mat ? mat.id : matId,
+            materialName: mat ? mat.name : (record.boneMaterialName || 'Bone Pocketing Roll'),
+            itemCode: formatItemCode(matId, mat, materials),
+            bomItemName: 'Bone',
+            unit: mat?.unit || (isKg ? 'Kg' : 'Roll'),
+            totalRequired: qty,
+            location: mat?.location || 'Main Store',
+            stockBefore: mat ? (Number(mat.stock) || 0) : 0
+          });
+        }
+      }
+
+      // Other Accessories item deduction
+      if (mode === 'other') {
+        const matId = record.selectedOtherMaterialId || selectedOtherMaterialId;
+        if (matId) {
+          const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+          const qty = parseFloat(record.otherRollCount) || parseFloat(record.rolls) || 1;
+          itemsToDeduct.push({
+            materialId: mat ? mat.id : matId,
+            materialName: mat ? mat.name : (record.otherMaterialName || 'Other Accessory'),
+            itemCode: formatItemCode(matId, mat, materials),
+            bomItemName: record.otherMaterialName || 'Other Accessory',
+            unit: mat?.unit || record.otherUnit || 'Roll',
+            totalRequired: qty,
+            location: mat?.location || 'Main Store',
+            stockBefore: mat ? (Number(mat.stock) || 0) : 0
+          });
+        }
+      }
+
+      // 2. Direct stock subtraction (total stock - issue stock)
+      const changedMaterials = [];
+      const updatedMaterials = (materials || []).map(m => {
+        const matched = itemsToDeduct.find(i => String(i.materialId) === String(m.id) || (m.itemCode && String(i.itemCode) === String(m.itemCode)));
+        if (matched) {
+          const oldStock = Number(m.stock) || 0;
+          const newStock = Math.max(0, Math.round((oldStock - matched.totalRequired) * 100) / 100);
+          matched.stockAfter = newStock;
+          const updatedMat = { ...m, stock: newStock };
+          changedMaterials.push(updatedMat);
+          if (typeof onUpdateMaterial === 'function') {
+            try { onUpdateMaterial(updatedMat); } catch (_) {}
+          }
+          return updatedMat;
+        }
+        return m;
+      });
+
+      // Update local state in ElasticIssueView immediately
+      setMaterials(updatedMaterials);
+
+      if (typeof syncMaterialsToDb === 'function' && changedMaterials.length > 0) {
+        try { syncMaterialsToDb(changedMaterials); } catch (_) {}
+      }
+
+      // Send PUT requests to MySQL
+      changedMaterials.forEach(cm => {
+        fetch(`${getBackendUrl()}/api/materials/${cm.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(cm)
+        }).catch(err => console.warn('Failed to PUT material stock update:', err));
+      });
+
+      // Update realIssuedMap in localStorage so all components know stock is deducted
+      const issueTimestamp = new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      try {
+        const realMap = JSON.parse(localStorage.getItem('gpdms_real_material_issued_bills') || '{}');
+        realMap[record.slipNo] = {
+          isIssued: true,
+          issuedAt: issueTimestamp,
+          issuedBy: record.issuerName || currentUser?.name || 'Store Staff',
+          issuedReceiver: record.receiverName,
+          deductedItems: itemsToDeduct
+        };
+        localStorage.setItem('gpdms_real_material_issued_bills', JSON.stringify(realMap));
+      } catch (_) {}
+
+      const recordWithDeduction = {
+        ...record,
+        realMaterialIssued: true,
+        deductedItems: itemsToDeduct,
+        issuedAt: issueTimestamp
+      };
+
       const current = [...issueHistory];
-      const updated = [record, ...current.filter(c => c.slipNo !== record.slipNo)];
+      const updated = [recordWithDeduction, ...current.filter(c => c.slipNo !== record.slipNo)];
       setIssueHistory(updated);
       localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(updated.slice(0, 100)));
 
-      // 1. Save directly into dedicated elastic_issue MySQL table
+      // 3. Save directly into dedicated elastic_issue MySQL table
       await fetch(`${getBackendUrl()}/api/elastic-issues`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1899,11 +2053,11 @@ export default function ElasticIssueView({
           selectedOtherMaterialId: record.selectedOtherMaterialId || selectedOtherMaterialId,
           otherItemCode: record.otherItemCode,
           remarks: record.remarks,
-          payload: JSON.stringify(record)
+          payload: JSON.stringify(recordWithDeduction)
         })
       });
 
-      // 2. Also sync to global issue_logs
+      // 4. Also sync to global issue_logs with deducted materials details
       try {
         const issueCat = (record.materialMode === 'other' || materialMode === 'other')
           ? 'OTHER ACCESSORIES'
@@ -1927,42 +2081,56 @@ export default function ElasticIssueView({
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
             date: record.date,
-            materials: [
-              (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') ? {
-                name: record.elasticMaterialName || elasticMaterialName || 'Elastic Waistband Roll',
-                materialId: record.selectedElasticMaterialId || selectedElasticMaterialId || '',
-                rolls: record.rolls,
-                shade: record.shade,
-                width: record.width,
-                elasticPerPcMtr: calcResult.elasticPerPcMtr,
-                totalElasticMtr: calcResult.totalElasticMtr
-              } : null,
-              (materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') ? {
-                name: record.tapeMaterialName || tapeMaterialName || 'Tape Roll',
-                materialId: record.selectedTapeMaterialId || selectedTapeMaterialId || '',
-                rolls: record.tapeRollCount || 1,
-                width: record.tapeWidth,
-                tapePerPcMtr: calcResult.tapePerPcMtr,
-                totalTapeMtr: calcResult.totalTapeMtr
-              } : null,
-              (materialMode === 'bone' || materialMode === 'all') ? {
-                name: record.boneMaterialName || boneMaterialName || 'Bone Pocketing Roll',
-                materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
-                rolls: record.boneRolls || boneRollCount || 1,
-                width: record.boneWidth
-              } : null,
-              (materialMode === 'other') ? {
-                name: record.otherMaterialName || otherMaterialName || 'Other Accessory',
-                materialId: record.selectedOtherMaterialId || selectedOtherMaterialId || '',
-                rolls: record.otherRollCount || otherRollCount || 1,
-                unit: record.otherUnit || otherUnit || 'Roll'
-              } : null
-            ].filter(Boolean)
+            materials: itemsToDeduct.length > 0
+              ? itemsToDeduct.map(i => ({
+                  name: i.materialName,
+                  materialId: i.materialId,
+                  bomItemName: i.bomItemName,
+                  qty: i.totalRequired,
+                  unit: i.unit,
+                  billNo: record.slipNo,
+                  location: i.location,
+                  remainingStock: i.stockAfter
+                }))
+              : [
+                  (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') ? {
+                    name: record.elasticMaterialName || elasticMaterialName || 'Elastic Waistband Roll',
+                    materialId: record.selectedElasticMaterialId || selectedElasticMaterialId || '',
+                    rolls: record.rolls,
+                    shade: record.shade,
+                    width: record.width,
+                    elasticPerPcMtr: calcResult.elasticPerPcMtr,
+                    totalElasticMtr: calcResult.totalElasticMtr
+                  } : null,
+                  (materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') ? {
+                    name: record.tapeMaterialName || tapeMaterialName || 'Tape Roll',
+                    materialId: record.selectedTapeMaterialId || selectedTapeMaterialId || '',
+                    rolls: record.tapeRollCount || 1,
+                    width: record.tapeWidth,
+                    tapePerPcMtr: calcResult.tapePerPcMtr,
+                    totalTapeMtr: calcResult.totalTapeMtr
+                  } : null,
+                  (materialMode === 'bone' || materialMode === 'all') ? {
+                    name: record.boneMaterialName || boneMaterialName || 'Bone Pocketing Roll',
+                    materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
+                    rolls: record.boneRolls || boneRollCount || 1,
+                    width: record.boneWidth
+                  } : null,
+                  (materialMode === 'other') ? {
+                    name: record.otherMaterialName || otherMaterialName || 'Other Accessory',
+                    materialId: record.selectedOtherMaterialId || selectedOtherMaterialId || '',
+                    rolls: record.otherRollCount || otherRollCount || 1,
+                    unit: record.otherUnit || otherUnit || 'Roll'
+                  } : null
+                ].filter(Boolean)
           })
         });
       } catch (_) { }
+
+      return itemsToDeduct;
     } catch (e) {
       console.warn('Backend sync warning:', e);
+      return [];
     }
   };
 
@@ -2938,10 +3106,15 @@ export default function ElasticIssueView({
     if (!generatedSlipData) return;
     setSavingSlip(true);
     try {
-      await saveToHistory(generatedSlipData);
+      const deducted = await saveToHistory(generatedSlipData);
       await fetchNextIssueSlipNo();
       setGeneratedSlipData(prev => prev ? { ...prev, isSaved: true } : null);
-      showToast(`Original Material Issue Bill ${generatedSlipData.slipNo} confirmed and saved successfully!`);
+      if (Array.isArray(deducted) && deducted.length > 0) {
+        const summary = deducted.map(d => `${d.materialName}: -${d.totalRequired} ${d.unit} (Stock: ${d.stockAfter})`).join(', ');
+        showToast(`Original Bill ${generatedSlipData.slipNo} saved & Stock Deducted! [${summary}]`, 'success');
+      } else {
+        showToast(`Original Material Issue Bill ${generatedSlipData.slipNo} confirmed and saved successfully!`);
+      }
     } catch (err) {
       console.error('Save error:', err);
       showToast('Failed to save bill details.', 'error');

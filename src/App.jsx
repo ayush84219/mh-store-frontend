@@ -185,7 +185,7 @@ const TAB_ROUTES = {
   bone_po: '/bone-issue',
   elastic_issue: '/elastic-issue',
   elastic_po: '/elastic-issue',
-  elastic_tape_issue: '/elastic-tape-issue',
+  elastic_tape_issue: '/elastic-issue',
   material_details: '/material-details',
   reports_history: '/reports-history',
   settings: '/settings',
@@ -217,8 +217,8 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/bone_po': 'bone_issue',
   '/elastic-po': 'elastic_issue',
   '/elastic_po': 'elastic_issue',
-  '/elastic-tape-issue': 'elastic_tape_issue',
-  '/elastic_tape_issue': 'elastic_tape_issue',
+  '/elastic-tape-issue': 'elastic_issue',
+  '/elastic_tape_issue': 'elastic_issue',
   '/reports/daily-fabric-issue': 'reports_history',
   '/reports/daily-report': 'reports_history',
   '/daily-fabric-issue': 'reports_history',
@@ -2197,9 +2197,6 @@ export default function App() {
                     <li className={`sidebar-subitem ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_issue'); }} title="Elastic Issue">
                       <span className="sidebar-text">Elastic Issue</span>
                     </li>
-                    <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_tape_issue'); }} title="Elastic & Tape Issue">
-                      <span className="sidebar-text">Elastic & Tape Issue</span>
-                    </li>
                     <li className={`sidebar-subitem ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                       <span className="sidebar-text">Generate PO</span>
                     </li>
@@ -2257,9 +2254,6 @@ export default function App() {
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'without_bom_material_issue' ? 'active' : ''}`} onClick={() => handleTabClick('without_bom_material_issue')} title="Material Issue (Without BOM)">
                       <span className="sidebar-text">⚡ Without BOM Issue</span>
-                    </li>
-                    <li className={`sidebar-subitem ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
-                      <span className="sidebar-text">Elastic & Tape Issue</span>
                     </li>
                     <li className={`sidebar-subitem ${activeTab === 'challan' ? 'active' : ''}`} onClick={() => handleTabClick('challan')} title="Component Challan">
                       <span className="sidebar-text">📦 Component Challan</span>
@@ -2350,10 +2344,6 @@ export default function App() {
                   <Sliders size={18} />
                   <span className="sidebar-text">Elastic Issue</span>
                 </li>
-                <li className={`sidebar-item ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => { handleTabClick('elastic_tape_issue'); }} title="Elastic & Tape Issue">
-                  <FileText size={18} />
-                  <span className="sidebar-text">Elastic & Tape Issue</span>
-                </li>
                 <li className={`sidebar-item ${activeTab === 'generate_po' ? 'active' : ''}`} onClick={() => handleTabClick('generate_po')} title="Generate PO">
                   <FileText size={18} />
                   <span className="sidebar-text">Generate PO</span>
@@ -2425,10 +2415,6 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 'elastic_issue' || activeTab === 'elastic_po' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_issue')} title="Elastic Issue">
                   <Sliders size={18} />
                   <span className="sidebar-text">Elastic Issue</span>
-                </li>
-                <li className={`sidebar-item ${activeTab === 'elastic_tape_issue' ? 'active' : ''}`} onClick={() => handleTabClick('elastic_tape_issue')} title="Elastic & Tape Issue">
-                  <FileText size={18} />
-                  <span className="sidebar-text">Elastic & Tape Issue</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'challan' ? 'active' : ''}`} onClick={() => handleTabClick('challan')} title="Component Challan">
                   <FileSpreadsheet size={18} />
@@ -3032,26 +3018,15 @@ export default function App() {
                 />
               )}
 
-              {(activeTab === 'elastic_issue' || activeTab === 'elastic_po') && (
+              {(activeTab === 'elastic_issue' || activeTab === 'elastic_po' || activeTab === 'elastic_tape_issue') && (
                 <ElasticIssueView
+                  materials={materials}
+                  onUpdateMaterial={handleUpdateMaterial}
+                  syncMaterialsToDb={syncMaterialsToDb}
                   prefilledLotNo={prefilledLotNo}
                   setPrefilledLotNo={setPrefilledLotNo}
                   currentUser={currentUser}
                   currencySymbol={currencySymbol}
-                  onNavigate={setActiveTab}
-                />
-              )}
-
-              {activeTab === 'elastic_tape_issue' && (
-                <ElasticTapeIssueView
-                  materials={materials}
-                  onIssueMaterials={handleIssueMaterials}
-                  onUpdateMaterial={handleUpdateMaterial}
-                  syncMaterialsToDb={syncMaterialsToDb}
-                  currentUser={currentUser}
-                  currencySymbol={currencySymbol}
-                  designs={designs}
-                  prefilledLotNo={prefilledLotNo}
                   onNavigate={setActiveTab}
                 />
               )}
