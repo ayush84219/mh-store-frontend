@@ -1014,9 +1014,17 @@ export default function WithoutBomMaterialIssueView({
   currencySymbol = '₹',
   onSwitchToWithBom,
   onRedirectToTab,
-  onSubmitApproval = null
+  onSubmitApproval = null,
+  initialTab = 'issue',
+  isMovementReport = false
 }) {
-  const [activeTab, setActiveTab] = useState('issue'); // 'issue' | 'history'
+  const [activeTab, setActiveTab] = useState(initialTab || 'issue');
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Issue Workflow Mode: 'item_only' (Direct single/multiple items issue without lot) vs 'floor_lot' (Batch issue against lot)
   const [issueMode, setIssueMode] = useState('item_only'); // 'item_only' | 'floor_lot'
@@ -1577,7 +1585,44 @@ export default function WithoutBomMaterialIssueView({
 
   // Raw without-bom issue logs for history tab (Strictly Without-BOM only)
   const rawWithoutBomLogs = useMemo(() => {
-    return (issueLogs || []).filter(l => {
+    const logs = [...(issueLogs || [])];
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localElastic = localStorage.getItem('gpdms_elastic_issue_history');
+        if (localElastic) {
+          const parsed = JSON.parse(localElastic);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(p => {
+              const pSlip = String(p.slipNo || p.slip_no || '').trim().toUpperCase();
+              if (pSlip.startsWith('OTHER-') && !logs.some(l => String(l.id || '').toUpperCase() === pSlip)) {
+                logs.push({
+                  id: p.slipNo || p.slip_no,
+                  lotId: p.lotNo || 'W/O BOM',
+                  isWithoutBom: true,
+                  category: 'OTHER ACCESSORIES',
+                  volume: Number(p.otherRollCount || p.rolls || 1),
+                  pieces: Number(p.quantity || p.issuePcs || 0),
+                  personName: p.issuerName || 'Store In-charge',
+                  receiverName: p.receiverName || 'Cutting Master',
+                  date: p.date || p.issueDate || '',
+                  style: p.style || 'LOWER',
+                  remarks: p.remarks || 'Other Accessories Issue',
+                  materials: [{
+                    name: p.otherMaterialName || 'Other Accessory',
+                    bomItemName: 'OTHER ACCESSORIES',
+                    qty: Number(p.otherRollCount || p.rolls || 1),
+                    unit: p.otherUnit || 'Roll',
+                    itemCode: p.otherItemCode || ''
+                  }]
+                });
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    return logs.filter(l => {
       const vid = String(l.id || '').toUpperCase();
       // STRICT: Exclude Extra Material & Re-Issues
       if (l.isReissue || vid.startsWith('EMI-') || vid.startsWith('RI-') || String(l.personName || '').toLowerCase().includes('extra')) {
@@ -1589,7 +1634,9 @@ export default function WithoutBomMaterialIssueView({
         vid.startsWith('CH-MI-') ||
         vid.startsWith('WO-MI-') ||
         vid.startsWith('MI-WO-') ||
+        vid.startsWith('OTHER-') ||
         String(l.category || '').toUpperCase().includes('WITHOUT BOM') ||
+        String(l.category || '').toUpperCase().includes('OTHER') ||
         String(l.lotId || '').toUpperCase().includes('DIRECT')
       );
     });
@@ -1599,7 +1646,7 @@ export default function WithoutBomMaterialIssueView({
   const availableHistoryCategories = useMemo(() => {
     const counts = {};
     // Seed default common categories
-    ['TAG', 'LABEL', 'DORI', 'ZIP', 'ELASTIC', 'BUTTON'].forEach(c => { counts[c] = 0; });
+    ['TAG', 'LABEL', 'DORI', 'ZIP', 'ELASTIC', 'BUTTON', 'OTHER ACCESSORIES'].forEach(c => { counts[c] = 0; });
 
     rawWithoutBomLogs.forEach(l => {
       const seenInThisLog = new Set();
@@ -3621,59 +3668,7 @@ export default function WithoutBomMaterialIssueView({
       `;
     }).join('') : '';
 
-    // Build Consolidated Lot-Wise Total Summary Table Rows (ONE table for all lots!)
-    const lotTableRowsHtml = Object.values(lotSummaryMap).map((lData, lIdx) => {
-      const challansArr = Array.from(lData.challans);
-      const matItems = Object.values(lData.materials);
-      const lotTotalQty = matItems.reduce((acc, m) => acc + m.totalQty, 0);
-      const lotPieces = lData.totalPieces || 0;
-      const lotVariance = lotPieces - lotTotalQty;
 
-      const lotMaterialsHtml = matItems.map(m => `
-        <div class="mat-item-row" style="padding: 2px 0;">
-          ${m.photo ? `<img src="${m.photo}" alt="${m.name}" class="mat-thumb" onerror="this.style.display='none'" />` : `<span class="no-photo">📦</span>`}
-          <div class="mat-info">
-            <span class="cat-badge">${m.componentType}</span>
-            <span class="mat-name"><strong>${m.name}</strong>${m.itemCode ? ` <span class="mat-code">[${m.itemCode}]</span>` : ''}</span>
-            <span class="mat-qty-badge">${m.totalQty.toLocaleString('en-IN')} ${m.unit}</span>
-            ${m.location ? `<span class="rack-badge">📍 ${m.location}</span>` : ''}
-          </div>
-        </div>
-      `).join('');
-
-      return `
-        <tr>
-          <td style="text-align: center; font-weight: 800; font-family: monospace;">#${lIdx + 1}</td>
-          <td style="font-weight: 900; font-size: 11.5px; color: #000000; white-space: nowrap;">
-            <span class="challan-badge" style="background: #f0fdf4; border-color: #000000; color: #000000;">
-              ${lData.lot}
-            </span>
-          </td>
-          <td style="font-weight: 700; color: #000000;">
-            ${lData.brand ? `<span style="font-weight: 800; font-size: 11px;">${lData.brand}</span>` : '<span style="color: #64748b;">—</span>'}
-          </td>
-          <td style="font-family: monospace; font-size: 9.5px; font-weight: 700;">
-            ${challansArr.join(', ')}
-          </td>
-          <td>
-            <div class="mat-list-container">
-              ${lotMaterialsHtml}
-            </div>
-          </td>
-          <td style="text-align: right; font-weight: 800; font-size: 11.5px; white-space: nowrap;">
-            ${lotPieces.toLocaleString('en-IN')} Pcs
-          </td>
-          <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap;">
-            ${lotTotalQty.toLocaleString('en-IN')} Pcs
-          </td>
-          <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap;">
-            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${lotVariance === 0 ? '#bbf7d0' : lotVariance > 0 ? '#bfdbfe' : '#fecaca'}; background: ${lotVariance === 0 ? '#f0fdf4' : lotVariance > 0 ? '#eff6ff' : '#fef2f2'}; color: ${lotVariance === 0 ? '#15803d' : lotVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
-              ${lotVariance > 0 ? `+${lotVariance.toLocaleString('en-IN')}` : lotVariance.toLocaleString('en-IN')} Pcs
-            </span>
-          </td>
-        </tr>
-      `;
-    }).join('');
 
     // Build Consolidated Material Summary (With Location / Rack No column)
     const materialListHtml = Object.values(materialSummaryMap).map(m => `
@@ -4104,50 +4099,9 @@ export default function WithoutBomMaterialIssueView({
           </tfoot>
         </table>
 
-        <!-- Consolidated Lot-Wise Total Summary -->
-        <div style="margin-top: 18px; margin-bottom: 6px; font-weight: 800; font-size: 11.5px; text-transform: uppercase;">
-          2. Consolidated Lot-Wise Total Summary
-        </div>
-        <table class="report-table">
-          <thead>
-            <tr>
-              <th style="width: 35px; text-align: center;">SEQ #</th>
-              <th style="width: 130px;">LOT REFERENCE</th>
-              <th style="width: 100px;">BRAND</th>
-              <th style="width: 140px;">CHALLAN NOS</th>
-              <th>MATERIALS ISSUED SUMMARY</th>
-              <th style="width: 115px; text-align: right;">TOTAL PIECES (CUTTING)</th>
-              <th style="width: 85px; text-align: right;">ISSUE PCS</th>
-              <th style="width: 105px; text-align: right;">VARIANCE (CUTTING - ISSUE)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${lotTableRowsHtml}
-          </tbody>
-          <tfoot>
-            <tr style="background: #f8fafc; font-weight: 900; font-size: 11px; border-top: 2px solid #000000;">
-              <td colspan="5" style="text-align: right; text-transform: uppercase; font-size: 11.5px;">All Lots Grand Total:</td>
-              <td style="text-align: right; font-weight: 900; font-size: 12px; white-space: nowrap; background: #f8fafc;">
-                ${grandTotalPieces.toLocaleString('en-IN')} Pcs Cutting
-              </td>
-              <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap; background: #fff7ed;">
-                ${totalQtyIssued.toLocaleString('en-IN')} Pcs
-              </td>
-              <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
-                <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${grandVariance === 0 ? '#bbf7d0' : grandVariance > 0 ? '#bfdbfe' : '#fecaca'}; color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
-                  ${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs
-                </span>
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-
-        <!-- Page break for End Summary -->
-        <div class="page-break"></div>
-
-        <!-- 3. Consolidated Material Grand Totals (With Location / Rack No) -->
-        <div class="section-banner">
-          <span>3. CONSOLIDATED MATERIAL GRAND TOTALS</span>
+        <!-- 2. Consolidated Material Grand Totals (With Location / Rack No) -->
+        <div class="section-banner" style="margin-top: 18px;">
+          <span>2. CONSOLIDATED MATERIAL GRAND TOTALS</span>
           <span style="font-size: 10px; font-weight: 600;">(Complete Material-wise Issue Volume Across All Lots)</span>
         </div>
         <table class="report-table">
@@ -4224,7 +4178,7 @@ export default function WithoutBomMaterialIssueView({
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '900', color: '#0f172a', letterSpacing: '0.3px' }}>
-                MATERIAL ISSUE WITHOUT BOM
+                {isMovementReport ? 'MATERIAL ISSUE' : 'MATERIAL ISSUE WITHOUT BOM'}
               </h3>
               <span style={{
                 fontSize: '11px',
@@ -5820,10 +5774,10 @@ export default function WithoutBomMaterialIssueView({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
-                Without-BOM &amp; Item Issue Challan / Bill Logs
+                {isMovementReport ? 'Material Issue Challan / Bill Logs' : 'Without-BOM & Item Issue Challan / Bill Logs'}
               </h4>
               <p style={{ margin: '2px 0 0 0', fontSize: '12px', color: '#64748b' }}>
-                Audit history of all material issue slips and challans generated without approved BOM.
+                {isMovementReport ? 'Audit history and cutting variance of all store material issue slips and challans.' : 'Audit history of all material issue slips and challans generated without approved BOM.'}
               </p>
             </div>
 

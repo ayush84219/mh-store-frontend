@@ -2713,14 +2713,23 @@ export default function ExtraMaterialIssueView({
       receiverDept: dept,
       isSingle: false,
       isReissue: isLogReissue(log),
-      items: (log.materials || []).map(m => ({
-        materialId: m.materialId || 'MT-ITEM',
-        materialName: m.name || m.bomItemName,
-        bomItemName: m.bomItemName || m.name,
-        totalRequired: m.qty,
-        unit: m.unit || 'Pcs',
-        reason: m.reason || (isLogReissue(log) ? 'Re-Issue Requisition' : 'Extra Material Requisition')
-      }))
+      items: (log.materials || []).map(m => {
+        const matMatch = (materials || []).find(mat => 
+          (m.materialId && String(mat.id) === String(m.materialId)) ||
+          (m.name && String(mat.name).trim().toLowerCase() === String(mat.name).trim().toLowerCase())
+        );
+        const rawCode = m.itemCode || (matMatch ? (matMatch.itemCode || matMatch.stCode || matMatch.materialCode || '') : '') || '';
+        const cleanCode = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+        return {
+          materialId: m.materialId || 'MT-ITEM',
+          materialName: m.name || m.bomItemName,
+          bomItemName: m.bomItemName || m.name,
+          itemCode: cleanCode,
+          totalRequired: m.qty,
+          unit: m.unit || 'Pcs',
+          reason: m.reason || (isLogReissue(log) ? 'Re-Issue Requisition' : 'Extra Material Requisition')
+        };
+      })
     };
   };
 
@@ -2769,6 +2778,7 @@ export default function ExtraMaterialIssueView({
               <th style="padding: 6px; text-align: center; width: 30px; border: 1px solid #000000; font-weight: 900;">#</th>
               <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Component Name</th>
               <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Material Description</th>
+              <th style="padding: 6px; text-align: left; width: 90px; border: 1px solid #000000; font-weight: 900;">Item Code</th>
               <th style="padding: 6px; text-align: center; width: 90px; border: 1px solid #000000; font-weight: 900;">Extra Qty</th>
               <th style="padding: 6px; text-align: left; border: 1px solid #000000; font-weight: 900;">Reason / Cause</th>
             </tr>
@@ -2779,6 +2789,7 @@ export default function ExtraMaterialIssueView({
                 <td style="padding: 6px; text-align: center; border: 1px solid #000000; font-weight: 900;">${idx + 1}</td>
                 <td style="padding: 6px; font-weight: 700; border: 1px solid #000000;"><span style="padding: 2px 6px; border-radius: 3px; background-color: #ffffff; color: #000000; border: 1.2px solid #000000; font-size: 11px; font-weight: 900;">${it.bomItemName || it.materialName}</span></td>
                 <td style="padding: 6px; border: 1px solid #000000; font-weight: 600;">${it.materialName || it.bomItemName}</td>
+                <td style="padding: 6px; border: 1px solid #000000; font-family: monospace; font-weight: 800;">${it.itemCode || '—'}</td>
                 <td style="padding: 6px; text-align: center; font-weight: 900; color: #000000; border: 1px solid #000000;">${it.totalRequired || it.qty} ${it.unit || 'Pcs'}</td>
                 <td style="padding: 6px; border: 1px solid #000000; font-weight: 600;">${it.reason || 'Extra Material Issue'}</td>
               </tr>

@@ -104,6 +104,8 @@ const PO_DATA_RANGE = "PO_Items!A:I";
  * Local Storage Keys
  * ========================= */
 const LOCAL_STORAGE_KEYS = {
+  BRAND_ENABLED: "po_brand_enabled",
+  BRANDS: "po_brands",
   SHADE_ENABLED: "po_shade_enabled",
   DESCRIPTIONS: "po_descriptions",
   SHADES: "po_shades",
@@ -170,6 +172,7 @@ function generateNextPoNumber(existingPoNumbers) {
 const blankRow = () => ({
   department: "",
   description: "",
+  brand: "",
   shade: "",
   uom: "",
   qty: 0,
@@ -378,6 +381,7 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
     qrGateImage = null,
     qrRecvImage = null,
     qrSide = 96,
+    brandEnabled = false,
     shadeEnabled = false,
     gstEnabled = false,
     gstPercentage = 0
@@ -557,6 +561,7 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
 
       const mRows = [
         ["PO #", (payload.meta?.poNumber || "").replace(/\s+/g, "")],
+        ...(payload.meta?.lotNo ? [["Lot #", String(payload.meta.lotNo)]] : []),
         ["Order Date/Time", [payload.meta?.orderDate, payload.meta?.orderTime].filter(Boolean).join(" ")],
         ...(payload.meta?.expectedDate ? [["Expected Date/Time", payload.meta.expectedDate]] : []),
         ...(payload.meta?.leadTimeHuman ? [["Lead Time", payload.meta.leadTimeHuman]] : []),
@@ -646,7 +651,30 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
       const gstAmount = gstEnabled && !isSupplierCopy ? (totalSum * gstPercentage) / 100 : 0;
 
       let cols;
-      if (shadeEnabled) {
+      if (brandEnabled && shadeEnabled) {
+        cols = [
+          { key: "line", title: "#", pct: 0.05, align: "right" },
+          { key: "department", title: "DEPARTMENT", pct: 0.13 },
+          { key: "description", title: "DESCRIPTION", pct: 0.25 },
+          { key: "brand", title: "BRAND", pct: 0.12 },
+          { key: "shade", title: "SHADE", pct: 0.12 },
+          { key: "uom", title: "UOM", pct: 0.07, align: "center" },
+          { key: "qty", title: "QTY", pct: 0.08, align: "right" },
+          { key: "rate", title: "RATE", pct: 0.09, align: "right" },
+          { key: "amount", title: "AMOUNT", pct: 0.09, align: "right" },
+        ];
+      } else if (brandEnabled) {
+        cols = [
+          { key: "line", title: "#", pct: 0.05, align: "right" },
+          { key: "department", title: "DEPARTMENT", pct: 0.14 },
+          { key: "description", title: "DESCRIPTION", pct: 0.31 },
+          { key: "brand", title: "BRAND", pct: 0.15 },
+          { key: "uom", title: "UOM", pct: 0.08, align: "center" },
+          { key: "qty", title: "QTY", pct: 0.09, align: "right" },
+          { key: "rate", title: "RATE", pct: 0.09, align: "right" },
+          { key: "amount", title: "AMOUNT", pct: 0.09, align: "right" },
+        ];
+      } else if (shadeEnabled) {
         cols = [
           { key: "line", title: "#", pct: 0.05, align: "right" },
           { key: "department", title: "DEPARTMENT", pct: 0.15 },
@@ -714,13 +742,16 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
 
       const drawTableRow = (r, idx) => {
         const descColIndex = cols.findIndex(col => col.key === "description");
+        const brandColIndex = brandEnabled ? cols.findIndex(col => col.key === "brand") : -1;
         const shadeColIndex = shadeEnabled ? cols.findIndex(col => col.key === "shade") : -1;
         const descWidth = descColIndex >= 0 ? cols[descColIndex].w - 20 : 0;
+        const brandWidth = brandColIndex >= 0 ? cols[brandColIndex].w - 20 : 0;
         const shadeWidth = shadeColIndex >= 0 ? cols[shadeColIndex].w - 20 : 0;
 
         const descLines = doc.splitTextToSize(r.description || "", descWidth);
+        const brandLines = brandEnabled ? doc.splitTextToSize(r.brand || "", brandWidth) : [];
         const shadeLines = shadeEnabled ? doc.splitTextToSize(r.shade || "", shadeWidth) : [];
-        const rowH = Math.max(baseH, descLines.length * 14 + 10, shadeLines.length * 14 + 10);
+        const rowH = Math.max(baseH, descLines.length * 14 + 10, brandLines.length * 14 + 10, shadeLines.length * 14 + 10);
 
         if (needSpaceForContent(rowH)) {
           drawTableHeader();
@@ -741,6 +772,15 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
         colIndex++;
         descLines.forEach((ln, j) => text(ln, xs[colIndex] + 10, yy + j * 14));
         colIndex++;
+
+        if (brandEnabled) {
+          if (brandLines.length > 0) {
+            brandLines.forEach((ln, j) => text(ln, xs[colIndex] + 10, yy + j * 14));
+          } else {
+            text(r.brand || "", xs[colIndex] + 10, yy);
+          }
+          colIndex++;
+        }
 
         if (shadeEnabled) {
           if (shadeLines.length > 0) {
@@ -1551,12 +1591,17 @@ export default function GeneratePOView({
                 return {
                   department: dept,
                   description: desc,
+                  brand: item.brand || "",
                   shade: isMySQL ? (item.description || "") : (item.shade || ""),
                   uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
                   qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
                   rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
                 };
               }));
+              if (poRows.some(r => r.brand)) {
+                setBrandEnabled(true);
+                setLocalStorageItem(LOCAL_STORAGE_KEYS.BRAND_ENABLED, true);
+              }
             }
           }
           setLocalStorageItem(LOCAL_STORAGE_KEYS.LAST_PO_NUMBER, targetPo);
@@ -1594,6 +1639,7 @@ export default function GeneratePOView({
         approvedBy: po.approvedBy || "SYSTEM",
         remarks: po.remarks || "",
         createdAt: po.date || new Date().toISOString(),
+        brandEnabled: poRows.some(r => r.brand) || !!po.brand,
         shadeEnabled: poRows.some(r => r.description),
         gstEnabled: po.tax > 0,
         gstPercentage: po.taxRate || 18,
@@ -1608,6 +1654,7 @@ export default function GeneratePOView({
           line: r.line || (i + 1),
           department: r.department || r.dept || "Trims",
           description: isMySQLFormat ? r.name : (r.description || r.item || ""),
+          brand: r.brand || "",
           shade: isMySQLFormat ? r.description : (r.shade || ""),
           uom: isMySQLFormat ? r.unit : (r.uom || r.unit || "PCS"),
           qty: parseFloat(isMySQLFormat ? r.qty : (r.qty || r.quantity)) || 0,
@@ -1642,6 +1689,7 @@ export default function GeneratePOView({
         qrGateImage: gateQR,
         qrRecvImage: recvQR,
         qrSide: 96,
+        brandEnabled: payload.meta.brandEnabled,
         shadeEnabled: payload.meta.shadeEnabled,
         gstEnabled: payload.meta.gstEnabled,
         gstPercentage: payload.meta.gstPercentage
@@ -2174,8 +2222,14 @@ export default function GeneratePOView({
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [loadError, setLoadError] = useState("");
 
+  const [brandEnabled, setBrandEnabled] = useState(() =>
+    getLocalStorageItem(LOCAL_STORAGE_KEYS.BRAND_ENABLED, false)
+  );
   const [shadeEnabled, setShadeEnabled] = useState(() =>
     getLocalStorageItem(LOCAL_STORAGE_KEYS.SHADE_ENABLED, false)
+  );
+  const [savedBrands, setSavedBrands] = useState(() =>
+    getLocalStorageItem(LOCAL_STORAGE_KEYS.BRANDS, [])
   );
   const [savedDescriptions, setSavedDescriptions] = useState(() =>
     getLocalStorageItem(LOCAL_STORAGE_KEYS.DESCRIPTIONS, [])
@@ -2183,6 +2237,32 @@ export default function GeneratePOView({
   const [savedShades, setSavedShades] = useState(() =>
     getLocalStorageItem(LOCAL_STORAGE_KEYS.SHADES, [])
   );
+
+  // Real-time Autocomplete state savers
+  const saveBrandWithDebounce = (brand) => {
+    if (!brand || !brand.trim()) return;
+    window.saveBrandTimeout = window.saveBrandTimeout || null;
+    if (window.saveBrandTimeout) clearTimeout(window.saveBrandTimeout);
+    window.saveBrandTimeout = setTimeout(() => {
+      const trimmedValue = brand.trim();
+      if (trimmedValue.length < 2) return;
+      const savedItems = getLocalStorageItem(LOCAL_STORAGE_KEYS.BRANDS, []);
+      if (!savedItems.includes(trimmedValue)) {
+        const updatedItems = [trimmedValue, ...savedItems.filter(item => item !== trimmedValue)];
+        setLocalStorageItem(LOCAL_STORAGE_KEYS.BRANDS, updatedItems.slice(0, 50));
+        setSavedBrands(updatedItems.slice(0, 50)); // Live React sync
+      }
+    }, 800);
+  };
+
+  const allBrandOptions = useMemo(() => {
+    const set = new Set();
+    (designs || []).forEach(d => { if (d.brand) set.add(d.brand.trim()); });
+    (materials || []).forEach(m => { if (m.brand) set.add(m.brand.trim()); });
+    (dbItemCodes || []).forEach(c => { if (c.brand) set.add(c.brand.trim()); });
+    savedBrands.forEach(b => { if (b) set.add(b.trim()); });
+    return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  }, [designs, materials, dbItemCodes, savedBrands]);
 
   // Real-time Autocomplete state savers
   const saveDescriptionWithDebounce = (description) => {
@@ -2242,12 +2322,57 @@ export default function GeneratePOView({
   const [saveManualVendorToDb, setSaveManualVendorToDb] = useState(false);
   const [isSavingVendor, setIsSavingVendor] = useState(false);
   const [poMode, setPoMode] = useState('lot'); // 'lot' | 'normal'
+  const [isLotDropdown, setIsLotDropdown] = useState(false);
+  const [lotCuttingPieces, setLotCuttingPieces] = useState(null);
+  const [showLotBomTable, setShowLotBomTable] = useState(false);
+  const [isLotDetailsExpanded, setIsLotDetailsExpanded] = useState(true);
+
+  // Smart resolution of design from ID, Style, LotNo2, or Name
+  const matchedDesign = useMemo(() => {
+    if (!selectedDesignId) return null;
+    const clean = String(selectedDesignId).trim().toLowerCase();
+    const cleanNum = clean.replace(/^(lot\s*#?|#)/i, '').trim();
+    return (
+      designs.find(d => String(d.id).trim().toLowerCase() === clean) ||
+      (cleanNum ? designs.find(d => String(d.id).trim().toLowerCase() === cleanNum) : null) ||
+      designs.find(d => String(d.name || '').trim().toLowerCase() === clean) ||
+      designs.find(d => String(d.style || '').trim().toLowerCase() === clean) ||
+      designs.find(d => String(d.lotNo2 || '').trim().toLowerCase() === clean) ||
+      null
+    );
+  }, [designs, selectedDesignId]);
+
+  // Fetch cutting pieces whenever lot changes
+  useEffect(() => {
+    if (!selectedDesignId) {
+      setLotCuttingPieces(null);
+      return;
+    }
+    const clean = String(selectedDesignId).trim();
+    const cleanNum = clean.replace(/^(lot\s*#?|#)/i, '').trim();
+    const targetLotId = matchedDesign?.id || cleanNum || clean;
+    if (!targetLotId) return;
+
+    fetch(`${getBackendUrl()}/api/cutting/${encodeURIComponent(targetLotId)}`)
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data && data.rows && data.rows.length > 0) {
+          const totalPcs = data.rows.reduce((sum, row) => sum + (Number(row.totalPcs) || 0), 0);
+          setLotCuttingPieces(totalPcs > 0 ? totalPcs : null);
+        } else {
+          setLotCuttingPieces(null);
+        }
+      })
+      .catch(() => setLotCuttingPieces(null));
+  }, [selectedDesignId, matchedDesign]);
 
   const handlePoModeChange = (mode) => {
     setPoMode(mode);
     if (mode === 'normal') {
       setSelectedDesignId('');
       setRows([blankRow()]);
+      setIsLotDropdown(false);
+      setLotCuttingPieces(null);
     }
   };
 
@@ -2364,22 +2489,25 @@ export default function GeneratePOView({
   const handleDesignChange = (designId) => {
     setSelectedDesignId(designId);
     if (!designId) {
-      setRows([blankRow()]);
+      if (poMode === 'lot') setRows([blankRow()]);
       return;
     }
-    const design = designs.find(d => d.id === designId);
-    if (design && design.bom) {
-      const mapped = design.bom
-        .filter(item => String(item.status).toLowerCase() === 'yes')
-        .map(item => ({
-          department: item.category || 'Trims',
-          description: item.name + (item.detail ? ` (${item.detail})` : ''),
-          shade: '',
-          uom: 'PCS',
-          qty: 100,
-          rate: 0
-        }));
-      setRows(mapped.length > 0 ? mapped : [blankRow()]);
+    if (poMode === 'lot') {
+      const design = designs.find(d => String(d.id) === String(designId));
+      if (design && design.bom) {
+        const mapped = design.bom
+          .filter(item => String(item.status).toLowerCase() === 'yes')
+          .map(item => ({
+            department: item.category || 'Trims',
+            description: item.name + (item.detail ? ` (${item.detail})` : ''),
+            brand: design.brand || '',
+            shade: '',
+            uom: 'PCS',
+            qty: 100,
+            rate: 0
+          }));
+        setRows(mapped.length > 0 ? mapped : [blankRow()]);
+      }
     }
   };
 
@@ -2470,6 +2598,10 @@ export default function GeneratePOView({
     })();
     return () => { mounted = false; };
   }, []);
+
+  useEffect(() => {
+    setLocalStorageItem(LOCAL_STORAGE_KEYS.BRAND_ENABLED, brandEnabled);
+  }, [brandEnabled]);
 
   useEffect(() => {
     setLocalStorageItem(LOCAL_STORAGE_KEYS.SHADE_ENABLED, shadeEnabled);
@@ -2581,6 +2713,10 @@ export default function GeneratePOView({
   const makePayload = () => ({
     meta: {
       poNumber,
+      lotNo: selectedDesignId || null,
+      designId: selectedDesignId || null,
+      designName: matchedDesign ? matchedDesign.name : (selectedDesignId ? `Lot #${selectedDesignId}` : null),
+      poMode,
       orderDate: orderDate || null,
       orderTime: orderTime || null,
       expectedDate: expectedDate || null,
@@ -2594,6 +2730,7 @@ export default function GeneratePOView({
       approvedBy: approvedBy || null,
       remarks: remarks || "",
       createdAt: new Date().toISOString(),
+      brandEnabled,
       shadeEnabled,
       gstEnabled,
       gstPercentage: gstEnabled ? gstPercentage : 0,
@@ -2606,6 +2743,7 @@ export default function GeneratePOView({
       line: i + 1,
       department: r.department,
       description: r.description,
+      brand: r.brand || "",
       shade: r.shade || "",
       uom: r.uom,
       qty: +r.qty || 0,
@@ -2637,6 +2775,9 @@ export default function GeneratePOView({
     setSaveManualVendorToDb(false);
     setRows([blankRow()]);
     setSelectedDesignId("");
+    setIsLotDropdown(false);
+    setLotCuttingPieces(null);
+    setShowLotBomTable(false);
     setPoMode("lot");
     setRequisitionRaisedBy("");
     setPreparedBy("");
@@ -2730,12 +2871,17 @@ export default function GeneratePOView({
                   line: item.line || (idx + 1),
                   department: dept,
                   description: desc,
+                  brand: item.brand || "",
                   shade: isMySQL ? (item.description || "") : (item.shade || ""),
                   uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
                   qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
                   rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
                 };
               }));
+              if (poRows.some(r => r.brand)) {
+                setBrandEnabled(true);
+                setLocalStorageItem(LOCAL_STORAGE_KEYS.BRAND_ENABLED, true);
+              }
             }
 
             loadedFromLocal = true;
@@ -2807,8 +2953,9 @@ export default function GeneratePOView({
         vendorName: payload.supplierName,
         // vendorEmail: payload.supplierEmail,
         // vendorAddress: payload.supplierAddress,
-        designName: selectedDesignId ? designs.find(d => d.id === selectedDesignId)?.name : 'Custom PO',
-        designCategory: selectedDesignId ? designs.find(d => d.id === selectedDesignId)?.category : 'N/A',
+        designName: matchedDesign ? matchedDesign.name : (selectedDesignId ? `Lot #${selectedDesignId}` : 'Custom PO'),
+        designCategory: matchedDesign ? (matchedDesign.category || 'General') : (selectedDesignId ? 'Lot Order' : 'N/A'),
+        lotNo: selectedDesignId || '',
         items: mappedItemsForMySQL,
         subtotal: totals.sub,
         taxRate: gstPercentage,
@@ -2875,6 +3022,7 @@ export default function GeneratePOView({
           qrGateImage: gateQR,
           qrRecvImage: recvQR,
           qrSide: 96,
+          brandEnabled,
           shadeEnabled,
           gstEnabled,
           gstPercentage: gstEnabled ? gstPercentage : 0
@@ -2917,6 +3065,7 @@ export default function GeneratePOView({
         qrGateImage: gateQR,
         qrRecvImage: recvQR,
         qrSide: 96,
+        brandEnabled,
         shadeEnabled,
         gstEnabled,
         gstPercentage: gstEnabled ? gstPercentage : 0
@@ -3313,7 +3462,7 @@ export default function GeneratePOView({
                   </div>
 
                   <div className="po-grid-2">
-                    {poMode === 'lot' && (
+                    {poMode === 'lot' ? (
                       <div>
                         <label className="FormLabel">Approved Design (Lot)</label>
                         <SearchableDesignSelect
@@ -3323,9 +3472,95 @@ export default function GeneratePOView({
                           placeholder="-- Choose Approved Lot --"
                         />
                       </div>
+                    ) : (
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <label className="FormLabel" style={{ margin: 0 }}>
+                            Lot Number <span style={{ fontSize: '11px', fontWeight: '500', color: 'var(--text-muted, #64748b)' }}>(Optional)</span>
+                          </label>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {selectedDesignId && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedDesignId('')}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--text-muted, #64748b)',
+                                  fontSize: '11px',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  padding: '2px 4px'
+                                }}
+                                title="Clear lot number"
+                              >
+                                ✕ Clear
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setIsLotDropdown(prev => !prev)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                color: 'var(--primary-color, #2563eb)',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                padding: '2px 4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title={isLotDropdown ? "Type lot number manually" : "Pick from approved lots"}
+                            >
+                              {isLotDropdown ? '✍️ Type Manually' : '📋 Pick Approved Lot'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {isLotDropdown ? (
+                          <SearchableDesignSelect
+                            designs={approvedDesigns}
+                            value={selectedDesignId}
+                            onChange={(id) => handleDesignChange(id)}
+                            placeholder="-- Choose Approved Lot (Optional) --"
+                          />
+                        ) : (
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="text"
+                              className="form-input"
+                              list="normal-po-approved-lots"
+                              placeholder="Enter Lot No (Optional) or pick from list..."
+                              value={selectedDesignId}
+                              onChange={e => setSelectedDesignId(e.target.value)}
+                              style={{ height: '40px' }}
+                            />
+                            <datalist id="normal-po-approved-lots">
+                              {approvedDesigns.map(d => (
+                                <option key={d.id} value={d.id}>
+                                  Lot #{d.id} - {d.name} {d.brand ? `• ${d.brand}` : ''} {d.style ? `• Style: ${d.style}` : ''} ({d.category || 'General'})
+                                </option>
+                              ))}
+                            </datalist>
+                          </div>
+                        )}
+
+                        {matchedDesign ? (
+                          <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: '700', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <span>✓</span>
+                            <span>Lot #{matchedDesign.id}: {matchedDesign.name} {matchedDesign.brand ? `(${matchedDesign.brand})` : ''}</span>
+                          </div>
+                        ) : (selectedDesignId ? (
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted, #64748b)', fontWeight: '500', marginTop: '4px' }}>
+                            Custom Lot #{selectedDesignId}
+                          </div>
+                        ) : null)}
+                      </div>
                     )}
 
-                    <div style={{ gridColumn: poMode === 'lot' ? 'span 1' : 'span 2' }}>
+                    <div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
                         <label className="FormLabel" style={{ margin: 0 }}>Vendor Profile</label>
                         <button
@@ -3443,6 +3678,299 @@ export default function GeneratePOView({
                       )}
                     </div>
                   </div>
+
+                  {/* FULL LOT SPECIFICATIONS & DETAILS CARD */}
+                  {selectedDesignId && (
+                    <div style={{
+                      background: 'linear-gradient(180deg, var(--bg-primary, #ffffff) 0%, var(--bg-secondary, #f8fafc) 100%)',
+                      border: '1.5px solid #6366f1',
+                      borderRadius: '12px',
+                      padding: '14px 16px',
+                      boxShadow: '0 4px 16px rgba(99, 102, 241, 0.08)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                      marginTop: '4px',
+                      marginBottom: '10px'
+                    }}>
+                      {/* Card Header */}
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span style={{
+                            background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                            color: '#ffffff',
+                            fontWeight: '800',
+                            fontSize: '12px',
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase'
+                          }}>
+                            LOT #{matchedDesign?.id || selectedDesignId}
+                          </span>
+                          <div>
+                            <span style={{ fontSize: '14px', fontWeight: '800', color: 'var(--text-main, #0f172a)' }}>
+                              {matchedDesign ? matchedDesign.name : `Lot #${selectedDesignId}`}
+                            </span>
+                            {matchedDesign?.style && (
+                              <span style={{ fontSize: '12px', color: 'var(--text-muted, #64748b)', marginLeft: '8px', fontFamily: 'monospace', fontWeight: '700' }}>
+                                Style: {matchedDesign.style}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {matchedDesign?.status && (
+                            <span style={{
+                              fontSize: '11px',
+                              fontWeight: '700',
+                              padding: '2px 8px',
+                              borderRadius: '12px',
+                              background: matchedDesign.status === 'Approved' ? '#dcfce7' : '#fef3c7',
+                              color: matchedDesign.status === 'Approved' ? '#15803d' : '#b45309'
+                            }}>
+                              ● {matchedDesign.status}
+                            </span>
+                          )}
+                          {poMode === 'normal' && matchedDesign?.bom && matchedDesign.bom.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const mapped = matchedDesign.bom
+                                  .filter(item => String(item.status).toLowerCase() === 'yes')
+                                  .map(item => ({
+                                    department: item.category || 'Trims',
+                                    description: item.name + (item.detail ? ` (${item.detail})` : ''),
+                                    shade: '',
+                                    uom: 'PCS',
+                                    qty: 100,
+                                    rate: 0
+                                  }));
+                                if (mapped.length > 0) {
+                                  setRows(mapped);
+                                  alert(`Loaded ${mapped.length} BOM component(s) from Lot #${matchedDesign.id} into PO items table!`);
+                                }
+                              }}
+                              style={{
+                                background: '#eff6ff',
+                                border: '1px solid #bfdbfe',
+                                color: '#2563eb',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                              title="Import all BOM items from this Lot into the PO table below"
+                            >
+                              📥 Load BOM into PO
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setIsLotDetailsExpanded(prev => !prev)}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: '#6366f1',
+                              fontSize: '12px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              padding: '2px 6px'
+                            }}
+                          >
+                            {isLotDetailsExpanded ? 'Hide Details ▲' : 'Show Details ▼'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Expanded Details Body */}
+                      {isLotDetailsExpanded && (
+                        <>
+                          {/* Key Specs Grid */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                            gap: '8px',
+                            background: 'var(--bg-primary, #ffffff)',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color, #e2e8f0)'
+                          }}>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Brand</div>
+                              <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--accent-color, #4f46e5)' }}>{matchedDesign?.brand || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Style Code</div>
+                              <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #0f172a)', fontFamily: 'monospace' }}>{matchedDesign?.style || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Category</div>
+                              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main, #0f172a)' }}>{matchedDesign?.category || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Primary Fabric</div>
+                              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main, #0f172a)' }}>{matchedDesign?.fabricType || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Section</div>
+                              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main, #0f172a)' }}>{matchedDesign?.section || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Season</div>
+                              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main, #0f172a)' }}>{matchedDesign?.season || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Target Sizes</div>
+                              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-main, #0f172a)' }}>{matchedDesign?.targetSizes || 'N/A'}</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Cutting / Order Qty</div>
+                              <div style={{ fontSize: '12px', fontWeight: '700', color: '#059669' }}>
+                                {lotCuttingPieces ? `${lotCuttingPieces.toLocaleString()} Pcs (Cut)` : (matchedDesign?.quantity ? `${matchedDesign.quantity.toLocaleString()} Pcs` : 'N/A')}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>Unit BOM Cost</div>
+                              <div style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-main, #0f172a)' }}>
+                                {matchedDesign?.totalCost ? `${currencySymbol}${Number(matchedDesign.totalCost).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'N/A'}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted, #64748b)', textTransform: 'uppercase' }}>BOM Components</div>
+                              <div style={{ fontSize: '12px', fontWeight: '700', color: '#6366f1' }}>
+                                {matchedDesign?.bom ? `${matchedDesign.bom.filter(b => String(b.status).toLowerCase() === 'yes').length} Items Mapped` : '0 Items'}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Trims & Secondary Specs (if present) */}
+                          {matchedDesign && (matchedDesign.collar || matchedDesign.bottomType || matchedDesign.zip || matchedDesign.sticker || matchedDesign.tapeLace || matchedDesign.bone || matchedDesign.fullBaju || (matchedDesign.lotNo2 && matchedDesign.lotNo2 !== 'N/A')) && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', fontSize: '11px', alignItems: 'center' }}>
+                              <span style={{ fontWeight: '700', color: 'var(--text-muted, #64748b)', fontSize: '10px', textTransform: 'uppercase' }}>Trims / Specs:</span>
+                              {matchedDesign.lotNo2 && matchedDesign.lotNo2 !== 'N/A' && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Lot 2: <strong>{matchedDesign.lotNo2}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.collar && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Collar: <strong>{matchedDesign.collar}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.bottomType && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Bottom: <strong>{matchedDesign.bottomType}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.zip && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Zip: <strong>{matchedDesign.zip}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.sticker && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Sticker: <strong>{matchedDesign.sticker}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.tapeLace && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Tape/Lace: <strong>{matchedDesign.tapeLace}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.bone && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Bone: <strong>{matchedDesign.bone}</strong>
+                                </span>
+                              )}
+                              {matchedDesign.fullBaju && (
+                                <span style={{ padding: '2px 8px', borderRadius: '4px', background: 'var(--bg-primary, #f1f5f9)', border: '1px solid var(--border-color, #e2e8f0)', color: 'var(--text-main)' }}>
+                                  Full Baju: <strong>{matchedDesign.fullBaju}</strong>
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* BOM Items quick toggle */}
+                          {matchedDesign?.bom && matchedDesign.bom.length > 0 && (
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setShowLotBomTable(prev => !prev)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: '#4f46e5',
+                                    fontSize: '11px',
+                                    fontWeight: '700',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px'
+                                  }}
+                                >
+                                  {showLotBomTable ? '▼ Hide Mapped BOM Components List' : `▶ View All Mapped BOM Components (${matchedDesign.bom.length})`}
+                                </button>
+                              </div>
+
+                              {showLotBomTable && (
+                                <div style={{
+                                  maxHeight: '180px',
+                                  overflowY: 'auto',
+                                  border: '1px solid var(--border-color, #e2e8f0)',
+                                  borderRadius: '6px',
+                                  background: 'var(--bg-primary, #ffffff)'
+                                }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                                    <thead>
+                                      <tr style={{ background: 'var(--bg-secondary, #f8fafc)', borderBottom: '1px solid var(--border-color, #e2e8f0)', textAlign: 'left' }}>
+                                        <th style={{ padding: '6px 8px' }}>Category</th>
+                                        <th style={{ padding: '6px 8px' }}>Component Name</th>
+                                        <th style={{ padding: '6px 8px' }}>Detail / Shade</th>
+                                        <th style={{ padding: '6px 8px' }}>Status</th>
+                                        <th style={{ padding: '6px 8px', textAlign: 'right' }}>Consumption</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {matchedDesign.bom.map((b, bIdx) => (
+                                        <tr key={bIdx} style={{ borderBottom: '1px solid var(--border-color, #f1f5f9)' }}>
+                                          <td style={{ padding: '5px 8px', fontWeight: '600', color: 'var(--text-muted)' }}>{b.category || 'Trims'}</td>
+                                          <td style={{ padding: '5px 8px', fontWeight: '700', color: 'var(--text-main)' }}>{b.name}</td>
+                                          <td style={{ padding: '5px 8px', color: 'var(--text-muted)' }}>{b.detail || '-'}</td>
+                                          <td style={{ padding: '5px 8px' }}>
+                                            <span style={{
+                                              padding: '1px 6px',
+                                              borderRadius: '4px',
+                                              fontSize: '10px',
+                                              fontWeight: '700',
+                                              background: String(b.status).toLowerCase() === 'yes' ? '#dcfce7' : '#f1f5f9',
+                                              color: String(b.status).toLowerCase() === 'yes' ? '#15803d' : '#64748b'
+                                            }}>
+                                              {String(b.status).toLowerCase() === 'yes' ? 'Required' : 'No'}
+                                            </span>
+                                          </td>
+                                          <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '600' }}>
+                                            {b.consumption ? `${b.consumption} ${b.uom || 'PCS'}` : '-'}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   <div>
                     <label className="FormLabel">PO Reference Number *</label>
@@ -3677,6 +4205,9 @@ export default function GeneratePOView({
                     <div><strong>Order Date:</strong> {orderDate} {orderTime}</div>
                     {expectedDate && <div><strong>Expected:</strong> {expectedDate} {expectedTime}</div>}
                     {leadHuman && <div><strong>Lead Time:</strong> {leadHuman}</div>}
+                    {selectedDesignId && (
+                      <div><strong>Lot No:</strong> Lot #{matchedDesign?.id || selectedDesignId} {matchedDesign?.name ? `(${matchedDesign.name})` : ''}</div>
+                    )}
                   </div>
                   <div className="paper-meta-col" style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '20px' }}>
                     <div><strong>Supplier:</strong> {supplierName || 'N/A'}</div>
@@ -3688,6 +4219,17 @@ export default function GeneratePOView({
                 <div className="paper-toggles-bar print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', background: 'var(--bg-primary, #f8fafc)', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color, #e2e8f0)' }}>
                   <span style={{ fontSize: '12px', fontWeight: '800', color: 'var(--accent-color, #6366f1)', textTransform: 'none', letterSpacing: 'normal' }}>Po Item Mapping</span>
                   <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main, #0f172a)', margin: 0 }}>
+                      <input type="checkbox" checked={brandEnabled} onChange={e => {
+                        const checked = e.target.checked;
+                        setBrandEnabled(checked);
+                        setLocalStorageItem(LOCAL_STORAGE_KEYS.BRAND_ENABLED, checked);
+                        if (checked && matchedDesign?.brand) {
+                          setRows(prev => prev.map(r => ({ ...r, brand: r.brand || matchedDesign.brand })));
+                        }
+                      }} style={{ width: '14px', height: '14px', cursor: 'pointer' }} />
+                      Brand
+                    </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', color: 'var(--text-main, #0f172a)', margin: 0 }}>
                       <input type="checkbox" checked={shadeEnabled} onChange={e => {
                         setShadeEnabled(e.target.checked);
@@ -3791,6 +4333,7 @@ export default function GeneratePOView({
                           </div>
                         </th>
                         <th>Description *</th>
+                        {brandEnabled && <th style={{ width: '120px' }}>Brand</th>}
                         {shadeEnabled && <th style={{ width: '120px' }}>Shade</th>}
                         <th style={{ width: '90px', textAlign: 'center' }}>UOM *</th>
                         <th style={{ width: '85px', textAlign: 'right' }}>Qty *</th>
@@ -3873,6 +4416,21 @@ export default function GeneratePOView({
                                 required
                               />
                             </td>
+                            {brandEnabled && (
+                              <td style={{ padding: '8px' }}>
+                                <SmartDropdown
+                                  value={row.brand}
+                                  onChange={val => {
+                                    updateRow(idx, { brand: val });
+                                    saveBrandWithDebounce(val);
+                                  }}
+                                  options={allBrandOptions}
+                                  placeholder={matchedDesign?.brand || "Brand"}
+                                  localStorageKey={LOCAL_STORAGE_KEYS.BRANDS}
+                                  onSaveToLocalStorage={() => setSavedBrands(getLocalStorageItem(LOCAL_STORAGE_KEYS.BRANDS, []))}
+                                />
+                              </td>
+                            )}
                             {shadeEnabled && (
                               <td style={{ padding: '8px' }}>
                                 <SmartDropdown

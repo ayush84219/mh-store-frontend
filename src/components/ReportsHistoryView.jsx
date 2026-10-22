@@ -4949,6 +4949,8 @@ export default function ReportsHistoryView({
         <AllIssuedAndAddedReport
           currencySymbol={currencySymbol}
           currentUser={currentUser}
+          designs={designs}
+          issueLogs={issueLogs || allIssueLogs}
           onNavigateToLot={(lotId) => {
             setSelectedLotId(lotId);
             setActiveReportTab('material_ledger');

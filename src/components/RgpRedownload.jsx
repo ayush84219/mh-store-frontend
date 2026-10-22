@@ -210,27 +210,51 @@ export default function RgpRedownload({
     const payload = buildPdfPayload();
     if (!payload) throw new Error("No RGP selected or payload is invalid");
 
-    const baseUrl = WEB_APP_URL || import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || "";
-    const entryUrl = `${baseUrl}?mode=entry&rgp=${encodeURIComponent(assignedRgpNo)}`;
-    const returnUrl = `${baseUrl}?mode=return&rgp=${encodeURIComponent(assignedRgpNo)}`;
+    const assignedRgpNo = payload.rgpNo || currentMainRecord?.["RGP No"] || currentMainRecord?.["RGP No."] || "";
+    const host = typeof window !== 'undefined' ? window.location.origin : "";
+    const baseUrl = WEB_APP_URL || import.meta.env.VITE_GOOGLE_RGP_WEB_APP_URL || host || "";
 
-    let entryQR = null, returnQR = null;
-    try { entryQR = await generateQRCode(entryUrl); } catch (e) { console.warn("Entry QR error:", e); }
-    try { returnQR = await generateQRCode(returnUrl); } catch (e) { console.warn("Return QR error:", e); }
+    const isGoogleScript = baseUrl.includes("script.google.com");
+    const entryUrl = isGoogleScript
+      ? `${baseUrl}?mode=entry&rgp=${encodeURIComponent(assignedRgpNo)}`
+      : `${baseUrl}/?action=rgpEntryForm&rgp=${encodeURIComponent(assignedRgpNo)}`;
 
-    let entryQRDataUrl = entryQR, returnQRDataUrl = returnQR;
+    const returnUrl = isGoogleScript
+      ? `${baseUrl}?mode=return&rgp=${encodeURIComponent(assignedRgpNo)}`
+      : `${baseUrl}/?action=rgpReturnForm&rgp=${encodeURIComponent(assignedRgpNo)}`;
+
+    const gateUrl = isGoogleScript
+      ? `${baseUrl}?mode=gate&rgp=${encodeURIComponent(assignedRgpNo)}`
+      : `${baseUrl}/?action=gateForm&rgp=${encodeURIComponent(assignedRgpNo)}`;
+
+    let entryQR = null, returnQR = null, gateQR = null;
+    try {
+      [entryQR, returnQR, gateQR] = await Promise.all([
+        generateQRCode(entryUrl),
+        generateQRCode(returnUrl),
+        generateQRCode(gateUrl)
+      ]);
+    } catch (e) {
+      console.warn("QR code generation error:", e);
+    }
+
+    let entryQRDataUrl = entryQR, returnQRDataUrl = returnQR, gateQRDataUrl = gateQR;
     if (entryQR && typeof entryQR === 'string' && entryQR.startsWith('blob:')) {
       try { entryQRDataUrl = await toDataURL(entryQR); } catch (e) { console.warn("Entry QR blob convert error:", e); }
     }
     if (returnQR && typeof returnQR === 'string' && returnQR.startsWith('blob:')) {
       try { returnQRDataUrl = await toDataURL(returnQR); } catch (e) { console.warn("Return QR blob convert error:", e); }
     }
+    if (gateQR && typeof gateQR === 'string' && gateQR.startsWith('blob:')) {
+      try { gateQRDataUrl = await toDataURL(gateQR); } catch (e) { console.warn("Gate QR blob convert error:", e); }
+    }
 
     return generateRgpPDF({
       payload,
       options: {
         qrEntryImage: entryQRDataUrl,
-        qrReturnImage: returnQRDataUrl
+        qrReturnImage: returnQRDataUrl,
+        qrGateImage: gateQRDataUrl
       }
     });
   };
@@ -241,8 +265,8 @@ export default function RgpRedownload({
     setGeneratingPdf(true);
     try {
       const pdfDoc = await generatePdfDocObj();
-      const rgpNo = currentMainRecord["RGP No"] || currentMainRecord["RGP No."];
-      const safeNo = rgpNo.replace(/[^\w\-]+/g, "-");
+      const rgpNo = currentMainRecord["RGP No"] || currentMainRecord["RGP No."] || "RGP";
+      const safeNo = String(rgpNo).replace(/[^\w\-]+/g, "-");
       pdfDoc.save(`RGP-${safeNo}.pdf`);
     } catch (err) {
       console.error("PDF generation failed:", err);

@@ -1525,10 +1525,16 @@ export default function MaterialIssueView({
         hasShortage = true;
       }
 
+      const rawItemCode = (material ? (material.itemCode || material.stCode || material.materialCode || material.item_code) : '') || mapping.itemCode || '';
+      const cleanItemCode = String(rawItemCode).toUpperCase().startsWith('MT') ? '' : rawItemCode;
+      const loc = (material ? (material.location || material.warehouseLocation || material.rack) : '') || mapping.location || '';
+
       return {
         ...mapping,
         materialName: material ? (material.color && material.color !== 'Default' ? `${material.name} (${material.color})` : material.name) : (mapping.isMapped ? 'Unknown Material' : `${mapping.bomItemName} (Unmapped)`),
         unit: material ? material.unit : (mapping.bomUnit || 'pcs'),
+        itemCode: cleanItemCode,
+        location: loc,
         currentStock,
         totalRequired,
         isShortage
@@ -1786,9 +1792,17 @@ export default function MaterialIssueView({
         log.materials.forEach(m => {
           const key = m.bomItemName ? `${m.bomItemName}___${m.name}` : m.name;
           if (!entry.materialsSummary[key]) {
+            const matchedMat = (materials || []).find(mat => 
+              (m.materialId && String(mat.id) === String(m.materialId)) ||
+              (m.name && String(mat.name).trim().toLowerCase() === String(mat.name).trim().toLowerCase())
+            );
+            const rawCode = m.itemCode || (matchedMat ? (matchedMat.itemCode || matchedMat.stCode || matchedMat.materialCode || '') : '') || '';
+            const itemCode = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+
             entry.materialsSummary[key] = {
               bomItemName: m.bomItemName || 'General',
               materialName: m.name,
+              itemCode,
               unit: m.unit || 'pcs',
               initialQty: 0,
               reissueQty: 0,
@@ -2517,10 +2531,11 @@ export default function MaterialIssueView({
 
       const combinedRows = Object.values(lotAudit.materialsSummary || {}).map((m, idx) => {
         const variance = m.initialQty > 0 ? `${((m.reissueQty / m.initialQty) * 100).toFixed(1)}%` : (m.reissueQty > 0 ? '100%' : '0%');
+        const desc = m.itemCode ? `[${m.itemCode}] ${m.materialName}` : m.materialName;
         return [
           idx + 1,
           m.bomItemName,
-          m.materialName,
+          desc,
           m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '0',
           m.reissueQty > 0 ? `+${Number(m.reissueQty.toFixed(2))} ${m.unit}` : '0',
           m.returnedQty > 0 ? `-${Number(m.returnedQty.toFixed(2))} ${m.unit}` : '0',
@@ -2531,7 +2546,7 @@ export default function MaterialIssueView({
 
       autoTable(doc, {
         startY: currentY + 3,
-        head: [['#', 'BOM Component', 'Inventory Item', '1st Time Qty', 'Extra Issue Qty', 'Returned', 'Combined Net Total', 'Variance %']],
+        head: [['#', 'BOM Component', 'Inventory Item & Code', '1st Time Qty', 'Extra Issue Qty', 'Returned', 'Combined Net Total', 'Variance %']],
         body: combinedRows,
         theme: 'grid',
         headStyles: { fillColor: [79, 70, 229], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
@@ -5440,22 +5455,37 @@ export default function MaterialIssueView({
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>
                 {printLog.isReturn ? 'Returned Materials Details' : 'Issued Materials Details'}
               </h4>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '20px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '20px' }}>
                 <thead>
                   <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f5f5f5' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', width: '30px' }}>#</th>
                     <th style={{ textAlign: 'left', padding: '6px 8px' }}>BOM Component</th>
                     <th style={{ textAlign: 'left', padding: '6px 8px' }}>{printLog.isReturn ? 'Inventory Material Returned' : 'Inventory Material Issued'}</th>
-                    <th style={{ textAlign: 'right', padding: '6px 8px' }}>{printLog.isReturn ? 'Quantity Returned' : 'Quantity Issued'}</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', width: '100px' }}>Item Code</th>
+                    <th style={{ textAlign: 'left', padding: '6px 8px', width: '90px' }}>Rack Loc</th>
+                    <th style={{ textAlign: 'right', padding: '6px 8px', width: '110px' }}>{printLog.isReturn ? 'Quantity Returned' : 'Quantity Issued'}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {printLog.materials.map((m, mIdx) => (
-                    <tr key={mIdx} style={{ borderBottom: '1px solid #ddd' }}>
-                      <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{m.bomItemName || 'N/A'}</td>
-                      <td style={{ padding: '6px 8px' }}>{m.name}</td>
-                      <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold' }}>{m.qty} {m.unit}</td>
-                    </tr>
-                  ))}
+                  {printLog.materials.map((m, mIdx) => {
+                    const matchedMat = (materials || []).find(mat => 
+                      (m.materialId && String(mat.id) === String(m.materialId)) ||
+                      (m.name && String(mat.name).trim().toLowerCase() === String(mat.name).trim().toLowerCase())
+                    );
+                    const rawCode = m.itemCode || (matchedMat ? (matchedMat.itemCode || matchedMat.stCode || matchedMat.materialCode || '') : '') || '—';
+                    const code = String(rawCode).toUpperCase().startsWith('MT') ? '—' : rawCode;
+                    const loc = m.location || (matchedMat ? (matchedMat.location || matchedMat.warehouseLocation || '') : '') || 'Store';
+                    return (
+                      <tr key={mIdx} style={{ borderBottom: '1px solid #ddd' }}>
+                        <td style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 'bold' }}>{mIdx + 1}</td>
+                        <td style={{ padding: '6px 8px', fontWeight: 'bold' }}>{m.bomItemName || 'N/A'}</td>
+                        <td style={{ padding: '6px 8px' }}>{m.name}</td>
+                        <td style={{ padding: '6px 8px', fontFamily: 'monospace', fontWeight: 'bold' }}>{code}</td>
+                        <td style={{ padding: '6px 8px' }}>{loc}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 'bold' }}>{m.qty} {m.unit}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -5567,21 +5597,31 @@ export default function MaterialIssueView({
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', marginBottom: '24px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#f4f4f4' }}>
-                        <th style={{ textAlign: 'left', padding: '8px 6px' }}>#</th>
+                        <th style={{ textAlign: 'left', padding: '8px 6px', width: '30px' }}>#</th>
                         <th style={{ textAlign: 'left', padding: '8px 6px' }}>BOM Component</th>
                         <th style={{ textAlign: 'left', padding: '8px 6px' }}>Inventory Material</th>
-                        <th style={{ textAlign: 'right', padding: '8px 6px' }}>Total Issued</th>
+                        <th style={{ textAlign: 'left', padding: '8px 6px', width: '100px' }}>Item Code</th>
+                        <th style={{ textAlign: 'left', padding: '8px 6px', width: '90px' }}>Rack Loc</th>
+                        <th style={{ textAlign: 'right', padding: '8px 6px', width: '110px' }}>Total Issued</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {previewIssue.items.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                          <td style={{ padding: '7px 6px', color: '#555' }}>{idx + 1}</td>
-                          <td style={{ padding: '7px 6px', fontWeight: 'bold' }}>{item.bomItemName}</td>
-                          <td style={{ padding: '7px 6px' }}>{item.materialName}</td>
-                          <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
-                        </tr>
-                      ))}
+                      {previewIssue.items.map((item, idx) => {
+                        const matchedMat = (materials || []).find(mat => String(mat.id) === String(item.materialId));
+                        const rawCode = item.itemCode || (matchedMat ? (matchedMat.itemCode || matchedMat.stCode || matchedMat.materialCode || '') : '') || '—';
+                        const code = String(rawCode).toUpperCase().startsWith('MT') ? '—' : rawCode;
+                        const loc = item.location || (matchedMat ? (matchedMat.location || matchedMat.warehouseLocation || '') : '') || 'Store';
+                        return (
+                          <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
+                            <td style={{ padding: '7px 6px', color: '#555', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
+                            <td style={{ padding: '7px 6px', fontWeight: 'bold' }}>{item.bomItemName}</td>
+                            <td style={{ padding: '7px 6px' }}>{item.materialName}</td>
+                            <td style={{ padding: '7px 6px', fontFamily: 'monospace', fontWeight: 'bold' }}>{code}</td>
+                            <td style={{ padding: '7px 6px' }}>{loc}</td>
+                            <td style={{ padding: '7px 6px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -5802,21 +5842,31 @@ export default function MaterialIssueView({
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', marginBottom: '18px' }}>
                     <thead>
                       <tr style={{ borderBottom: '2px solid #000', backgroundColor: '#eee' }}>
-                        <th style={{ textAlign: 'left', padding: '6px 5px' }}>#</th>
+                        <th style={{ textAlign: 'left', padding: '6px 5px', width: '25px' }}>#</th>
                         <th style={{ textAlign: 'left', padding: '6px 5px' }}>BOM Component</th>
                         <th style={{ textAlign: 'left', padding: '6px 5px' }}>Inventory Material</th>
-                        <th style={{ textAlign: 'right', padding: '6px 5px' }}>Total Issued</th>
+                        <th style={{ textAlign: 'left', padding: '6px 5px', width: '90px' }}>Item Code</th>
+                        <th style={{ textAlign: 'left', padding: '6px 5px', width: '85px' }}>Rack Loc</th>
+                        <th style={{ textAlign: 'right', padding: '6px 5px', width: '95px' }}>Total Issued</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {showPrintPrompt.items.map((item, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid #ccc' }}>
-                          <td style={{ padding: '5px' }}>{idx + 1}</td>
-                          <td style={{ padding: '5px', fontWeight: 'bold' }}>{item.bomItemName}</td>
-                          <td style={{ padding: '5px' }}>{item.materialName}</td>
-                          <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
-                        </tr>
-                      ))}
+                      {showPrintPrompt.items.map((item, idx) => {
+                        const matchedMat = (materials || []).find(mat => String(mat.id) === String(item.materialId));
+                        const rawCode = item.itemCode || (matchedMat ? (matchedMat.itemCode || matchedMat.stCode || matchedMat.materialCode || '') : '') || '—';
+                        const code = String(rawCode).toUpperCase().startsWith('MT') ? '—' : rawCode;
+                        const loc = item.location || (matchedMat ? (matchedMat.location || matchedMat.warehouseLocation || '') : '') || 'Store';
+                        return (
+                          <tr key={idx} style={{ borderBottom: '1px solid #ccc' }}>
+                            <td style={{ padding: '5px', textAlign: 'center', fontWeight: 'bold' }}>{idx + 1}</td>
+                            <td style={{ padding: '5px', fontWeight: 'bold' }}>{item.bomItemName}</td>
+                            <td style={{ padding: '5px' }}>{item.materialName}</td>
+                            <td style={{ padding: '5px', fontFamily: 'monospace', fontWeight: 'bold' }}>{code}</td>
+                            <td style={{ padding: '5px' }}>{loc}</td>
+                            <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold' }}>{item.totalRequired} {item.unit}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -6818,6 +6868,7 @@ export default function MaterialIssueView({
                             <th style={{ padding: '5px 8px', textAlign: 'center', width: '25px' }}>#</th>
                             <th style={{ padding: '5px 8px', textAlign: 'left' }}>BOM Component</th>
                             <th style={{ padding: '5px 8px', textAlign: 'left' }}>Inventory Material</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', width: '90px' }}>Item Code</th>
                             <th style={{ padding: '5px 8px', textAlign: 'right', backgroundColor: 'rgba(37, 99, 235, 0.08)', color: '#1d4ed8' }}>1st Issue Qty</th>
                             <th style={{ padding: '5px 8px', textAlign: 'right', backgroundColor: 'rgba(239, 68, 68, 0.08)', color: '#dc2626' }}>Extra Qty</th>
                             <th style={{ padding: '5px 8px', textAlign: 'right', color: '#059669' }}>Returned</th>
@@ -6834,6 +6885,7 @@ export default function MaterialIssueView({
                                 <td style={{ padding: '5px 8px', textAlign: 'center' }}>{mIdx + 1}</td>
                                 <td style={{ padding: '5px 8px', fontWeight: '700' }}>{m.bomItemName}</td>
                                 <td style={{ padding: '5px 8px' }}>{m.materialName}</td>
+                                <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontWeight: '700' }}>{m.itemCode || '—'}</td>
                                 <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '700', color: '#1d4ed8' }}>
                                   {m.initialQty > 0 ? `${Number(m.initialQty.toFixed(2))} ${m.unit}` : '0'}
                                 </td>

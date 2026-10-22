@@ -1326,12 +1326,18 @@ export default function App() {
       receiverName: receiverName || '',
       receiverDept: receiverDept || '',
       date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-      materials: validatedItems.map(item => ({
-        name: item.materialName,
-        bomItemName: item.bomItemName,
-        qty: item.totalRequired,
-        unit: item.unit
-      }))
+      materials: validatedItems.map(item => {
+        const mat = materials.find(m => m.id === item.materialId);
+        return {
+          name: item.materialName,
+          bomItemName: item.bomItemName,
+          qty: item.totalRequired,
+          unit: item.unit,
+          itemCode: item.itemCode || (mat ? (mat.itemCode || mat.stCode || mat.materialCode || '') : '') || '',
+          location: item.location || (mat ? mat.location : '') || '',
+          materialId: item.materialId || ''
+        };
+      })
     };
     setIssueLogs(prev => [newLog, ...prev]);
     syncIssueLogToDb(newLog);
@@ -3102,6 +3108,9 @@ export default function App() {
                 <AllIssuedAndAddedReport
                   currencySymbol={currencySymbol}
                   currentUser={currentUser}
+                  materials={materials}
+                  designs={designs}
+                  issueLogs={issueLogs}
                   onNavigateToLot={(lotNo) => {
                     setPrefilledLotNo(lotNo);
                     setActiveTab('material_issue');

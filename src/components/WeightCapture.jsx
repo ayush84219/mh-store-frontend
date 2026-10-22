@@ -8,7 +8,7 @@ import {
   MapPin, User, ChevronDown, ChevronRight, BarChart2, CheckCircle2,
   AlertTriangle, PlaySquare, X, HelpCircle, HardDrive, Package,
   Receipt, Printer, List, Menu, ClipboardList, Upload, Image as ImageIcon, Eye,
-  Zap
+  Zap, Plus, Check
 } from 'lucide-react';
 import SearchableLocationSelect from './SearchableLocationSelect';
 import { universalPlayTone } from '../utils/deviceCapabilities';
@@ -20,6 +20,10 @@ const parseMTNum = (code) => {
 };
 const BASE_CODE = 1000;
 
+
+const DEFAULT_UNITS = [
+  'Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch'
+];
 
 const MATERIAL_OPTIONS = [
   '18L Metal Button', 'YKK Zipper 20cm', 'Elastic Tape 2cm', 'Hook & Eye Set',
@@ -200,6 +204,32 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
     remarks: '',
     imageUrl: '',
   });
+
+  // Custom Units State (Persisted in localStorage)
+  const [customUnits, setCustomUnits] = useState(() => {
+    try {
+      const saved = localStorage.getItem('gpdms_custom_units');
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+  const [showAddUnitInput, setShowAddUnitInput] = useState(false);
+  const [newUnitInput, setNewUnitInput] = useState('');
+
+  // All available units combining default + custom + currently selected unit
+  const allUnits = useMemo(() => {
+    const combined = [...DEFAULT_UNITS];
+    (customUnits || []).forEach(u => {
+      if (u && !combined.some(c => c.toLowerCase() === u.toLowerCase())) {
+        combined.push(u);
+      }
+    });
+    if (form.unit && !combined.some(c => c.toLowerCase() === form.unit.toLowerCase())) {
+      combined.push(form.unit);
+    }
+    return combined;
+  }, [customUnits, form.unit]);
 
   const [metadataFlash, setMetadataFlash] = useState(false);
 
@@ -662,6 +692,57 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
     setToastMessage(msg);
     setToastType(type);
     setTimeout(() => setToastMessage(''), 3000);
+  };
+
+  const handleUnitChange = (e) => {
+    const val = e.target.value;
+    if (val === '__add_manual__') {
+      setShowAddUnitInput(true);
+      setNewUnitInput('');
+    } else {
+      setShowAddUnitInput(false);
+      setForm(p => ({ ...p, unit: val }));
+    }
+  };
+
+  const handleSaveNewUnit = () => {
+    const trimmed = (newUnitInput || '').trim();
+    if (!trimmed) {
+      showToast('⚠️ Please enter a valid unit name.', 'error');
+      return;
+    }
+    const formattedUnit = trimmed.length > 1 && trimmed === trimmed.toLowerCase()
+      ? trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+      : trimmed;
+
+    let updated = [...customUnits];
+    if (
+      !updated.some(u => u.toLowerCase() === formattedUnit.toLowerCase()) &&
+      !DEFAULT_UNITS.some(u => u.toLowerCase() === formattedUnit.toLowerCase())
+    ) {
+      updated = [...updated, formattedUnit];
+      try {
+        localStorage.setItem('gpdms_custom_units', JSON.stringify(updated));
+      } catch (_) {}
+      setCustomUnits(updated);
+    }
+    setForm(p => ({ ...p, unit: formattedUnit }));
+    setShowAddUnitInput(false);
+    setNewUnitInput('');
+    showToast(`✅ Added & selected new unit: "${formattedUnit}"`);
+  };
+
+  const handleRemoveCustomUnit = (e, unitToRemove) => {
+    e.stopPropagation();
+    const updated = customUnits.filter(u => u.toLowerCase() !== unitToRemove.toLowerCase());
+    try {
+      localStorage.setItem('gpdms_custom_units', JSON.stringify(updated));
+    } catch (_) {}
+    setCustomUnits(updated);
+    if (form.unit === unitToRemove) {
+      setForm(p => ({ ...p, unit: 'Pcs' }));
+    }
+    showToast(`Removed custom unit "${unitToRemove}"`, 'info');
   };
 
   const downloadCSV = () => {
@@ -2101,19 +2182,128 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
               </div>
 
               <div style={{ flex: 1, minWidth: '180px' }}>
-                <label className="wcs-label" style={{ fontWeight: '700', fontSize: '12px', marginBottom: '6px', display: 'block' }}>
-                  Unit of Measurement
-                </label>
-                <select
-                  className="wcs-input"
-                  value={form.unit}
-                  onChange={setF('unit')}
-                  style={{ height: '38px', fontSize: '13px', cursor: 'pointer' }}
-                >
-                  {['Pcs', 'Mtr', 'Kg', 'Gm', 'Pair', 'Cone', 'Roll', 'Set', 'Doz', 'Box', 'Pkt', 'Bundle', 'Yds', 'Cm', 'Inch'].map(u => (
-                    <option key={u} value={u}>{u}</option>
-                  ))}
-                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label className="wcs-label" style={{ fontWeight: '700', fontSize: '12px', margin: 0, display: 'block' }}>
+                    Unit of Measurement
+                  </label>
+                  {!showAddUnitInput ? (
+                    <button
+                      type="button"
+                      onClick={() => { setShowAddUnitInput(true); setNewUnitInput(''); }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        fontSize: '11px',
+                        fontWeight: '800',
+                        color: '#1d4ed8',
+                        background: '#eff6ff',
+                        border: '1px solid #bfdbfe',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        cursor: 'pointer'
+                      }}
+                      title="Add custom unit manually"
+                    >
+                      <Plus size={11} /> Add Manually
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUnitInput(false)}
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        color: '#64748b',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ✕ Cancel
+                    </button>
+                  )}
+                </div>
+
+                {!showAddUnitInput ? (
+                  <select
+                    className="wcs-input"
+                    value={form.unit}
+                    onChange={handleUnitChange}
+                    style={{ height: '38px', fontSize: '13px', cursor: 'pointer' }}
+                  >
+                    {allUnits.map(u => (
+                      <option key={u} value={u}>{u}</option>
+                    ))}
+                    <option value="__add_manual__" style={{ color: '#1d4ed8', fontWeight: 'bold' }}>
+                      ➕ + Add Manually / New Unit...
+                    </option>
+                  </select>
+                ) : (
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <input
+                      type="text"
+                      autoFocus
+                      placeholder="e.g. Cartoon, Bag, Gross, Ltr..."
+                      value={newUnitInput}
+                      onChange={(e) => setNewUnitInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSaveNewUnit();
+                        } else if (e.key === 'Escape') {
+                          setShowAddUnitInput(false);
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        height: '38px',
+                        padding: '0 8px',
+                        borderRadius: '6px',
+                        border: '2px solid #2563eb',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        outline: 'none',
+                        background: '#ffffff'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveNewUnit}
+                      style={{
+                        padding: '0 10px',
+                        height: '38px',
+                        background: '#2563eb',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        fontWeight: '800',
+                        fontSize: '12px',
+                        cursor: 'pointer'
+                      }}
+                      title="Save new unit"
+                    >
+                      <Check size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUnitInput(false)}
+                      style={{
+                        padding: '0 8px',
+                        height: '38px',
+                        background: '#f1f5f9',
+                        color: '#475569',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '6px',
+                        fontWeight: '700',
+                        fontSize: '11px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
               </div>
 
               <button

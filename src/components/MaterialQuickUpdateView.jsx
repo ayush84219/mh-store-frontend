@@ -318,10 +318,12 @@ export default function MaterialQuickUpdateView({
         }
       }
 
-      // Record in local session update history
       const now = new Date();
+      const rawCode = selectedMaterial.itemCode || selectedMaterial.stCode || selectedMaterial.materialCode || selectedMaterial.item_code || '';
+      const cleanItemCode = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
       const historyItem = {
         id: selectedMaterial.id,
+        itemCode: cleanItemCode,
         name: selectedMaterial.name,
         category: selectedMaterial.category,
         oldStock: currentStock,
@@ -427,6 +429,7 @@ export default function MaterialQuickUpdateView({
           <div style="font-size: 10px; color: #444;">${r.date || ''}</div>
         </td>
         <td style="font-weight: bold; font-family: monospace; font-size: 12px;">${r.id || '-'}</td>
+        <td style="font-weight: bold; font-family: monospace; font-size: 11px;">${r.itemCode || '-'}</td>
         <td style="font-weight: 600;">${r.name || '-'}</td>
         <td style="text-align: right; font-weight: bold;">${r.addedQty !== null ? `+${r.addedQty} ${r.unit || 'Pcs'}` : 'Override'}</td>
         <td style="text-align: right; font-weight: bold;">${r.newStock} ${r.unit || 'Pcs'}</td>
@@ -618,6 +621,7 @@ export default function MaterialQuickUpdateView({
                 <th style="width: 25px; text-align: center;">#</th>
                 <th style="width: 85px;">Time / Date</th>
                 <th style="width: 75px;">Material ID</th>
+                <th style="width: 80px;">Item Code</th>
                 <th>Material Name</th>
                 <th style="width: 80px; text-align: right;">Inward Qty</th>
                 <th style="width: 80px; text-align: right;">Total Stock</th>
@@ -736,6 +740,7 @@ export default function MaterialQuickUpdateView({
         '#',
         'Time / Date',
         'Material ID',
+        'Item Code',
         'Material Name',
         'Inward Pieces',
         'Total Stock',
@@ -751,6 +756,7 @@ export default function MaterialQuickUpdateView({
         i + 1,
         `${r.timestamp || ''}\n${r.date || ''}`,
         r.id || '-',
+        r.itemCode || '-',
         r.name || '-',
         r.addedQty !== null ? `+${r.addedQty} ${r.unit || 'Pcs'}` : 'Override',
         `${r.newStock} ${r.unit || 'Pcs'}`,

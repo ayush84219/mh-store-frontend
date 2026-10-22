@@ -95,6 +95,18 @@ export default function ItemCodeGeneratorView() {
   const [showAddUomDialog, setShowAddUomDialog] = useState(false);
   const [newUomInput, setNewUomInput] = useState('');
 
+  // Inline Category / UOM Quick-Add States (Creation Panel)
+  const [isCustomCat, setIsCustomCat] = useState(false);
+  const [customCatInput, setCustomCatInput] = useState('');
+  const [isCustomUom, setIsCustomUom] = useState(false);
+  const [customUomInput, setCustomUomInput] = useState('');
+
+  // Inline Category / UOM Quick-Add States (Edit Modal)
+  const [isEditCustomCat, setIsEditCustomCat] = useState(false);
+  const [editCustomCatInput, setEditCustomCatInput] = useState('');
+  const [isEditCustomUom, setIsEditCustomUom] = useState(false);
+  const [editCustomUomInput, setEditCustomUomInput] = useState('');
+
   // Ledger / Movement History Modal State
   const [selectedLedgerItem, setSelectedLedgerItem] = useState(null);
   const [ledgerLogs, setLedgerLogs] = useState([]);
@@ -206,18 +218,34 @@ export default function ItemCodeGeneratorView() {
   const handleAddCategory = (catToAdd = newCatInput) => {
     const trimmed = (catToAdd || '').trim();
     if (!trimmed) return;
-    if (categories.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
-      alert(`Category "${trimmed}" already exists.`);
-      setIcCategory(trimmed);
+    const existing = categories.find(c => c.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      if (showEditModal) {
+        setEditForm(prev => ({ ...prev, category: existing }));
+      } else {
+        setIcCategory(existing);
+      }
       setShowAddCatDialog(false);
       setNewCatInput('');
+      setIsCustomCat(false);
+      setIsEditCustomCat(false);
+      setCustomCatInput('');
+      setEditCustomCatInput('');
       return;
     }
     const updated = [...customCategories, trimmed];
     setCustomCategories(updated);
     setLocalStorageItem('item_code_custom_categories', updated);
-    setIcCategory(trimmed);
+    if (showEditModal) {
+      setEditForm(prev => ({ ...prev, category: trimmed }));
+    } else {
+      setIcCategory(trimmed);
+    }
     setNewCatInput('');
+    setIsCustomCat(false);
+    setIsEditCustomCat(false);
+    setCustomCatInput('');
+    setEditCustomCatInput('');
     setShowAddCatDialog(false);
   };
 
@@ -228,24 +256,43 @@ export default function ItemCodeGeneratorView() {
     if (icCategory === catToDelete) {
       setIcCategory('Trims');
     }
+    if (editForm.category === catToDelete) {
+      setEditForm(prev => ({ ...prev, category: 'Trims' }));
+    }
   };
 
   // Handlers for Adding & Deleting UOMs
   const handleAddUom = (uomToAdd = newUomInput) => {
     const trimmed = (uomToAdd || '').trim().toUpperCase();
     if (!trimmed) return;
-    if (uoms.some(u => u.toLowerCase() === trimmed.toLowerCase())) {
-      alert(`UOM "${trimmed}" already exists.`);
-      setIcUom(trimmed);
+    const existing = uoms.find(u => u.toLowerCase() === trimmed.toLowerCase());
+    if (existing) {
+      if (showEditModal) {
+        setEditForm(prev => ({ ...prev, uom: existing }));
+      } else {
+        setIcUom(existing);
+      }
       setShowAddUomDialog(false);
       setNewUomInput('');
+      setIsCustomUom(false);
+      setIsEditCustomUom(false);
+      setCustomUomInput('');
+      setEditCustomUomInput('');
       return;
     }
     const updated = [...customUoms, trimmed];
     setCustomUoms(updated);
     setLocalStorageItem('item_code_custom_uoms', updated);
-    setIcUom(trimmed);
+    if (showEditModal) {
+      setEditForm(prev => ({ ...prev, uom: trimmed }));
+    } else {
+      setIcUom(trimmed);
+    }
     setNewUomInput('');
+    setIsCustomUom(false);
+    setIsEditCustomUom(false);
+    setCustomUomInput('');
+    setEditCustomUomInput('');
     setShowAddUomDialog(false);
   };
 
@@ -255,6 +302,9 @@ export default function ItemCodeGeneratorView() {
     setLocalStorageItem('item_code_custom_uoms', updated);
     if (icUom === uomToDelete) {
       setIcUom('PCS');
+    }
+    if (editForm.uom === uomToDelete) {
+      setEditForm(prev => ({ ...prev, uom: 'PCS' }));
     }
   };
 
@@ -1342,32 +1392,134 @@ export default function ItemCodeGeneratorView() {
                 <label className="FormLabel" style={{ margin: 0, fontWeight: '700', fontSize: '12.5px', color: 'var(--text-main)' }}>
                   Category / Dept *
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowAddCatDialog(true)}
-                  style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
-                  title="Add new category"
-                >
-                  + Add
-                </button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomCat(true);
+                      setCustomCatInput('');
+                    }}
+                    style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
+                    title="Add new category inline"
+                  >
+                    + Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCatDialog(true)}
+                    style={{ fontSize: '11px', background: 'var(--bg-secondary, #f1f5f9)', color: '#475569', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 6px', fontWeight: '700', cursor: 'pointer' }}
+                    title="Manage all categories"
+                  >
+                    ⚙️
+                  </button>
+                </div>
               </div>
-              <select
-                className="form-input"
-                value={icCategory}
-                onChange={e => {
-                  if (e.target.value === 'ADD_NEW') {
-                    setShowAddCatDialog(true);
-                  } else {
-                    setIcCategory(e.target.value);
-                  }
-                }}
-                style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
-              >
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>{cat}</option>
-                ))}
-                <option value="ADD_NEW" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>➕ Add New Category...</option>
-              </select>
+              {isCustomCat ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Type category name (e.g. Buttons)..."
+                      value={customCatInput}
+                      onChange={(e) => setCustomCatInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (customCatInput.trim()) {
+                            handleAddCategory(customCatInput);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsCustomCat(false);
+                          setCustomCatInput('');
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        height: '40px',
+                        padding: '0 12px',
+                        borderRadius: '8px',
+                        border: '2px solid #ea580c',
+                        background: '#fff7ed',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        color: '#0f172a'
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (customCatInput.trim()) {
+                          handleAddCategory(customCatInput);
+                        }
+                      }}
+                      style={{
+                        height: '40px',
+                        padding: '0 12px',
+                        background: '#059669',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      ✓ Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomCat(false);
+                        setCustomCatInput('');
+                      }}
+                      style={{
+                        height: '40px',
+                        padding: '0 10px',
+                        background: '#f1f5f9',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#64748b',
+                        cursor: 'pointer'
+                      }}
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '600' }}>
+                    ↵ Press Enter or click ✓ Add to save immediately
+                  </span>
+                </div>
+              ) : (
+                <select
+                  className="form-input"
+                  value={icCategory}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === '__custom__') {
+                      setIsCustomCat(true);
+                      setCustomCatInput('');
+                    } else if (val === '__manage__' || val === 'ADD_NEW') {
+                      setShowAddCatDialog(true);
+                    } else {
+                      setIcCategory(val);
+                    }
+                  }}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
+                >
+                  {categories.map((cat, cIdx) => (
+                    <option key={cat} value={cat}>{cIdx + 1}. {cat}</option>
+                  ))}
+                  <option value="__custom__" style={{ fontWeight: 'bold', color: '#ea580c' }}>✏️ + Add Manually (Custom Category)</option>
+                  <option value="__manage__" style={{ fontWeight: 'bold', color: '#4f46e5' }}>⚙️ Manage Categories ({customCategories.length})...</option>
+                </select>
+              )}
             </div>
 
             {/* UOM Field with Dynamic Add Option */}
@@ -1376,32 +1528,134 @@ export default function ItemCodeGeneratorView() {
                 <label className="FormLabel" style={{ margin: 0, fontWeight: '700', fontSize: '12.5px', color: 'var(--text-main)' }}>
                   Unit of Measure (UOM) *
                 </label>
-                <button
-                  type="button"
-                  onClick={() => setShowAddUomDialog(true)}
-                  style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
-                  title="Add new Unit of Measure"
-                >
-                  + Add
-                </button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomUom(true);
+                      setCustomUomInput('');
+                    }}
+                    style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
+                    title="Add new Unit of Measure inline"
+                  >
+                    + Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddUomDialog(true)}
+                    style={{ fontSize: '11px', background: 'var(--bg-secondary, #f1f5f9)', color: '#475569', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 6px', fontWeight: '700', cursor: 'pointer' }}
+                    title="Manage all UOMs"
+                  >
+                    ⚙️
+                  </button>
+                </div>
               </div>
-              <select
-                className="form-input"
-                value={icUom}
-                onChange={e => {
-                  if (e.target.value === 'ADD_NEW') {
-                    setShowAddUomDialog(true);
-                  } else {
-                    setIcUom(e.target.value);
-                  }
-                }}
-                style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
-              >
-                {uoms.map(u => (
-                  <option key={u} value={u}>{u}</option>
-                ))}
-                <option value="ADD_NEW" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>➕ Add New UOM...</option>
-              </select>
+              {isCustomUom ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      placeholder="Type UOM code (e.g. BUNDLE)..."
+                      value={customUomInput}
+                      onChange={(e) => setCustomUomInput(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          if (customUomInput.trim()) {
+                            handleAddUom(customUomInput);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsCustomUom(false);
+                          setCustomUomInput('');
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        height: '40px',
+                        padding: '0 12px',
+                        borderRadius: '8px',
+                        border: '2px solid #ea580c',
+                        background: '#fff7ed',
+                        fontSize: '13px',
+                        fontWeight: '700',
+                        color: '#0f172a'
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (customUomInput.trim()) {
+                          handleAddUom(customUomInput);
+                        }
+                      }}
+                      style={{
+                        height: '40px',
+                        padding: '0 12px',
+                        background: '#059669',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      ✓ Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomUom(false);
+                        setCustomUomInput('');
+                      }}
+                      style={{
+                        height: '40px',
+                        padding: '0 10px',
+                        background: '#f1f5f9',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#64748b',
+                        cursor: 'pointer'
+                      }}
+                      title="Cancel"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '600' }}>
+                    ↵ Press Enter or click ✓ Add to save immediately
+                  </span>
+                </div>
+              ) : (
+                <select
+                  className="form-input"
+                  value={icUom}
+                  onChange={e => {
+                    const val = e.target.value;
+                    if (val === '__custom__') {
+                      setIsCustomUom(true);
+                      setCustomUomInput('');
+                    } else if (val === '__manage__' || val === 'ADD_NEW') {
+                      setShowAddUomDialog(true);
+                    } else {
+                      setIcUom(val);
+                    }
+                  }}
+                  style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
+                >
+                  {uoms.map((u, uIdx) => (
+                    <option key={u} value={u}>{uIdx + 1}. {u}</option>
+                  ))}
+                  <option value="__custom__" style={{ fontWeight: 'bold', color: '#ea580c' }}>✏️ + Add Manually (Custom UOM)</option>
+                  <option value="__manage__" style={{ fontWeight: 'bold', color: '#4f46e5' }}>⚙️ Manage UOMs ({customUoms.length})...</option>
+                </select>
+              )}
             </div>
 
             <div>
@@ -2353,8 +2607,8 @@ export default function ItemCodeGeneratorView() {
 
       {/* MODAL 3: Manage & Add Categories */}
       {showAddCatDialog && (
-        <div className="modal-overlay">
-          <div className="modal-content animate-scale" style={{ maxWidth: '450px', borderRadius: '16px' }}>
+        <div className="modal-overlay" style={{ zIndex: 1500 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '450px', borderRadius: '16px', zIndex: 1501 }}>
             <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 className="modal-title" style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--text-main)' }}>
                 Manage & Add Categories / Departments
@@ -2442,8 +2696,8 @@ export default function ItemCodeGeneratorView() {
 
       {/* MODAL 4: Manage & Add Units of Measure (UOM) */}
       {showAddUomDialog && (
-        <div className="modal-overlay">
-          <div className="modal-content animate-scale" style={{ maxWidth: '450px', borderRadius: '16px' }}>
+        <div className="modal-overlay" style={{ zIndex: 1500 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '450px', borderRadius: '16px', zIndex: 1501 }}>
             <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 className="modal-title" style={{ fontSize: '1.1rem', fontWeight: '800', margin: 0, color: 'var(--text-main)' }}>
                 Manage & Add Units of Measure (UOM)
@@ -2717,28 +2971,134 @@ export default function ItemCodeGeneratorView() {
                     <label className="FormLabel" style={{ fontWeight: '700', fontSize: '12.5px', color: 'var(--text-main)' }}>
                       Category *
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddCatDialog(true)}
-                      style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
-                    >
-                      + New
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditCustomCat(true);
+                          setEditCustomCatInput('');
+                        }}
+                        style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
+                        title="Add category inline"
+                      >
+                        + Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCatDialog(true)}
+                        style={{ fontSize: '11px', background: 'var(--bg-secondary, #f1f5f9)', color: '#475569', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 6px', fontWeight: '700', cursor: 'pointer' }}
+                        title="Manage all categories"
+                      >
+                        ⚙️
+                      </button>
+                    </div>
                   </div>
-                  <select
-                    className="form-input"
-                    value={editForm.category}
-                    onChange={e => {
-                      if (e.target.value === 'ADD_NEW') setShowAddCatDialog(true);
-                      else setEditForm(prev => ({ ...prev, category: e.target.value }));
-                    }}
-                    style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
-                  >
-                    {categories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                    <option value="ADD_NEW" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>➕ Add New Category...</option>
-                  </select>
+                  {isEditCustomCat ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          placeholder="Type category name (e.g. Buttons)..."
+                          value={editCustomCatInput}
+                          onChange={(e) => setEditCustomCatInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (editCustomCatInput.trim()) {
+                                handleAddCategory(editCustomCatInput);
+                              }
+                            } else if (e.key === 'Escape') {
+                              setIsEditCustomCat(false);
+                              setEditCustomCatInput('');
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            height: '40px',
+                            padding: '0 12px',
+                            borderRadius: '8px',
+                            border: '2px solid #ea580c',
+                            background: '#fff7ed',
+                            fontSize: '13px',
+                            fontWeight: '700',
+                            color: '#0f172a'
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editCustomCatInput.trim()) {
+                              handleAddCategory(editCustomCatInput);
+                            }
+                          }}
+                          style={{
+                            height: '40px',
+                            padding: '0 12px',
+                            background: '#059669',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          ✓ Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditCustomCat(false);
+                            setEditCustomCatInput('');
+                          }}
+                          style={{
+                            height: '40px',
+                            padding: '0 10px',
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            color: '#64748b',
+                            cursor: 'pointer'
+                          }}
+                          title="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '600' }}>
+                        ↵ Press Enter or click ✓ Add to save immediately
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      className="form-input"
+                      value={editForm.category}
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === '__custom__') {
+                          setIsEditCustomCat(true);
+                          setEditCustomCatInput('');
+                        } else if (val === '__manage__' || val === 'ADD_NEW') {
+                          setShowAddCatDialog(true);
+                        } else {
+                          setEditForm(prev => ({ ...prev, category: val }));
+                        }
+                      }}
+                      style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
+                    >
+                      {categories.map((cat, cIdx) => (
+                        <option key={cat} value={cat}>{cIdx + 1}. {cat}</option>
+                      ))}
+                      <option value="__custom__" style={{ fontWeight: 'bold', color: '#ea580c' }}>✏️ + Add Manually (Custom Category)</option>
+                      <option value="__manage__" style={{ fontWeight: 'bold', color: '#4f46e5' }}>⚙️ Manage Categories ({customCategories.length})...</option>
+                    </select>
+                  )}
                 </div>
 
                 <div>
@@ -2746,28 +3106,134 @@ export default function ItemCodeGeneratorView() {
                     <label className="FormLabel" style={{ fontWeight: '700', fontSize: '12.5px', color: 'var(--text-main)' }}>
                       Unit of Measure (UOM) *
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddUomDialog(true)}
-                      style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
-                    >
-                      + New
-                    </button>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditCustomUom(true);
+                          setEditCustomUomInput('');
+                        }}
+                        style={{ fontSize: '11px', background: 'var(--accent-light, #e0e7ff)', color: 'var(--accent-color, #4f46e5)', border: 'none', borderRadius: '4px', padding: '2px 8px', fontWeight: '800', cursor: 'pointer' }}
+                        title="Add UOM inline"
+                      >
+                        + Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddUomDialog(true)}
+                        style={{ fontSize: '11px', background: 'var(--bg-secondary, #f1f5f9)', color: '#475569', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '2px 6px', fontWeight: '700', cursor: 'pointer' }}
+                        title="Manage all UOMs"
+                      >
+                        ⚙️
+                      </button>
+                    </div>
                   </div>
-                  <select
-                    className="form-input"
-                    value={editForm.uom}
-                    onChange={e => {
-                      if (e.target.value === 'ADD_NEW') setShowAddUomDialog(true);
-                      else setEditForm(prev => ({ ...prev, uom: e.target.value }));
-                    }}
-                    style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
-                  >
-                    {uoms.map(u => (
-                      <option key={u} value={u}>{u}</option>
-                    ))}
-                    <option value="ADD_NEW" style={{ fontWeight: 'bold', color: 'var(--accent-color)' }}>➕ Add New UOM...</option>
-                  </select>
+                  {isEditCustomUom ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <input
+                          type="text"
+                          placeholder="Type UOM code (e.g. BUNDLE)..."
+                          value={editCustomUomInput}
+                          onChange={(e) => setEditCustomUomInput(e.target.value.toUpperCase())}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (editCustomUomInput.trim()) {
+                                handleAddUom(editCustomUomInput);
+                              }
+                            } else if (e.key === 'Escape') {
+                              setIsEditCustomUom(false);
+                              setEditCustomUomInput('');
+                            }
+                          }}
+                          style={{
+                            flex: 1,
+                            height: '40px',
+                            padding: '0 12px',
+                            borderRadius: '8px',
+                            border: '2px solid #ea580c',
+                            background: '#fff7ed',
+                            fontSize: '13px',
+                            fontWeight: '700',
+                            color: '#0f172a'
+                          }}
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editCustomUomInput.trim()) {
+                              handleAddUom(editCustomUomInput);
+                            }
+                          }}
+                          style={{
+                            height: '40px',
+                            padding: '0 12px',
+                            background: '#059669',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          ✓ Add
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditCustomUom(false);
+                            setEditCustomUomInput('');
+                          }}
+                          style={{
+                            height: '40px',
+                            padding: '0 10px',
+                            background: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            color: '#64748b',
+                            cursor: 'pointer'
+                          }}
+                          title="Cancel"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '600' }}>
+                        ↵ Press Enter or click ✓ Add to save immediately
+                      </span>
+                    </div>
+                  ) : (
+                    <select
+                      className="form-input"
+                      value={editForm.uom}
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val === '__custom__') {
+                          setIsEditCustomUom(true);
+                          setEditCustomUomInput('');
+                        } else if (val === '__manage__' || val === 'ADD_NEW') {
+                          setShowAddUomDialog(true);
+                        } else {
+                          setEditForm(prev => ({ ...prev, uom: val }));
+                        }
+                      }}
+                      style={{ width: '100%', borderRadius: '8px', height: '40px', padding: '0 12px', backgroundColor: 'var(--bg-primary)' }}
+                    >
+                      {uoms.map((u, uIdx) => (
+                        <option key={u} value={u}>{uIdx + 1}. {u}</option>
+                      ))}
+                      <option value="__custom__" style={{ fontWeight: 'bold', color: '#ea580c' }}>✏️ + Add Manually (Custom UOM)</option>
+                      <option value="__manage__" style={{ fontWeight: 'bold', color: '#4f46e5' }}>⚙️ Manage UOMs ({customUoms.length})...</option>
+                    </select>
+                  )}
                 </div>
 
                 <div>

@@ -773,15 +773,24 @@ export default function ReturnMaterialView({
       alert('Please allow popup windows to print the Return Voucher slip.');
       return;
     }
-    const materialsHtml = (slip.parsedMaterials || []).map((m, idx) => `
-      <tr>
-        <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${idx + 1}</td>
-        <td style="border: 1px solid #000; padding: 7px 10px; font-weight: bold;">${m.name || 'Material'}</td>
-        <td style="border: 1px solid #000; padding: 7px 10px;">${m.bomItemName || 'Return'}</td>
-        <td style="border: 1px solid #000; padding: 7px 10px; text-align: right; font-weight: bold;">${m.qty}</td>
-        <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${m.unit || 'pcs'}</td>
-      </tr>
-    `).join('');
+    const materialsHtml = (slip.parsedMaterials || []).map((m, idx) => {
+      const matchedMat = (materials || []).find(mat => 
+        (m.materialId && String(mat.id) === String(m.materialId)) ||
+        (m.name && String(mat.name).trim().toLowerCase() === String(mat.name).trim().toLowerCase())
+      );
+      const rawCode = m.itemCode || (matchedMat ? (matchedMat.itemCode || matchedMat.stCode || matchedMat.materialCode || '') : '') || '—';
+      const code = String(rawCode).toUpperCase().startsWith('MT') ? '—' : rawCode;
+      return `
+        <tr>
+          <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${idx + 1}</td>
+          <td style="border: 1px solid #000; padding: 7px 10px; font-weight: bold;">${m.name || 'Material'}</td>
+          <td style="border: 1px solid #000; padding: 7px 10px;">${m.bomItemName || 'Return'}</td>
+          <td style="border: 1px solid #000; padding: 7px 10px; font-family: monospace; font-weight: bold;">${code}</td>
+          <td style="border: 1px solid #000; padding: 7px 10px; text-align: right; font-weight: bold;">${m.qty}</td>
+          <td style="border: 1px solid #000; padding: 7px 10px; text-align: center;">${m.unit || 'pcs'}</td>
+        </tr>
+      `;
+    }).join('');
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -826,6 +835,7 @@ export default function ReturnMaterialView({
                 <th style="width: 40px; text-align: center;">#</th>
                 <th>Material Description</th>
                 <th>BOM Component</th>
+                <th style="width: 100px;">Item Code</th>
                 <th style="width: 100px; text-align: right;">Returned Qty</th>
                 <th style="width: 80px; text-align: center;">Unit</th>
               </tr>

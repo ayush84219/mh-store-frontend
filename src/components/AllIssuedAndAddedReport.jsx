@@ -13,6 +13,8 @@ import {
 import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import WithoutBomMaterialIssueView from './WithoutBomMaterialIssueView';
+import { formatItemCode, cleanMaterialName } from './ElasticIssueView';
 
 // ── Date & Time Utilities ────────────────────────────────────────────────────────
 
@@ -108,7 +110,10 @@ const formatPersonName = (name) => {
 export default function AllIssuedAndAddedReport({
   currencySymbol = '₹',
   currentUser = null,
-  onNavigateToLot = () => {}
+  onNavigateToLot = () => {},
+  materials: propMaterials = null,
+  designs: propDesigns = null,
+  issueLogs: propIssueLogs = null
 }) {
   // Master Raw Data States
   const [boneIssues, setBoneIssues] = useState([]);
@@ -117,14 +122,15 @@ export default function AllIssuedAndAddedReport({
   const [issueLogs, setIssueLogs] = useState([]);
   const [weightCaptures, setWeightCaptures] = useState([]);
   const [materialsList, setMaterialsList] = useState([]);
+  const [designsList, setDesignsList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Filters State
+  // Filters State - Default to 'material_issue' to immediately show the Challan / Bill report
   const [quickDateFilter, setQuickDateFilter] = useState('all'); // 'all', 'today', 'yesterday', 'last7', 'thisMonth', 'custom'
   const [specificDate, setSpecificDate] = useState(''); // Specific calendar date (YYYY-MM-DD)
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
-  const [movementFilter, setMovementFilter] = useState('all'); // 'all', 'all_issues', 'add_material', 'bone_issue', 'elastic_issue', 'tape_issue', 'extra_pic_issue', 'general_issue'
+  const [movementFilter, setMovementFilter] = useState('material_issue'); // 'material_issue', 'all', 'all_issues', 'add_material', 'bone_issue', 'elastic_issue', 'tape_issue', 'extra_pic_issue'
   const [searchQuery, setSearchQuery] = useState('');
   const [viewLayout, setViewLayout] = useState('table'); // 'table' | 'daily_grouped'
   const [sortOrder, setSortOrder] = useState('desc'); // 'desc' | 'asc'
@@ -140,38 +146,66 @@ export default function AllIssuedAndAddedReport({
     setIsLoading(true);
     const backendUrl = getBackendUrl();
     try {
-      const [bRes, elRes, exRes, issRes, wtRes, matRes] = await Promise.all([
+      const [bRes, elRes, exRes, issRes, wtRes, matRes, desRes] = await Promise.all([
         fetch(`${backendUrl}/api/bone-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/elastic-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/extra-material-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/issue-logs`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/weight-capture`).catch(() => ({ ok: false })),
-        fetch(`${backendUrl}/api/materials`).catch(() => ({ ok: false }))
+        fetch(`${backendUrl}/api/materials`).catch(() => ({ ok: false })),
+        fetch(`${backendUrl}/api/designs`).catch(() => ({ ok: false }))
       ]);
 
-      if (bRes.ok) {
+      if (bRes && bRes.ok) {
         const d = await bRes.json();
         setBoneIssues(Array.isArray(d) ? d : []);
       }
-      if (elRes.ok) {
+      if (elRes && elRes.ok) {
         const d = await elRes.json();
-        setElasticIssues(Array.isArray(d) ? d : []);
+        const apiRecords = Array.isArray(d) ? d : [];
+        try {
+          const localSaved = localStorage.getItem('gpdms_elastic_issue_history');
+          if (localSaved) {
+            const parsed = JSON.parse(localSaved);
+            if (Array.isArray(parsed)) {
+              parsed.forEach(p => {
+                const pSlip = String(p.slipNo || p.slip_no || '').trim().toLowerCase();
+                if (pSlip && !apiRecords.some(e => String(e.slipNo || e.slip_no || '').trim().toLowerCase() === pSlip)) {
+                  apiRecords.push(p);
+                }
+              });
+            }
+          }
+        } catch (_) {}
+        setElasticIssues(apiRecords);
+      } else {
+        try {
+          const localSaved = localStorage.getItem('gpdms_elastic_issue_history');
+          if (localSaved) {
+            const parsed = JSON.parse(localSaved);
+            if (Array.isArray(parsed)) setElasticIssues(parsed);
+          }
+        } catch (_) {}
       }
-      if (exRes.ok) {
+      if (exRes && exRes.ok) {
         const d = await exRes.json();
         setExtraIssues(Array.isArray(d) ? d : []);
       }
-      if (issRes.ok) {
+      if (issRes && issRes.ok) {
         const d = await issRes.json();
         setIssueLogs(Array.isArray(d) ? d : []);
       }
-      if (wtRes.ok) {
+      if (wtRes && wtRes.ok) {
         const d = await wtRes.json();
         setWeightCaptures(Array.isArray(d) ? d : (d?.data || []));
       }
-      if (matRes.ok) {
+      if (matRes && matRes.ok) {
         const d = await matRes.json();
         setMaterialsList(Array.isArray(d) ? d : []);
+      }
+      if (desRes && desRes.ok) {
+        const d = await desRes.json();
+        setDesignsList(Array.isArray(d) ? d : []);
       }
     } catch (err) {
       console.error('Error fetching movement report datasets:', err);
@@ -184,19 +218,122 @@ export default function AllIssuedAndAddedReport({
     fetchAllMovementData();
   }, []);
 
-  // Material Photo lookup helper
+  const effectiveMaterials = useMemo(() => {
+    return (propMaterials && propMaterials.length > 0) ? propMaterials : materialsList;
+  }, [propMaterials, materialsList]);
+
+  const effectiveDesigns = useMemo(() => {
+    return (propDesigns && propDesigns.length > 0) ? propDesigns : designsList;
+  }, [propDesigns, designsList]);
+
+  const effectiveIssueLogs = useMemo(() => {
+    return (propIssueLogs && propIssueLogs.length > 0) ? propIssueLogs : issueLogs;
+  }, [propIssueLogs, issueLogs]);
+
+  // Material Photo lookup helper with deep indexing of effectiveMaterials and effectiveDesigns
   const materialPhotoMap = useMemo(() => {
-    const map = {};
-    (materialsList || []).forEach(m => {
-      const photo = m.materialPhoto || m.photo || m.image || m.imageUrl;
+    const map = new Map();
+
+    const setKey = (k, v) => {
+      if (!k || !v) return;
+      const clean = String(k).trim().toLowerCase();
+      if (clean && !map.has(clean)) {
+        map.set(clean, v);
+      }
+    };
+
+    // 1. Index from effectiveMaterials
+    (effectiveMaterials || []).forEach(m => {
+      const photo = m.materialPhoto || m.photo || m.image || m.imageUrl || m.imgUrl || m.picture;
       if (photo) {
-        if (m.id) map[String(m.id).toLowerCase()] = photo;
-        if (m.itemCode) map[String(m.itemCode).toLowerCase()] = photo;
-        if (m.name) map[String(m.name).toLowerCase()] = photo;
+        if (m.id) setKey(m.id, photo);
+        if (m.itemCode) setKey(m.itemCode, photo);
+        if (m.stCode) setKey(m.stCode, photo);
+        if (m.materialCode) setKey(m.materialCode, photo);
+        if (m.barcodeId) setKey(m.barcodeId, photo);
+        if (m.name) {
+          setKey(m.name, photo);
+          setKey(m.name.replace(/[^a-zA-Z0-9]/g, ''), photo);
+        }
+        if (m.materialName) {
+          setKey(m.materialName, photo);
+          setKey(m.materialName.replace(/[^a-zA-Z0-9]/g, ''), photo);
+        }
+        if (m.shade) setKey(m.shade, photo);
+        if (m.color) setKey(m.color, photo);
+        if (m.name && m.color) setKey(`${m.name}_${m.color}`, photo);
+        if (m.name && m.shade) setKey(`${m.name}_${m.shade}`, photo);
       }
     });
+
+    // 2. Index from effectiveDesigns (BOM materials and design pictures)
+    (effectiveDesigns || []).forEach(d => {
+      const designLot = String(d.lotNumber || d.id || '').trim().toLowerCase();
+      const dPhoto = d.image || d.imageUrl || d.photo || d.sketchUrl;
+
+      const bomList = Array.isArray(d.materials) ? d.materials :
+                      Array.isArray(d.bom) ? d.bom :
+                      Array.isArray(d.bomItems) ? d.bomItems : [];
+
+      bomList.forEach(b => {
+        const bPhoto = b.photo || b.imageUrl || b.image || b.imgUrl || b.materialPhoto || dPhoto;
+        if (bPhoto) {
+          if (b.id) setKey(b.id, bPhoto);
+          if (b.materialId) setKey(b.materialId, bPhoto);
+          if (b.itemCode) setKey(b.itemCode, bPhoto);
+          if (b.stCode) setKey(b.stCode, bPhoto);
+          if (b.name) {
+            setKey(b.name, bPhoto);
+            setKey(b.name.replace(/[^a-zA-Z0-9]/g, ''), bPhoto);
+          }
+          if (b.bomItemName) setKey(b.bomItemName, bPhoto);
+          if (b.materialName) setKey(b.materialName, bPhoto);
+          if (designLot && b.name) setKey(`${designLot}:${b.name}`, bPhoto);
+          if (designLot && b.bomItemName) setKey(`${designLot}:${b.bomItemName}`, bPhoto);
+        }
+      });
+
+      if (designLot && dPhoto) {
+        setKey(`lot:${designLot}`, dPhoto);
+      }
+    });
+
     return map;
-  }, [materialsList]);
+  }, [effectiveMaterials, effectiveDesigns]);
+
+  // Comprehensive photo resolution helper
+  const resolveRecordPhoto = (candidates = []) => {
+    for (const c of candidates) {
+      if (!c) continue;
+      if (typeof c === 'string' && (c.startsWith('http://') || c.startsWith('https://') || c.startsWith('data:image/') || c.startsWith('/uploads/') || c.startsWith('blob:'))) {
+        return c;
+      }
+      const clean = String(c).trim().toLowerCase();
+      if (materialPhotoMap.has(clean)) {
+        return materialPhotoMap.get(clean);
+      }
+      const cleanAlpha = clean.replace(/[^a-zA-Z0-9]/g, '');
+      if (cleanAlpha && materialPhotoMap.has(cleanAlpha)) {
+        return materialPhotoMap.get(cleanAlpha);
+      }
+    }
+
+    // Fuzzy search in effectiveMaterials by name substring
+    for (const c of candidates) {
+      if (!c || typeof c !== 'string') continue;
+      const lower = c.trim().toLowerCase();
+      if (lower.length < 3) continue;
+      const found = (effectiveMaterials || []).find(m => {
+        const mName = String(m.name || m.materialName || '').trim().toLowerCase();
+        return (mName && (mName.includes(lower) || lower.includes(mName))) && (m.photo || m.image || m.imageUrl || m.materialPhoto);
+      });
+      if (found) {
+        return found.photo || found.image || found.imageUrl || found.materialPhoto;
+      }
+    }
+
+    return null;
+  };
 
   // ── Normalize & Consolidate All Movements ──────────────────────────────────────
   const normalizedRecords = useMemo(() => {
@@ -213,8 +350,26 @@ export default function AllIssuedAndAddedReport({
                      String(b.style || '').toLowerCase().includes('tape') ||
                      String(b.remarks || '').toLowerCase().includes('tape');
 
-      const matPhoto = materialPhotoMap[String(b.shade || '').toLowerCase()] ||
-                       materialPhotoMap[String(b.style || '').toLowerCase()] || null;
+      let payloadObj = {};
+      try {
+        payloadObj = typeof b.payload === 'string' ? JSON.parse(b.payload) : (b.payload || {});
+      } catch (_) {}
+      const deductedMat = Array.isArray(payloadObj.deductedItems) && payloadObj.deductedItems[0] ? payloadObj.deductedItems[0] : {};
+
+      const matPhoto = resolveRecordPhoto([
+        b.photo,
+        b.imageUrl,
+        payloadObj.selectedBoneMaterialId,
+        deductedMat.materialId,
+        deductedMat.materialCode,
+        payloadObj.boneMaterialName,
+        deductedMat.materialName,
+        b.shade,
+        b.style,
+        b.size,
+        b.lotNo ? `lot:${b.lotNo}` : null,
+        'bone'
+      ]);
 
       list.push({
         id: `bone-table-${b.id || docNo}`,
@@ -254,53 +409,130 @@ export default function AllIssuedAndAddedReport({
       });
     });
 
-    // 2. INGEST DEDICATED ELASTIC ISSUES
-    (elasticIssues || []).forEach(e => {
-      const docNo = e.slipNo || e.slip_no || `ELASTIC-${e.id}`;
+    // 2. INGEST DEDICATED ELASTIC, TAPE & OTHER ACCESSORY ISSUES (API + LocalStorage Sync)
+    const combinedElasticList = [...(elasticIssues || [])];
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localSaved = localStorage.getItem('gpdms_elastic_issue_history');
+        if (localSaved) {
+          const parsed = JSON.parse(localSaved);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(p => {
+              const pSlip = String(p.slipNo || p.slip_no || '').trim().toLowerCase();
+              if (!pSlip) return;
+              const existingIdx = combinedElasticList.findIndex(e => String(e.slipNo || e.slip_no || '').trim().toLowerCase() === pSlip);
+              if (existingIdx >= 0) {
+                combinedElasticList[existingIdx] = { ...combinedElasticList[existingIdx], ...p };
+              } else {
+                combinedElasticList.push(p);
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    combinedElasticList.forEach(e => {
+      const docNo = e.slipNo || e.slip_no || (e.id ? `ELASTIC-${e.id}` : 'SLIP');
       seenIssueKeys.add(String(docNo).toLowerCase());
 
-      const dObj = parseToDateObject(e.issueDate || e.issue_date || e.createdAt || e.created_at);
-      const isTape = String(docNo).toLowerCase().startsWith('tape') ||
-                     (Number(e.totalTapeMtr || e.total_tape_mtr || 0) > 0 && Number(e.totalElasticMtr || e.total_elastic_mtr || 0) === 0);
+      const dObj = parseToDateObject(e.issueDate || e.issue_date || e.date || e.createdAt || e.created_at);
+
+      let payloadObj = {};
+      try {
+        payloadObj = typeof e.payload === 'string' ? JSON.parse(e.payload) : (e.payload || {});
+      } catch (_) {}
+
+      const isOther = String(docNo).toLowerCase().startsWith('other') ||
+                      String(e.slipNo || '').toLowerCase().startsWith('other') ||
+                      String(e.slip_no || '').toLowerCase().startsWith('other') ||
+                      e.materialMode === 'other' ||
+                      payloadObj.materialMode === 'other' ||
+                      Boolean(payloadObj.otherMaterialName) ||
+                      Boolean(e.otherMaterialName);
+
+      const isTape = !isOther && (
+        String(docNo).toLowerCase().startsWith('tape') ||
+        (Number(e.totalTapeMtr || e.total_tape_mtr || 0) > 0 && Number(e.totalElasticMtr || e.total_elastic_mtr || 0) === 0)
+      );
+
+      const deductedMat = Array.isArray(payloadObj.deductedItems) && payloadObj.deductedItems[0] ? payloadObj.deductedItems[0] : {};
+
+      const rawOtherName = payloadObj.otherMaterialName || e.otherMaterialName || payloadObj.materialName || e.materialName || e.style || 'Other Accessory';
+      const otherMatName = cleanMaterialName(rawOtherName);
+      const otherItemCode = formatItemCode(payloadObj.otherItemCode || payloadObj.selectedOtherMaterialId || e.otherItemCode || e.selectedOtherMaterialId, null, effectiveMaterials);
+      const otherUnit = payloadObj.otherUnit || e.otherUnit || 'Roll';
+      const otherRolls = Number(payloadObj.otherRollCount || payloadObj.rolls || e.otherRollCount || e.rolls || 1);
 
       const mtr = isTape
         ? Number(e.totalTapeMtr || e.total_tape_mtr || 0)
         : Number(e.totalElasticMtr || e.total_elastic_mtr || 0);
 
+      const matPhoto = resolveRecordPhoto([
+        e.photo,
+        e.imageUrl,
+        isOther ? (payloadObj.selectedOtherMaterialId || e.selectedOtherMaterialId) : (isTape ? payloadObj.selectedTapeMaterialId : payloadObj.selectedElasticMaterialId),
+        deductedMat.materialId,
+        deductedMat.materialCode,
+        isOther ? otherItemCode : e.itemCode,
+        e.elasticWidth,
+        isOther ? otherMatName : payloadObj.elasticMaterialName,
+        deductedMat.materialName,
+        e.style,
+        e.lotNo ? `lot:${e.lotNo}` : null,
+        isOther ? (payloadObj.selectedOtherCategory || 'other') : (isTape ? 'tape' : 'elastic')
+      ]);
+
+      const itemType = isOther ? 'other_issue' : (isTape ? 'tape_issue' : 'elastic_issue');
+      const itemLabel = isOther ? 'Other Accessory Issue' : (isTape ? 'Tape Issue' : 'Elastic Issue');
+      const itemIcon = isOther ? '📦' : (isTape ? '📏' : '🧵');
+      const itemMatName = isOther
+        ? (otherMatName && otherMatName !== 'Other Accessory' ? (otherItemCode ? `${otherMatName} [${otherItemCode}]` : otherMatName) : (e.style ? `${e.style} Accessory` : 'Other Accessory'))
+        : (isTape ? `Tape (${e.elasticWidth || 'Standard'})` : `Elastic Waistband (${e.elasticWidth || 'Standard'})`);
+      const itemCategory = isOther ? (payloadObj.selectedOtherCategory || 'Other Accessories') : (isTape ? 'Tape' : 'Elastic');
+      const itemQty = isOther ? otherRolls : (mtr > 0 ? mtr : Number(e.rolls || 1));
+      const itemUnit = isOther ? `${otherUnit}(s)` : (mtr > 0 ? 'Meters' : 'Rolls');
+
+      const rawLot = e.lotNo || e.lot_no || payloadObj.lotNo || '';
+      const cleanLotNo = rawLot
+        ? (String(rawLot).toUpperCase().includes('W/O') ? String(rawLot).replace(/^LOT\s*#?/i, 'LOT #') : `LOT #${String(rawLot).replace(/^LOT\s*#?/i, '')} (W/O BOM)`)
+        : 'W/O BOM';
+
       list.push({
         id: `elastic-table-${e.id || docNo}`,
         docNo,
-        type: isTape ? 'tape_issue' : 'elastic_issue',
-        typeLabel: isTape ? 'Tape Issue' : 'Elastic Issue',
-        typeIcon: isTape ? '📏' : '🧵',
+        type: itemType,
+        typeLabel: itemLabel,
+        typeIcon: itemIcon,
         typeGroup: 'issue',
         dateObj: dObj,
         dateYmd: formatDateToYMD(dObj),
         displayDate: formatDisplayDate(dObj),
         displayTime: formatDisplayTime(dObj),
-        lotNo: e.lotNo || e.lot_no || 'N/A',
+        lotNo: cleanLotNo,
         poNo: e.poNo || e.po_no || '—',
         style: e.style || e.garmentType || e.garment_type || '—',
         brand: e.brand || '—',
-        itemCode: e.elasticWidth || e.width || 'ELASTIC-ACC',
-        materialName: isTape ? `Tape (${e.elasticWidth || 'Standard'})` : `Elastic Waistband (${e.elasticWidth || 'Standard'})`,
-        category: isTape ? 'Tape' : 'Elastic',
-        qty: mtr > 0 ? mtr : Number(e.rolls || 1),
-        unit: mtr > 0 ? 'Meters' : 'Rolls',
+        itemCode: isOther ? (otherItemCode || 'OTHER-ACC') : (e.elasticWidth || e.width || 'ELASTIC-ACC'),
+        materialName: itemMatName,
+        category: itemCategory,
+        qty: itemQty,
+        unit: itemUnit,
         extraDetails: {
-          rolls: e.rolls || 1,
-          meters: mtr,
+          rolls: isOther ? otherRolls : (e.rolls || 1),
+          meters: isOther ? 0 : mtr,
           elasticPerPcMtr: e.elasticPerPcMtr || e.elastic_per_pc_mtr || 0,
           elasticWidth: e.elasticWidth || e.width || '',
-          supervisor: e.supervisorName || e.supervisor_name || ''
+          supervisor: e.supervisorName || e.supervisor_name || '',
+          cuttingQty: e.quantity || 0
         },
         issuerName: e.issuerName || e.issuer_name || '—',
         receiverName: e.receiverName || e.receiver_name || '—',
-        receiverDept: 'Cutting / Stitching Floor',
+        receiverDept: isOther ? 'Production Floor' : 'Cutting / Stitching Floor',
         supplier: '—',
         location: 'Store / Floor',
-        remarks: e.remarks || '',
-        photo: null,
+        remarks: e.remarks || (isOther ? 'Direct W/O BOM Floor Issue' : ''),
+        photo: matPhoto,
         raw: e
       });
     });
@@ -332,10 +564,35 @@ export default function AllIssuedAndAddedReport({
         subtype = 'elastic_issue';
         subtypeLabel = 'Elastic Extra Issue';
         subtypeIcon = '🧵';
+      } else if (catLower.includes('other') || matLower.includes('other')) {
+        subtype = 'other_issue';
+        subtypeLabel = 'Other Accessory Extra Issue';
+        subtypeIcon = '📦';
       }
 
-      const matPhoto = materialPhotoMap[String(ex.material_id || '').toLowerCase()] ||
-                       materialPhotoMap[String(ex.material_name || '').toLowerCase()] || null;
+      let extraItems = ex.items || [];
+      if (typeof ex.items_payload === 'string') {
+        try { extraItems = JSON.parse(ex.items_payload); } catch (_) {}
+      }
+      const it = Array.isArray(extraItems) && extraItems[0] ? extraItems[0] : {};
+
+      const matPhoto = resolveRecordPhoto([
+        ex.photo,
+        ex.imageUrl,
+        ex.image_url,
+        it.photo,
+        it.imageUrl,
+        it.itemCode,
+        it.materialCode,
+        it.materialId,
+        ex.material_id,
+        ex.materialCode,
+        ex.itemCode,
+        it.materialName,
+        ex.material_name,
+        ex.bom_item_name,
+        ex.lot_id ? `${ex.lot_id}:${matName}` : null
+      ]);
 
       list.push({
         id: `extra-table-${ex.id || docNo}`,
@@ -377,7 +634,7 @@ export default function AllIssuedAndAddedReport({
     });
 
     // 4. INGEST GENERAL & LEGACY ISSUE LOGS (issue_logs)
-    (issueLogs || []).forEach(l => {
+    (effectiveIssueLogs || issueLogs || []).forEach(l => {
       const docNo = l.id || `LOG-${l.lotId || ''}`;
       // Skip if already ingested from dedicated tables
       if (seenIssueKeys.has(String(docNo).toLowerCase())) {
@@ -389,17 +646,25 @@ export default function AllIssuedAndAddedReport({
       const idUpper = String(docNo).toUpperCase();
       const catUpper = String(l.category || '').toUpperCase();
 
-      // De-aggregate materials array if present
+      // De-aggregate materials array or items array if present
       let rawMats = [];
       try {
-        rawMats = Array.isArray(l.materials) ? l.materials : (typeof l.materials === 'string' ? JSON.parse(l.materials) : []);
+        if (Array.isArray(l.materials)) {
+          rawMats = l.materials;
+        } else if (typeof l.materials === 'string' && l.materials.trim()) {
+          rawMats = JSON.parse(l.materials);
+        } else if (Array.isArray(l.items)) {
+          rawMats = l.items;
+        } else if (typeof l.items === 'string' && l.items.trim()) {
+          rawMats = JSON.parse(l.items);
+        }
       } catch (_) {
         rawMats = [];
       }
 
       if (rawMats.length > 0) {
         rawMats.forEach((mat, mIdx) => {
-          const matName = mat.name || mat.bomItemName || 'Issued Material';
+          const matName = mat.name || mat.bomItemName || mat.materialName || 'Issued Material';
           const matUpper = String(matName).toUpperCase();
 
           let itemType = 'general_issue';
@@ -430,11 +695,28 @@ export default function AllIssuedAndAddedReport({
             itemType = 'extra_pic_issue';
             itemLabel = 'Extra Pic Issue';
             itemIcon = '➕';
+          } else if (idUpper.startsWith('OTHER') || catUpper.includes('OTHER') || matUpper.includes('OTHER')) {
+            itemType = 'other_issue';
+            itemLabel = 'Other Accessory Issue';
+            itemIcon = '📦';
           }
 
-          const photo = mat.photo || mat.imageUrl ||
-                        materialPhotoMap[String(mat.itemCode || mat.id || '').toLowerCase()] ||
-                        materialPhotoMap[String(matName).toLowerCase()] || null;
+          const photo = resolveRecordPhoto([
+            mat.photo,
+            mat.imageUrl,
+            mat.image,
+            mat.materialPhoto,
+            mat.itemCode,
+            mat.stCode,
+            mat.id,
+            mat.materialId,
+            mat.name,
+            mat.bomItemName,
+            mat.materialName,
+            mat.color ? `${mat.name}_${mat.color}` : null,
+            l.lotId ? `${l.lotId}:${matName}` : null,
+            l.lotId ? `lot:${l.lotId}` : null
+          ]);
 
           list.push({
             id: `log-${docNo}-${mIdx}`,
@@ -451,9 +733,9 @@ export default function AllIssuedAndAddedReport({
             poNo: '—',
             style: l.category || '—',
             brand: '—',
-            itemCode: mat.itemCode || mat.id || 'ACC-MAT',
+            itemCode: mat.itemCode || mat.stCode || mat.id || 'ACC-MAT',
             materialName: matName,
-            category: mat.category || l.category || 'Trims',
+            category: mat.category || mat.bomItemName || l.category || 'Trims',
             qty: Number(mat.qty || mat.issuedQty || mat.volume || l.volume || 1),
             unit: mat.unit || 'Pcs',
             extraDetails: {
@@ -501,7 +783,19 @@ export default function AllIssuedAndAddedReport({
           itemType = 'extra_pic_issue';
           itemLabel = 'Extra Pic Issue';
           itemIcon = '➕';
+        } else if (idUpper.startsWith('OTHER') || catUpper.includes('OTHER')) {
+          itemType = 'other_issue';
+          itemLabel = 'Other Accessory Issue';
+          itemIcon = '📦';
         }
+
+        const fallbackPhoto = resolveRecordPhoto([
+          l.photo,
+          l.imageUrl,
+          l.image,
+          l.category,
+          l.lotId ? `lot:${l.lotId}` : null
+        ]);
 
         list.push({
           id: `log-${docNo}`,
@@ -530,7 +824,7 @@ export default function AllIssuedAndAddedReport({
           supplier: '—',
           location: 'Store',
           remarks: l.isReissue ? 'Re-Issue' : '',
-          photo: null,
+          photo: fallbackPhoto,
           raw: l
         });
       }
@@ -541,9 +835,18 @@ export default function AllIssuedAndAddedReport({
       const docNo = w.barcodeId || w.invoiceNo || `ADD-${w.id}`;
       const dObj = parseToDateObject(w.capturedAt || w.createdAt || w.created_at);
 
-      const photo = w.imageUrl || w.materialPhoto ||
-                    materialPhotoMap[String(w.materialCode || w.itemCode || w.barcodeId || '').toLowerCase()] ||
-                    materialPhotoMap[String(w.materialName || '').toLowerCase()] || null;
+      const photo = resolveRecordPhoto([
+        w.imageUrl,
+        w.materialPhoto,
+        w.photo,
+        w.image,
+        w.materialCode,
+        w.itemCode,
+        w.barcodeId,
+        w.stCode,
+        w.materialName,
+        w.category
+      ]);
 
       list.push({
         id: `wt-${w.id || docNo}`,
@@ -642,6 +945,8 @@ export default function AllIssuedAndAddedReport({
       result = result.filter(r => r.type === 'elastic_issue');
     } else if (movementFilter === 'tape_issue') {
       result = result.filter(r => r.type === 'tape_issue');
+    } else if (movementFilter === 'other_issue') {
+      result = result.filter(r => r.type === 'other_issue');
     } else if (movementFilter === 'extra_pic_issue') {
       result = result.filter(r => r.type === 'extra_pic_issue');
     } else if (movementFilter === 'general_issue') {
@@ -690,6 +995,8 @@ export default function AllIssuedAndAddedReport({
     let elasticMeters = 0;
     let tapeCount = 0;
     let tapeMeters = 0;
+    let otherCount = 0;
+    let otherQty = 0;
     let extraPicCount = 0;
     let extraPicQty = 0;
     let generalIssueCount = 0;
@@ -710,6 +1017,9 @@ export default function AllIssuedAndAddedReport({
         } else if (r.type === 'tape_issue') {
           tapeCount += 1;
           tapeMeters += Number(r.extraDetails?.meters || r.qty || 0);
+        } else if (r.type === 'other_issue') {
+          otherCount += 1;
+          otherQty += Number(r.extraDetails?.rolls || r.extraDetails?.qty || r.qty || 0);
         } else if (r.type === 'extra_pic_issue') {
           extraPicCount += 1;
           extraPicQty += Number(r.extraDetails?.extraQty || r.qty || 0);
@@ -731,6 +1041,8 @@ export default function AllIssuedAndAddedReport({
       elasticMeters: Math.round(elasticMeters),
       tapeCount,
       tapeMeters: Math.round(tapeMeters),
+      otherCount,
+      otherQty: Math.round(otherQty),
       extraPicCount,
       extraPicQty: Math.round(extraPicQty),
       generalIssueCount
@@ -752,6 +1064,7 @@ export default function AllIssuedAndAddedReport({
           boneCount: 0,
           elasticCount: 0,
           tapeCount: 0,
+          otherCount: 0,
           extraPicCount: 0
         };
       }
@@ -763,6 +1076,7 @@ export default function AllIssuedAndAddedReport({
         if (rec.type === 'bone_issue') groups[key].boneCount += 1;
         if (rec.type === 'elastic_issue') groups[key].elasticCount += 1;
         if (rec.type === 'tape_issue') groups[key].tapeCount += 1;
+        if (rec.type === 'other_issue') groups[key].otherCount += 1;
         if (rec.type === 'extra_pic_issue') groups[key].extraPicCount += 1;
       }
     });
@@ -1137,7 +1451,14 @@ export default function AllIssuedAndAddedReport({
         <td style="white-space: nowrap;"><strong>${r.displayDate}</strong><br/><small style="color: #333;">${r.displayTime || ''}</small></td>
         <td><span class="badge">${r.typeLabel}</span></td>
         <td style="font-weight: bold; white-space: nowrap;">${r.docNo}</td>
-        <td><strong>${r.materialName}</strong><br/><small>Code: ${r.itemCode} | ${r.category}</small></td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${r.photo ? `<img src="${getCleanImageUrl(r.photo)}" style="width: 26px; height: 26px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; flex-shrink: 0;" onerror="this.style.display='none'" />` : ''}
+            <div>
+              <strong>${r.materialName}</strong><br/><small>Code: ${r.itemCode} | ${r.category}</small>
+            </div>
+          </div>
+        </td>
         <td style="white-space: nowrap;">${r.lotNo && r.lotNo !== 'N/A' ? `<strong>Lot ${r.lotNo}</strong>` : '—'}${r.poNo && r.poNo !== '—' ? `<br/><small>PO: ${r.poNo}</small>` : ''}</td>
         <td style="text-align: center; font-weight: 800; white-space: nowrap;">${r.qty} ${r.unit}${r.extraDetails?.rolls > 1 ? `<br/><small>(${r.extraDetails.rolls} Rolls)</small>` : ''}</td>
         <td><strong>${formatPersonName(r.receiverName)}</strong><br/><small>${r.receiverDept}</small></td>
@@ -1415,6 +1736,13 @@ export default function AllIssuedAndAddedReport({
           border: '#5eead4',
           color: '#0f766e',
           glow: 'rgba(13, 148, 136, 0.15)'
+        };
+      case 'other_issue':
+        return {
+          bg: '#faf5ff',
+          border: '#d8b4fe',
+          color: '#7c3aed',
+          glow: 'rgba(124, 58, 237, 0.15)'
         };
       case 'extra_pic_issue':
         return {
@@ -1957,16 +2285,21 @@ export default function AllIssuedAndAddedReport({
         </div>
 
         {/* Metric 7: Extra Pic Issue */}
-        <div style={{
-          background: 'var(--bg-secondary, #ffffff)',
-          border: '1px solid #fda4af',
-          borderRadius: '14px',
-          padding: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          boxShadow: '0 2px 6px rgba(225, 29, 72, 0.08)'
-        }}>
+        <div 
+          onClick={() => setMovementFilter('extra_pic_issue')}
+          style={{
+            background: 'var(--bg-secondary, #ffffff)',
+            border: movementFilter === 'extra_pic_issue' ? '2px solid #e11d48' : '1px solid #fda4af',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            boxShadow: '0 2px 6px rgba(225, 29, 72, 0.08)',
+            cursor: 'pointer'
+          }}
+          title="Filter by Extra Pic Issue"
+        >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', fontWeight: '700', color: '#be123c', textTransform: 'uppercase' }}>➕ Extra Pic Issue</span>
             <span style={{ fontSize: '16px' }}>➕</span>
@@ -1976,6 +2309,34 @@ export default function AllIssuedAndAddedReport({
           </div>
           <span style={{ fontSize: '11px', color: '#9f1239' }}>
             {summaryKpis.extraPicQty.toLocaleString()} extra pcs
+          </span>
+        </div>
+
+        {/* Metric 8: Other Accessories Issue */}
+        <div 
+          onClick={() => setMovementFilter('other_issue')}
+          style={{
+            background: 'var(--bg-secondary, #ffffff)',
+            border: movementFilter === 'other_issue' ? '2px solid #7c3aed' : '1px solid #d8b4fe',
+            borderRadius: '14px',
+            padding: '16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            boxShadow: '0 2px 6px rgba(124, 58, 237, 0.08)',
+            cursor: 'pointer'
+          }}
+          title="Filter by Other Accessories Issue"
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: '#7c3aed', textTransform: 'uppercase' }}>📦 Other Accessories</span>
+            <span style={{ fontSize: '16px' }}>📦</span>
+          </div>
+          <div style={{ fontSize: '24px', fontWeight: '800', color: '#7c3aed' }}>
+            {summaryKpis.otherCount}
+          </div>
+          <span style={{ fontSize: '11px', color: '#6b21a8' }}>
+            {summaryKpis.otherQty.toLocaleString()} items / rolls issued
           </span>
         </div>
       </div>
@@ -1999,15 +2360,16 @@ export default function AllIssuedAndAddedReport({
             </span>
 
             {[
-              { id: 'all', label: 'All Transactions', icon: '⚡' },
+              { id: 'material_issue', label: 'Material Issue', icon: '⚡' },
+              { id: 'all', label: 'All Transactions', icon: '📋' },
               { id: 'add_material', label: 'Add Material (Inward)', icon: '📥' },
               { id: 'all_issues', label: 'All Issued Material', icon: '📤' },
               { id: 'return_material', label: 'Material Return', icon: '🔄' },
               { id: 'bone_issue', label: 'Bone Issue', icon: '🦴' },
               { id: 'elastic_issue', label: 'Elastic Issue', icon: '🧵' },
               { id: 'tape_issue', label: 'Tape Issue', icon: '📏' },
-              { id: 'extra_pic_issue', label: 'Extra Pic Issue', icon: '➕' },
-              { id: 'general_issue', label: 'General BOM Issue', icon: '📦' }
+              { id: 'other_issue', label: 'Other Accessories Issue', icon: '📦' },
+              { id: 'extra_pic_issue', label: 'Extra Pic Issue', icon: '➕' }
             ].map(tab => {
               const active = movementFilter === tab.id;
               return (
@@ -2038,60 +2400,64 @@ export default function AllIssuedAndAddedReport({
           </div>
 
           {/* View Mode Toggle: Table Register vs Daily Wise Grouped Accordion */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            background: 'var(--bg-primary, #f1f5f9)',
-            padding: '3px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color, #e2e8f0)'
-          }}>
-            <button
-              onClick={() => setViewLayout('table')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                border: 'none',
-                background: viewLayout === 'table' ? 'var(--bg-secondary, #ffffff)' : 'transparent',
-                color: viewLayout === 'table' ? '#2563eb' : '#64748b',
-                fontWeight: viewLayout === 'table' ? '700' : '600',
-                fontSize: '12px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                boxShadow: viewLayout === 'table' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-              }}
-            >
-              <LayoutGrid size={14} />
-              <span>Table View</span>
-            </button>
+          {movementFilter !== 'material_issue' && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: 'var(--bg-primary, #f1f5f9)',
+              padding: '3px',
+              borderRadius: '10px',
+              border: '1px solid var(--border-color, #e2e8f0)'
+            }}>
+              <button
+                onClick={() => setViewLayout('table')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: viewLayout === 'table' ? 'var(--bg-secondary, #ffffff)' : 'transparent',
+                  color: viewLayout === 'table' ? '#2563eb' : '#64748b',
+                  fontWeight: viewLayout === 'table' ? '700' : '600',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  boxShadow: viewLayout === 'table' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                }}
+              >
+                <LayoutGrid size={14} />
+                <span>Table View</span>
+              </button>
 
-            <button
-              onClick={() => setViewLayout('daily_grouped')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '8px',
-                border: 'none',
-                background: viewLayout === 'daily_grouped' ? 'var(--bg-secondary, #ffffff)' : 'transparent',
-                color: viewLayout === 'daily_grouped' ? '#2563eb' : '#64748b',
-                fontWeight: viewLayout === 'daily_grouped' ? '700' : '600',
-                fontSize: '12px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                boxShadow: viewLayout === 'daily_grouped' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-              }}
-            >
-              <CalendarDays size={14} />
-              <span>Daily Wise Breakdown ({dailyGroups.length} Days)</span>
-            </button>
-          </div>
+              <button
+                onClick={() => setViewLayout('daily_grouped')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: 'none',
+                  background: viewLayout === 'daily_grouped' ? 'var(--bg-secondary, #ffffff)' : 'transparent',
+                  color: viewLayout === 'daily_grouped' ? '#2563eb' : '#64748b',
+                  fontWeight: viewLayout === 'daily_grouped' ? '700' : '600',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  boxShadow: viewLayout === 'daily_grouped' ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+                }}
+              >
+                <CalendarDays size={14} />
+                <span>Daily Wise Breakdown ({dailyGroups.length} Days)</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ROW 2: DAILY WISE & DATE WISE FILTERS */}
-        <div style={{
+        {movementFilter !== 'material_issue' && (
+          <>
+          <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -2419,11 +2785,35 @@ export default function AllIssuedAndAddedReport({
             </select>
           </div>
         </div>
+        </>
+      )}
       </div>
 
-      {/* ── REPORT CONTENT (TABLE OR DAILY ACCORDION VIEW) ─────────────────────── */}
+      {/* ── REPORT CONTENT (TABLE OR DAILY ACCORDION VIEW OR MATERIAL ISSUE CHALLAN REGISTER) ── */}
 
-      {isLoading ? (
+      {movementFilter === 'material_issue' ? (
+        <div style={{ marginTop: '4px' }}>
+          <WithoutBomMaterialIssueView
+            materials={effectiveMaterials}
+            designs={effectiveDesigns}
+            issueLogs={effectiveIssueLogs}
+            currencySymbol={currencySymbol}
+            currentUser={currentUser}
+            initialTab="history"
+            isMovementReport={true}
+            onSwitchToWithBom={() => {
+              if (typeof onNavigateToLot === 'function') {
+                onNavigateToLot('');
+              }
+            }}
+            onRedirectToTab={(tab, lot) => {
+              if (typeof onNavigateToLot === 'function' && lot) {
+                onNavigateToLot(lot);
+              }
+            }}
+          />
+        </div>
+      ) : isLoading ? (
         <div style={{
           background: 'var(--bg-secondary, #ffffff)',
           border: '1px solid var(--border-color, #e2e8f0)',
@@ -2618,6 +3008,19 @@ export default function AllIssuedAndAddedReport({
                         borderRadius: '6px'
                       }}>
                         📏 {group.tapeCount} Tape
+                      </span>
+                    )}
+                    {group.otherCount > 0 && (
+                      <span style={{
+                        background: '#faf5ff',
+                        border: '1px solid #d8b4fe',
+                        color: '#7c3aed',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        padding: '3px 8px',
+                        borderRadius: '6px'
+                      }}>
+                        📦 {group.otherCount} Other
                       </span>
                     )}
                     {group.extraPicCount > 0 && (
