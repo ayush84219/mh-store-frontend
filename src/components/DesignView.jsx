@@ -1,5 +1,5 @@
 import { getBackendUrl } from '../utils/api';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Layers3, PlusCircle, Trash2, Tag, Search, Database, Printer, Scissors, Image as ImageIcon, ImageOff, ExternalLink, X, Edit3, Zap, CheckCircle, AlertTriangle, ChevronDown, Maximize2 } from 'lucide-react';
 
@@ -774,8 +774,25 @@ export default function DesignView({
     const targetLot = prefilledLotNo || lotFromUrl;
 
     if (targetLot) {
+      const cleanTarget = String(targetLot).trim().toLowerCase();
+      const existing = (designs || []).find(d =>
+        String(d.id || '').trim().toLowerCase() === cleanTarget ||
+        (d.lotNo2 && d.lotNo2 !== 'N/A' && String(d.lotNo2).trim().toLowerCase() === cleanTarget)
+      );
+
+      if (existing && String(existing.status).trim().toLowerCase() === 'approved') {
+        setSelectedDesignId(existing.id);
+        setIsCreating(false);
+        setFetchMessage({
+          type: 'error',
+          text: `Already Created: BOM for Lot #${existing.id} is already Approved! It cannot be created again.`
+        });
+        if (setPrefilledLotNo) setPrefilledLotNo('');
+        return;
+      }
+
       setIsCreating(true);
-      setEditingDesignId(null);
+      setEditingDesignId(existing ? existing.id : null);
       setLotNo(targetLot);
       // Small timeout to allow state to initialize
       const timer = setTimeout(() => {
@@ -784,7 +801,7 @@ export default function DesignView({
       if (setPrefilledLotNo) setPrefilledLotNo('');
       return () => clearTimeout(timer);
     }
-  }, [prefilledLotNo]);
+  }, [prefilledLotNo, designs]);
 
 
   useEffect(() => {
@@ -904,6 +921,24 @@ export default function DesignView({
   const [season, setSeason] = useState('Summer');
   const [imageUrl, setImageUrl] = useState('');
 
+  // Check if current entered lot already has a BOM created & its approval status
+  const existingDesignForLot = useMemo(() => {
+    const rawLot = (lotNo || editingDesignId || '').trim().toLowerCase();
+    if (!rawLot) return null;
+    return (designs || []).find(d => {
+      const idMatch = String(d.id || '').trim().toLowerCase() === rawLot;
+      const lot2Match = d.lotNo2 && d.lotNo2 !== 'N/A' && String(d.lotNo2).trim().toLowerCase() === rawLot;
+      return idMatch || lot2Match;
+    });
+  }, [lotNo, editingDesignId, designs]);
+
+  const isBomAlreadyApproved = Boolean(
+    existingDesignForLot && String(existingDesignForLot.status).trim().toLowerCase() === 'approved'
+  );
+  const isBomExistingNotApproved = Boolean(
+    existingDesignForLot && String(existingDesignForLot.status).trim().toLowerCase() !== 'approved'
+  );
+
   // Accessories states
   const [tapeLace, setTapeLace] = useState('No');
   const [bottomType, setBottomType] = useState('N/A');
@@ -988,6 +1023,11 @@ export default function DesignView({
   };
 
   const handleEditDraft = (design) => {
+    if (!design) return;
+    if (String(design.status).trim().toLowerCase() === 'approved') {
+      alert(`Already Created: BOM is already Approved for Lot #${design.id}. It cannot be modified.`);
+      return;
+    }
     setEditingDesignId(design.id);
     setCategory(design.category);
     setDesigner(design.designer || 'Admin');
@@ -1228,10 +1268,30 @@ export default function DesignView({
         setLotNo(data.lotNo || targetLot);
       }
 
-      setFetchMessage({
-        type: 'success',
-        text: `Specs for Lot #${data.lotNo} loaded successfully! (${data.brand} — ${data.garmentType})`
-      });
+      // Check if BOM already exists and its approval status
+      const matchedLot = data.lotNo || targetLot;
+      const cleanTarget = String(matchedLot).trim().toLowerCase();
+      const existing = (designs || []).find(d =>
+        String(d.id || '').trim().toLowerCase() === cleanTarget ||
+        (d.lotNo2 && d.lotNo2 !== 'N/A' && String(d.lotNo2).trim().toLowerCase() === cleanTarget)
+      );
+
+      if (existing && String(existing.status).trim().toLowerCase() === 'approved') {
+        setFetchMessage({
+          type: 'error',
+          text: `Already Created: BOM for Lot #${matchedLot} is already Approved! It cannot be created again.`
+        });
+      } else if (existing) {
+        setFetchMessage({
+          type: 'warning',
+          text: `Specs loaded for Lot #${matchedLot}. Note: BOM exists with status "${existing.status}" (Not Approved). You can edit and update it.`
+        });
+      } else {
+        setFetchMessage({
+          type: 'success',
+          text: `Specs for Lot #${data.lotNo || targetLot} loaded successfully! (${data.brand || 'Brand'} — ${data.garmentType || 'Garment'})`
+        });
+      }
 
     } catch (err) {
       console.error(err);
@@ -1252,6 +1312,18 @@ export default function DesignView({
     // Auto-increment Lot Number (Design ID) starting at 11000 — Lot No IS the name
     const nextId = getNextLotNo();
     const finalId = (lotNo.trim() || editingDesignId || String(nextId)).trim();
+
+    // STRICT VALIDATION: If BOM is already created and approved, block submission
+    const cleanFinalId = finalId.toLowerCase();
+    const existing = (designs || []).find(d =>
+      String(d.id || '').trim().toLowerCase() === cleanFinalId ||
+      (d.lotNo2 && d.lotNo2 !== 'N/A' && String(d.lotNo2).trim().toLowerCase() === cleanFinalId)
+    );
+
+    if (existing && String(existing.status).trim().toLowerCase() === 'approved') {
+      alert(`Already Created: BOM is already Approved for Lot #${finalId}. It cannot be created or modified again.`);
+      return;
+    }
 
     const getBOMAccessoryStatus = (name) => {
       const item = bomItems.find(b => b.name.toLowerCase() === name.toLowerCase());
@@ -1410,6 +1482,86 @@ export default function DesignView({
               </div>
             </div>
           </div>
+
+          {/* Already Approved Alert Banner: Shows "Already Created" and blocks recreation */}
+          {isBomAlreadyApproved && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              backgroundColor: '#fef2f2',
+              border: '2px solid #ef4444',
+              borderRadius: 'var(--border-radius-md)',
+              padding: '14px 18px',
+              marginBottom: '20px',
+              boxShadow: '0 2px 8px rgba(239, 68, 68, 0.12)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <AlertTriangle size={24} color="#dc2626" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: '800', fontSize: '14.5px', color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>Already Created: BOM is Approved!</span>
+                    <span className="status-badge approved" style={{ fontSize: '11px', padding: '1px 8px' }}>Approved</span>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: '#7f1d1d', marginTop: '2px' }}>
+                    Bill of Materials (BOM) has already been created and Approved for Lot #{existingDesignForLot?.id}. It cannot be created again.
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  handleCancelCreating();
+                  if (existingDesignForLot?.id) setSelectedDesignId(existingDesignForLot.id);
+                }}
+                style={{ whiteSpace: 'nowrap', borderColor: '#dc2626', color: '#dc2626', backgroundColor: '#fff', fontWeight: '700' }}
+              >
+                View Approved BOM
+              </button>
+            </div>
+          )}
+
+          {/* Existing BOM (Not Approved) Info Banner: "if bom is not approved do it" */}
+          {!isBomAlreadyApproved && isBomExistingNotApproved && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              backgroundColor: '#fffbeb',
+              border: '1.5px solid #f59e0b',
+              borderRadius: 'var(--border-radius-md)',
+              padding: '12px 18px',
+              marginBottom: '20px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <AlertTriangle size={20} color="#d97706" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: '700', fontSize: '13.5px', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>Existing BOM Found ({existingDesignForLot?.status})</span>
+                    <span className="status-badge" style={{ fontSize: '10.5px', padding: '1px 6px', backgroundColor: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>
+                      Not Approved
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#78350f', marginTop: '2px' }}>
+                    BOM for Lot #{existingDesignForLot?.id} is currently <strong>{existingDesignForLot?.status}</strong> (not approved). You can edit, modify, and update this BOM.
+                  </div>
+                </div>
+              </div>
+              {!editingDesignId && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => handleEditDraft(existingDesignForLot)}
+                  style={{ whiteSpace: 'nowrap', borderColor: '#d97706', color: '#b45309', backgroundColor: '#fff', fontWeight: '600' }}
+                >
+                  Load Existing Specs
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Fetch feedback messages */}
           {fetchMessage.text && (
@@ -2072,8 +2224,35 @@ export default function DesignView({
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
               <button type="button" className="btn btn-secondary" onClick={handleCancelCreating}>Cancel</button>
-              <button type="submit" className="btn btn-secondary" style={{ borderColor: 'var(--accent-color)', color: 'var(--accent-color)' }} onClick={() => setSubmitStatus('Draft')}>Draft Design</button>
-              <button type="submit" className="btn btn-primary" onClick={() => setSubmitStatus('In Verification')}>Confirm Design</button>
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                style={{
+                  borderColor: 'var(--accent-color)',
+                  color: 'var(--accent-color)',
+                  opacity: isBomAlreadyApproved ? 0.45 : 1,
+                  cursor: isBomAlreadyApproved ? 'not-allowed' : 'pointer'
+                }}
+                onClick={() => setSubmitStatus('Draft')}
+                disabled={isBomAlreadyApproved}
+                title={isBomAlreadyApproved ? "BOM is already approved. Modifications blocked." : "Save as Draft"}
+              >
+                Draft Design
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                onClick={() => setSubmitStatus('In Verification')}
+                disabled={isBomAlreadyApproved}
+                style={{
+                  opacity: isBomAlreadyApproved ? 0.45 : 1,
+                  backgroundColor: isBomAlreadyApproved ? '#6b7280' : undefined,
+                  cursor: isBomAlreadyApproved ? 'not-allowed' : 'pointer'
+                }}
+                title={isBomAlreadyApproved ? "BOM has already been approved for this Lot. Cannot create again." : (editingDesignId ? "Update Design BOM" : "Confirm Design")}
+              >
+                {isBomAlreadyApproved ? 'Already Created (Approved)' : (editingDesignId ? 'Update Design' : 'Confirm Design')}
+              </button>
             </div>
           </form>
         </div>
@@ -2280,32 +2459,56 @@ export default function DesignView({
                     gap: '12px',
                     flexWrap: 'wrap'
                   }}>
-                    {/* Edit Design Option in identical stacked 2-line style */}
-                    <button
-                      type="button"
-                      className="fashion-print-btn fashion-edit-btn print-hide"
-                      onClick={() => handleEditDraft(selectedDesign)}
-                      title="Edit Design Specification"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '6px 14px',
-                        borderRadius: '10px',
-                        border: '1.5px solid var(--accent-color, #0284c7)',
-                        backgroundColor: 'var(--accent-light, #e0f2fe)',
-                        color: 'var(--accent-color, #0284c7)',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                        boxShadow: '0 1px 3px rgba(2, 132, 199, 0.1)'
-                      }}
-                    >
-                      <Edit3 size={16} strokeWidth={2.2} color="var(--accent-color, #0284c7)" />
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
-                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Edit</span>
-                        <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Design</span>
+                    {/* Edit Design Option - restricted if already approved */}
+                    {selectedDesign?.status === 'Approved' ? (
+                      <div
+                        className="print-hide"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '6px 14px',
+                          borderRadius: '10px',
+                          border: '1.5px solid #10b981',
+                          backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                          color: '#059669',
+                          cursor: 'not-allowed'
+                        }}
+                        title="Already Created: This BOM is already Approved and locked. It cannot be created or modified again."
+                      >
+                        <CheckCircle size={16} strokeWidth={2.2} color="#059669" />
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
+                          <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: '#059669' }}>Already</span>
+                          <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: '#059669' }}>Approved</span>
+                        </div>
                       </div>
-                    </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="fashion-print-btn fashion-edit-btn print-hide"
+                        onClick={() => handleEditDraft(selectedDesign)}
+                        title="Edit Design Specification (Not Approved)"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '6px 14px',
+                          borderRadius: '10px',
+                          border: '1.5px solid var(--accent-color, #0284c7)',
+                          backgroundColor: 'var(--accent-light, #e0f2fe)',
+                          color: 'var(--accent-color, #0284c7)',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                          boxShadow: '0 1px 3px rgba(2, 132, 199, 0.1)'
+                        }}
+                      >
+                        <Edit3 size={16} strokeWidth={2.2} color="var(--accent-color, #0284c7)" />
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
+                          <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Edit</span>
+                          <span style={{ fontSize: '13px', fontWeight: '800', letterSpacing: '0.01em', color: 'var(--accent-color, #0284c7)' }}>Design</span>
+                        </div>
+                      </button>
+                    )}
 
                     {/* Exact Print PDF Button with stacked Print / PDF text */}
                     <button

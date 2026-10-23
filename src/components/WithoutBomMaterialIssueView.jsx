@@ -39,11 +39,66 @@ import {
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-// Helper to get official Item Code (suppressing any internal MT code)
-export const getItemCodeDisplay = (m) => {
+// Helper to get official Item Code (guarantees Item Code ST... is used, never MT or ITM- placeholder)
+export const getItemCodeDisplay = (m, materialsList = []) => {
   if (!m) return '';
-  const code = String(m.itemCode || m.stCode || m.item_code || m.materialCode || '').trim();
-  if (!code || code.toUpperCase().startsWith('MT')) return '';
+
+  let code = '';
+  const list = (Array.isArray(materialsList) && materialsList.length > 0)
+    ? materialsList
+    : (typeof window !== 'undefined' && window.__gpdms_materials ? window.__gpdms_materials : []);
+
+  if (typeof m === 'string') {
+    const raw = m.trim();
+    if (!raw || raw.toUpperCase().startsWith('ITM-')) return '';
+    const match = list.find(x =>
+      String(x.id).toLowerCase() === raw.toLowerCase() ||
+      String(x.itemCode || '').toLowerCase() === raw.toLowerCase() ||
+      String(x.stCode || '').toLowerCase() === raw.toLowerCase() ||
+      String(x.name || '').trim().toLowerCase() === raw.toLowerCase()
+    );
+    if (match && (match.itemCode || match.stCode)) {
+      code = String(match.itemCode || match.stCode).trim();
+    } else {
+      code = raw;
+    }
+  } else if (typeof m === 'object') {
+    code = String(m.itemCode || m.stCode || m.item_code || m.materialCode || '').trim();
+    if (code.toUpperCase().startsWith('ITM-')) code = '';
+
+    // If not found directly, check if m.id or m.materialId is an ST/MT code
+    const matId = String(m.materialId || m.id || '').trim();
+    if (!code && matId && !matId.toUpperCase().startsWith('ITM-')) {
+      if (matId.toUpperCase().startsWith('ST') || matId.toUpperCase().startsWith('MT')) {
+        code = matId;
+      }
+    }
+
+    // Look up in materials list by ID or by Name
+    if (!code && list.length > 0) {
+      const targetId = String(m.materialId || m.id || '').trim().toLowerCase();
+      const targetName = String(m.name || m.materialName || '').trim().toLowerCase();
+      const match = list.find(x =>
+        (targetId && (String(x.id).toLowerCase() === targetId || String(x.itemCode || '').toLowerCase() === targetId || String(x.stCode || '').toLowerCase() === targetId)) ||
+        (targetName && String(x.name || '').trim().toLowerCase() === targetName)
+      );
+      if (match && (match.itemCode || match.stCode || match.id)) {
+        code = String(match.itemCode || match.stCode || match.id).trim();
+      }
+    }
+  }
+
+  if (!code || code.toUpperCase().startsWith('ITM-')) return '';
+
+  // Clean out any MT prefix: MT1222 -> ST1222, MT0014 -> ST0014
+  if (code.toUpperCase().startsWith('MT')) {
+    code = 'ST' + code.substring(2);
+  } else if (/^M\d+/i.test(code)) {
+    code = 'ST' + code.replace(/^\D+/g, '').padStart(5, '0');
+  } else if (/^\d+$/.test(code) && code.length <= 5) {
+    code = 'ST' + code.padStart(5, '0');
+  }
+
   return code;
 };
 
@@ -1021,6 +1076,12 @@ export default function WithoutBomMaterialIssueView({
   const [activeTab, setActiveTab] = useState(initialTab || 'issue');
 
   useEffect(() => {
+    if (Array.isArray(materials) && materials.length > 0 && typeof window !== 'undefined') {
+      window.__gpdms_materials = materials;
+    }
+  }, [materials]);
+
+  useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
     }
@@ -1304,14 +1365,20 @@ export default function WithoutBomMaterialIssueView({
   useEffect(() => {
     if (defaultAutoIssueQty > 1) {
       setItems(prev => prev.map(item => {
-        // If row is at initial default value (1) or 0, update to defaultAutoIssueQty
+        // If row is at initial default value (1) or 0, update to defaultAutoIssueQty (capped by rack stock if mapped)
         if (!item.totalQty || Number(item.totalQty) === 1) {
+          const liveMat = (materials || []).find(m => String(m.id) === String(item.materialId));
+          const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(item.availableStock) || 0);
+          if (item.materialId && item.entryMode !== 'manual') {
+            const cappedQty = rackStock > 0 ? Math.min(defaultAutoIssueQty, rackStock) : (rackStock === 0 ? 0 : 1);
+            return { ...item, totalQty: cappedQty };
+          }
           return { ...item, totalQty: defaultAutoIssueQty };
         }
         return item;
       }));
     }
-  }, [defaultAutoIssueQty]);
+  }, [defaultAutoIssueQty, materials]);
 
   // 1% Threshold Exceeded Approval Modal State
   const [approvalModalData, setApprovalModalData] = useState(null);
@@ -1350,6 +1417,18 @@ export default function WithoutBomMaterialIssueView({
   const [submitting, setSubmitting] = useState(false);
   const [previewModal, setPreviewModal] = useState(null); // { doc, pdfUrl, voucherId, issueData, isPreviewOnly }
   const [activePrintData, setActivePrintData] = useState(null);
+
+  // Compute stock shortages across all currently chosen items
+  const shortageItemsList = useMemo(() => {
+    return items.filter(i => {
+      if (!i.materialId || i.entryMode === 'manual') return false;
+      const liveMat = (materials || []).find(m => String(m.id) === String(i.materialId));
+      const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(i.availableStock) || 0);
+      return Number(i.totalQty) > rackStock;
+    });
+  }, [items, materials]);
+
+  const hasShortageItems = shortageItemsList.length > 0;
 
   // Helper to extract clean photo URL for any material in logs or materials prop
   const getMaterialPhoto = (m) => {
@@ -1935,7 +2014,7 @@ export default function WithoutBomMaterialIssueView({
         location: mat ? (mat.location || mat.warehouseLocation || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
         calcMode: 'direct',
         perPcReq: 0,
-        totalQty: defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1
+        totalQty: mat ? ((Number(mat.stock) || 0) > 0 ? (defaultAutoIssueQty > 0 ? Math.min(defaultAutoIssueQty, Number(mat.stock)) : 1) : 0) : (defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1)
       }
     ]);
   };
@@ -2002,15 +2081,21 @@ export default function WithoutBomMaterialIssueView({
           location: ''
         };
       }
+      const rackStock = Number(mat.stock) || 0;
+      const safeInitialQty = (defaultAutoIssueQty > 0 && rackStock > 0)
+        ? Math.min(defaultAutoIssueQty, rackStock)
+        : (rackStock > 0 ? 1 : 0);
+
       return {
         ...item,
         materialId: mat.id,
         materialName: mat.name,
-        itemCode: getItemCodeDisplay(mat),
+        itemCode: getItemCodeDisplay(mat, materials),
         imageUrl: mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '',
         color: mat.color || mat.shade || '',
         unit: mat.unit || 'Pcs',
-        availableStock: Number(mat.stock) || 0,
+        availableStock: rackStock,
+        totalQty: safeInitialQty,
         location: mat.location || mat.warehouseLocation || 'Main Store',
         componentType: item.componentType || 'DORI'
       };
@@ -2057,7 +2142,7 @@ export default function WithoutBomMaterialIssueView({
             location: matched.location || 'Main Store',
             calcMode: 'direct',
             perPcReq: 0,
-            totalQty: defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1
+            totalQty: Number(matched.stock) > 0 ? (defaultAutoIssueQty > 0 ? Math.min(defaultAutoIssueQty, Number(matched.stock)) : 1) : 0
           }
         ]);
       }
@@ -2182,7 +2267,7 @@ export default function WithoutBomMaterialIssueView({
 
     // Materials Table
     const tableRows = (issueData.items || []).map((item, idx) => {
-      const c = getItemCodeDisplay(item);
+      const c = getItemCodeDisplay(item, materials) || (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '');
       const desc = c ? `[${c}] ${item.materialName || 'Material Item'}` : (item.materialName || 'Material Item');
       return [
         idx + 1,
@@ -2345,13 +2430,26 @@ export default function WithoutBomMaterialIssueView({
     const effectiveLot = lotNo.trim();
     const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
 
-    // Check shortage warnings
-    const shortageItems = validItems.filter(i => i.materialId && i.availableStock < i.totalQty);
+    // Strict stock verification against store rack inventory - STRICT BLOCKING
+    const shortageItems = validItems.filter(i => {
+      if (!i.materialId || i.entryMode === 'manual') return false;
+      const liveMat = (materials || []).find(m => String(m.id) === String(i.materialId));
+      const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(i.availableStock) || 0);
+      return Number(i.totalQty) > rackStock;
+    });
+
     if (shortageItems.length > 0) {
-      const confirmShortage = window.confirm(
-        `Warning: ${shortageItems.length} item(s) exceed available stock (${shortageItems.map(s => `${s.materialName}: Needs ${s.totalQty}, Has ${s.availableStock}`).join('; ')}).\n\nDo you want to proceed with issuing anyway?`
-      );
-      if (!confirmShortage) return;
+      const errorDetails = shortageItems.map(s => {
+        const liveMat = (materials || []).find(m => String(m.id) === String(s.materialId));
+        const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(s.availableStock) || 0);
+        return `• "${s.materialName}" [${s.itemCode || 'ST'}] (Rack: ${s.location || 'Store'}): Available in Rack = ${rackStock} ${s.unit}, Attempted Issue = ${s.totalQty} ${s.unit}`;
+      }).join('\n');
+
+      const msg = `⛔ CANNOT ISSUE — INSUFFICIENT STORE RACK STOCK!\n\nStore rack me utna stock available nahi hai:\n${errorDetails}\n\nNegative stock issue karna strictly blocked hai. Please issue quantity ko rack stock ke barabar ya kam karein.`;
+      setFormError(msg);
+      playFeedbackSound('error');
+      alert(msg);
+      return;
     }
 
     setSubmitting(true);
@@ -2369,7 +2467,7 @@ export default function WithoutBomMaterialIssueView({
           bomItemName: effectiveType,
           totalRequired: Number(i.totalQty),
           unit: i.unit || 'Pcs',
-          itemCode: i.itemCode || (i.entryMode === 'manual' ? 'MANUAL' : ''),
+          itemCode: getItemCodeDisplay(i, materials) || (i.itemCode && !i.itemCode.toUpperCase().startsWith('ITM-') ? i.itemCode : '') || (i.entryMode === 'manual' ? 'MANUAL' : ''),
           color: i.color || '',
           availableStock: i.availableStock || 0,
           location: i.location || (i.entryMode === 'manual' ? 'Custom Entry' : '')
@@ -2418,7 +2516,8 @@ export default function WithoutBomMaterialIssueView({
           return {
             ...i,
             componentType: effectiveType,
-            materialName: effectiveName
+            materialName: effectiveName,
+            itemCode: getItemCodeDisplay(i, materials) || (i.itemCode && !i.itemCode.toUpperCase().startsWith('ITM-') ? i.itemCode : '') || (i.entryMode === 'manual' ? 'MANUAL' : '')
           };
         })
       };
@@ -2486,6 +2585,29 @@ export default function WithoutBomMaterialIssueView({
     if (validItems.length === 0) {
       setFormError('Please select at least one material item with an issue quantity greater than 0.');
       playFeedbackSound('error');
+      return;
+    }
+
+    // ── STRICT STORE RACK INVENTORY VERIFICATION ──
+    // If the rack does not have enough bundles, rolls, or pieces, strictly block the issue!
+    const stockShortageItems = validItems.filter(i => {
+      if (!i.materialId || i.entryMode === 'manual') return false;
+      const liveMat = (materials || []).find(m => String(m.id) === String(i.materialId));
+      const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(i.availableStock) || 0);
+      return Number(i.totalQty) > rackStock;
+    });
+
+    if (stockShortageItems.length > 0) {
+      const errorList = stockShortageItems.map(s => {
+        const liveMat = (materials || []).find(m => String(m.id) === String(s.materialId));
+        const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(s.availableStock) || 0);
+        return `• "${s.materialName}" [${s.itemCode || 'ST'}]: Store rack (${s.location || 'Rack'}) only has ${rackStock} ${s.unit}, but tried to issue ${s.totalQty} ${s.unit}`;
+      }).join('\n');
+
+      const msg = `⛔ CANNOT ISSUE — INSUFFICIENT STORE RACK STOCK!\n\nStore rack me utna stock available nahi hai:\n${errorList}\n\nPlease issue quantity ko rack stock (${stockShortageItems[0].availableStock || 0}) ke barabar ya kam karein.`;
+      setFormError(msg);
+      playFeedbackSound('error');
+      alert(msg);
       return;
     }
 
@@ -2670,16 +2792,22 @@ export default function WithoutBomMaterialIssueView({
       receiverName: log.receiverName || 'Cutting Master',
       receiverDept: log.receiverDept || 'Cutting',
       remarks: log.remarks || '',
-      items: (log.materials || []).map((m, idx) => ({
-        componentType: m.bomItemName || 'Accessory',
-        materialName: m.name || 'Material Item',
-        itemCode: getItemCodeDisplay(m) || `ITM-${idx + 1}`,
-        color: m.color || 'Standard',
-        location: getMaterialLocation(m) || m.location || 'Main Store',
-        availableStock: m.qty || 0,
-        totalQty: m.qty || 1,
-        unit: m.unit || 'Pcs'
-      }))
+      items: (log.materials || []).map((m, idx) => {
+        const itemCodeResolved = getItemCodeDisplay(m, materials) ||
+          (m.itemCode && !m.itemCode.toUpperCase().startsWith('ITM-') ? m.itemCode : '') ||
+          (m.materialId && String(m.materialId).toUpperCase().startsWith('ST') ? String(m.materialId) : '') ||
+          (m.materialId && /^\d+$/.test(String(m.materialId)) ? `ST${String(m.materialId).padStart(5, '0')}` : '-');
+        return {
+          componentType: m.bomItemName || 'Accessory',
+          materialName: m.name || 'Material Item',
+          itemCode: itemCodeResolved,
+          color: m.color || 'Standard',
+          location: getMaterialLocation(m) || m.location || 'Main Store',
+          availableStock: m.qty || 0,
+          totalQty: m.qty || 1,
+          unit: m.unit || 'Pcs'
+        };
+      })
     };
   };
 
@@ -2757,7 +2885,9 @@ export default function WithoutBomMaterialIssueView({
           </thead>
           <tbody>
             ${items.map((item, idx) => {
-              const code = getItemCodeDisplay(item) || item.itemCode || '-';
+              const code = getItemCodeDisplay(item, materials) ||
+                (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '') ||
+                '-';
               const qty = Number(item.totalQty);
               const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
               return `
@@ -5378,18 +5508,18 @@ export default function WithoutBomMaterialIssueView({
                                   borderRadius: '6px',
                                   border: '1px solid #cbd5e1',
                                   textAlign: 'right',
-                                  fontSize: '12px',
-                                  boxSizing: 'border-box'
+                                  fontSize: '12px'
                                 }}
                               />
-                              <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '800' }}>
-                                = {item.totalQty} {item.unit}
-                              </span>
                             </div>
                           ) : (() => {
                             const qty = Number(item.totalQty) || 0;
-                            const isExceeded = cuttingPieces > 0 && qty > defaultAutoIssueQty;
-                            const isWithin = cuttingPieces > 0 && qty > 0 && qty <= defaultAutoIssueQty;
+                            const liveMat = (materials || []).find(m => String(m.id) === String(item.materialId));
+                            const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(item.availableStock) || 0);
+                            const hasMaterial = Boolean(item.materialId && item.entryMode !== 'manual');
+                            const isStockShortage = hasMaterial && qty > rackStock;
+                            const isExceeded = !isStockShortage && cuttingPieces > 0 && qty > defaultAutoIssueQty;
+                            const isWithin = !isStockShortage && cuttingPieces > 0 && qty > 0 && qty <= defaultAutoIssueQty;
 
                             return (
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
@@ -5397,22 +5527,68 @@ export default function WithoutBomMaterialIssueView({
                                   type="number"
                                   step="any"
                                   min="0.01"
+                                  max={hasMaterial ? rackStock : undefined}
                                   value={item.totalQty || ''}
                                   onChange={(e) => handleUpdateItem(item.id, 'totalQty', parseFloat(e.target.value) || 0)}
                                   style={{
                                     width: '100px',
                                     padding: '5px 8px',
                                     borderRadius: '6px',
-                                    border: isExceeded ? '2px solid #ef4444' : isWithin ? '1.5px solid #10b981' : '1.5px solid #cbd5e1',
-                                    background: isExceeded ? '#fef2f2' : isWithin ? '#f0fdf4' : '#ffffff',
+                                    border: isStockShortage
+                                      ? '2px solid #dc2626'
+                                      : isExceeded
+                                        ? '2px solid #ef4444'
+                                        : isWithin
+                                          ? '1.5px solid #10b981'
+                                          : '1.5px solid #cbd5e1',
+                                    background: isStockShortage
+                                      ? '#fef2f2'
+                                      : isExceeded
+                                        ? '#fef2f2'
+                                        : isWithin
+                                          ? '#f0fdf4'
+                                          : '#ffffff',
                                     textAlign: 'right',
                                     fontSize: '13px',
                                     fontWeight: '800',
-                                    color: isExceeded ? '#b91c1c' : '#0f172a',
+                                    color: isStockShortage || isExceeded ? '#b91c1c' : '#0f172a',
                                     boxSizing: 'border-box'
                                   }}
                                 />
-                                {isExceeded && (
+                                {isStockShortage && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                    <span style={{
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      color: '#991b1b',
+                                      background: '#fee2e2',
+                                      border: '1px solid #fca5a5',
+                                      padding: '2px 5px',
+                                      borderRadius: '4px',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      ⛔ Exceeds Rack Stock! (Rack: {rackStock} {item.unit})
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleUpdateItem(item.id, 'totalQty', rackStock)}
+                                      style={{
+                                        fontSize: '9.5px',
+                                        color: '#b91c1c',
+                                        background: '#ffffff',
+                                        border: '1px solid #f87171',
+                                        borderRadius: '4px',
+                                        cursor: 'pointer',
+                                        fontWeight: '800',
+                                        padding: '1px 5px'
+                                      }}
+                                      title="Set to max available rack stock"
+                                    >
+                                      Set to Rack Stock ({rackStock})
+                                    </button>
+                                  </div>
+                                )}
+                                {!isStockShortage && isExceeded && (
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
                                     <span style={{
                                       fontSize: '9.5px',
@@ -5444,7 +5620,7 @@ export default function WithoutBomMaterialIssueView({
                                     </button>
                                   </div>
                                 )}
-                                {isWithin && (
+                                {!isStockShortage && isWithin && (
                                   <span style={{ fontSize: '9.5px', color: '#059669', fontWeight: '700' }}>
                                     ✓ &le; 1% Allowed
                                   </span>
@@ -5686,26 +5862,35 @@ export default function WithoutBomMaterialIssueView({
               {/* Confirm & Issue Button */}
               <button
                 type="button"
-                disabled={submitting}
+                disabled={submitting || hasShortageItems}
                 onClick={handleSubmitIssue}
                 style={{
                   padding: '12px 28px',
                   borderRadius: '10px',
                   border: 'none',
-                  background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+                  background: hasShortageItems
+                    ? '#94a3b8'
+                    : 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
                   color: '#ffffff',
                   fontSize: '14px',
                   fontWeight: '800',
-                  cursor: submitting ? 'wait' : 'pointer',
+                  cursor: (submitting || hasShortageItems) ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
-                  boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
-                  transition: 'all 0.2s'
+                  boxShadow: hasShortageItems ? 'none' : '0 4px 14px rgba(234, 88, 12, 0.35)',
+                  transition: 'all 0.2s',
+                  opacity: hasShortageItems ? 0.75 : 1
                 }}
               >
                 <Zap size={18} />
-                <span>{submitting ? 'Issuing & Generating Challan...' : '⚡ Confirm Issue & Give Challan / Bill'}</span>
+                <span>
+                  {hasShortageItems
+                    ? '⛔ Stock Shortage in Rack (Cannot Issue)'
+                    : submitting
+                      ? 'Issuing & Generating Challan...'
+                      : '⚡ Confirm Issue & Give Challan / Bill'}
+                </span>
               </button>
 
               {/* Reset / Clear Form */}
@@ -7568,7 +7753,7 @@ export default function WithoutBomMaterialIssueView({
                         <td style={{ padding: '5px', border: '1px solid #000' }}><strong>{item.componentType}</strong></td>
                         <td style={{ padding: '5px', border: '1px solid #000' }}>{item.materialName}</td>
                         <td style={{ padding: '5px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {getItemCodeDisplay(item) || item.itemCode || '-'}
+                          {getItemCodeDisplay(item, materials) || (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '') || '-'}
                         </td>
                         <td style={{ padding: '5px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
                         <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>
@@ -7662,7 +7847,7 @@ export default function WithoutBomMaterialIssueView({
                         <td style={{ padding: '5px', border: '1px solid #000' }}><strong>{item.componentType}</strong></td>
                         <td style={{ padding: '5px', border: '1px solid #000' }}>{item.materialName}</td>
                         <td style={{ padding: '5px', border: '1px solid #000', fontFamily: 'monospace', fontWeight: 'bold' }}>
-                          {getItemCodeDisplay(item) || item.itemCode || '-'}
+                          {getItemCodeDisplay(item, materials) || (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '') || '-'}
                         </td>
                         <td style={{ padding: '5px', border: '1px solid #000' }}>{item.location || 'Store'}</td>
                         <td style={{ padding: '5px', textAlign: 'right', fontWeight: 'bold', border: '1px solid #000' }}>

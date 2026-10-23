@@ -6,7 +6,7 @@ import {
   Search, Scale, ArrowLeftRight, Settings, Users, ShieldAlert, Truck, Layers,
   Scissors, AlertCircle, AlertTriangle, ExternalLink, RefreshCw, BarChart3, Activity, 
   PackageCheck, RotateCcw, ArrowRightLeft, Gauge, Package,
-  QrCode, ShieldCheck, CheckCircle, Check, CheckSquare, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock, Sparkles, Filter
+  QrCode, ShieldCheck, CheckCircle, Check, CheckSquare, Copy, X, ChevronDown, ChevronUp, Boxes, FileSpreadsheet, Eye, ArrowUpRight, Clock, Sparkles, Filter, Calculator
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -2525,6 +2525,31 @@ export default function ReportsHistoryView({
         flexWrap: 'wrap',
         gap: '4px'
       }}>
+        <button
+          type="button"
+          onClick={() => {
+            if (onRedirectToTab) onRedirectToTab('lot_costing');
+          }}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            fontWeight: '800',
+            borderRadius: '6px',
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: '#4f46e5',
+            color: '#ffffff',
+            transition: 'all 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            boxShadow: '0 2px 8px rgba(79,70,229,0.35)'
+          }}
+          title="Open Admin Lot Material Costing & Valuation (Quantity * Rate = Total Cost)"
+        >
+          <Calculator size={14} />
+          <span>(★ NEW) Lot Material Costing</span>
+        </button>
         <button
           type="button"
           onClick={() => setActiveReportTab('all_issued_added_report')}

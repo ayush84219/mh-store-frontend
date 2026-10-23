@@ -245,7 +245,7 @@ export default function AuthView({ onLoginSuccess, sessionExpiredMessage }) {
               <strong style={{ display: 'block', color: '#fca5a5', fontSize: '13px', marginBottom: '2px' }}>
                 12-Hour Session Expired
               </strong>
-              <span>{expiredNotice}</span>
+              <span>{typeof expiredNotice === 'string' ? expiredNotice : (expiredNotice?.message || String(expiredNotice || ''))}</span>
             </div>
             <button
               type="button"

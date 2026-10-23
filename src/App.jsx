@@ -8,7 +8,7 @@ import {
   LogOut, X, ClipboardList, Shield, RotateCcw, ShieldCheck,
   History, Bell, QrCode, Truck, Download, ChevronDown, ChevronRight, ArrowLeftRight, Menu,
   PanelLeftClose, PanelLeftOpen, PanelLeft, Sparkles, Sliders, Boxes, PackageCheck, Scan, Barcode, Tag,
-  FileSpreadsheet
+  FileSpreadsheet, Calculator
 } from 'lucide-react';
 import './App.css';
 
@@ -37,6 +37,7 @@ const ScannerLogsView = lazy(() => import('./components/ScannerLogsView'));
 const FabricRgpForm = lazy(() => import('./components/rgp'));
 const RgpWithoutBom = lazy(() => import('./components/RgpWithoutBom'));
 const ReDownloadView = lazy(() => import('./components/ReDownloadView'));
+const CombinedTransactionsHubView = lazy(() => import('./components/CombinedTransactionsHubView'));
 const WeightCapture = lazy(() => import('./components/WeightCapture'));
 const ManuallyWeightCapture = lazy(() => import('./components/ManuallyWeightCapture'));
 const MaterialTransferView = lazy(() => import('./components/MaterialTransferView'));
@@ -49,6 +50,7 @@ const ElasticTapeIssueView = lazy(() => import('./components/ElasticTapeIssueVie
 const ChallanView = lazy(() => import('./components/ChallanView'));
 const WithoutBomMaterialIssueView = lazy(() => import('./components/WithoutBomMaterialIssueView'));
 const AllIssuedAndAddedReport = lazy(() => import('./components/AllIssuedAndAddedReport'));
+const LotCostingView = lazy(() => import('./components/LotCostingView'));
 import ErrorBoundary from './components/ErrorBoundary';
 import FastSearchModal from './components/FastSearchModal';
 import { clientDSA } from './utils/dsaSearchEngine';
@@ -98,10 +100,12 @@ const hasTabAccess = (tabName, role) => {
       'approval_queue',
       'po_verification',
       're_download',
+      'combine_hub',
       'only_cutting',
       'item_codes',
       'challan',
-      'movement_report'
+      'movement_report',
+      'lot_costing'
     ].includes(tabName);
   }
   if (panel === 'designer') {
@@ -128,6 +132,7 @@ const hasTabAccess = (tabName, role) => {
       'only_cutting',
       'material_details',
       're_download',
+      'combine_hub',
       'item_codes',
       'challan',
       'movement_report'
@@ -154,6 +159,7 @@ const hasTabAccess = (tabName, role) => {
       'rgp_without_bom',
       'generate_po',
       're_download',
+      'combine_hub',
       'bone_issue',
       'bone_po',
       'elastic_issue',
@@ -179,6 +185,7 @@ const TAB_ROUTES = {
   return_material: '/return-material',
   generate_po: '/generate-po',
   re_download: '/re-download',
+  combine_hub: '/combine-hub',
   zip_po: '/zip-po',
   dori_po: '/dori-po',
   bone_issue: '/bone-issue',
@@ -203,6 +210,7 @@ const TAB_ROUTES = {
   item_codes: '/item-codes',
   movement_report: '/movement-report',
   challan: '/challan',
+  lot_costing: '/lot-costing',
 };
 
 const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
@@ -233,7 +241,9 @@ const PATH_TO_TAB = Object.entries(TAB_ROUTES).reduce((acc, [tab, path]) => {
   '/all-issued-added': 'movement_report',
   '/movement-report': 'movement_report',
   '/challan': 'challan',
-  '/component-challan': 'challan'
+  '/component-challan': 'challan',
+  '/lot-costing': 'lot_costing',
+  '/costing': 'lot_costing'
 });
 
 export default function App() {
@@ -592,7 +602,8 @@ export default function App() {
       settings: 'Setting',
       approval_queue: currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests',
       item_codes: 'Item Code Generator',
-      challan: 'Component Issue Challan'
+      challan: 'Component Issue Challan',
+      combine_hub: 'Combine RGP, PO & Scans Hub'
     };
     const title = pageTitles[activeTab] || 'MH Store';
     document.title = `Garment PDMS - ${title}`;
@@ -1057,9 +1068,10 @@ export default function App() {
   }, []);
 
   const handleLogout = (reasonMsg = null) => {
-    clearAuthSession(reasonMsg);
-    if (reasonMsg) {
-      setSessionExpiredNotice(reasonMsg);
+    const cleanMsg = typeof reasonMsg === 'string' ? reasonMsg : '';
+    clearAuthSession(cleanMsg);
+    if (cleanMsg) {
+      setSessionExpiredNotice(cleanMsg);
     }
     setCurrentUser(null);
     setActiveTab('dashboard');
@@ -1175,6 +1187,17 @@ export default function App() {
 
   // State Updates
   const handleAddDesign = async (newDesign) => {
+    // Check if design already exists and is Approved
+    const currentDesign = designs.find(d => String(d.id).trim().toLowerCase() === String(newDesign.id).trim().toLowerCase());
+    if (currentDesign && String(currentDesign.status).trim().toLowerCase() === 'approved') {
+      setToast({
+        type: 'error',
+        title: 'Already Created',
+        message: `BOM for Lot #${newDesign.id} is already approved and cannot be created or modified again.`
+      });
+      return { success: false, error: 'Already created and approved' };
+    }
+
     const designWithTime = {
       ...newDesign,
       created_at: new Date().toISOString()
@@ -1202,13 +1225,22 @@ export default function App() {
       });
     });
     try {
-      await fetch(`${getBackendUrl()}/api/designs`, {
+      const res = await fetch(`${getBackendUrl()}/api/designs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...designWithTime, actorName: currentUser?.name || 'Designer' })
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to save design');
+      }
     } catch (err) {
       console.error('Failed to save design to SQLite:', err);
+      setToast({
+        type: 'error',
+        title: 'Design Save Error',
+        message: err.message || 'Failed to save design to server.'
+      });
     }
   };
 
@@ -2460,6 +2492,10 @@ export default function App() {
                   <Download size={18} />
                   <span className="sidebar-text">Re-Download (PO & RGP)</span>
                 </li>
+                <li className={`sidebar-item ${activeTab === 'combine_hub' ? 'active' : ''}`} onClick={() => handleTabClick('combine_hub')} title="Combine RGP, PO & Scans Hub">
+                  <Layers size={18} />
+                  <span className="sidebar-text">Combine RGP, PO & Scans</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'item_codes' ? 'active' : ''}`} onClick={() => handleTabClick('item_codes')} title="Item Code Generator">
                   <Tag size={18} />
                   <span className="sidebar-text">Item Code Generator</span>
@@ -2500,6 +2536,10 @@ export default function App() {
             {/* ADMIN-SPECIFIC GLOBAL ITEMS */}
             {currentUser?.role === 'Admin' && (
               <>
+                <li className={`sidebar-item ${activeTab === 'lot_costing' ? 'active' : ''}`} onClick={() => handleTabClick('lot_costing')} title="Lot Material Costing">
+                  <Calculator size={18} />
+                  <span className="sidebar-text">Lot Material Costing</span>
+                </li>
                 <li className={`sidebar-item ${activeTab === 'reports_history' ? 'active' : ''}`} onClick={() => handleTabClick('reports_history')} title="Report and History">
                   <BarChart3 size={18} />
                   <span className="sidebar-text">Report and History</span>
@@ -2511,6 +2551,10 @@ export default function App() {
                 <li className={`sidebar-item ${activeTab === 're_download' ? 'active' : ''}`} onClick={() => handleTabClick('re_download')} title="Re-Download Options">
                   <Download size={18} />
                   <span className="sidebar-text">Re-Download Options</span>
+                </li>
+                <li className={`sidebar-item ${activeTab === 'combine_hub' ? 'active' : ''}`} onClick={() => handleTabClick('combine_hub')} title="Combine RGP, PO & Scans Hub">
+                  <Layers size={18} />
+                  <span className="sidebar-text">Combine RGP, PO & Scans</span>
                 </li>
                 <li className={`sidebar-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => handleTabClick('history')} title="Production Work">
                   <History size={18} />
@@ -2548,7 +2592,7 @@ export default function App() {
           <button
             className="theme-toggle"
             style={{ width: '100%', borderRadius: 'var(--border-radius-md)', display: 'flex', gap: '8px', color: '#ff4d4d', backgroundColor: 'rgba(255, 77, 77, 0.1)', border: '1px solid rgba(255, 77, 77, 0.2)' }}
-            onClick={handleLogout}
+            onClick={() => handleLogout()}
             title="Sign Out"
           >
             <LogOut size={18} />
@@ -2586,6 +2630,7 @@ export default function App() {
                 {activeTab === 'challan' && 'Component Issue Challan'}
                 {activeTab === 'movement_report' && 'Movement Report (All Issues)'}
                 {activeTab === 'generate_po' && 'Generate PO'}
+                {activeTab === 'combine_hub' && 'Combine RGP, PO & Scans Hub'}
                 {activeTab === 'item_codes' && 'Item Code Generator & Master Registry'}
                 {activeTab === 'history' && 'Production Work'}
                 {activeTab === 'scanner_logs' && 'Scanner Log'}
@@ -2604,6 +2649,7 @@ export default function App() {
                 {activeTab === 'approval_queue' && (currentUser?.role === 'Admin' ? 'Approval Queue' : 'My Requests')}
                 {activeTab === 'po_verification' && 'PO Verification'}
                 {activeTab === 'only_cutting' && 'Only Cutting (Not Designed)'}
+                {activeTab === 'lot_costing' && 'Lot Material Costing & Valuation'}
               </h1>
             </div>
           </div>
@@ -3000,6 +3046,13 @@ export default function App() {
                 />
               )}
 
+              {activeTab === 'combine_hub' && (
+                <CombinedTransactionsHubView
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                />
+              )}
+
               {activeTab === 'zip_po' && (
                 <PuneetZip prefilledLotNo={prefilledLotNo} setPrefilledLotNo={setPrefilledLotNo} initialTab="zip" />
               )}
@@ -3087,6 +3140,22 @@ export default function App() {
                   designs={designs}
                   issueLogs={issueLogs}
                   onNavigateToLot={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('material_issue');
+                  }}
+                />
+              )}
+
+              {activeTab === 'lot_costing' && (
+                <LotCostingView
+                  currencySymbol={currencySymbol}
+                  currentUser={currentUser}
+                  initialLotNo={prefilledLotNo}
+                  onNavigateToDesign={(lotNo) => {
+                    setPrefilledLotNo(lotNo);
+                    setActiveTab('design');
+                  }}
+                  onNavigateToMaterialIssue={(lotNo) => {
                     setPrefilledLotNo(lotNo);
                     setActiveTab('material_issue');
                   }}

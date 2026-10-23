@@ -10,6 +10,7 @@ import { generateIssuePdf as generateZipIssuePdf } from './pogenerate';
 import { generateIssuePdf as generateDoriIssuePdf } from './dooripogenerate';
 import StandardPoRedownload from './StandardPoRedownload';
 import RgpRedownload from './RgpRedownload';
+import CombinedTransactionsHubView from './CombinedTransactionsHubView';
 
 const formatDateSafe = (dateVal) => {
   try {
@@ -29,11 +30,11 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab') || params.get('subtab') || params.get('type');
-      if (tabParam && ['po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
+      if (tabParam && ['combined', 'po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
         return tabParam.toLowerCase();
       }
     } catch (_) {}
-    if (initialTab && ['po', 'rgp', 'zip', 'dori'].includes(initialTab.toLowerCase())) {
+    if (initialTab && ['combined', 'po', 'rgp', 'zip', 'dori'].includes(initialTab.toLowerCase())) {
       return initialTab.toLowerCase();
     }
     return 'po';
@@ -46,7 +47,7 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
     try {
       const params = new URLSearchParams(window.location.search);
       const tabParam = params.get('tab') || params.get('subtab') || params.get('type');
-      if (tabParam && ['po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
+      if (tabParam && ['combined', 'po', 'rgp', 'zip', 'dori'].includes(tabParam.toLowerCase())) {
         setActiveSubTab(tabParam.toLowerCase());
       }
     } catch (_) {}
@@ -646,6 +647,7 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
         gap: '4px'
       }}>
         {[
+          { id: 'combined', label: '🌐 All Combined Hub', icon: <Layers size={16} /> },
           { id: 'po', label: '📄 Old PO (Standard)', icon: <FileText size={16} /> },
           { id: 'rgp', label: '🚚 Old RGP (Fabric Gate Pass)', icon: <Truck size={16} /> },
           { id: 'zip', label: '⚡ Zip PO Archive', icon: <Layers size={16} /> },
@@ -692,6 +694,14 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
           );
         })}
       </div>
+
+      {/* Combined Transactions Hub */}
+      {activeSubTab === 'combined' && (
+        <CombinedTransactionsHubView
+          currentUser={currentUser}
+          currencySymbol={currencySymbol}
+        />
+      )}
 
       {/* Standard PO Tab Content (from po redownload.txt) */}
       {activeSubTab === 'po' && <StandardPoRedownload />}
