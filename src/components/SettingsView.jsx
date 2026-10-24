@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield, Mail, UserCheck, ShieldCheck } from 'lucide-react';
+import { Settings, ShieldAlert, Plus, PlusCircle, Trash2, Globe, Users, User, Edit, Package, Search, Warehouse, MapPin, CheckCircle, RefreshCw, AlertTriangle, Camera, Image as ImageIcon, Eye, Shield, Mail, UserCheck, ShieldCheck, Layers, DollarSign, Check, ArrowRight, TrendingUp, TrendingDown, Clock, Info, X, ChevronRight, History } from 'lucide-react';
 import { getBackendUrl } from '../utils/api';
 
 // Helper to derive pure ST ID (suppressing internal MT/M codes)
@@ -391,6 +391,124 @@ export default function SettingsView({
   const [matVendorName, setMatVendorName] = useState('');
   const [matError, setMatError] = useState('');
 
+  // Material Pricing & Valuation Policy (FCFS / FIFO vs Update Both)
+  const [materialPricingPolicy, setMaterialPricingPolicy] = useState('fcfs');
+  const [savingPricingPolicy, setSavingPricingPolicy] = useState(false);
+  const [revaluingStock, setRevaluingStock] = useState(false);
+  const [pricingPolicyMsg, setPricingPolicyMsg] = useState(null);
+  const [matUpdatePolicy, setMatUpdatePolicy] = useState('fcfs');
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/settings/material-pricing-policy`)
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.policy) setMaterialPricingPolicy(d.policy);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSavePricingPolicy = async (newPolicy) => {
+    setSavingPricingPolicy(true);
+    setPricingPolicyMsg(null);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/settings/material-pricing-policy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policy: newPolicy })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMaterialPricingPolicy(newPolicy);
+        fetchPriceUpdates();
+        setPricingPolicyMsg({
+          type: 'success',
+          text: newPolicy === 'fcfs'
+            ? '✓ FCFS / FIFO Policy Active: Old stock retains purchase price; new price applies after old stock is finished.'
+            : '✓ Global Update Policy Active: Material rate updates will revalue both existing and new stock.'
+        });
+      } else {
+        setPricingPolicyMsg({ type: 'error', text: data.error || 'Failed to update pricing policy' });
+      }
+    } catch (err) {
+      setPricingPolicyMsg({ type: 'error', text: err.message || 'Network error updating pricing policy' });
+    } finally {
+      setSavingPricingPolicy(false);
+      setTimeout(() => setPricingPolicyMsg(null), 7000);
+    }
+  };
+
+  const handleRevalueAllStock = async () => {
+    if (!window.confirm('Are you sure you want to revalue all existing inventory batches and materials to their latest registered item code rates? This will synchronize all historical batches to current prices.')) return;
+    setRevaluingStock(true);
+    setPricingPolicyMsg(null);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/materials/revalue-all-to-latest`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchPriceUpdates();
+        setPricingPolicyMsg({
+          type: 'success',
+          text: `✓ Inventory Revalued: ${data.materialsUpdated || 0} materials & ${data.batchesUpdated || 0} batches updated to latest rates.`
+        });
+      } else {
+        setPricingPolicyMsg({ type: 'error', text: data.error || 'Failed to revalue inventory' });
+      }
+    } catch (err) {
+      setPricingPolicyMsg({ type: 'error', text: err.message || 'Network error during inventory revaluation' });
+    } finally {
+      setRevaluingStock(false);
+      setTimeout(() => setPricingPolicyMsg(null), 8000);
+    }
+  };
+
+  // ── Updated Material Prices (Only show if price is updated) ───────────────
+  const [updatedPriceMaterials, setUpdatedPriceMaterials] = useState([]);
+  const [loadingPriceUpdates, setLoadingPriceUpdates] = useState(false);
+  const [priceUpdatesError, setPriceUpdatesError] = useState(null);
+  const [priceSearchQuery, setPriceSearchQuery] = useState('');
+  const [priceFilter, setPriceFilter] = useState('all'); // 'all' | 'increased' | 'decreased'
+  const [selectedBatchMaterial, setSelectedBatchMaterial] = useState(null);
+
+  const fetchPriceUpdates = async () => {
+    setLoadingPriceUpdates(true);
+    setPriceUpdatesError(null);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/materials/price-updates`);
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setUpdatedPriceMaterials(data.materials || []);
+      } else {
+        setPriceUpdatesError(data.error || 'Failed to fetch updated material prices');
+      }
+    } catch (err) {
+      setPriceUpdatesError(err.message || 'Network error fetching updated prices');
+    } finally {
+      setLoadingPriceUpdates(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPriceUpdates();
+  }, []);
+
+  const filteredUpdatedMaterials = useMemo(() => {
+    let list = updatedPriceMaterials || [];
+    if (priceFilter === 'increased') {
+      list = list.filter(m => (m.priceDiff || 0) > 0);
+    } else if (priceFilter === 'decreased') {
+      list = list.filter(m => (m.priceDiff || 0) < 0);
+    }
+    if (!priceSearchQuery.trim()) return list;
+    const q = priceSearchQuery.toLowerCase().trim();
+    return list.filter(m =>
+      String(m.materialName || '').toLowerCase().includes(q) ||
+      String(m.itemCode || '').toLowerCase().includes(q) ||
+      String(m.materialId || '').toLowerCase().includes(q)
+    );
+  }, [updatedPriceMaterials, priceFilter, priceSearchQuery]);
+
   const categorySuggestions = useMemo(() => {
     const set = new Set();
     (materials || []).forEach(m => {
@@ -451,7 +569,9 @@ export default function SettingsView({
       color: matColor ? matColor.trim() : 'Default',
       location: matLocation ? matLocation.trim() : 'Main Store',
       poNumber: matPoNumber ? matPoNumber.trim() : (editingMaterial.poNumber || 'N/A'),
-      vendorName: matVendorName ? matVendorName.trim() : (editingMaterial.vendorName || '')
+      vendorName: matVendorName ? matVendorName.trim() : (editingMaterial.vendorName || ''),
+      policy: matUpdatePolicy,
+      updatePolicy: matUpdatePolicy
     };
     if (onUpdateMaterial) {
       onUpdateMaterial(updated);
@@ -781,6 +901,465 @@ export default function SettingsView({
       <div className="split-view" style={{ gridTemplateColumns: '0.9fr 1.1fr' }}>
         {/* Left Column: System Configurations */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* ── Material Pricing & Stock Valuation Policy (FCFS / FIFO) ── */}
+          {/* ── Updated Material Prices & Stock Valuation Panel ── */}
+          <div className="panel" style={{
+            marginBottom: 0,
+            border: '1.5px solid rgba(59, 130, 246, 0.3)',
+            background: 'linear-gradient(180deg, rgba(59, 130, 246, 0.02) 0%, var(--bg-primary) 100%)',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.04)'
+          }}>
+            {/* Panel Header */}
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '9px',
+                  background: '#dbeafe',
+                  color: '#1d4ed8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}>
+                  <TrendingUp size={20} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h3 className="panel-title" style={{ margin: 0, fontSize: '15px', fontWeight: '800' }}>
+                      Updated Material Prices
+                    </h3>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '800',
+                      padding: '2px 8px',
+                      borderRadius: '10px',
+                      background: updatedPriceMaterials.length > 0 ? '#dbeafe' : 'var(--bg-secondary)',
+                      color: updatedPriceMaterials.length > 0 ? '#1e40af' : 'var(--text-muted)',
+                      border: `1px solid ${updatedPriceMaterials.length > 0 ? '#bfdbfe' : 'var(--border-color)'}`
+                    }}>
+                      {updatedPriceMaterials.length} Updated
+                    </span>
+                    <span style={{
+                      fontSize: '10.5px',
+                      fontWeight: '800',
+                      padding: '2px 7px',
+                      borderRadius: '10px',
+                      background: 'rgba(37, 99, 235, 0.08)',
+                      color: '#2563eb',
+                      border: '1px solid rgba(37, 99, 235, 0.2)'
+                    }}>
+                      ⚡ FCFS Automated
+                    </span>
+                  </div>
+                  <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                    Before vs. New purchase price tracking with automated First-Come First-Served tier inventory valuation.
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons Toolbar */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleRevalueAllStock}
+                  disabled={revaluingStock}
+                  style={{ fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  title="Synchronize all inventory batches to latest registered item code rates"
+                >
+                  <RefreshCw size={13} className={revaluingStock ? 'spin' : ''} />
+                  <span>{revaluingStock ? 'Revaluing...' : 'Revalue All Stock'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={fetchPriceUpdates}
+                  disabled={loadingPriceUpdates}
+                  style={{ fontSize: '11.5px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '5px' }}
+                  title="Refresh updated prices"
+                >
+                  <RefreshCw size={13} className={loadingPriceUpdates ? 'spin' : ''} />
+                  <span>{loadingPriceUpdates ? 'Refreshing...' : 'Refresh'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Notification alert if any */}
+            {pricingPolicyMsg && (
+              <div style={{
+                padding: '9px 12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                fontWeight: '700',
+                margin: '12px 0 6px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: pricingPolicyMsg.type === 'success' ? '#ecfdf5' : '#fef2f2',
+                color: pricingPolicyMsg.type === 'success' ? '#047857' : '#b91c1c',
+                border: `1px solid ${pricingPolicyMsg.type === 'success' ? '#a7f3d0' : '#fecaca'}`
+              }}>
+                {pricingPolicyMsg.type === 'success' ? <CheckCircle size={15} /> : <AlertTriangle size={15} />}
+                <span>{pricingPolicyMsg.text}</span>
+              </div>
+            )}
+
+            {/* Quick Metrics Summary Strip (if items exist) */}
+            {updatedPriceMaterials.length > 0 && (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px',
+                margin: '12px 0'
+              }}>
+                <div style={{ padding: '8px 10px', background: 'var(--bg-secondary)', borderRadius: '8px', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Updated Materials</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: 'var(--text-main)', marginTop: '1px' }}>{updatedPriceMaterials.length}</div>
+                </div>
+                <div style={{ padding: '8px 10px', background: 'rgba(22, 163, 74, 0.05)', borderRadius: '8px', border: '1px solid rgba(22, 163, 74, 0.2)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '800', color: '#16a34a', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Price Increased</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: '#15803d', marginTop: '1px' }}>
+                    {updatedPriceMaterials.filter(m => (m.priceDiff || 0) > 0).length}
+                  </div>
+                </div>
+                <div style={{ padding: '8px 10px', background: 'rgba(220, 38, 38, 0.05)', borderRadius: '8px', border: '1px solid rgba(220, 38, 38, 0.2)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '800', color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.4px' }}>Price Decreased</div>
+                  <div style={{ fontSize: '16px', fontWeight: '900', color: '#b91c1c', marginTop: '1px' }}>
+                    {updatedPriceMaterials.filter(m => (m.priceDiff || 0) < 0).length}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Loading state */}
+            {loadingPriceUpdates && (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12.5px' }}>
+                <RefreshCw size={18} className="spin" style={{ margin: '0 auto 8px auto', display: 'block', color: '#2563eb' }} />
+                Checking for updated material rates and FCFS batches...
+              </div>
+            )}
+
+            {/* Error state */}
+            {priceUpdatesError && (
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: '#fef2f2',
+                border: '1px solid #fecaca',
+                color: '#b91c1c',
+                fontSize: '12.5px',
+                margin: '12px 0',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span>{priceUpdatesError}</span>
+                <button type="button" onClick={fetchPriceUpdates} className="btn btn-secondary btn-xs" style={{ fontSize: '11px' }}>
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {/* Empty state: No price updates recorded */}
+            {!loadingPriceUpdates && !priceUpdatesError && updatedPriceMaterials.length === 0 && (
+              <div style={{
+                padding: '24px 18px',
+                borderRadius: '10px',
+                background: 'rgba(59, 130, 246, 0.03)',
+                border: '1px solid rgba(59, 130, 246, 0.15)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+                margin: '14px 0'
+              }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '50%',
+                  background: '#eff6ff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#2563eb'
+                }}>
+                  <Info size={18} />
+                </div>
+                <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>
+                  No Material Price Updates Recorded Yet
+                </strong>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', maxWidth: '440px', lineHeight: '1.45' }}>
+                  Only materials where purchase rates have changed (for example, Tag @ ₹1.00/pc updating to ₹1.50/pc during inward) appear here with Before Price, New Price, and remaining stock valuation breakdown.
+                </p>
+              </div>
+            )}
+
+            {/* Materials List */}
+            {!loadingPriceUpdates && !priceUpdatesError && updatedPriceMaterials.length > 0 && (
+              <div style={{ marginTop: '8px' }}>
+                {/* Search Bar & Filter Tabs */}
+                <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', flex: 1, minWidth: '160px' }}>
+                    <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                    <input
+                      type="text"
+                      placeholder="Search updated material by name or code..."
+                      value={priceSearchQuery}
+                      onChange={(e) => setPriceSearchQuery(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '7px 10px 7px 30px',
+                        fontSize: '12px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-main)'
+                      }}
+                    />
+                    {priceSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setPriceSearchQuery('')}
+                        style={{
+                          position: 'absolute',
+                          right: '8px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          border: 'none',
+                          background: 'none',
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)',
+                          padding: '2px'
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPriceFilter('all')}
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        borderRadius: '6px',
+                        border: priceFilter === 'all' ? '1px solid #2563eb' : '1px solid var(--border-color)',
+                        background: priceFilter === 'all' ? '#dbeafe' : 'var(--bg-secondary)',
+                        color: priceFilter === 'all' ? '#1e40af' : 'var(--text-main)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      All ({updatedPriceMaterials.length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPriceFilter('increased')}
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        borderRadius: '6px',
+                        border: priceFilter === 'increased' ? '1px solid #16a34a' : '1px solid var(--border-color)',
+                        background: priceFilter === 'increased' ? '#dcfce7' : 'var(--bg-secondary)',
+                        color: priceFilter === 'increased' ? '#15803d' : 'var(--text-main)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      Increased ({updatedPriceMaterials.filter(m => (m.priceDiff || 0) > 0).length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPriceFilter('decreased')}
+                      style={{
+                        padding: '5px 10px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        borderRadius: '6px',
+                        border: priceFilter === 'decreased' ? '1px solid #dc2626' : '1px solid var(--border-color)',
+                        background: priceFilter === 'decreased' ? '#fee2e2' : 'var(--bg-secondary)',
+                        color: priceFilter === 'decreased' ? '#b91c1c' : 'var(--text-main)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      Decreased ({updatedPriceMaterials.filter(m => (m.priceDiff || 0) < 0).length})
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filtered Materials List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '11px', maxHeight: '460px', overflowY: 'auto', paddingRight: '4px' }}>
+                  {filteredUpdatedMaterials.length === 0 ? (
+                    <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                      No matching materials found for "{priceSearchQuery}".
+                    </div>
+                  ) : (
+                    filteredUpdatedMaterials.map(m => {
+                      const isUp = (m.priceDiff || 0) > 0;
+                      const isDown = (m.priceDiff || 0) < 0;
+                      return (
+                        <div
+                          key={m.materialId || m.itemCode}
+                          style={{
+                            background: 'var(--bg-secondary)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '10px',
+                            padding: '12px 14px',
+                            boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+                            transition: 'border-color 0.2s ease, box-shadow 0.2s ease'
+                          }}
+                        >
+                          {/* Top Row: ST Code, Material Name, Unit, and Actions */}
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px', marginBottom: '9px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <span style={{
+                                  fontSize: '11px',
+                                  fontWeight: '800',
+                                  fontFamily: 'monospace',
+                                  background: '#eff6ff',
+                                  color: '#1d4ed8',
+                                  padding: '2px 7px',
+                                  borderRadius: '5px',
+                                  border: '1px solid #bfdbfe'
+                                }}>
+                                  {getSTCode(m) || m.itemCode}
+                                </span>
+                                <strong style={{ fontSize: '13.5px', color: 'var(--text-main)' }}>
+                                  {m.materialName}
+                                </strong>
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                  ({m.unit || 'Pcs'})
+                                </span>
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                                <Clock size={11.5} />
+                                <span>Updated: {m.lastUpdatedAt || 'Recent'}</span>
+                                <span>&bull;</span>
+                                <span>{m.updateReason}</span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBatchMaterial(m)}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                fontSize: '11.5px',
+                                fontWeight: '700',
+                                padding: '5px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid #93c5fd',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                cursor: 'pointer',
+                                flexShrink: 0,
+                                transition: 'all 0.15s ease'
+                              }}
+                              title="Inspect all inward batches"
+                            >
+                              <span>View Batches</span>
+                              <ChevronRight size={13} />
+                            </button>
+                          </div>
+
+                          {/* Rate Comparison Box: Before Price vs New Price */}
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: '1fr auto 1fr',
+                            alignItems: 'center',
+                            gap: '10px',
+                            background: 'var(--bg-primary)',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-color)',
+                            marginBottom: '8px'
+                          }}>
+                            {/* Before Price */}
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-muted)', marginBottom: '2px' }}>
+                                Before Price
+                              </div>
+                              <div style={{
+                                fontSize: '15px',
+                                fontWeight: '800',
+                                color: '#475569',
+                                textDecoration: (m.priceDiff !== 0) ? 'line-through' : 'none'
+                              }}>
+                                ₹{Number(m.beforePrice || 0).toFixed(2)}
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                Old Stock: <strong>{Number(m.oldStockRemaining || 0).toLocaleString()}</strong> {m.unit}
+                              </div>
+                            </div>
+
+                            {/* Arrow & Difference Badge */}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                              <ArrowRight size={15} style={{ color: isUp ? '#16a34a' : isDown ? '#dc2626' : 'var(--text-muted)' }} />
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: '800',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                background: isUp ? '#dcfce7' : isDown ? '#fee2e2' : '#f1f5f9',
+                                color: isUp ? '#15803d' : isDown ? '#b91c1c' : '#475569'
+                              }}>
+                                {isUp ? `+₹${m.priceDiff.toFixed(2)} (+${m.percentChange}%)` : isDown ? `-₹${Math.abs(m.priceDiff).toFixed(2)} (${m.percentChange}%)` : 'Unchanged'}
+                              </span>
+                            </div>
+
+                            {/* New Price */}
+                            <div style={{ textAlign: 'center' }}>
+                              <div style={{ fontSize: '10px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.4px', color: '#2563eb', marginBottom: '2px' }}>
+                                New Price
+                              </div>
+                              <div style={{ fontSize: '16px', fontWeight: '900', color: isUp ? '#15803d' : isDown ? '#b91c1c' : '#1d4ed8' }}>
+                                ₹{Number(m.newPrice || 0).toFixed(2)}
+                              </div>
+                              <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                New Stock: <strong>{Number(m.newStockRemaining || 0).toLocaleString()}</strong> {m.unit}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* FCFS Valuation Breakdown Pill */}
+                          <div style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '6px',
+                            fontSize: '11px',
+                            padding: '6px 10px',
+                            background: 'rgba(37, 99, 235, 0.04)',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(37, 99, 235, 0.12)'
+                          }}>
+                            <span style={{ color: 'var(--text-muted)' }}>
+                              Valuation: <strong style={{ color: 'var(--text-main)', fontFamily: 'monospace' }}>{m.breakdownText}</strong>
+                            </span>
+                            <span style={{ fontWeight: '800', color: '#1e40af' }}>
+                              Total: {Number(m.currentStock || 0).toLocaleString()} {m.unit} = ₹{Number(m.totalValuation || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Material Photo Change & Delete Permission Control (Admin Exclusive) */}
           <div className="panel" style={{
             marginBottom: 0,
@@ -1848,6 +2427,7 @@ export default function SettingsView({
                               setMatLocation(m.location || '');
                               setMatPoNumber(m.poNumber && m.poNumber !== 'N/A' ? m.poNumber : '');
                               setMatVendorName(m.vendorName || m.vendor || m.supplier || '');
+                              setMatUpdatePolicy(materialPricingPolicy || 'fcfs');
                               setMatError('');
                             }}
                             style={{ padding: '6px' }}
@@ -1981,6 +2561,65 @@ export default function SettingsView({
                     onChange={(e) => setMatCost(e.target.value)}
                     required
                   />
+                </div>
+              </div>
+
+              {/* Price Update Scope (FCFS vs Update Both) */}
+              <div style={{
+                background: '#f8fafc',
+                padding: '12px 14px',
+                borderRadius: '10px',
+                border: '1.5px solid #cbd5e1',
+                marginBottom: '16px'
+              }}>
+                <label className="form-label" style={{ fontWeight: '800', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>Price Update Valuation Scope</span>
+                  <span style={{ fontSize: '11px', background: matUpdatePolicy === 'fcfs' ? '#dbeafe' : '#ffedd5', color: matUpdatePolicy === 'fcfs' ? '#1e40af' : '#9a3412', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                    {matUpdatePolicy === 'fcfs' ? '⚡ FCFS / FIFO' : '🔄 Global Revalue'}
+                  </span>
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                  <label style={{
+                    display: 'flex', flexDirection: 'column', padding: '10px 12px', borderRadius: '8px',
+                    border: matUpdatePolicy === 'fcfs' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                    background: matUpdatePolicy === 'fcfs' ? '#eff6ff' : '#ffffff',
+                    cursor: 'pointer'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '12.5px', color: matUpdatePolicy === 'fcfs' ? '#1d4ed8' : '#334155' }}>
+                      <input
+                        type="radio"
+                        name="matModalPolicy"
+                        value="fcfs"
+                        checked={matUpdatePolicy === 'fcfs'}
+                        onChange={() => setMatUpdatePolicy('fcfs')}
+                      />
+                      <span>FCFS (Keep Old Stock Cost)</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', lineHeight: '1.3' }}>
+                      Existing {editingMaterial.stock || 0} {editingMaterial.unit || 'pcs'} retain historical cost; new rate applies to future stock.
+                    </span>
+                  </label>
+
+                  <label style={{
+                    display: 'flex', flexDirection: 'column', padding: '10px 12px', borderRadius: '8px',
+                    border: matUpdatePolicy === 'update_all' ? '2px solid #ea580c' : '1px solid #cbd5e1',
+                    background: matUpdatePolicy === 'update_all' ? '#fff7ed' : '#ffffff',
+                    cursor: 'pointer'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '800', fontSize: '12.5px', color: matUpdatePolicy === 'update_all' ? '#c2410c' : '#334155' }}>
+                      <input
+                        type="radio"
+                        name="matModalPolicy"
+                        value="update_all"
+                        checked={matUpdatePolicy === 'update_all'}
+                        onChange={() => setMatUpdatePolicy('update_all')}
+                      />
+                      <span>Update Both (Old & New Stock)</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', lineHeight: '1.3' }}>
+                      Revalue all {editingMaterial.stock || 0} {editingMaterial.unit || 'pcs'} of existing stock & past batches to {currencySymbol}{matCost || 0}.
+                    </span>
+                  </label>
                 </div>
               </div>
 
@@ -2706,6 +3345,240 @@ export default function SettingsView({
               >
                 <Trash2 size={14} />
                 <span>Delete</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── FCFS Batches & Price History Modal ── */}
+      {selectedBatchMaterial && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(15, 23, 42, 0.65)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999,
+          padding: '16px'
+        }}>
+          <div style={{
+            background: 'var(--bg-primary)',
+            borderRadius: '14px',
+            width: '100%',
+            maxWidth: '750px',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+            border: '1px solid var(--border-color)',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'linear-gradient(90deg, rgba(37,99,235,0.06) 0%, transparent 100%)'
+            }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    fontSize: '11.5px',
+                    fontWeight: '800',
+                    padding: '2px 8px',
+                    borderRadius: '5px',
+                    background: '#dbeafe',
+                    color: '#1e40af',
+                    fontFamily: 'monospace'
+                  }}>
+                    {getSTCode(selectedBatchMaterial) || selectedBatchMaterial.itemCode}
+                  </span>
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: 'var(--text-main)' }}>
+                    {selectedBatchMaterial.materialName}
+                  </h3>
+                </div>
+                <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  FCFS Inward Batches & Rate Valuation History &bull; Unit: {selectedBatchMaterial.unit || 'Pcs'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedBatchMaterial(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  padding: '6px',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px', overflowY: 'auto', flex: 1 }}>
+              {/* Top Metric Cards */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '12px',
+                marginBottom: '16px'
+              }}>
+                <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '700' }}>Before Price (Old)</div>
+                  <div style={{ fontSize: '18px', fontWeight: '900', color: '#475569', marginTop: '2px' }}>
+                    ₹{Number(selectedBatchMaterial.beforePrice || 0).toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Old Stock: {Number(selectedBatchMaterial.oldStockRemaining || 0).toLocaleString()} {selectedBatchMaterial.unit}
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px', borderRadius: '8px', background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#2563eb', fontWeight: '700' }}>New Price (Latest)</div>
+                  <div style={{ fontSize: '18px', fontWeight: '900', color: '#1d4ed8', marginTop: '2px' }}>
+                    ₹{Number(selectedBatchMaterial.newPrice || 0).toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: '11px', color: selectedBatchMaterial.priceDiff > 0 ? '#15803d' : '#b91c1c', fontWeight: '700', marginTop: '2px' }}>
+                    {selectedBatchMaterial.priceDiff > 0 ? `+₹${selectedBatchMaterial.priceDiff.toFixed(2)} (+${selectedBatchMaterial.percentChange}%)` : `-₹${Math.abs(selectedBatchMaterial.priceDiff).toFixed(2)} (${selectedBatchMaterial.percentChange}%)`}
+                  </div>
+                </div>
+
+                <div style={{ padding: '12px', borderRadius: '8px', background: 'rgba(37,99,235,0.06)', border: '1px solid rgba(37,99,235,0.2)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#1e40af', fontWeight: '700' }}>Total Valuation</div>
+                  <div style={{ fontSize: '18px', fontWeight: '900', color: '#1e3a8a', marginTop: '2px' }}>
+                    ₹{Number(selectedBatchMaterial.totalValuation || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Stock: {Number(selectedBatchMaterial.currentStock || 0).toLocaleString()} {selectedBatchMaterial.unit}
+                  </div>
+                </div>
+              </div>
+
+              {/* Inward Batches Table */}
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '800', color: 'var(--text-main)' }}>
+                Chronological Inward Batches (FCFS Order)
+              </h4>
+              {(!selectedBatchMaterial.batches || selectedBatchMaterial.batches.length === 0) ? (
+                <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                  No individual weighbridge batch records found. Valuation calculated from registered rate.
+                </p>
+              ) : (
+                <div style={{ overflowX: 'auto', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)' }}>
+                        <th style={{ padding: '9px 12px' }}>Batch</th>
+                        <th style={{ padding: '9px 12px' }}>Inward Date</th>
+                        <th style={{ padding: '9px 12px' }}>PO / Invoice</th>
+                        <th style={{ padding: '9px 12px' }}>Purchase Rate</th>
+                        <th style={{ padding: '9px 12px' }}>Initial Qty</th>
+                        <th style={{ padding: '9px 12px' }}>Remaining</th>
+                        <th style={{ padding: '9px 12px' }}>Batch Value</th>
+                        <th style={{ padding: '9px 12px' }}>FCFS Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedBatchMaterial.batches.map((b, idx) => {
+                        const isDepleted = b.isDepleted || b.remainingPieces <= 0;
+                        const isActive = b.isActiveTier;
+                        return (
+                          <tr key={b.id || idx} style={{
+                            borderBottom: '1px solid var(--border-color)',
+                            background: isActive ? 'rgba(37,99,235,0.06)' : isDepleted ? 'rgba(0,0,0,0.02)' : 'transparent',
+                            opacity: isDepleted ? 0.6 : 1
+                          }}>
+                            <td style={{ padding: '9px 12px', fontWeight: '700' }}>#{idx + 1}</td>
+                            <td style={{ padding: '9px 12px' }}>{b.date || '—'} <span style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>{b.time || ''}</span></td>
+                            <td style={{ padding: '9px 12px' }}>
+                              <div>{b.poNumber ? `PO: ${b.poNumber}` : 'Direct Inward'}</div>
+                              {b.invoiceNo && <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>Inv: {b.invoiceNo}</div>}
+                            </td>
+                            <td style={{ padding: '9px 12px', fontWeight: '800', color: b.rate === selectedBatchMaterial.newPrice ? '#15803d' : '#475569' }}>
+                              ₹{Number(b.rate || 0).toFixed(2)}
+                            </td>
+                            <td style={{ padding: '9px 12px' }}>{Number(b.initialPieces || 0).toLocaleString()}</td>
+                            <td style={{ padding: '9px 12px', fontWeight: '700' }}>{Number(b.remainingPieces || 0).toLocaleString()}</td>
+                            <td style={{ padding: '9px 12px', fontWeight: '800' }}>
+                              ₹{Number(b.amount || (b.remainingPieces * b.rate) || 0).toFixed(2)}
+                            </td>
+                            <td style={{ padding: '9px 12px' }}>
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: '800',
+                                padding: '2px 7px',
+                                borderRadius: '5px',
+                                background: isActive ? '#dbeafe' : isDepleted ? '#f1f5f9' : '#e0e7ff',
+                                color: isActive ? '#1e40af' : isDepleted ? '#64748b' : '#3730a3',
+                                border: `1px solid ${isActive ? '#93c5fd' : isDepleted ? '#cbd5e1' : '#c7d2fe'}`
+                              }}>
+                                {isActive ? '⚡ Active (Consuming)' : isDepleted ? '✓ Depleted' : '⏳ Next in Queue'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Price History Log (if any) */}
+              {selectedBatchMaterial.history && selectedBatchMaterial.history.length > 0 && (
+                <div style={{ marginTop: '16px' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12.5px', fontWeight: '800', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <History size={14} style={{ color: '#2563eb' }} />
+                    Price Change Audit Trail
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {selectedBatchMaterial.history.map((h, hIdx) => (
+                      <div key={h.id || hIdx} style={{
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        background: 'var(--bg-secondary)',
+                        fontSize: '11.5px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div>
+                          Rate changed from <strong style={{ color: '#b91c1c' }}>₹{h.oldRate}</strong> to <strong style={{ color: '#15803d' }}>₹{h.newRate}</strong> &bull; Policy: {h.policy?.toUpperCase()} &bull; Reason: {h.reason || 'Rate Update'}
+                        </div>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{h.date}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '12px 20px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              justifyContent: 'flex-end',
+              background: 'var(--bg-secondary)'
+            }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setSelectedBatchMaterial(null)}
+              >
+                Close Details
               </button>
             </div>
           </div>

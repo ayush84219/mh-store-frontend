@@ -53,6 +53,7 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
   const [selectedItemCode, setSelectedItemCode] = useState('');
   const [itemCodeSearch, setItemCodeSearch] = useState('');
   const [icDropdownOpen, setIcDropdownOpen] = useState(false);
+  const [fcfsInfo, setFcfsInfo] = useState(null);
 
   useEffect(() => {
     const fetchLocations = async () => {
@@ -207,6 +208,26 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
     remarks: '',
     imageUrl: '',
   });
+
+  useEffect(() => {
+    const code = form.materialCode || selectedItemCode;
+    if (!code) {
+      setFcfsInfo(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${getBackendUrl()}/api/materials/${encodeURIComponent(code)}/fcfs-batches`)
+      .then(r => r.json())
+      .then(d => {
+        if (!cancelled && d && d.success) {
+          setFcfsInfo(d);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFcfsInfo(null);
+      });
+    return () => { cancelled = true; };
+  }, [form.materialCode, selectedItemCode]);
 
   // Custom Units State (Persisted in localStorage)
   const [customUnits, setCustomUnits] = useState(() => {
@@ -2806,6 +2827,40 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                   placeholder="e.g. 25.50"
                   style={{ height: '40px', fontSize: '15px', fontWeight: '800', color: '#065f46' }}
                 />
+
+                {/* Live FCFS Inventory Valuation Badge */}
+                {fcfsInfo && fcfsInfo.stock > 0 && (
+                  <div style={{
+                    marginTop: '8px',
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: '#ffffff',
+                    border: '1.2px solid #86efac',
+                    fontSize: '11.5px',
+                    color: '#065f46'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '3px' }}>
+                      <span style={{ fontWeight: '800', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Layers size={13} style={{ color: '#059669' }} />
+                        <span>⚡ FCFS Inventory Policy Active</span>
+                      </span>
+                      <span style={{ fontWeight: '800', color: '#1d4ed8', background: '#dbeafe', padding: '1px 6px', borderRadius: '4px', fontSize: '10.5px' }}>
+                        Old Stock: {fcfsInfo.stock.toLocaleString()} {form.unit || 'Pcs'} @ ₹{fcfsInfo.currentRate}/u
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#475569', lineHeight: '1.35' }}>
+                      {Number(form.rate || form.price) > 0 && Number(form.rate || form.price) !== Number(fcfsInfo.currentRate) ? (
+                        <span>
+                          Existing <strong>{fcfsInfo.stock.toLocaleString()} {form.unit || 'Pcs'}</strong> remains costed at <strong>₹{fcfsInfo.currentRate}</strong>. This incoming batch ({Number(pieces || 0).toLocaleString()} {form.unit || 'Pcs'}) will be costed at <strong>₹{form.rate || form.price}</strong> once old stock is finished.
+                        </span>
+                      ) : (
+                        <span>
+                          Existing inventory of {fcfsInfo.stock.toLocaleString()} {form.unit || 'Pcs'} is currently valued at ₹{fcfsInfo.currentRate}/unit.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -3344,7 +3399,7 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                       {/* TOTAL PIECES */}
                       <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
                         <div style={{ fontWeight: '900', color: '#3b82f6', fontSize: '14px' }}>
-                          {row.pieces.toLocaleString()} Pcs
+                          {row.pieces.toLocaleString()} {row.unit || 'Pcs'}
                         </div>
                         {row.packets > 1 && (
                           <div style={{ marginTop: '3px' }}>
@@ -3355,6 +3410,12 @@ export default function WeightCapture({ racks = [], currentUser = null, onNaviga
                             }}>
                               📦 {row.packets} Packets
                             </span>
+                          </div>
+                        )}
+                        {Number(row.rate || row.price) > 0 && (
+                          <div style={{ fontSize: '11px', color: '#059669', fontWeight: '700', marginTop: '2px' }}>
+                            @ ₹{row.rate || row.price}/unit
+                            {Number(row.pieces) > 0 && ` (₹${(Number(row.pieces) * Number(row.rate || row.price)).toLocaleString('en-IN', { maximumFractionDigits: 2 })})`}
                           </div>
                         )}
                       </td>

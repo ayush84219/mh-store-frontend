@@ -29,6 +29,7 @@ export default function LotCostingView({
   // Rate Edit Modal State
   const [editingItem, setEditingItem] = useState(null);
   const [newRateInput, setNewRateInput] = useState('');
+  const [ratePolicy, setRatePolicy] = useState('fcfs');
   const [isSavingRate, setIsSavingRate] = useState(false);
 
   // Slips History Modal State
@@ -130,6 +131,7 @@ export default function LotCostingView({
   const handleOpenRateModal = (item) => {
     setEditingItem(item);
     setNewRateInput(item.rate ? String(item.rate) : '');
+    setRatePolicy('fcfs');
   };
 
   const handleSaveRate = async () => {
@@ -149,7 +151,8 @@ export default function LotCostingView({
           materialId: editingItem.materialId,
           materialName: editingItem.materialName,
           itemCode: editingItem.itemCode,
-          rate: rateVal
+          rate: rateVal,
+          policy: ratePolicy
         })
       });
 
@@ -158,37 +161,42 @@ export default function LotCostingView({
         throw new Error(err.error || 'Failed to update rate');
       }
 
-      // Update state locally and recompute
-      setCostingData(prev => {
-        if (!prev) return prev;
-        const cuttingQty = prev.summary?.cuttingQty || 1;
-        const updatedItems = prev.items.map(it => {
-          if (it.key === editingItem.key) {
-            const tot = Math.round((it.quantity * rateVal) * 100) / 100;
-            const cpp = cuttingQty > 0 ? Math.round((tot / cuttingQty) * 1000) / 1000 : 0;
-            return {
-              ...it,
-              rate: rateVal,
-              totalCost: tot,
-              costPerPiece: cpp
-            };
-          }
-          return it;
+      if (ratePolicy === 'update_all' && selectedLotNo) {
+        // Re-fetch lot data to get fresh calculation from database
+        await fetchCostingForLot(selectedLotNo);
+      } else {
+        // Update state locally and recompute
+        setCostingData(prev => {
+          if (!prev) return prev;
+          const cuttingQty = prev.summary?.cuttingQty || 1;
+          const updatedItems = prev.items.map(it => {
+            if (it.key === editingItem.key) {
+              const tot = Math.round((it.quantity * rateVal) * 100) / 100;
+              const cpp = cuttingQty > 0 ? Math.round((tot / cuttingQty) * 1000) / 1000 : 0;
+              return {
+                ...it,
+                rate: rateVal,
+                totalCost: tot,
+                costPerPiece: cpp
+              };
+            }
+            return it;
+          });
+
+          const newTotalCost = Math.round(updatedItems.reduce((sum, it) => sum + (it.totalCost || 0), 0) * 100) / 100;
+          const newCostPerPiece = cuttingQty > 0 ? Math.round((newTotalCost / cuttingQty) * 1000) / 1000 : 0;
+
+          return {
+            ...prev,
+            items: updatedItems,
+            summary: {
+              ...prev.summary,
+              totalAccessoryCost: newTotalCost,
+              costPerGarmentPiece: newCostPerPiece
+            }
+          };
         });
-
-        const newTotalCost = Math.round(updatedItems.reduce((sum, it) => sum + (it.totalCost || 0), 0) * 100) / 100;
-        const newCostPerPiece = cuttingQty > 0 ? Math.round((newTotalCost / cuttingQty) * 1000) / 1000 : 0;
-
-        return {
-          ...prev,
-          items: updatedItems,
-          summary: {
-            ...prev.summary,
-            totalAccessoryCost: newTotalCost,
-            costPerGarmentPiece: newCostPerPiece
-          }
-        };
-      });
+      }
 
       setEditingItem(null);
     } catch (err) {
@@ -877,6 +885,20 @@ export default function LotCostingView({
                                 <Edit3 size={14} />
                               </button>
                             </div>
+                            {item.fcfsBreakdown && (
+                              <div style={{
+                                fontSize: '10.5px',
+                                color: '#4338ca',
+                                background: '#e0e7ff',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: '800',
+                                marginTop: '3px',
+                                textAlign: 'right'
+                              }} title="First-Come First-Served Batch Breakdown">
+                                ⚡ FCFS: {item.fcfsBreakdown}
+                              </div>
+                            )}
                           </td>
 
                           {/* Total Cost (Qty * Rate) */}
@@ -1027,6 +1049,61 @@ export default function LotCostingView({
               <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
                 Updating rate will automatically recompute total item cost and cost per garment piece.
               </span>
+            </div>
+
+            {/* Scope / Policy Radio Selector */}
+            <div style={{
+              background: '#f8fafc',
+              padding: '12px 14px',
+              borderRadius: '10px',
+              border: '1.5px solid #cbd5e1',
+              marginBottom: '20px'
+            }}>
+              <label style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span>Rate Update Policy</span>
+                <span style={{ fontSize: '10.5px', background: ratePolicy === 'fcfs' ? '#dbeafe' : '#ffedd5', color: ratePolicy === 'fcfs' ? '#1e40af' : '#9a3412', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                  {ratePolicy === 'fcfs' ? '⚡ FCFS / FIFO' : '🔄 Global Revalue'}
+                </span>
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <label style={{
+                  display: 'flex', flexDirection: 'column', padding: '8px 10px', borderRadius: '8px',
+                  border: ratePolicy === 'fcfs' ? '2px solid #2563eb' : '1px solid #cbd5e1',
+                  background: ratePolicy === 'fcfs' ? '#eff6ff' : '#ffffff', cursor: 'pointer'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', color: ratePolicy === 'fcfs' ? '#1d4ed8' : '#334155' }}>
+                    <input
+                      type="radio"
+                      name="lotRatePolicy"
+                      checked={ratePolicy === 'fcfs'}
+                      onChange={() => setRatePolicy('fcfs')}
+                    />
+                    <span>FCFS (New Inward Only)</span>
+                  </div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px', lineHeight: '1.3' }}>
+                    Old stock retains purchase price; new rate applies to future inwards.
+                  </span>
+                </label>
+
+                <label style={{
+                  display: 'flex', flexDirection: 'column', padding: '8px 10px', borderRadius: '8px',
+                  border: ratePolicy === 'update_all' ? '2px solid #ea580c' : '1px solid #cbd5e1',
+                  background: ratePolicy === 'update_all' ? '#fff7ed' : '#ffffff', cursor: 'pointer'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: '800', color: ratePolicy === 'update_all' ? '#c2410c' : '#334155' }}>
+                    <input
+                      type="radio"
+                      name="lotRatePolicy"
+                      checked={ratePolicy === 'update_all'}
+                      onChange={() => setRatePolicy('update_all')}
+                    />
+                    <span>Update Both (Old & New)</span>
+                  </div>
+                  <span style={{ fontSize: '10.5px', color: '#64748b', marginTop: '3px', lineHeight: '1.3' }}>
+                    Revalues all existing inventory batches & past lot costing records.
+                  </span>
+                </label>
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>

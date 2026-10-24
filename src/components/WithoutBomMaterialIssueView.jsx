@@ -2,31 +2,31 @@ import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { 
-  Zap, 
-  Layers, 
-  Plus, 
-  Trash2, 
-  Printer, 
-  CheckCircle, 
-  AlertTriangle, 
-  Search, 
-  Scan, 
-  FileText, 
-  Calendar, 
-  User, 
-  Building, 
-  MapPin, 
-  Package, 
-  Sparkles, 
-  Download, 
-  X, 
-  RefreshCw, 
-  ArrowRight, 
-  Clock, 
-  Tag, 
-  ShieldCheck, 
-  Check, 
+import {
+  Zap,
+  Layers,
+  Plus,
+  Trash2,
+  Printer,
+  CheckCircle,
+  AlertTriangle,
+  Search,
+  Scan,
+  FileText,
+  Calendar,
+  User,
+  Building,
+  MapPin,
+  Package,
+  Sparkles,
+  Download,
+  X,
+  RefreshCw,
+  ArrowRight,
+  Clock,
+  Tag,
+  ShieldCheck,
+  Check,
   Eye,
   AlertCircle,
   Copy,
@@ -168,8 +168,8 @@ export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {},
 
   // 2. Fallback to designs prop (if design has garment quantity)
   if (!cuttingVolume && !isDirect && cleanLot && Array.isArray(designs)) {
-    const dMatch = designs.find(d => 
-      String(d.id || '').trim().toLowerCase() === cleanLot || 
+    const dMatch = designs.find(d =>
+      String(d.id || '').trim().toLowerCase() === cleanLot ||
       String(d.lotNumber || '').trim().toLowerCase() === cleanLot
     );
     if (dMatch && Number(dMatch.quantity) > 0) {
@@ -209,12 +209,12 @@ export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {},
   const totalPieces = isDirect ? 0 : cuttingVolume;
   const variance = totalPieces > 0 ? (totalPieces - issuePcs) : -issuePcs;
 
-  return { 
-    totalPieces, 
-    totalStoreStock, 
-    issuePcs, 
-    variance, 
-    stockBreakdown, 
+  return {
+    totalPieces,
+    totalStoreStock,
+    issuePcs,
+    variance,
+    stockBreakdown,
     cuttingVolume,
     isDirect
   };
@@ -263,7 +263,7 @@ const playFeedbackSound = (type = 'success') => {
 };
 
 // Searchable Material Dropdown Component with dedicated search bar
-function SearchableMaterialDropdown({
+export function SearchableMaterialDropdown({
   materials = [],
   value,
   onChange,
@@ -284,8 +284,8 @@ function SearchableMaterialDropdown({
   const selectedMaterial = useMemo(() => {
     if (!value) return null;
     const vStr = String(value).trim().toLowerCase();
-    return materials.find(m => 
-      String(m.id).trim().toLowerCase() === vStr || 
+    return materials.find(m =>
+      String(m.id).trim().toLowerCase() === vStr ||
       String(m.itemCode || '').trim().toLowerCase() === vStr ||
       String(m.stCode || '').trim().toLowerCase() === vStr
     );
@@ -759,13 +759,13 @@ function SearchableMaterialDropdown({
                       background: isHighlighted
                         ? '#ffedd5'
                         : isSelected
-                        ? 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)'
-                        : '#ffffff',
+                          ? 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)'
+                          : '#ffffff',
                       border: isHighlighted
                         ? '1px solid #ea580c'
                         : isSelected
-                        ? '1px solid #fed7aa'
-                        : '1px solid transparent',
+                          ? '1px solid #fed7aa'
+                          : '1px solid transparent',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
@@ -1236,10 +1236,10 @@ export default function WithoutBomMaterialIssueView({
     const cleanLower = cleanLot.toLowerCase();
 
     // 1. INSTANT (0ms) In-Memory Lookup from cuttingHeaders & designs
-    const headerMatch = (cuttingHeaders || []).find(ch => 
+    const headerMatch = (cuttingHeaders || []).find(ch =>
       String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
     );
-    const designMatch = (designs || []).find(d => 
+    const designMatch = (designs || []).find(d =>
       String(d.id || '').trim().toLowerCase() === cleanLower ||
       String(d.lotNumber || '').trim().toLowerCase() === cleanLower
     );
@@ -1297,8 +1297,8 @@ export default function WithoutBomMaterialIssueView({
         matrixCacheRef.current[cleanLower] = data;
         const matrixRows = data?.rows || [];
         const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
-        const resolvedTotal = matrixTotal > 0 
-          ? matrixTotal 
+        const resolvedTotal = matrixTotal > 0
+          ? matrixTotal
           : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
 
         const styleVal = data?.style || data?.header?.Style || '';
@@ -1438,7 +1438,7 @@ export default function WithoutBomMaterialIssueView({
     const mId = m.materialId || m.id;
     const mName = m.name || m.materialName || m.bomItemName;
     if (mId || mName) {
-      const match = (materials || []).find(mat => 
+      const match = (materials || []).find(mat =>
         (mId && String(mat.id) === String(mId)) ||
         (mName && String(mat.name).trim().toLowerCase() === String(mName).trim().toLowerCase()) ||
         (m.itemCode && String(mat.itemCode || '').trim().toLowerCase() === String(m.itemCode).trim().toLowerCase())
@@ -1465,7 +1465,7 @@ export default function WithoutBomMaterialIssueView({
     const mId = m.materialId || m.id;
     const mName = m.name || m.materialName;
     if (mId || mName) {
-      const match = (materials || []).find(mat => 
+      const match = (materials || []).find(mat =>
         (mId && String(mat.id) === String(mId)) ||
         (mName && String(mat.name).trim().toLowerCase() === String(mName).trim().toLowerCase()) ||
         (m.itemCode && String(mat.itemCode || '').trim().toLowerCase() === String(m.itemCode).trim().toLowerCase())
@@ -1490,7 +1490,7 @@ export default function WithoutBomMaterialIssueView({
     const mCat = (m.bomItemName || m.componentType || m.category || '').trim().toLowerCase();
 
     if (mId || mName || code) {
-      let match = (materials || []).find(mat => 
+      let match = (materials || []).find(mat =>
         (mId && String(mat.id) === String(mId)) ||
         (code && String(mat.itemCode || '').trim().toLowerCase() === String(code).trim().toLowerCase())
       );
@@ -1504,7 +1504,7 @@ export default function WithoutBomMaterialIssueView({
       }
 
       if (!match && mName) {
-        match = (materials || []).find(mat => 
+        match = (materials || []).find(mat =>
           String(mat.name || '').trim().toLowerCase() === String(mName).trim().toLowerCase()
         );
       }
@@ -1646,9 +1646,9 @@ export default function WithoutBomMaterialIssueView({
     (issueLogs || []).forEach(log => {
       const idStr = String(log.id || '').toUpperCase();
       if (
-        idStr.startsWith('BILL-MI-') || 
-        idStr.startsWith('CH-MI-') || 
-        idStr.startsWith('WO-MI-') || 
+        idStr.startsWith('BILL-MI-') ||
+        idStr.startsWith('CH-MI-') ||
+        idStr.startsWith('WO-MI-') ||
         idStr.startsWith('MI-WO-') ||
         idStr.startsWith('BILL-')
       ) {
@@ -1699,7 +1699,7 @@ export default function WithoutBomMaterialIssueView({
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     return logs.filter(l => {
       const vid = String(l.id || '').toUpperCase();
@@ -1866,10 +1866,10 @@ export default function WithoutBomMaterialIssueView({
   }, [rawWithoutBomLogs, historyDateFrom, historyDateTo, historyCategories, historyPersons, historySearch, materials]);
 
   // Total active filter criteria count
-  const activeFiltersCount = (historyDateFrom ? 1 : 0) + 
-    (historyDateTo ? 1 : 0) + 
-    (historyCategories.length > 0 ? historyCategories.length : 0) + 
-    (historyPersons.length > 0 ? historyPersons.length : 0) + 
+  const activeFiltersCount = (historyDateFrom ? 1 : 0) +
+    (historyDateTo ? 1 : 0) +
+    (historyCategories.length > 0 ? historyCategories.length : 0) +
+    (historyPersons.length > 0 ? historyPersons.length : 0) +
     (historySearch ? 1 : 0);
 
   // Base default accessory component types
@@ -1896,7 +1896,7 @@ export default function WithoutBomMaterialIssueView({
   useEffect(() => {
     try {
       localStorage.setItem('without_bom_custom_component_types', JSON.stringify(customComponentTypes));
-    } catch (e) {}
+    } catch (e) { }
   }, [customComponentTypes]);
 
   // Helper to add a custom component type into list
@@ -1913,7 +1913,7 @@ export default function WithoutBomMaterialIssueView({
         const updated = [...prev, clean];
         try {
           localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       });
     }
@@ -1926,7 +1926,7 @@ export default function WithoutBomMaterialIssueView({
       const updated = prev.filter(t => t.toUpperCase() !== String(typeToRemove).toUpperCase());
       try {
         localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       return updated;
     });
   };
@@ -2108,7 +2108,7 @@ export default function WithoutBomMaterialIssueView({
     const query = barcodeInput.trim().toLowerCase();
     if (!query) return;
 
-    const matched = (materials || []).find(m => 
+    const matched = (materials || []).find(m =>
       String(m.id || '').toLowerCase() === query ||
       String(m.barcode || '').toLowerCase() === query ||
       String(m.itemCode || '').toLowerCase() === query ||
@@ -2771,7 +2771,7 @@ export default function WithoutBomMaterialIssueView({
   // Helper to build issueData from a history log
   const buildIssueDataFromLog = (log) => {
     const cleanLot = String(log.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
-    const resolvedCutting = (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+    const resolvedCutting = (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
       (log.volume > 1 ? Number(log.volume) : 0);
     const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
     const defaultQty = resolvedCutting + onePct;
@@ -2820,8 +2820,8 @@ export default function WithoutBomMaterialIssueView({
     const remarksHtml = issueData.remarks ? `<div class="remarks"><strong>Remarks / Allocation Notes:</strong> ${issueData.remarks}</div>` : '';
 
     const cleanLot = String(issueData.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
-    const resolvedCutting = Number(issueData.cuttingPieces) || 
-      (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+    const resolvedCutting = Number(issueData.cuttingPieces) ||
+      (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
       (activeLotCutting && String(activeLotCutting.lotNumber).trim().toLowerCase() === cleanLot ? Number(activeLotCutting.totalPieces) : 0) ||
       (Number(issueData.pieces) > 1 ? Number(issueData.pieces) : 0);
 
@@ -2885,12 +2885,12 @@ export default function WithoutBomMaterialIssueView({
           </thead>
           <tbody>
             ${items.map((item, idx) => {
-              const code = getItemCodeDisplay(item, materials) ||
-                (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '') ||
-                '-';
-              const qty = Number(item.totalQty);
-              const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
-              return `
+      const code = getItemCodeDisplay(item, materials) ||
+        (item.itemCode && !item.itemCode.toUpperCase().startsWith('ITM-') ? item.itemCode : '') ||
+        '-';
+      const qty = Number(item.totalQty);
+      const isItemExtra = resolvedCutting > 0 && (qty >= totalAllowedWith1Pct || qty > resolvedCutting);
+      return `
                 <tr>
                   <td style="text-align: center; font-weight: bold;">${idx + 1}</td>
                   <td><strong>${item.componentType || 'Accessory'}</strong></td>
@@ -2903,7 +2903,7 @@ export default function WithoutBomMaterialIssueView({
                   </td>
                 </tr>
               `;
-            }).join('')}
+    }).join('')}
           </tbody>
         </table>
 
@@ -3226,7 +3226,7 @@ export default function WithoutBomMaterialIssueView({
       // Clean up previous print iframe if existing
       const oldFrame = document.getElementById('without-bom-print-iframe');
       if (oldFrame) {
-        try { document.body.removeChild(oldFrame); } catch (e) {}
+        try { document.body.removeChild(oldFrame); } catch (e) { }
       }
 
       // Create invisible iframe to trigger native browser print window without popup blocking
@@ -3576,7 +3576,7 @@ export default function WithoutBomMaterialIssueView({
       const rawBrand = (log.brand || log.brandName || '').trim();
       const rawLot = String(log.lotId || '').trim();
       const isDirect = !rawLot || rawLot === 'DIRECT-ITEM' || rawLot.toLowerCase().includes('direct');
-      
+
       const effectiveLot = isDirect ? 'DIRECT REQUISITION' : `LOT #${rawLot}`;
       const { totalPieces: logVol } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
       grandTotalPieces += logVol;
@@ -4277,7 +4277,7 @@ export default function WithoutBomMaterialIssueView({
 
   return (
     <div className="without-bom-container animate-fade" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      
+
       {/* ── TOP HERO HEADER & SUB-TABS ── */}
       <div className="panel" style={{
         padding: '16px 20px',
@@ -4686,8 +4686,8 @@ export default function WithoutBomMaterialIssueView({
                 marginTop: '16px',
                 padding: '14px 18px',
                 borderRadius: '10px',
-                background: activeLotCutting?.hasDetails 
-                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+                background: activeLotCutting?.hasDetails
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)'
                   : '#f8fafc',
                 border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
                 boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
@@ -4962,7 +4962,7 @@ export default function WithoutBomMaterialIssueView({
 
           {/* 2. Materials Allocation Grid */}
           <div className="panel" style={{ padding: '18px 22px', borderRadius: '12px', background: '#ffffff', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
-            
+
             {/* Grid Header & Quick Barcode Scanner */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
               <div>
@@ -5304,8 +5304,8 @@ export default function WithoutBomMaterialIssueView({
                               }}
                             >
                               {componentTypeOptions.map(opt => (
-                                <option 
-                                  key={opt.value} 
+                                <option
+                                  key={opt.value}
                                   value={opt.value}
                                   style={{
                                     fontWeight: opt.value.startsWith('__') ? '600' : '700',
@@ -6027,7 +6027,7 @@ export default function WithoutBomMaterialIssueView({
           }}>
             {/* ROW 1: Date Filter + Person Filter + Reset Button */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-              
+
               {/* Date Filter */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e293b', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
@@ -6149,8 +6149,8 @@ export default function WithoutBomMaterialIssueView({
                       {historyPersons.length === 0
                         ? `All Persons (${availablePeople.total})`
                         : historyPersons.length === 1
-                        ? formatPersonKey(historyPersons[0])
-                        : `${formatPersonKey(historyPersons[0])} +${historyPersons.length - 1} more`}
+                          ? formatPersonKey(historyPersons[0])
+                          : `${formatPersonKey(historyPersons[0])} +${historyPersons.length - 1} more`}
                     </span>
                     {historyPersons.length > 0 && (
                       <span style={{
@@ -6481,11 +6481,11 @@ export default function WithoutBomMaterialIssueView({
                 >
                   <Tag size={12} style={{ color: historyCategories.length > 0 ? '#2563eb' : '#64748b' }} />
                   <span>
-                    {historyCategories.length === 0 
-                      ? `All Categories (${rawWithoutBomLogs.length})` 
-                      : historyCategories.length === 1 
-                      ? `${historyCategories[0]}` 
-                      : `${historyCategories.slice(0, 2).join(', ')}${historyCategories.length > 2 ? ` +${historyCategories.length - 2}` : ''}`}
+                    {historyCategories.length === 0
+                      ? `All Categories (${rawWithoutBomLogs.length})`
+                      : historyCategories.length === 1
+                        ? `${historyCategories[0]}`
+                        : `${historyCategories.slice(0, 2).join(', ')}${historyCategories.length > 2 ? ` +${historyCategories.length - 2}` : ''}`}
                   </span>
                   {historyCategories.length > 0 && (
                     <span style={{
@@ -6636,7 +6636,7 @@ export default function WithoutBomMaterialIssueView({
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
-                                  onChange={() => {}}
+                                  onChange={() => { }}
                                   style={{ cursor: 'pointer' }}
                                 />
                                 <span style={{ fontWeight: isChecked ? '800' : '600', color: isChecked ? '#1d4ed8' : '#0f172a' }}>
@@ -6819,8 +6819,8 @@ export default function WithoutBomMaterialIssueView({
                 {activeFiltersCount > 0 ? 'No Without-BOM challans match your selected filters.' : 'No Without-BOM issue slips found.'}
               </div>
               <p style={{ fontSize: '12px', margin: '4px 0 0 0' }}>
-                {activeFiltersCount > 0 
-                  ? 'Try broadening your dates, clearing category selection, or resetting filters.' 
+                {activeFiltersCount > 0
+                  ? 'Try broadening your dates, clearing category selection, or resetting filters.'
                   : 'Issue materials above to track them in this audit log.'}
               </p>
               {activeFiltersCount > 0 && (
@@ -7153,7 +7153,7 @@ export default function WithoutBomMaterialIssueView({
 
       {/* ── MODAL: BEAUTIFUL ON-SCREEN CHALLAN / BILL PREVIEW WITH PRINT & DOWNLOAD ── */}
       {previewModal && (
-        <div 
+        <div
           className="without-bom-modal-overlay"
           style={{
             position: 'fixed',
@@ -7213,7 +7213,7 @@ export default function WithoutBomMaterialIssueView({
 
             {/* Scrollable Challan Sheet View */}
             <div style={{ flex: '1', overflowY: 'auto', padding: '24px', background: '#f8fafc' }}>
-              
+
               {/* Printable Challan Box */}
               <div style={{
                 background: '#ffffff',
@@ -7397,7 +7397,7 @@ export default function WithoutBomMaterialIssueView({
                     boxShadow: '0 2px 8px rgba(234, 88, 12, 0.3)'
                   }}
                 >
-                  <Printer size={16} /> 
+                  <Printer size={16} />
                   <span>🖨️ Print Challan Now</span>
                 </button>
 
@@ -7423,7 +7423,7 @@ export default function WithoutBomMaterialIssueView({
                     gap: '6px'
                   }}
                 >
-                  <Download size={15} /> 
+                  <Download size={15} />
                   <span>Download PDF</span>
                 </button>
 
@@ -7672,8 +7672,8 @@ export default function WithoutBomMaterialIssueView({
         if (!printIssue) return null;
 
         const cleanLot = String(printIssue.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
-        const resolvedCutting = Number(printIssue.cuttingPieces) || 
-          (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) || 
+        const resolvedCutting = Number(printIssue.cuttingPieces) ||
+          (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
           (activeLotCutting && String(activeLotCutting.lotNumber).trim().toLowerCase() === cleanLot ? Number(activeLotCutting.totalPieces) : 0) ||
           (Number(printIssue.pieces) > 1 ? Number(printIssue.pieces) : 0);
         const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;

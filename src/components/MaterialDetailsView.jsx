@@ -250,11 +250,11 @@ const BarcodeVisual = ({ code }) => {
       <svg width="100%" height="55" viewBox={`0 0 ${totalWidth} 55`} preserveAspectRatio="xMidYMid meet">
         <g>{bars}</g>
       </svg>
-      <span style={{ 
-        fontSize: '12px', 
-        fontFamily: 'monospace', 
-        fontWeight: '900', 
-        marginTop: '6px', 
+      <span style={{
+        fontSize: '12px',
+        fontFamily: 'monospace',
+        fontWeight: '900',
+        marginTop: '6px',
         letterSpacing: '2px',
         color: '#000000'
       }}>
@@ -285,7 +285,7 @@ export default function MaterialDetailsView({
   const [rpp, setRpp] = useState(10);
   const [expandedMaterialId, setExpandedMaterialId] = useState(null);
   const [printQueue, setPrintQueue] = useState(null);
-  
+
   // Material Photo Management Modal State
   const [photoModalData, setPhotoModalData] = useState(null); // material object
   const [photoModalImage, setPhotoModalImage] = useState('');
@@ -650,7 +650,7 @@ export default function MaterialDetailsView({
       if (!active) return;
       console.log("Connecting to Fabric Print Service WebSocket...");
       setPrintServiceStatus('connecting');
-      
+
       socket = new WebSocket('ws://localhost:8765');
       wsRef.current = socket;
 
@@ -792,21 +792,21 @@ export default function MaterialDetailsView({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedMaterial)
       })
-      .then(r => {
-        if (r.ok) handleSuccess();
-        else handleError();
-      })
-      .catch(() => handleError());
+        .then(r => {
+          if (r.ok) handleSuccess();
+          else handleError();
+        })
+        .catch(() => handleError());
     }
   };
 
   const getPacketLocationForMaterial = (m, packetNo) => {
     const mode = materialLocationModes[m.id] || 'same';
     const groups = materialLocationGroups[m.id] || [];
-    const baseLoc = (m.location && m.location !== 'Default') 
-      ? m.location 
-      : ((m.storeLocation && m.storeLocation !== 'Default') 
-        ? m.storeLocation 
+    const baseLoc = (m.location && m.location !== 'Default')
+      ? m.location
+      : ((m.storeLocation && m.storeLocation !== 'Default')
+        ? m.storeLocation
         : ((m.color && m.color !== 'Default') ? m.color : 'Main Store'));
 
     if (mode === 'same' || groups.length === 0) {
@@ -1206,7 +1206,7 @@ export default function MaterialDetailsView({
     const finalItemCode = itemCode.trim() || (matchedExistingMaterial ? (matchedExistingMaterial.itemCode || matchedExistingMaterial.stCode) : undefined);
     const numPackets = Math.max(1, parseInt(packetsToPrint, 10) || 1);
     const generatedBarcodes = Array.from(
-      { length: numPackets }, 
+      { length: numPackets },
       () => materialId
     );
 
@@ -1783,9 +1783,9 @@ export default function MaterialDetailsView({
             {/* Print Service Status */}
             <button
               onClick={() => connectRef.current && connectRef.current()}
-              style={{ 
-                fontSize: '11px', 
-                fontWeight: '600', 
+              style={{
+                fontSize: '11px',
+                fontWeight: '600',
                 color: printServiceStatus === 'connected' ? 'var(--success)' : printServiceStatus === 'connecting' ? 'var(--warning)' : 'var(--text-light)',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1798,17 +1798,17 @@ export default function MaterialDetailsView({
               }}
               title="Click to reconnect print service"
             >
-              <span style={{ 
-                width: '6px', 
-                height: '6px', 
-                borderRadius: '50%', 
+              <span style={{
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
                 backgroundColor: printServiceStatus === 'connected' ? 'var(--success)' : printServiceStatus === 'connecting' ? 'var(--warning)' : 'var(--text-light)',
                 display: 'inline-block'
               }} />
-              {printServiceStatus === 'connected' 
-                ? `Print Connected (${printerName || 'USB Printer'})` 
-                : printServiceStatus === 'connecting' 
-                  ? 'Connecting...' 
+              {printServiceStatus === 'connected'
+                ? `Print Connected (${printerName || 'USB Printer'})`
+                : printServiceStatus === 'connecting'
+                  ? 'Connecting...'
                   : 'Print Offline'
               }
             </button>
@@ -2045,7 +2045,7 @@ export default function MaterialDetailsView({
                   return (
                     <React.Fragment key={m.id}>
                       <tr style={{ transition: 'background-color 0.15s ease' }}>
-                        <td 
+                        <td
                           style={{ fontWeight: 'bold', cursor: 'pointer' }}
                           onClick={() => setExpandedMaterialId(expandedMaterialId === m.id ? null : m.id)}
                           title="Click to view/print item barcodes"
@@ -2179,7 +2179,7 @@ export default function MaterialDetailsView({
                             {m.category || 'Accessory'}
                           </span>
                         </td>
-                        <td 
+                        <td
                           style={{
                             maxWidth: '130px',
                             whiteSpace: 'nowrap',
@@ -2187,7 +2187,7 @@ export default function MaterialDetailsView({
                             textOverflow: 'ellipsis',
                             fontSize: '12px',
                             fontWeight: '500'
-                          }} 
+                          }}
                           title={m.color || 'Default'}
                         >
                           {m.color || 'Default'}
@@ -2302,11 +2302,11 @@ export default function MaterialDetailsView({
                       {expandedMaterialId === m.id && (
                         <tr>
                           <td colSpan="10" style={{ padding: '16px', backgroundColor: 'var(--bg-primary)' }}>
-                            <div style={{ 
-                              backgroundColor: 'var(--bg-secondary)', 
-                              border: '1px solid var(--border-color)', 
-                              borderRadius: 'var(--border-radius-sm)', 
-                              padding: '16px' 
+                            <div style={{
+                              backgroundColor: 'var(--bg-secondary)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: 'var(--border-radius-sm)',
+                              padding: '16px'
                             }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
                                 <div>
@@ -2410,9 +2410,9 @@ export default function MaterialDetailsView({
                                           }}
                                         >
                                           {saveStatus[m.id] === 'saving' ? '⏳ Saving...' :
-                                           saveStatus[m.id] === 'saved' ? '✓ Saved!' :
-                                           saveStatus[m.id] === 'error' ? '❌ Error!' :
-                                           '💾 Save Setup'}
+                                            saveStatus[m.id] === 'saved' ? '✓ Saved!' :
+                                              saveStatus[m.id] === 'error' ? '❌ Error!' :
+                                                '💾 Save Setup'}
                                         </button>
                                       </div>
                                     ) : (
@@ -2495,9 +2495,9 @@ export default function MaterialDetailsView({
                                               }}
                                             >
                                               {saveStatus[m.id] === 'saving' ? '⏳ Saving...' :
-                                               saveStatus[m.id] === 'saved' ? '✓ Saved!' :
-                                               saveStatus[m.id] === 'error' ? '❌ Error!' :
-                                               '💾 Save Location Setup'}
+                                                saveStatus[m.id] === 'saved' ? '✓ Saved!' :
+                                                  saveStatus[m.id] === 'error' ? '❌ Error!' :
+                                                    '💾 Save Location Setup'}
                                             </button>
                                           </div>
 
@@ -2516,7 +2516,7 @@ export default function MaterialDetailsView({
                                     )}
                                   </div>
                                 </div>
-                                <button 
+                                <button
                                   className="btn btn-secondary btn-sm"
                                   onClick={() => handlePrintBarcodes(barcodes, m)}
                                   disabled={barcodes.length === 0}
@@ -2532,23 +2532,23 @@ export default function MaterialDetailsView({
                                   No items registered (Stock level is 0).
                                 </div>
                               ) : (
-                                <div style={{ 
-                                  display: 'grid', 
-                                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', 
+                                <div style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
                                   gap: '14px',
                                   maxHeight: '360px',
                                   overflowY: 'auto',
                                   padding: '4px 6px 4px 2px'
                                 }}>
                                   {barcodes.map((code, idx) => (
-                                    <div 
-                                      key={`${m.id}-pkt-${idx + 1}`} 
-                                      style={{ 
-                                        display: 'flex', 
-                                        flexDirection: 'column', 
-                                        backgroundColor: 'var(--bg-primary)', 
-                                        padding: '12px', 
-                                        borderRadius: '8px', 
+                                    <div
+                                      key={`${m.id}-pkt-${idx + 1}`}
+                                      style={{
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        backgroundColor: 'var(--bg-primary)',
+                                        padding: '12px',
+                                        borderRadius: '8px',
                                         border: '1.5px solid var(--border-color)',
                                         boxShadow: 'var(--shadow-sm)',
                                         gap: '8px',
@@ -2615,8 +2615,8 @@ export default function MaterialDetailsView({
 
                                       <BarcodeVisual code={m.id} />
 
-                                      <button 
-                                        className="btn btn-secondary btn-sm" 
+                                      <button
+                                        className="btn btn-secondary btn-sm"
                                         style={{ marginTop: '2px', width: '100%', fontSize: '11px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}
                                         onClick={() => handlePrintBarcodes([m.id], m)}
                                       >
@@ -2672,13 +2672,13 @@ export default function MaterialDetailsView({
               const pktQtyText = `${pktQty} ${m.unit || 'Pcs'}`;
 
               return (
-                <div 
-                  key={`${m.id || 'mat'}-print-${idx + 1}`} 
-                  style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column', 
-                    padding: '8px', 
-                    border: '1.5px solid #000000', 
+                <div
+                  key={`${m.id || 'mat'}-print-${idx + 1}`}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    padding: '8px',
+                    border: '1.5px solid #000000',
                     borderRadius: '4px',
                     pageBreakInside: 'avoid',
                     backgroundColor: '#ffffff',
@@ -2807,16 +2807,16 @@ export default function MaterialDetailsView({
               {confirmModal.message}
             </p>
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button 
+              <button
                 type="button"
-                className="btn btn-secondary" 
+                className="btn btn-secondary"
                 onClick={() => setConfirmModal(null)}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 type="button"
-                className="btn btn-primary" 
+                className="btn btn-primary"
                 onClick={() => {
                   confirmModal.onConfirm();
                   setConfirmModal(null);
@@ -3158,7 +3158,7 @@ export default function MaterialDetailsView({
                               {pkt.status}
                             </span>
                           </div>
-                          
+
                           <div style={{ fontSize: '13px', fontWeight: '800', color: 'var(--text-main)', marginBottom: '6px' }}>
                             {traceModalData.material.name}
                           </div>
@@ -3197,7 +3197,7 @@ export default function MaterialDetailsView({
                           </div>
 
                           <BarcodeVisual code={pkt.barcode} />
-                          
+
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => handlePrintSinglePacket(traceModalData.material, pkt)}

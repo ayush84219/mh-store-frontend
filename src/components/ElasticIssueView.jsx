@@ -5,12 +5,13 @@ import {
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
   ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale,
-  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2, Clock
+  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2, Clock, Scan
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import SmartSelectWithManual from './SmartSelectWithManual';
+import { SearchableMaterialDropdown } from './WithoutBomMaterialIssueView';
 
 // ── Accessory Unit Normalizer: Mtr, Roll, Pcs, Box, Pkt, Cone, Kg, etc. ──
 export const normalizeAccUnit = (rawUnit) => {
@@ -80,7 +81,7 @@ function SearchableMaterialSelect({
   placeholder = "-- Select Material --",
   themeColor = '#7c3aed',
   componentHint = '',
-  onPreviewPhoto = () => {},
+  onPreviewPhoto = () => { },
   compact = false,
   showCategoryFilter = true
 }) {
@@ -1052,7 +1053,7 @@ export default function ElasticIssueView({
     try {
       localStorage.setItem('elastic_custom_component_types', JSON.stringify(customOtherComponentTypes));
       localStorage.setItem('without_bom_custom_component_types', JSON.stringify(customOtherComponentTypes));
-    } catch (e) {}
+    } catch (e) { }
   }, [customOtherComponentTypes]);
 
   // Helper to add custom component type
@@ -1070,7 +1071,7 @@ export default function ElasticIssueView({
         try {
           localStorage.setItem('elastic_custom_component_types', JSON.stringify(updated));
           localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       });
     }
@@ -1084,7 +1085,7 @@ export default function ElasticIssueView({
       try {
         localStorage.setItem('elastic_custom_component_types', JSON.stringify(updated));
         localStorage.setItem('without_bom_custom_component_types', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       return updated;
     });
   };
@@ -1113,6 +1114,185 @@ export default function ElasticIssueView({
     }
     return opts;
   }, [allOtherComponentTypes, customOtherComponentTypes]);
+
+  // ── Multi-Row Other Accessories Allocation State ──
+  const [otherItems, setOtherItems] = useState([
+    {
+      id: 1,
+      componentType: 'DORI',
+      customComponentType: '',
+      isCustomType: false,
+      entryMode: 'choose', // 'choose' | 'manual'
+      materialId: '',
+      materialName: '',
+      itemCode: '',
+      color: '',
+      unit: 'Mtr',
+      availableStock: 0,
+      location: '',
+      calcMode: 'direct',
+      totalQty: 1
+    }
+  ]);
+  const [otherBarcodeInput, setOtherBarcodeInput] = useState('');
+  const otherBarcodeInputRef = useRef(null);
+
+  // Commit custom component type entered directly in row input
+  const commitOtherCustomType = (rowId, rawVal) => {
+    const clean = String(rawVal || '').trim().toUpperCase();
+    if (!clean) {
+      setOtherItems(prev => prev.map(item => {
+        if (item.id !== rowId) return item;
+        return {
+          ...item,
+          isCustomType: false,
+          customComponentType: '',
+          componentType: item.componentType && item.componentType !== '__custom__' ? item.componentType : (allOtherComponentTypes[0] || 'DORI')
+        };
+      }));
+      return;
+    }
+    addCustomOtherComponentType(clean);
+    setOtherItems(prev => prev.map(item => {
+      if (item.id !== rowId) return item;
+      return {
+        ...item,
+        isCustomType: false,
+        customComponentType: clean,
+        componentType: clean,
+        unit: (clean === 'DORI' || clean === 'ELASTIC' || clean === 'TAPE' || clean === 'LACE') ? (item.unit || 'Mtr') : (item.unit || 'Pcs')
+      };
+    }));
+  };
+
+  // Add Item Row
+  const handleAddOtherItemRow = (compType = 'DORI', defaultMatId = '', entryMode = 'choose') => {
+    const mat = defaultMatId ? (materials || []).find(m => String(m.id) === String(defaultMatId)) : null;
+    let defUnit = (compType === 'DORI' || compType === 'ELASTIC' || compType === 'TAPE' || compType === 'LACE') ? 'Mtr' : 'Pcs';
+    setOtherItems(prev => [
+      ...prev,
+      {
+        id: Date.now() + Math.random(),
+        componentType: compType,
+        customComponentType: '',
+        isCustomType: false,
+        entryMode: entryMode,
+        materialId: mat ? mat.id : '',
+        materialName: mat ? mat.name : (entryMode === 'manual' ? `${compType} Item` : ''),
+        itemCode: mat ? (formatItemCode(mat, null, materials) || mat.itemCode || '') : '',
+        imageUrl: mat ? (mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '') : '',
+        color: mat ? (mat.color || mat.shade || '') : '',
+        unit: mat ? (mat.unit || defUnit) : defUnit,
+        availableStock: mat ? (Number(mat.stock) || 0) : 0,
+        location: mat ? (mat.location || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
+        calcMode: 'direct',
+        totalQty: 1
+      }
+    ]);
+  };
+
+  // Remove Item Row (preserves at least one clean row)
+  const handleRemoveOtherItemRow = (rowId) => {
+    if (otherItems.length <= 1) {
+      setOtherItems([{
+        id: Date.now(),
+        componentType: allOtherComponentTypes[0] || 'DORI',
+        customComponentType: '',
+        isCustomType: false,
+        entryMode: 'choose',
+        materialId: '',
+        materialName: '',
+        itemCode: '',
+        color: '',
+        unit: 'Mtr',
+        availableStock: 0,
+        location: '',
+        calcMode: 'direct',
+        totalQty: 1
+      }]);
+      return;
+    }
+    setOtherItems(prev => prev.filter(item => item.id !== rowId));
+  };
+
+  // Update Item Row Field
+  const handleUpdateOtherItem = (rowId, field, value) => {
+    setOtherItems(prev => prev.map(item => {
+      if (item.id !== rowId) return item;
+      return { ...item, [field]: value };
+    }));
+  };
+
+  // Handle Material Selection for Row
+  const handleSelectOtherRowMaterial = (rowId, materialId) => {
+    const mat = (materials || []).find(m => String(m.id) === String(materialId));
+    setOtherItems(prev => prev.map(item => {
+      if (item.id !== rowId) return item;
+      if (!mat) {
+        return {
+          ...item,
+          materialId: '',
+          materialName: '',
+          itemCode: '',
+          imageUrl: '',
+          color: '',
+          unit: 'Mtr',
+          availableStock: 0,
+          location: ''
+        };
+      }
+      const rackStock = Number(mat.stock) || 0;
+      return {
+        ...item,
+        materialId: mat.id,
+        materialName: mat.name,
+        itemCode: formatItemCode(mat, null, materials) || mat.itemCode || '',
+        imageUrl: mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '',
+        color: mat.color || mat.shade || '',
+        unit: mat.unit || 'Mtr',
+        availableStock: rackStock,
+        totalQty: item.totalQty > 0 ? item.totalQty : 1,
+        location: mat.location || 'Main Store'
+      };
+    }));
+  };
+
+  // Barcode / Fast Code Search Scanner
+  const handleOtherBarcodeSubmit = (e) => {
+    if (e) e.preventDefault();
+    const query = String(otherBarcodeInput || '').trim().toLowerCase();
+    if (!query) return;
+    const match = (materials || []).find(m =>
+      String(m.id || '').toLowerCase() === query ||
+      String(m.itemCode || '').toLowerCase() === query ||
+      String(m.stCode || '').toLowerCase() === query ||
+      String(m.barcode || '').toLowerCase() === query ||
+      String(m.name || '').toLowerCase().includes(query)
+    );
+    if (!match) {
+      showToast(`No material found matching: "${otherBarcodeInput}"`, 'error');
+      return;
+    }
+    const emptyRow = otherItems.find(r => !r.materialId && r.entryMode !== 'manual');
+    if (emptyRow) {
+      handleSelectOtherRowMaterial(emptyRow.id, match.id);
+    } else {
+      handleAddOtherItemRow(match.category ? match.category.toUpperCase() : 'DORI', match.id, 'choose');
+    }
+    setOtherBarcodeInput('');
+    showToast(`Added ${match.name} (${formatItemCode(match, null, materials)})`, 'success');
+  };
+
+  // Synchronize first item with legacy state
+  useEffect(() => {
+    if (materialMode === 'other' && otherItems.length > 0) {
+      const first = otherItems[0];
+      setOtherMaterialName(first.materialName || first.componentType || 'Other Accessory');
+      setOtherRollCount(otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0) || 1);
+      setOtherUnit(first.unit || 'Mtr');
+      setSelectedOtherMaterialId(first.materialId || '');
+    }
+  }, [otherItems, materialMode]);
 
   // Helper to get normalized select dropdown value
   const getSelectedCategoryValue = () => {
@@ -1334,7 +1514,7 @@ export default function ElasticIssueView({
       setCustomOtherNames(updated);
       try {
         localStorage.setItem('gpdms_custom_other_names', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
     }
     showToast(`Saved "${trimmed}" to quick names.`);
   };
@@ -1345,7 +1525,7 @@ export default function ElasticIssueView({
     setCustomOtherNames(updated);
     try {
       localStorage.setItem('gpdms_custom_other_names', JSON.stringify(updated));
-    } catch (err) {}
+    } catch (err) { }
   };
 
   // Auto-link first suitable other material on initial load if not selected
@@ -1742,10 +1922,10 @@ export default function ElasticIssueView({
     const cleanLower = cleanLot.toLowerCase();
 
     // 1. INSTANT (0ms) In-Memory Lookup from cuttingHeaders & designs
-    const headerMatch = (cuttingHeaders || []).find(ch => 
+    const headerMatch = (cuttingHeaders || []).find(ch =>
       String(ch.Lot_Number || '').trim().toLowerCase() === cleanLower
     );
-    const designMatch = (designs || []).find(d => 
+    const designMatch = (designs || []).find(d =>
       String(d.id || '').trim().toLowerCase() === cleanLower ||
       String(d.lotNumber || '').trim().toLowerCase() === cleanLower
     );
@@ -1808,8 +1988,8 @@ export default function ElasticIssueView({
         matrixCacheRef.current[cleanLower] = data;
         const matrixRows = data?.rows || [];
         const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
-        const resolvedTotal = matrixTotal > 0 
-          ? matrixTotal 
+        const resolvedTotal = matrixTotal > 0
+          ? matrixTotal
           : (memoryTotal > 0 ? memoryTotal : (Number(data?.cuttingQty) || Number(data?.header?.Cutting_Qty) || 0));
 
         const styleVal = data?.style || data?.header?.Style || '';
@@ -1941,22 +2121,47 @@ export default function ElasticIssueView({
         }
       }
 
-      // Other Accessories item deduction
+      // Other Accessories item deduction (Multi-Row Support)
       if (mode === 'other') {
-        const matId = record.selectedOtherMaterialId || selectedOtherMaterialId;
-        if (matId) {
-          const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
-          const qty = parseFloat(record.otherRollCount) || parseFloat(record.rolls) || 1;
-          itemsToDeduct.push({
-            materialId: mat ? mat.id : matId,
-            materialName: mat ? mat.name : (record.otherMaterialName || 'Other Accessory'),
-            itemCode: formatItemCode(matId, mat, materials),
-            bomItemName: record.otherMaterialName || 'Other Accessory',
-            unit: mat?.unit || record.otherUnit || 'Roll',
-            totalRequired: qty,
-            location: mat?.location || 'Main Store',
-            stockBefore: mat ? (Number(mat.stock) || 0) : 0
+        const rawItems = Array.isArray(record.otherItems) && record.otherItems.length > 0
+          ? record.otherItems
+          : otherItems;
+        if (Array.isArray(rawItems) && rawItems.length > 0) {
+          rawItems.forEach(item => {
+            const matId = item.materialId;
+            if (matId && item.entryMode !== 'manual') {
+              const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+              const qty = parseFloat(item.totalQty || item.qty) || 1;
+              itemsToDeduct.push({
+                materialId: mat ? mat.id : matId,
+                materialName: mat ? mat.name : (item.materialName || item.componentType || 'Other Accessory'),
+                itemCode: formatItemCode(matId, mat, materials),
+                bomItemName: item.componentType || item.materialName || 'Other Accessory',
+                unit: mat?.unit || item.unit || 'Mtr',
+                totalRequired: qty,
+                location: mat?.location || 'Main Store',
+                stockBefore: mat ? (Number(mat.stock) || 0) : 0
+              });
+            }
           });
+        }
+        // Fallback if no array items matched:
+        if (itemsToDeduct.length === 0) {
+          const matId = record.selectedOtherMaterialId || selectedOtherMaterialId;
+          if (matId) {
+            const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
+            const qty = parseFloat(record.otherRollCount) || parseFloat(record.rolls) || 1;
+            itemsToDeduct.push({
+              materialId: mat ? mat.id : matId,
+              materialName: mat ? mat.name : (record.otherMaterialName || 'Other Accessory'),
+              itemCode: formatItemCode(matId, mat, materials),
+              bomItemName: record.otherMaterialName || 'Other Accessory',
+              unit: mat?.unit || record.otherUnit || 'Roll',
+              totalRequired: qty,
+              location: mat?.location || 'Main Store',
+              stockBefore: mat ? (Number(mat.stock) || 0) : 0
+            });
+          }
         }
       }
 
@@ -1971,7 +2176,7 @@ export default function ElasticIssueView({
           const updatedMat = { ...m, stock: newStock };
           changedMaterials.push(updatedMat);
           if (typeof onUpdateMaterial === 'function') {
-            try { onUpdateMaterial(updatedMat); } catch (_) {}
+            try { onUpdateMaterial(updatedMat); } catch (_) { }
           }
           return updatedMat;
         }
@@ -1982,7 +2187,7 @@ export default function ElasticIssueView({
       setMaterials(updatedMaterials);
 
       if (typeof syncMaterialsToDb === 'function' && changedMaterials.length > 0) {
-        try { syncMaterialsToDb(changedMaterials); } catch (_) {}
+        try { syncMaterialsToDb(changedMaterials); } catch (_) { }
       }
 
       // Send PUT requests to MySQL
@@ -2006,7 +2211,7 @@ export default function ElasticIssueView({
           deductedItems: itemsToDeduct
         };
         localStorage.setItem('gpdms_real_material_issued_bills', JSON.stringify(realMap));
-      } catch (_) {}
+      } catch (_) { }
 
       const recordWithDeduction = {
         ...record,
@@ -2083,46 +2288,46 @@ export default function ElasticIssueView({
             date: record.date,
             materials: itemsToDeduct.length > 0
               ? itemsToDeduct.map(i => ({
-                  name: i.materialName,
-                  materialId: i.materialId,
-                  bomItemName: i.bomItemName,
-                  qty: i.totalRequired,
-                  unit: i.unit,
-                  billNo: record.slipNo,
-                  location: i.location,
-                  remainingStock: i.stockAfter
-                }))
+                name: i.materialName,
+                materialId: i.materialId,
+                bomItemName: i.bomItemName,
+                qty: i.totalRequired,
+                unit: i.unit,
+                billNo: record.slipNo,
+                location: i.location,
+                remainingStock: i.stockAfter
+              }))
               : [
-                  (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') ? {
-                    name: record.elasticMaterialName || elasticMaterialName || 'Elastic Waistband Roll',
-                    materialId: record.selectedElasticMaterialId || selectedElasticMaterialId || '',
-                    rolls: record.rolls,
-                    shade: record.shade,
-                    width: record.width,
-                    elasticPerPcMtr: calcResult.elasticPerPcMtr,
-                    totalElasticMtr: calcResult.totalElasticMtr
-                  } : null,
-                  (materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') ? {
-                    name: record.tapeMaterialName || tapeMaterialName || 'Tape Roll',
-                    materialId: record.selectedTapeMaterialId || selectedTapeMaterialId || '',
-                    rolls: record.tapeRollCount || 1,
-                    width: record.tapeWidth,
-                    tapePerPcMtr: calcResult.tapePerPcMtr,
-                    totalTapeMtr: calcResult.totalTapeMtr
-                  } : null,
-                  (materialMode === 'bone' || materialMode === 'all') ? {
-                    name: record.boneMaterialName || boneMaterialName || 'Bone Pocketing Roll',
-                    materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
-                    rolls: record.boneRolls || boneRollCount || 1,
-                    width: record.boneWidth
-                  } : null,
-                  (materialMode === 'other') ? {
-                    name: record.otherMaterialName || otherMaterialName || 'Other Accessory',
-                    materialId: record.selectedOtherMaterialId || selectedOtherMaterialId || '',
-                    rolls: record.otherRollCount || otherRollCount || 1,
-                    unit: record.otherUnit || otherUnit || 'Roll'
-                  } : null
-                ].filter(Boolean)
+                (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') ? {
+                  name: record.elasticMaterialName || elasticMaterialName || 'Elastic Waistband Roll',
+                  materialId: record.selectedElasticMaterialId || selectedElasticMaterialId || '',
+                  rolls: record.rolls,
+                  shade: record.shade,
+                  width: record.width,
+                  elasticPerPcMtr: calcResult.elasticPerPcMtr,
+                  totalElasticMtr: calcResult.totalElasticMtr
+                } : null,
+                (materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') ? {
+                  name: record.tapeMaterialName || tapeMaterialName || 'Tape Roll',
+                  materialId: record.selectedTapeMaterialId || selectedTapeMaterialId || '',
+                  rolls: record.tapeRollCount || 1,
+                  width: record.tapeWidth,
+                  tapePerPcMtr: calcResult.tapePerPcMtr,
+                  totalTapeMtr: calcResult.totalTapeMtr
+                } : null,
+                (materialMode === 'bone' || materialMode === 'all') ? {
+                  name: record.boneMaterialName || boneMaterialName || 'Bone Pocketing Roll',
+                  materialId: record.selectedBoneMaterialId || selectedBoneMaterialId || '',
+                  rolls: record.boneRolls || boneRollCount || 1,
+                  width: record.boneWidth
+                } : null,
+                (materialMode === 'other') ? {
+                  name: record.otherMaterialName || otherMaterialName || 'Other Accessory',
+                  materialId: record.selectedOtherMaterialId || selectedOtherMaterialId || '',
+                  rolls: record.otherRollCount || otherRollCount || 1,
+                  unit: record.otherUnit || otherUnit || 'Roll'
+                } : null
+              ].filter(Boolean)
           })
         });
       } catch (_) { }
@@ -2655,43 +2860,55 @@ export default function ElasticIssueView({
       y += rowH;
     }
 
-    // Row: Other Accessories (Shown if other)
+    // Row: Other Accessories (Multi-Row Support if otherItems provided)
     if (effectiveMode === 'other') {
-      const rowH = 24;
-      doc.setFillColor(255, 255, 255);
-      doc.rect(im, y, iw, rowH, 'F');
-      doc.setDrawColor(210, 210, 210);
-      doc.setLineWidth(0.6);
-      doc.line(im, y + rowH, pw - im, y + rowH);
+      const itemsList = Array.isArray(data.otherItems) && data.otherItems.length > 0
+        ? data.otherItems
+        : [{
+            materialName: data.otherMaterialName || otherMaterialName || 'Other Accessory',
+            materialId: data.selectedOtherMaterialId || selectedOtherMaterialId,
+            itemCode: data.otherItemCode,
+            totalQty: data.rolls || otherRollCount || 1,
+            unit: data.otherUnit || otherUnit || 'Roll'
+          }];
 
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8.5);
-      doc.setTextColor(0, 0, 0);
-      doc.text(String(itemIdx++), im + 6, y + 15);
+      itemsList.forEach(it => {
+        const rowH = 24;
+        doc.setFillColor(255, 255, 255);
+        doc.rect(im, y, iw, rowH, 'F');
+        doc.setDrawColor(210, 210, 210);
+        doc.setLineWidth(0.6);
+        doc.line(im, y + rowH, pw - im, y + rowH);
 
-      doc.setFont('helvetica', 'bold');
-      const chosenOtherId = data.otherItemCode || data.selectedOtherMaterialId || selectedOtherMaterialId;
-      const matchedOtherMat = (materials || []).find(m => String(m.id) === String(chosenOtherId) || String(m.itemCode) === String(chosenOtherId));
-      const effOtherCode = formatItemCode(chosenOtherId, matchedOtherMat, materials);
-      const rawOtherName = cleanMaterialName(data.otherMaterialName || otherMaterialName || 'Other Accessory');
-      const effOtherTitle = rawOtherName + (effOtherCode ? ` [${effOtherCode}]` : '');
-      doc.text(effOtherTitle, im + 24, y + 15);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(0, 0, 0);
+        doc.text(String(itemIdx++), im + 6, y + 15);
 
-      doc.setFont('helvetica', 'normal');
-      doc.text(data.otherUnit || otherUnit || 'Roll', im + 180, y + 15);
+        doc.setFont('helvetica', 'bold');
+        const chosenOtherId = it.itemCode || it.materialId;
+        const matchedOtherMat = (materials || []).find(m => String(m.id) === String(chosenOtherId) || String(m.itemCode) === String(chosenOtherId));
+        const effOtherCode = formatItemCode(chosenOtherId, matchedOtherMat, materials);
+        const rawOtherName = cleanMaterialName(it.materialName || it.componentType || 'Other Accessory');
+        const effOtherTitle = rawOtherName + (effOtherCode ? ` [${effOtherCode}]` : '');
+        doc.text(effOtherTitle, im + 24, y + 15);
 
-      doc.setFont('helvetica', 'bold');
-      doc.text('Direct Floor Issue', im + 290, y + 15);
+        doc.setFont('helvetica', 'normal');
+        doc.text(it.unit || 'Mtr', im + 180, y + 15);
 
-      doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Direct Floor Issue', im + 290, y + 15);
 
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(109, 40, 217);
-      doc.text(`= ${data.rolls || otherRollCount || 1} ${data.otherUnit || otherUnit || 'Roll'}(s)`, pw - im - 10, y + 15, { align: 'right' });
-      doc.setTextColor(0, 0, 0);
+        doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
 
-      y += rowH;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.setTextColor(109, 40, 217);
+        doc.text(`= ${it.totalQty || 1} ${it.unit || 'Mtr'}(s)`, pw - im - 10, y + 15, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+
+        y += rowH;
+      });
     }
 
     // Table Outer Border
@@ -3012,7 +3229,8 @@ export default function ElasticIssueView({
         currentSlipNo = await fetchNextIssueSlipNo(false);
       }
       const currentLotNo = (enteredLotNo || (withoutLotActive ? 'W/O LOT' : '')).toUpperCase();
-      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || activeLotCutting?.totalPieces || (materialMode === 'other' ? otherRollCount : 0) || 0, 10);
+      const totalOtherQty = otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0) || parseFloat(otherRollCount) || 1;
+      const currentQuantity = parseInt(issuePcs || lotDetails?.quantity || activeLotCutting?.totalPieces || (materialMode === 'other' ? totalOtherQty : 0) || 0, 10);
       const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
       const calculatedTapeRolls = Math.ceil(currentQuantity / effTapeDiv) || 1;
       const calculatedElasticRolls = withoutLotActive
@@ -3021,7 +3239,7 @@ export default function ElasticIssueView({
       const calculatedRolls = materialMode === 'tape'
         ? calculatedTapeRolls
         : materialMode === 'other'
-          ? (parseFloat(otherRollCount) || 1)
+          ? totalOtherQty
           : calculatedElasticRolls;
 
       const payload = {
@@ -3030,9 +3248,22 @@ export default function ElasticIssueView({
         isWithoutLot: withoutLotActive,
         isWithoutPo: withoutLotActive,
         rolls: materialMode === 'bone' ? (boneRollCount ? Number(boneRollCount) : (parseFloat(boneWeightKg) || 1)) : calculatedRolls,
-        otherRollCount: parseFloat(otherRollCount) || 1,
-        otherMaterialName: otherMaterialName || 'Other Accessory',
-        otherUnit: otherUnit || 'Roll',
+        otherRollCount: totalOtherQty,
+        otherMaterialName: otherItems.map(it => it.materialName || it.componentType).filter(Boolean).join(', ') || otherMaterialName || 'Other Accessory',
+        otherUnit: otherItems[0]?.unit || otherUnit || 'Roll',
+        otherItems: otherItems.map(it => ({
+          id: it.id,
+          componentType: it.componentType || 'ACCESSORY',
+          materialId: it.materialId || '',
+          materialName: it.materialName || it.componentType || 'Accessory Item',
+          itemCode: it.itemCode || formatItemCode(it.materialId, null, materials) || '',
+          entryMode: it.entryMode || 'choose',
+          availableStock: it.availableStock || 0,
+          totalQty: Number(it.totalQty) || 1,
+          unit: it.unit || 'Mtr',
+          color: it.color || '',
+          location: it.location || 'Main Store'
+        })),
         tapeRolls: calculatedTapeRolls,
         totalTapeRolls: calculatedTapeRolls,
         width: effectiveWidth,
@@ -3159,6 +3390,7 @@ export default function ElasticIssueView({
         otherMaterialName: item.otherMaterialName || 'Other Accessory',
         otherRollCount: item.otherRollCount || item.rolls || 1,
         otherUnit: item.otherUnit || 'Roll',
+        otherItems: item.otherItems || [],
         selectedOtherMaterialId: item.selectedOtherMaterialId || '',
         slipNo: item.slipNo,
         lotNo: item.lotNo,
@@ -4401,8 +4633,8 @@ export default function ElasticIssueView({
                 marginBottom: '16px',
                 padding: '14px 18px',
                 borderRadius: '10px',
-                background: activeLotCutting?.hasDetails 
-                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)' 
+                background: activeLotCutting?.hasDetails
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%)'
                   : '#f8fafc',
                 border: activeLotCutting?.hasDetails ? '1.5px solid #86efac' : '1px dashed #cbd5e1',
                 boxShadow: activeLotCutting?.hasDetails ? '0 2px 8px rgba(34, 197, 94, 0.08)' : 'none',
@@ -4856,67 +5088,680 @@ export default function ElasticIssueView({
                   </div>
                 </div>
 
-                {/* BACKEND CALCULATION & CONVERSION CARD (ELASTIC, TAPE, BONE & OTHER ACCESSORIES) */}
-                <div style={{
-                  marginTop: '16px',
-                  padding: '18px 20px',
-                  borderRadius: '14px',
-                  background: '#ffffff',
-                  border: materialMode === 'other' ? '1.5px solid #7c3aed' : materialMode === 'tape' ? '1.5px solid #3b82f6' : materialMode === 'bone' ? '1.5px solid #0284c7' : '1.5px solid #059669',
-                  boxShadow: materialMode === 'other' ? '0 4px 14px rgba(124, 58, 237, 0.08)' : materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : materialMode === 'bone' ? '0 4px 14px rgba(2, 132, 199, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{
-                        width: '32px', height: '32px', borderRadius: '8px',
-                        background: materialMode === 'other'
-                          ? 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)'
-                          : materialMode === 'tape'
+                {/* MATERIAL ALLOCATION & CONVERSION CARDS */}
+                {materialMode === 'other' ? (
+                  /* OTHER ACCESSORIES MULTI-ITEM ALLOCATION & STOCK DEDUCTION (STANDALONE CARD) */
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '20px 22px',
+                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: '1.5px solid #7c3aed',
+                    boxShadow: '0 4px 16px rgba(124, 58, 237, 0.08)'
+                  }}>
+                    {/* Header with Icon, Title, Items Count & Quick Barcode Scanner */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      marginBottom: '16px',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{
+                          width: '38px', height: '38px', borderRadius: '10px',
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff',
+                          boxShadow: '0 2px 8px rgba(124, 58, 237, 0.35)'
+                        }}>
+                          <Package size={20} />
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span>Other Accessories Manual Allocation &amp; Floor Issue</span>
+                            <span style={{ fontSize: '11px', fontWeight: '800', background: '#ede9fe', color: '#6d28d9', padding: '2px 8px', borderRadius: '12px' }}>
+                              {otherItems.length} Item{otherItems.length > 1 ? 's' : ''} Configured
+                            </span>
+                          </h4>
+                          <span style={{ fontSize: '11.5px', color: '#64748b' }}>
+                            Pick materials from store inventory or type manual item names &bull; Issue multiple accessories in a single transaction
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Quick Barcode Scan */}
+                      <form onSubmit={handleOtherBarcodeSubmit} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            ref={otherBarcodeInputRef}
+                            type="text"
+                            placeholder="Scan Barcode / Enter Code..."
+                            value={otherBarcodeInput}
+                            onChange={(e) => setOtherBarcodeInput(e.target.value)}
+                            style={{
+                              padding: '7px 10px 7px 30px',
+                              borderRadius: '8px',
+                              border: '1.5px solid #cbd5e1',
+                              fontSize: '12.5px',
+                              width: '230px',
+                              boxSizing: 'border-box',
+                              outline: 'none'
+                            }}
+                          />
+                          <Search size={14} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                        </div>
+                        <button
+                          type="submit"
+                          style={{
+                            padding: '7px 14px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: '#0f172a',
+                            color: '#ffffff',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <Scan size={13} />
+                          <span>Scan Add</span>
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Items Table */}
+                    <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
+                        <thead>
+                          <tr style={{ background: '#0f172a', color: '#ffffff', fontWeight: '800', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.4px' }}>
+                            <th style={{ padding: '10px 12px', width: '38px', textAlign: 'center' }}>#</th>
+                            <th style={{ padding: '10px 12px', width: '160px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span>COMPONENT / TYPE</span>
+                                {customOtherComponentTypes.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowManageOtherTypesModal(true)}
+                                    title="Manage custom types"
+                                    style={{
+                                      background: 'rgba(255,255,255,0.2)',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      padding: '2px 5px',
+                                      fontSize: '10px',
+                                      fontWeight: '700',
+                                      color: '#ffffff',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px'
+                                    }}
+                                  >
+                                    <Sliders size={10} />
+                                    <span>({customOtherComponentTypes.length})</span>
+                                  </button>
+                                )}
+                              </div>
+                            </th>
+                            <th style={{ padding: '10px 12px', minWidth: '280px' }}>STORE MATERIAL ITEM</th>
+                            <th style={{ padding: '10px 12px', width: '105px', textAlign: 'center' }}>CURRENT STOCK</th>
+                            <th style={{ padding: '10px 12px', width: '95px', textAlign: 'center' }}>METHOD</th>
+                            <th style={{ padding: '10px 12px', width: '125px', textAlign: 'right' }}>ISSUE QUANTITY</th>
+                            <th style={{ padding: '10px 12px', width: '75px', textAlign: 'center' }}>UNIT</th>
+                            <th style={{ padding: '10px 12px', width: '100px', textAlign: 'right' }}>BALANCE</th>
+                            <th style={{ padding: '10px 12px', width: '42px', textAlign: 'center' }}></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {otherItems.map((item, idx) => {
+                            const balance = Math.round(((item.availableStock || 0) - (Number(item.totalQty) || 0)) * 100) / 100;
+                            const isShortage = item.materialId && balance < 0;
+
+                            return (
+                              <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                                {/* Sequence # */}
+                                <td style={{ padding: '10px 12px', textAlign: 'center', fontWeight: '800', color: '#94a3b8' }}>
+                                  {idx + 1}
+                                </td>
+
+                                {/* Component Type */}
+                                <td style={{ padding: '10px 12px' }}>
+                                  {item.isCustomType ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="Type name (e.g. BUTTON)..."
+                                          value={item.customComponentType || ''}
+                                          onChange={(e) => handleUpdateOtherItem(item.id, 'customComponentType', e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              commitOtherCustomType(item.id, item.customComponentType);
+                                            } else if (e.key === 'Escape') {
+                                              handleUpdateOtherItem(item.id, 'isCustomType', false);
+                                              handleUpdateOtherItem(item.id, 'customComponentType', '');
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            if (item.customComponentType && item.customComponentType.trim()) {
+                                              commitOtherCustomType(item.id, item.customComponentType);
+                                            }
+                                          }}
+                                          style={{
+                                            width: '100%',
+                                            padding: '6px 8px',
+                                            borderRadius: '6px',
+                                            border: '1.5px solid #ea580c',
+                                            background: '#fff7ed',
+                                            fontSize: '12px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            boxSizing: 'border-box'
+                                          }}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => commitOtherCustomType(item.id, item.customComponentType)}
+                                          title="Save and add to list"
+                                          style={{
+                                            background: '#059669',
+                                            color: '#ffffff',
+                                            border: 'none',
+                                            borderRadius: '5px',
+                                            cursor: 'pointer',
+                                            padding: '5px 8px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            whiteSpace: 'nowrap',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '2px'
+                                          }}
+                                        >
+                                          ✓ Add
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            handleUpdateOtherItem(item.id, 'isCustomType', false);
+                                            handleUpdateOtherItem(item.id, 'customComponentType', '');
+                                            handleUpdateOtherItem(item.id, 'componentType', allOtherComponentTypes[0] || 'DORI');
+                                          }}
+                                          title="Cancel"
+                                          style={{
+                                            background: '#f1f5f9',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '5px',
+                                            cursor: 'pointer',
+                                            padding: '5px 7px',
+                                            fontSize: '11px',
+                                            color: '#64748b'
+                                          }}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                      <span style={{ fontSize: '10px', color: '#ea580c', fontWeight: '600' }}>
+                                        ↵ Enter or click ✓ Add to save
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <select
+                                      value={item.componentType}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === '__custom__') {
+                                          handleUpdateOtherItem(item.id, 'isCustomType', true);
+                                          handleUpdateOtherItem(item.id, 'customComponentType', '');
+                                        } else if (val === '__manage__') {
+                                          setShowManageOtherTypesModal(true);
+                                        } else {
+                                          handleUpdateOtherItem(item.id, 'componentType', val);
+                                          handleUpdateOtherItem(item.id, 'isCustomType', false);
+                                          if (val === 'DORI' || val === 'ELASTIC' || val === 'TAPE' || val === 'LACE') {
+                                            if (!item.materialId) handleUpdateOtherItem(item.id, 'unit', 'Mtr');
+                                          } else {
+                                            if (!item.materialId) handleUpdateOtherItem(item.id, 'unit', 'Pcs');
+                                          }
+                                        }
+                                      }}
+                                      style={{
+                                        width: '100%',
+                                        padding: '6px 8px',
+                                        borderRadius: '6px',
+                                        border: '1.5px solid #cbd5e1',
+                                        fontSize: '12px',
+                                        fontWeight: '700',
+                                        background: '#ffffff',
+                                        color: '#0f172a',
+                                        boxSizing: 'border-box'
+                                      }}
+                                    >
+                                      {otherComponentTypeOptions.map(opt => (
+                                        <option
+                                          key={opt.value}
+                                          value={opt.value}
+                                          style={{
+                                            fontWeight: opt.value.startsWith('__') ? '600' : '700',
+                                            color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
+                                          }}
+                                        >
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </td>
+
+                                {/* Material Item Selector or Manual Entry */}
+                                <td style={{ padding: '8px 12px' }}>
+                                  {item.entryMode === 'manual' ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="✏️ Type Material Name (e.g. 5mm White Dori)..."
+                                          value={item.materialName || ''}
+                                          onChange={(e) => handleUpdateOtherItem(item.id, 'materialName', e.target.value)}
+                                          style={{
+                                            flex: 1,
+                                            padding: '6px 8px',
+                                            borderRadius: '6px',
+                                            border: '1.5px solid #ea580c',
+                                            background: '#fff7ed',
+                                            fontSize: '12px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            boxSizing: 'border-box'
+                                          }}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            handleUpdateOtherItem(item.id, 'entryMode', 'choose');
+                                            handleUpdateOtherItem(item.id, 'materialName', '');
+                                          }}
+                                          title="Switch back to Store Inventory"
+                                          style={{
+                                            padding: '5px 8px',
+                                            fontSize: '11px',
+                                            borderRadius: '6px',
+                                            border: '1px solid #cbd5e1',
+                                            background: '#f8fafc',
+                                            color: '#475569',
+                                            cursor: 'pointer',
+                                            fontWeight: '700',
+                                            whiteSpace: 'nowrap'
+                                          }}
+                                        >
+                                          📋 Inventory
+                                        </button>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '4px' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="Color / Shade (optional)"
+                                          value={item.color || ''}
+                                          onChange={(e) => handleUpdateOtherItem(item.id, 'color', e.target.value)}
+                                          style={{
+                                            flex: 1,
+                                            padding: '4px 6px',
+                                            borderRadius: '4px',
+                                            border: '1px solid #cbd5e1',
+                                            fontSize: '11px',
+                                            background: '#ffffff',
+                                            boxSizing: 'border-box'
+                                          }}
+                                        />
+                                        <input
+                                          type="text"
+                                          placeholder="Item Code (optional)"
+                                          value={item.itemCode || ''}
+                                          onChange={(e) => handleUpdateOtherItem(item.id, 'itemCode', e.target.value)}
+                                          style={{
+                                            flex: 1,
+                                            padding: '4px 6px',
+                                            borderRadius: '4px',
+                                            border: '1px solid #cbd5e1',
+                                            fontSize: '11px',
+                                            background: '#ffffff',
+                                            boxSizing: 'border-box'
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <SearchableMaterialDropdown
+                                          materials={materials}
+                                          value={item.materialId}
+                                          componentType={item.isCustomType ? (item.customComponentType || '') : item.componentType}
+                                          onChange={(matId) => handleSelectOtherRowMaterial(item.id, matId)}
+                                          onSwitchToManual={() => {
+                                            handleUpdateOtherItem(item.id, 'entryMode', 'manual');
+                                            handleUpdateOtherItem(item.id, 'materialId', '');
+                                            handleUpdateOtherItem(item.id, 'availableStock', 0);
+                                          }}
+                                          placeholder="🔍 Search & Choose Material (Name / Code)..."
+                                        />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          handleUpdateOtherItem(item.id, 'entryMode', 'manual');
+                                          handleUpdateOtherItem(item.id, 'materialId', '');
+                                          handleUpdateOtherItem(item.id, 'availableStock', 0);
+                                        }}
+                                        title="Type custom material manually"
+                                        style={{
+                                          padding: '5px 8px',
+                                          fontSize: '11px',
+                                          borderRadius: '6px',
+                                          border: '1.5px dashed #ea580c',
+                                          background: '#fff7ed',
+                                          color: '#c2410c',
+                                          cursor: 'pointer',
+                                          fontWeight: '700',
+                                          whiteSpace: 'nowrap',
+                                          flexShrink: 0
+                                        }}
+                                      >
+                                        ✏️ Manual
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* Current Stock */}
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  {item.entryMode === 'manual' ? (
+                                    <span style={{
+                                      fontWeight: '700',
+                                      color: '#c2410c',
+                                      background: '#fff7ed',
+                                      padding: '3px 7px',
+                                      borderRadius: '5px',
+                                      fontSize: '11px',
+                                      border: '1px dashed #fed7aa',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      ✏️ Manual Item
+                                    </span>
+                                  ) : item.materialId ? (
+                                    <span style={{
+                                      fontWeight: '800',
+                                      color: item.availableStock > 0 ? '#059669' : '#dc2626',
+                                      background: item.availableStock > 0 ? '#f0fdf4' : '#fef2f2',
+                                      border: item.availableStock > 0 ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      fontSize: '11.5px',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      {item.availableStock} {item.unit}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8' }}>—</span>
+                                  )}
+                                </td>
+
+                                {/* Method: Direct Qty */}
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  <div style={{
+                                    background: '#f8fafc',
+                                    color: '#475569',
+                                    fontWeight: '800',
+                                    fontSize: '11px',
+                                    padding: '4px 6px',
+                                    borderRadius: '5px',
+                                    border: '1px solid #e2e8f0',
+                                    textAlign: 'center',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    Direct Qty
+                                  </div>
+                                </td>
+
+                                {/* Issue Qty */}
+                                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                  {(() => {
+                                    const qty = Number(item.totalQty) || 0;
+                                    const liveMat = (materials || []).find(m => String(m.id) === String(item.materialId));
+                                    const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(item.availableStock) || 0);
+                                    const hasMaterial = Boolean(item.materialId && item.entryMode !== 'manual');
+                                    const isStockShortage = hasMaterial && qty > rackStock;
+
+                                    return (
+                                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
+                                        <input
+                                          type="number"
+                                          step="any"
+                                          min="0.01"
+                                          value={item.totalQty === '' ? '' : item.totalQty}
+                                          onChange={(e) => handleUpdateOtherItem(item.id, 'totalQty', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
+                                          style={{
+                                            width: '85px',
+                                            padding: '5px 8px',
+                                            borderRadius: '6px',
+                                            border: isStockShortage ? '2px solid #dc2626' : '1.5px solid #cbd5e1',
+                                            background: isStockShortage ? '#fef2f2' : '#ffffff',
+                                            textAlign: 'right',
+                                            fontSize: '13px',
+                                            fontWeight: '800',
+                                            color: isStockShortage ? '#b91c1c' : '#0f172a',
+                                            boxSizing: 'border-box',
+                                            outline: 'none'
+                                          }}
+                                        />
+                                        {isStockShortage && (
+                                          <span style={{
+                                            fontSize: '9.5px',
+                                            fontWeight: '800',
+                                            color: '#991b1b',
+                                            background: '#fee2e2',
+                                            border: '1px solid #fca5a5',
+                                            padding: '1px 5px',
+                                            borderRadius: '4px',
+                                            whiteSpace: 'nowrap'
+                                          }}>
+                                            ⛔ Exceeds ({rackStock})
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })()}
+                                </td>
+
+                                {/* Unit */}
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  <input
+                                    type="text"
+                                    value={item.unit}
+                                    onChange={(e) => handleUpdateOtherItem(item.id, 'unit', e.target.value)}
+                                    style={{
+                                      width: '60px',
+                                      padding: '5px 6px',
+                                      borderRadius: '6px',
+                                      border: '1px solid #cbd5e1',
+                                      fontSize: '11.5px',
+                                      fontWeight: '700',
+                                      textAlign: 'center',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                </td>
+
+                                {/* Balance */}
+                                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                  {item.entryMode === 'manual' ? (
+                                    <span style={{ color: '#64748b', fontSize: '11px', fontWeight: '600' }}>Custom Issue</span>
+                                  ) : item.materialId ? (
+                                    <span style={{
+                                      fontWeight: '800',
+                                      color: isShortage ? '#dc2626' : '#059669',
+                                      background: isShortage ? '#fef2f2' : '#f0fdf4',
+                                      padding: '3px 7px',
+                                      borderRadius: '5px',
+                                      fontSize: '11.5px'
+                                    }}>
+                                      {balance} {item.unit}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8' }}>—</span>
+                                  )}
+                                </td>
+
+                                {/* Action: Delete Row */}
+                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveOtherItemRow(item.id)}
+                                    style={{
+                                      background: 'transparent',
+                                      border: 'none',
+                                      color: '#94a3b8',
+                                      cursor: 'pointer',
+                                      padding: '4px',
+                                      borderRadius: '4px',
+                                      transition: 'color 0.15s ease'
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.color = '#ef4444'}
+                                    onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                                    title="Remove row"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Table Bottom Action: Add Row & Remarks */}
+                    <div style={{
+                      marginTop: '14px',
+                      paddingTop: '12px',
+                      borderTop: '1px solid #e2e8f0',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '12px'
+                    }}>
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleAddOtherItemRow('DORI', '', 'choose')}
+                          style={{
+                            padding: '8px 18px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
+                            color: '#ffffff',
+                            fontWeight: '800',
+                            fontSize: '12.5px',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.3)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Plus size={15} />
+                          <span>Add Accessory Item</span>
+                        </button>
+                        <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>
+                          Total: <strong>{otherItems.length}</strong> item{otherItems.length > 1 ? 's' : ''} &bull; <strong>{otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0)}</strong> units
+                        </span>
+                      </div>
+
+                      {/* Remarks input */}
+                      <div style={{ minWidth: '260px', flex: '1', maxWidth: '380px' }}>
+                        <input
+                          type="text"
+                          placeholder="Optional allocation notes / floor remarks..."
+                          value={remarks}
+                          onChange={(e) => setRemarks(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '7px 12px',
+                            borderRadius: '7px',
+                            border: '1px solid #cbd5e1',
+                            fontSize: '12px',
+                            boxSizing: 'border-box',
+                            outline: 'none'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* BACKEND CALCULATION & CONVERSION CARD (ELASTIC, TAPE & BONE) */
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '18px 20px',
+                    borderRadius: '14px',
+                    background: '#ffffff',
+                    border: materialMode === 'tape' ? '1.5px solid #3b82f6' : materialMode === 'bone' ? '1.5px solid #0284c7' : '1.5px solid #059669',
+                    boxShadow: materialMode === 'tape' ? '0 4px 14px rgba(37, 99, 235, 0.08)' : materialMode === 'bone' ? '0 4px 14px rgba(2, 132, 199, 0.08)' : '0 4px 14px rgba(5, 150, 105, 0.08)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{
+                          width: '32px', height: '32px', borderRadius: '8px',
+                          background: materialMode === 'tape'
                             ? 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)'
                             : materialMode === 'bone'
                               ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
                               : 'linear-gradient(135deg, #059669 0%, #047857 100%)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
-                      }}>
-                        {materialMode === 'other' ? <Package size={18} /> : materialMode === 'bone' ? <Layers size={18} /> : <Calculator size={18} />}
-                      </div>
-                      <div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
-                          {materialMode === 'other'
-                            ? 'Other Accessories Manual Allocation & Floor Issue'
-                            : materialMode === 'tape'
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff'
+                        }}>
+                          {materialMode === 'bone' ? <Layers size={18} /> : <Calculator size={18} />}
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' }}>
+                            {materialMode === 'tape'
                               ? 'Tape Issue Allocation & Consumption (Pcs ÷ 45 Rule)'
                               : materialMode === 'bone'
                                 ? 'Bone Pocketing Material Allocation & Floor Issue'
                                 : withoutLotActive
                                   ? `Elastic Without BOM Allocation `
                                   : 'Automated Backend Meter Conversion & Consumption'}
-                        </h4>
-                        <span style={{ fontSize: '11px', color: '#64748b' }}>
-                          {materialMode === 'other'
-                            ? <span>Enter Material Name manually &bull; Enter Pieces &bull; Enter Total Material / Rolls To Issue</span>
-                            : materialMode === 'tape'
+                          </h4>
+                          <span style={{ fontSize: '11px', color: '#64748b' }}>
+                            {materialMode === 'tape'
                               ? <span>Formula: <strong>Pieces ÷ 45 = Rolls To Issue</strong> &bull; Direct piece allocation without size conversion</span>
                               : materialMode === 'bone'
                                 ? <span>Direct Weight &amp; Roll Issue &bull; Choose bone material from inventory ({boneMaterials.length} items) or enter custom name</span>
                                 : withoutLotActive
                                   ? <span>Divisors: <strong>1 Inch ÷ 25</strong> &bull; <strong>1.5 Inch ÷ 23</strong> &bull; <strong>2 Inch ÷ 23</strong> &bull; Formula: <strong>Issue Pcs ÷ Inch Divisor = Total Rolls</strong></span>
                                   : <span>Formulas: <strong>Inchs × 0.0254 = Mtr</strong> &bull; <strong>CMs ÷ 100 = Mtr</strong> &bull; <strong>Tape: Pcs ÷ 45 = Rolls</strong></span>}
-                        </span>
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* INPUT CONTROLS: ELASTIC, TAPE, BONE & OTHER (BASED ON SWITCH) */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
-                    gap: '16px',
-                    padding: '16px',
-                    borderRadius: '12px',
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0'
-                  }}>
+                    {/* INPUT CONTROLS: ELASTIC, TAPE & BONE */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: materialMode === 'both' ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr',
+                      gap: '16px',
+                      padding: '16px',
+                      borderRadius: '12px',
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0'
+                    }}>
                     {/* BONE POCKETING SPECIFICATION CARD */}
                     {materialMode === 'bone' && (
                       <div style={{
@@ -5257,2100 +6102,1177 @@ export default function ElasticIssueView({
                       </div>
                     )}
 
-                    {/* OTHER ACCESSORIES CARD */}
-                    {materialMode === 'other' && (
+                    {/* ELASTIC INPUT: WITHOUT BOM DIRECT PIECE DIVISION BY INCH DIVISOR */}
+                    {withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: '#ecfdf5',
+                        border: '1.5px solid #86efac',
+                        boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                            ELASTIC ALLOCATION
+                          </label>
+                          <span style={{ fontSize: '11px', background: '#dcfce7', color: '#047857', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                            Selected: {effectiveWidth} &bull; Rule: Pcs ÷ {effectiveDivisor}
+                          </span>
+                        </div>
+
                         <div style={{
-                          padding: '18px 20px',
-                          borderRadius: '14px',
-                          background: 'linear-gradient(180deg, #fbf7ff 0%, #faf5ff 100%)',
-                          border: '2px solid #c084fc',
-                          boxShadow: '0 4px 16px rgba(124, 58, 237, 0.09)'
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                          gap: '12px',
+                          background: '#ffffff',
+                          padding: '12px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #bbf7d0',
+                          alignItems: 'center'
                         }}>
-                          {/* Card Header with Dual-Mode Segmented Control */}
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '14px',
-                            flexWrap: 'wrap',
-                            gap: '10px'
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '9px' }}>
-                              <div style={{
-                                width: '32px', height: '32px', borderRadius: '8px',
-                                background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                color: '#ffffff', boxShadow: '0 2px 6px rgba(124, 58, 237, 0.35)'
-                              }}>
-                                <Package size={17} />
-                              </div>
-                              <div>
-                                <label style={{ fontSize: '13.5px', fontWeight: '800', color: '#581c87', margin: 0, display: 'block', letterSpacing: '0.2px' }}>
-                                  OTHER ACCESSORIES SPECIFICATION
-                                </label>
-                                <span style={{ fontSize: '11px', color: '#7e22ce' }}>
-                                  Pick component (Tape, Button, Lace, etc.) from live stock or enter custom name
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Dual Mode Toggle: Choose Material vs Add Manually */}
-                            <div style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              background: '#f3e8ff',
-                              padding: '3px',
-                              borderRadius: '8px',
-                              border: '1.5px solid #d8b4fe',
-                              gap: '3px'
-                            }}>
-                              <button
-                                type="button"
-                                onClick={() => setOtherEntryMode('choose')}
-                                style={{
-                                  padding: '6px 14px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  background: otherEntryMode === 'choose' ? '#7c3aed' : 'transparent',
-                                  color: otherEntryMode === 'choose' ? '#ffffff' : '#6b21a8',
-                                  fontSize: '11.5px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '5px',
-                                  boxShadow: otherEntryMode === 'choose' ? '0 2px 6px rgba(124, 58, 237, 0.35)' : 'none',
-                                  transition: 'all 0.15s ease'
+                          {/* 1. Pieces Input */}
+                          <div>
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                              1. ENTER / VERIFY PIECES:
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                value={issuePcs}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
                                 }}
-                              >
-                                <Box size={13} />
-                                📦 Choose Material ({otherMaterials.length})
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setOtherEntryMode('manual')}
+                                placeholder="Enter Pcs..."
                                 style={{
-                                  padding: '6px 14px',
-                                  borderRadius: '6px',
-                                  border: 'none',
-                                  background: otherEntryMode === 'manual' ? '#7c3aed' : 'transparent',
-                                  color: otherEntryMode === 'manual' ? '#ffffff' : '#6b21a8',
-                                  fontSize: '11.5px',
-                                  fontWeight: '800',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '5px',
-                                  boxShadow: otherEntryMode === 'manual' ? '0 2px 6px rgba(124, 58, 237, 0.35)' : 'none',
-                                  transition: 'all 0.15s ease'
+                                  width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
+                                  border: '1.5px solid #059669', fontSize: '15px', fontWeight: '800',
+                                  color: '#0f172a', background: '#f8fafc', outline: 'none'
                                 }}
-                              >
-                                <Edit2 size={13} />
-                                ✍️ + Add Manually
-                              </button>
+                              />
+                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857' }}>Pcs</span>
                             </div>
                           </div>
 
-
-                          {/* 2-Column Specification Controls */}
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-                            gap: '14px',
-                            background: '#ffffff',
-                            padding: '16px',
-                            borderRadius: '10px',
-                            border: '1px solid #e9d5ff',
-                            boxShadow: '0 2px 8px rgba(124, 58, 237, 0.04)'
-                          }}>
-                            {/* 1. Material Specification (Choose from Stock or Manual) */}
-                            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-                              <div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                                  <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#6b21a8', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                                    1. {otherEntryMode === 'choose' ? `CHOOSE MATERIAL (${selectedOtherCategory}):` : 'ENTER MATERIAL NAME:'}
-                                  </span>
+                          {/* 2. Inch Width & Divisor (Editable) */}
+                          <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
+                                2. INCH DIVISOR ({effectiveWidth}):
+                              </span>
+                              <span style={{ fontSize: '9px', background: '#dcfce7', color: '#047857', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                Editable
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
+                              <span style={{ fontSize: '20px', fontWeight: '900', color: '#047857', lineHeight: '1' }}>÷</span>
+                              <input
+                                type="number"
+                                min="1"
+                                step="any"
+                                value={customDivisor !== '' ? customDivisor : defaultElasticDivisor}
+                                onChange={(e) => setCustomDivisor(e.target.value)}
+                                title="Click to edit divisor number directly (e.g. 25, 23, 20...)"
+                                style={{
+                                  width: '68px',
+                                  boxSizing: 'border-box',
+                                  padding: '3px 6px',
+                                  borderRadius: '6px',
+                                  border: '2px solid #059669',
+                                  background: '#ffffff',
+                                  fontSize: '18px',
+                                  fontWeight: '900',
+                                  color: '#047857',
+                                  textAlign: 'center',
+                                  outline: 'none',
+                                  boxShadow: '0 2px 6px rgba(5, 150, 105, 0.15)'
+                                }}
+                              />
+                              <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
+                              {[
+                                { label: '1 Inch', div: 25 },
+                                { label: '1.5 Inch', div: 23 },
+                                { label: '2 Inch', div: 23 }
+                              ].map(item => {
+                                const isSelected = effectiveWidth.includes(item.label) && Number(effectiveDivisor) === item.div;
+                                return (
                                   <button
+                                    key={item.label}
                                     type="button"
-                                    onClick={() => setOtherEntryMode(otherEntryMode === 'choose' ? 'manual' : 'choose')}
+                                    onClick={() => {
+                                      setElasticWidth(item.label);
+                                      setCustomDivisor(String(item.div));
+                                    }}
                                     style={{
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: '#7c3aed',
-                                      fontSize: '10px',
-                                      fontWeight: '700',
-                                      cursor: 'pointer',
-                                      textDecoration: 'underline',
-                                      padding: 0
+                                      padding: '1px 6px',
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      borderRadius: '4px',
+                                      border: isSelected ? '1px solid #059669' : '1px solid #cbd5e1',
+                                      background: isSelected ? '#dcfce7' : '#f8fafc',
+                                      color: isSelected ? '#047857' : '#64748b',
+                                      cursor: 'pointer'
                                     }}
                                   >
-                                    {otherEntryMode === 'choose' ? '✍️ Type Custom Name' : '📋 Pick from Inventory'}
+                                    {item.label} (÷{item.div})
                                   </button>
-                                </div>
+                                );
+                              })}
+                            </div>
+                          </div>
 
-                                {otherEntryMode === 'choose' ? (
-                                  <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                      {/* Category Dropdown Box or Inline Custom Category Input */}
-                                      <div style={{ width: '165px', minWidth: '150px', flexShrink: 0 }}>
-                                        {isAddingCustomCategory ? (
-                                          <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-                                            <input
-                                              type="text"
-                                              placeholder="Category..."
-                                              value={inlineCustomCategoryInput}
-                                              onChange={(e) => setInlineCustomCategoryInput(e.target.value.toUpperCase())}
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter') {
-                                                  e.preventDefault();
-                                                  commitInlineCustomCategory(inlineCustomCategoryInput);
-                                                } else if (e.key === 'Escape') {
-                                                  setIsAddingCustomCategory(false);
-                                                  setInlineCustomCategoryInput('');
-                                                }
-                                              }}
-                                              autoFocus
-                                              style={{
-                                                width: '105px',
-                                                padding: '7px 8px',
-                                                borderRadius: '6px',
-                                                border: '1.5px solid #7c3aed',
-                                                fontSize: '11.5px',
-                                                fontWeight: '800',
-                                                background: '#faf5ff',
-                                                color: '#581c87',
-                                                outline: 'none',
-                                                boxSizing: 'border-box'
-                                              }}
-                                            />
-                                            <button
-                                              type="button"
-                                              onClick={() => commitInlineCustomCategory(inlineCustomCategoryInput)}
-                                              title="Save and select category"
-                                              style={{
-                                                background: '#059669',
-                                                color: '#ffffff',
-                                                border: 'none',
-                                                borderRadius: '5px',
-                                                cursor: 'pointer',
-                                                padding: '6px 8px',
-                                                fontSize: '11px',
-                                                fontWeight: '800'
-                                              }}
-                                            >
-                                              ✓
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => {
-                                                setIsAddingCustomCategory(false);
-                                                setInlineCustomCategoryInput('');
-                                              }}
-                                              title="Cancel"
-                                              style={{
-                                                background: '#f1f5f9',
-                                                border: '1px solid #cbd5e1',
-                                                borderRadius: '5px',
-                                                cursor: 'pointer',
-                                                padding: '6px 7px',
-                                                fontSize: '11px',
-                                                color: '#64748b'
-                                              }}
-                                            >
-                                              ✕
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <select
-                                            value={getSelectedCategoryValue()}
-                                            onChange={(e) => handleCategorySelectChange(e.target.value)}
-                                            style={{
-                                              width: '100%',
-                                              padding: '7px 9px',
-                                              borderRadius: '6px',
-                                              border: '1.5px solid #cbd5e1',
-                                              fontSize: '12px',
-                                              fontWeight: '700',
-                                              background: '#ffffff',
-                                              color: '#0f172a',
-                                              boxSizing: 'border-box',
-                                              cursor: 'pointer',
-                                              boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                                            }}
-                                          >
-                                            <option value="ALL" style={{ fontWeight: '700', color: '#7c3aed' }}>
-                                              📦 All Inventory ({materials.length})
-                                            </option>
-                                            {otherComponentTypeOptions.map(opt => (
-                                              <option
-                                                key={opt.value}
-                                                value={opt.value}
-                                                style={{
-                                                  fontWeight: opt.value.startsWith('__') ? '600' : '700',
-                                                  color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
-                                                }}
-                                              >
-                                                {opt.label}
-                                              </option>
-                                            ))}
-                                          </select>
-                                        )}
-                                      </div>
+                          {/* 3. Result Amount to Issue */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#047857', display: 'block', marginBottom: '4px' }}>
+                              3. TOTAL ROLLS TO ISSUE:
+                            </span>
+                            <div style={{ fontSize: '22px', fontWeight: '900', color: '#047857', lineHeight: '1.1' }}>
+                              {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
+                            </div>
+                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
+                              ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ {effectiveDivisor} = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor).toFixed(2)} Rolls)
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                                      {/* Searchable Material Select */}
-                                      <div style={{ flex: 1, minWidth: '220px' }}>
-                                        <SearchableMaterialSelect
-                                          materials={otherMaterials}
-                                          value={selectedOtherMaterialId}
-                                          onChange={handleSelectOtherMaterial}
-                                          placeholder="🔍 Search & Choose Material (Name / Code)..."
-                                          themeColor="#7c3aed"
-                                          onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                        />
-                                      </div>
-                                    </div>
+                    {/* ELASTIC INPUT (WITH BOM STANDARD MODE) */}
+                    {!withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                      <div style={{
+                        padding: '14px',
+                        borderRadius: '10px',
+                        background: '#ffffff',
+                        border: '1.5px solid #86efac',
+                        boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
+                      }}>
+                        <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
+                            ELASTIC SIZE INPUT
+                          </span>
+                          <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
+                            Formula: {String(elasticUnit).toLowerCase() === 'cm' ? '÷ 100' : String(elasticUnit).toLowerCase() === 'mtr' ? '× 1' : String(elasticUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
+                          </span>
+                        </label>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={elasticSizeInput}
+                            onChange={(e) => setElasticSizeInput(e.target.value)}
+                            placeholder="e.g. 50"
+                            style={{
+                              width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
+                              border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
+                              color: '#0f172a', background: '#ffffff', outline: 'none'
+                            }}
+                          />
+                          <SmartSelectWithManual
+                            value={elasticUnit}
+                            onChange={setElasticUnit}
+                            options={[
+                              { label: 'Inch (×0.0254)', value: 'inch' },
+                              { label: 'CM (÷100)', value: 'cm' },
+                              { label: 'Mtr (×1)', value: 'mtr' },
+                              { label: 'Yard (×0.9144)', value: 'yard' },
+                              { label: 'MM (÷1000)', value: 'mm' }
+                            ]}
+                            placeholder="Unit"
+                            manualPlaceholder="e.g. inch"
+                            manualLabel="+ Manual Unit"
+                            unitMode={true}
+                            icon="ruler"
+                            theme="emerald"
+                          />
+                        </div>
 
-                                    {/* Notice when filter has 0 items */}
-                                    {otherMaterials.length === 0 && (
-                                      <div style={{
-                                        padding: '10px 12px',
-                                        background: '#faf5ff',
-                                        borderRadius: '8px',
-                                        border: '1.5px dashed #c084fc',
-                                        marginTop: '8px',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        flexWrap: 'wrap',
-                                        gap: '8px'
-                                      }}>
-                                        <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: '700' }}>
-                                          No <strong>{selectedOtherCategory}</strong> in inventory.
-                                        </span>
-                                        <div style={{ display: 'flex', gap: '6px' }}>
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              setOtherEntryMode('manual');
-                                              setOtherMaterialName(selectedOtherCategory);
-                                            }}
-                                            style={{
-                                              padding: '4px 8px',
-                                              borderRadius: '5px',
-                                              border: 'none',
-                                              background: '#7c3aed',
-                                              color: '#ffffff',
-                                              fontSize: '10.5px',
-                                              fontWeight: '800',
-                                              cursor: 'pointer'
-                                            }}
-                                          >
-                                            ✍️ Type Manually
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => handleSelectComponentCategory('ALL')}
-                                            style={{
-                                              padding: '4px 8px',
-                                              borderRadius: '5px',
-                                              border: '1px solid #c084fc',
-                                              background: '#ffffff',
-                                              color: '#7c3aed',
-                                              fontSize: '10.5px',
-                                              fontWeight: '800',
-                                              cursor: 'pointer'
-                                            }}
-                                          >
-                                            Show All
-                                          </button>
-                                        </div>
-                                      </div>
-                                    )}
+                        {/* Elastic Presets */}
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+                          {[
+                            { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
+                            { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
+                            { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
+                          ].map(p => (
+                            <button
+                              key={p.label}
+                              type="button"
+                              onClick={() => {
+                                setElasticSizeInput(p.size);
+                                setElasticUnit(p.u);
+                              }}
+                              style={{
+                                padding: '4px 9px', borderRadius: '6px',
+                                border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
+                                background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
+                                color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
+                                fontSize: '11px', fontWeight: '700', cursor: 'pointer'
+                              }}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
-                                    {/* Selected Material Info Badge & Photo Card */}
-                                    {currentOtherMaterial ? (
-                                      <div style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        gap: '8px',
-                                        flexWrap: 'wrap',
-                                        marginTop: '10px',
-                                        padding: '8px 12px',
-                                        borderRadius: '8px',
-                                        background: '#faf5ff',
-                                        border: '1.5px dashed #c084fc'
-                                      }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-                                          {/* Photo Swatch */}
-                                          {(() => {
-                                            const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
-                                            const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                            return cleanImg ? (
-                                              <div
-                                                onClick={() => setPreviewPhotoUrl({
-                                                  url: cleanImg,
-                                                  title: currentOtherMaterial.name,
-                                                  code: formatItemCode(currentOtherMaterial, null, materials),
-                                                  stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}`,
-                                                  location: currentOtherMaterial.location
-                                                })}
-                                                title="Click to zoom material photo"
-                                                style={{
-                                                  width: '42px',
-                                                  height: '42px',
-                                                  borderRadius: '6px',
-                                                  border: '2px solid #7c3aed',
-                                                  overflow: 'hidden',
-                                                  cursor: 'zoom-in',
-                                                  flexShrink: 0,
-                                                  boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)',
-                                                  position: 'relative'
-                                                }}
-                                              >
-                                                <img src={cleanImg} alt={currentOtherMaterial.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                                              </div>
-                                            ) : (
-                                              <div style={{
-                                                width: '42px',
-                                                height: '42px',
-                                                borderRadius: '6px',
-                                                border: '1px dashed #cbd5e1',
-                                                background: '#ffffff',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                color: '#94a3b8',
-                                                flexShrink: 0
-                                              }}>
-                                                <Package size={18} />
-                                              </div>
-                                            );
-                                          })()}
+                    {/* TAPE CONSUMPTION (DIRECT PIECES ÷ 45 RULE - NO SIZE INPUT) */}
+                    {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                      <div style={{
+                        padding: '14px 16px',
+                        borderRadius: '10px',
+                        background: '#eff6ff',
+                        border: '1.5px solid #93c5fd',
+                        boxShadow: '0 2px 6px rgba(37, 99, 235, 0.06)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
+                          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
+                            TAPE ALLOCATION (DIRECT PIECES ÷ 45)
+                          </label>
+                          <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
+                            Formula: Issue Pcs ÷ 45 = Total Tape Rolls
+                          </span>
+                        </div>
 
-                                          <div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#6b21a8', background: '#f3e8ff', padding: '1px 5px', borderRadius: '4px' }}>
-                                                ITEM CODE: {formatItemCode(currentOtherMaterial, null, materials)}
-                                              </span>
-                                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>
-                                                {currentOtherMaterial.name}
-                                              </span>
-                                            </div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', fontSize: '10.5px', flexWrap: 'wrap' }}>
-                                              <span style={{ fontWeight: '800', color: (Number(currentOtherMaterial.stock) || 0) > 0 ? '#059669' : '#dc2626' }}>
-                                                Live Stock: <strong>{currentOtherMaterial.stock} {normalizeAccUnit(currentOtherMaterial.unit)}</strong>
-                                              </span>
-                                              <span style={{ fontSize: '10px', color: '#7c3aed', background: '#ede9fe', padding: '1px 5px', borderRadius: '4px', fontWeight: '700' }}>
-                                                ⚡ Auto-Unit: {normalizeAccUnit(currentOtherMaterial.unit)}
-                                              </span>
-                                              {currentOtherMaterial.location && (
-                                                <span style={{ color: '#64748b', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                                  <MapPin size={9} color="#7c3aed" /> {currentOtherMaterial.location}
-                                                </span>
-                                              )}
-                                            </div>
-                                          </div>
-                                        </div>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                          gap: '12px',
+                          background: '#ffffff',
+                          padding: '12px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid #bfdbfe',
+                          alignItems: 'center'
+                        }}>
+                          {/* 1. Pieces Input */}
+                          <div>
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
+                              1. ENTER / VERIFY PIECES:
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="number"
+                                min="1"
+                                value={issuePcs}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
+                                }}
+                                placeholder="Enter Pcs..."
+                                style={{
+                                  width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
+                                  border: '1.5px solid #3b82f6', fontSize: '15px', fontWeight: '800',
+                                  color: '#0f172a', background: '#f8fafc', outline: 'none'
+                                }}
+                              />
+                              <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e40af' }}>Pcs</span>
+                            </div>
+                          </div>
 
-                                        {(() => {
-                                          const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
-                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                          return cleanImg ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => setPreviewPhotoUrl({
-                                                url: cleanImg,
-                                                title: currentOtherMaterial.name,
-                                                code: formatItemCode(currentOtherMaterial, null, materials),
-                                                stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}`,
-                                                location: currentOtherMaterial.location
-                                              })}
-                                              style={{
-                                                border: 'none',
-                                                background: '#7c3aed',
-                                                color: '#ffffff',
-                                                padding: '4px 10px',
-                                                borderRadius: '6px',
-                                                fontSize: '10.5px',
-                                                fontWeight: '800',
-                                                cursor: 'pointer',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '4px',
-                                                boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
-                                              }}
-                                            >
-                                              <ZoomIn size={12} />
-                                              View Photo
-                                            </button>
-                                          ) : null;
-                                        })()}
-                                      </div>
-                                    ) : (
-                                      <div style={{ fontSize: '10.5px', color: '#9333ea', marginTop: '6px', fontStyle: 'italic' }}>
-                                        Select from store inventory with live photos, or click component chips above
-                                      </div>
-                                    )}
+                          {/* 2. Divisor 45 (Editable) */}
+                          <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
+                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
+                                2. STANDARD DIVISOR:
+                              </span>
+                              <span style={{ fontSize: '9px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
+                                Editable
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
+                              <span style={{ fontSize: '20px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1' }}>÷</span>
+                              <input
+                                type="number"
+                                min="2"
+                                step="any"
+                                value={tapeDivisor !== '' && Number(tapeDivisor) > 1 ? tapeDivisor : 45}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setTapeDivisor(val);
+                                }}
+                                title="Click to edit tape divisor (Standard: 45 pcs per roll)"
+                                style={{
+                                  width: '68px',
+                                  boxSizing: 'border-box',
+                                  padding: '3px 6px',
+                                  borderRadius: '6px',
+                                  border: '2px solid #2563eb',
+                                  background: '#ffffff',
+                                  fontSize: '18px',
+                                  fontWeight: '900',
+                                  color: '#1d4ed8',
+                                  textAlign: 'center',
+                                  outline: 'none',
+                                  boxShadow: '0 2px 6px rgba(37, 99, 235, 0.15)'
+                                }}
+                              />
+                              <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
+                            </div>
+                            <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
+                              {[
+                                { label: '÷ 45 (Std)', val: '45' },
+                                { label: '÷ 40', val: '40' },
+                                { label: '÷ 50', val: '50' }
+                              ].map(p => {
+                                const isSel = (tapeDivisor === p.val || (p.val === '45' && (!tapeDivisor || tapeDivisor === '45' || Number(tapeDivisor) <= 1)));
+                                return (
+                                  <button
+                                    key={p.val}
+                                    type="button"
+                                    onClick={() => setTapeDivisor(p.val)}
+                                    style={{
+                                      padding: '1px 5px',
+                                      fontSize: '9.5px',
+                                      fontWeight: '800',
+                                      borderRadius: '3px',
+                                      border: isSel ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                                      background: isSel ? '#dbeafe' : '#f8fafc',
+                                      color: isSel ? '#1d4ed8' : '#64748b',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    {p.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* 3. Result Amount to Issue */}
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1e40af', display: 'block', marginBottom: '4px' }}>
+                              3. TAPE AMOUNT TO ISSUE:
+                            </span>
+                            {(() => {
+                              const currentTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
+                              const tapePcsNum = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                              const rollsToIssue = Math.ceil(tapePcsNum / currentTapeDiv);
+                              const exactDec = (tapePcsNum / currentTapeDiv).toFixed(2);
+                              return (
+                                <>
+                                  <div style={{ fontSize: '22px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
+                                    {rollsToIssue} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
                                   </div>
-                                ) : (
-                                  <div>
-                                    {/* Category Select + Manual Input with Save Button */}
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                      <div style={{ width: '165px', minWidth: '150px', flexShrink: 0 }}>
-                                        <select
-                                          value={getSelectedCategoryValue()}
-                                          onChange={(e) => handleCategorySelectChange(e.target.value)}
-                                          style={{
-                                            width: '100%',
-                                            padding: '7px 9px',
-                                            borderRadius: '6px',
-                                            border: '1.5px solid #cbd5e1',
-                                            fontSize: '12px',
-                                            fontWeight: '700',
-                                            background: '#ffffff',
-                                            color: '#0f172a',
-                                            boxSizing: 'border-box',
-                                            cursor: 'pointer',
-                                            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                                          }}
-                                        >
-                                          <option value="ALL" style={{ fontWeight: '700', color: '#7c3aed' }}>
-                                            📦 All Inventory ({materials.length})
-                                          </option>
-                                          {otherComponentTypeOptions.map(opt => (
-                                            <option
-                                              key={opt.value}
-                                              value={opt.value}
-                                              style={{
-                                                fontWeight: opt.value.startsWith('__') ? '600' : '700',
-                                                color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
-                                              }}
-                                            >
-                                              {opt.label}
-                                            </option>
-                                          ))}
-                                        </select>
-                                      </div>
-                                      <div style={{ flex: 1, minWidth: '220px', display: 'flex', gap: '6px' }}>
-                                        <input
-                                          type="text"
-                                          value={otherMaterialName}
-                                          onChange={(e) => setOtherMaterialName(e.target.value)}
-                                          placeholder="e.g. Tape Cotton 1 inch, Horn Button 24L, Lace GPO..."
-                                          style={{
-                                            flex: 1,
-                                            boxSizing: 'border-box',
-                                            padding: '8px 10px',
-                                            borderRadius: '6px',
-                                            border: '1.5px solid #7c3aed',
-                                            fontSize: '13px',
-                                            fontWeight: '800',
-                                            color: '#0f172a',
-                                            background: '#ffffff',
-                                            outline: 'none'
-                                          }}
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => handleAddNewCustomName(otherMaterialName)}
-                                          title="Save this name for fast one-click selection"
-                                          style={{
-                                            padding: '0 12px',
-                                            borderRadius: '6px',
-                                            border: 'none',
-                                            background: '#7c3aed',
-                                            color: '#ffffff',
-                                            fontSize: '11px',
-                                            fontWeight: '800',
-                                            cursor: 'pointer',
-                                            whiteSpace: 'nowrap'
-                                          }}
-                                        >
-                                          + Save
-                                        </button>
-                                      </div>
-                                    </div>
+                                  <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
+                                    ({tapePcsNum} ÷ {currentTapeDiv} = {exactDec} Rolls)
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                                    {/* Suggestions & Saved Names Chips */}
-                                    <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '8px', maxHeight: '68px', overflowY: 'auto' }}>
-                                      {Array.from(new Set([
-                                        'Tape Cotton 1"', 'Cello Tape', 'Button 18L (4-Hole)', 'Shirt Button', 'Metal Snap Button', 'Cotton Lace 1"', 'GPO Lace', 'Drawcord Dori', 'Metal Zipper #5', 'Woven Brand Label', 'Rubber Badge', 'Eyelet 8mm',
-                                        ...customOtherNames
-                                      ])).map(matSuggestion => {
-                                        const isSavedCustom = customOtherNames.includes(matSuggestion);
-                                        const isSelected = otherMaterialName === matSuggestion;
+                  {/* EXACT BREAKDOWN TABLE: ELASTIC, TAPE & BONE */}
+                  <div style={{ marginTop: '16px', overflowX: 'auto', borderRadius: '10px', border: '1.5px solid #cbd5e1', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                      <thead>
+                        <tr style={{ background: '#0f172a', color: '#ffffff', fontSize: '12px', fontWeight: '800' }}>
+                          <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', minWidth: '290px' }}>Material (Editable & Mapped)</th>
+                          <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Input</th>
+                          <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'center' }}>Conversion Formula</th>
+                          <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Per Pc (In Mtr)</th>
+                          <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Pcs</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right' }}>Total Requirement</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(() => {
+                          const effPcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                          const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
+                          const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
+
+                          const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
+                          const tapeExactRolls = effPcs > 0 ? parseFloat((effPcs / effTapeDiv).toFixed(2)) : 0;
+                          const tapeCalculatedRolls = effPcs > 0 ? Math.ceil(effPcs / effTapeDiv) : 0;
+
+                          return (
+                            <>
+                              {/* ELASTIC ROW */}
+                              {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                                <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'both' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
+                                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                      {/* Material Image Swatch Thumbnail */}
+                                      {(() => {
+                                        const rawImg = currentElasticMaterial?.imageUrl || currentElasticMaterial?.image || currentElasticMaterial?.photo || currentElasticMaterial?.imgUrl;
+                                        const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
                                         return (
                                           <div
-                                            key={matSuggestion}
-                                            style={{
-                                              display: 'inline-flex',
-                                              alignItems: 'center',
-                                              gap: '2px',
-                                              padding: '2px 7px',
-                                              borderRadius: '4px',
-                                              border: isSelected ? '1.5px solid #7c3aed' : '1px solid #e9d5ff',
-                                              background: isSelected ? '#7c3aed' : '#f5f3ff',
-                                              color: isSelected ? '#ffffff' : '#6b21a8',
-                                              fontSize: '10px',
-                                              fontWeight: '700',
-                                              cursor: 'pointer'
-                                            }}
                                             onClick={() => {
-                                              setOtherMaterialName(matSuggestion);
-                                              // Smart unit deduction
-                                              const sLower = matSuggestion.toLowerCase();
-                                              if (sLower.includes('tape') || sLower.includes('lace') || sLower.includes('dori')) {
-                                                setOtherUnit('Mtr');
-                                              } else if (sLower.includes('button') || sLower.includes('zipper') || sLower.includes('label') || sLower.includes('badge') || sLower.includes('eyelet')) {
-                                                setOtherUnit('Pcs');
+                                              if (cleanImg) {
+                                                setPreviewPhotoUrl({
+                                                  url: cleanImg,
+                                                  title: currentElasticMaterial?.name || elasticMaterialName || 'Elastic Material',
+                                                  code: currentElasticMaterial?.id || currentElasticMaterial?.itemCode || '',
+                                                  stock: `${currentElasticMaterial?.stock || 0} ${currentElasticMaterial?.unit || 'Roll'}`,
+                                                  location: currentElasticMaterial?.location || ''
+                                                });
                                               }
                                             }}
+                                            title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this elastic item"}
+                                            style={{
+                                              width: '56px',
+                                              height: '56px',
+                                              borderRadius: '8px',
+                                              border: cleanImg ? '2px solid #059669' : '1.5px dashed #cbd5e1',
+                                              background: cleanImg ? '#ffffff' : '#f8fafc',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              flexShrink: 0,
+                                              cursor: cleanImg ? 'zoom-in' : 'default',
+                                              overflow: 'hidden',
+                                              boxShadow: cleanImg ? '0 2px 6px rgba(5, 150, 105, 0.2)' : 'none',
+                                              position: 'relative',
+                                              transition: 'all 0.15s ease',
+                                              marginTop: '2px'
+                                            }}
+                                            onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
                                           >
-                                            <span>{matSuggestion}</span>
-                                            {isSavedCustom && (
-                                              <span
-                                                onClick={(e) => handleRemoveCustomName(matSuggestion, e)}
-                                                title="Remove saved name"
-                                                style={{
-                                                  marginLeft: '2px',
-                                                  color: isSelected ? '#ffffff' : '#a855f7',
-                                                  cursor: 'pointer',
-                                                  fontWeight: '900',
-                                                  fontSize: '11px'
-                                                }}
-                                              >
-                                                &times;
-                                              </span>
+                                            {cleanImg ? (
+                                              <>
+                                                <img
+                                                  src={cleanImg}
+                                                  alt={currentElasticMaterial?.name || 'Elastic'}
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                />
+                                                <div style={{
+                                                  position: 'absolute',
+                                                  bottom: 0,
+                                                  left: 0,
+                                                  right: 0,
+                                                  background: 'rgba(5, 150, 105, 0.85)',
+                                                  color: '#ffffff',
+                                                  fontSize: '8px',
+                                                  fontWeight: '800',
+                                                  textAlign: 'center',
+                                                  padding: '1px 0',
+                                                  letterSpacing: '0.5px'
+                                                }}>
+                                                  ZOOM
+                                                </div>
+                                              </>
+                                            ) : (
+                                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                <Package size={20} />
+                                                <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                              </div>
                                             )}
                                           </div>
                                         );
-                                      })}
+                                      })()}
+
+                                      {/* Right Controls: Name, Dropdown & Details */}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        {/* Top: Bullet & Editable Material Name */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669', flexShrink: 0 }}></span>
+                                          <div style={{ flex: 1, position: 'relative' }}>
+                                            <input
+                                              type="text"
+                                              value={elasticMaterialName}
+                                              onChange={(e) => setElasticMaterialName(e.target.value)}
+                                              placeholder="Material Name (e.g. Elastic 1 Inch)..."
+                                              title="Click to edit material name directly"
+                                              style={{
+                                                width: '100%',
+                                                boxSizing: 'border-box',
+                                                padding: '5px 8px',
+                                                paddingRight: '26px',
+                                                borderRadius: '6px',
+                                                border: '1.5px solid #86efac',
+                                                background: '#f0fdf4',
+                                                color: '#047857',
+                                                fontSize: '13px',
+                                                fontWeight: '800',
+                                                outline: 'none',
+                                                transition: 'all 0.15s ease'
+                                              }}
+                                            />
+                                            <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#059669', opacity: 0.7 }}>
+                                              <Edit2 size={12} />
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Middle: Map to choose material dropdown (Elastic category only) */}
+                                        <div style={{ marginBottom: '6px' }}>
+                                          <SearchableMaterialSelect
+                                            materials={elasticMaterials}
+                                            value={selectedElasticMaterialId}
+                                            onChange={handleSelectElasticMaterial}
+                                            placeholder="🔍 Map Elastic Item (with Photos)..."
+                                            themeColor="#059669"
+                                            componentHint="Elastic"
+                                            compact={true}
+                                            showCategoryFilter={false}
+                                            onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                          />
+                                        </div>
+
+                                        {/* Bottom: All material details according to issue */}
+                                        {currentElasticMaterial ? (
+                                          <div style={{
+                                            display: 'flex',
+                                            flexWrap: 'wrap',
+                                            gap: '4px',
+                                            alignItems: 'center',
+                                            fontSize: '10.5px',
+                                            background: '#ecfdf5',
+                                            padding: '5px 7px',
+                                            borderRadius: '6px',
+                                            border: '1px dashed #a7f3d0'
+                                          }}>
+                                            <span style={{ fontWeight: '800', color: '#065f46', background: '#dcfce7', padding: '1px 5px', borderRadius: '3px' }}>
+                                              ITEM CODE: {formatItemCode(currentElasticMaterial, null, materials)}
+                                            </span>
+                                            <span style={{ fontWeight: '700', color: currentElasticMaterial.stock > 0 ? '#047857' : '#dc2626' }}>
+                                              Stock: {currentElasticMaterial.stock} {currentElasticMaterial.unit || 'Roll'}
+                                            </span>
+                                            {currentElasticMaterial.location && (
+                                              <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                <MapPin size={10} color="#059669" />
+                                                {currentElasticMaterial.location}
+                                              </span>
+                                            )}
+                                            <span style={{ color: '#047857', fontWeight: '800' }}>
+                                              {effectiveDivisor === 25 ? '÷ 25 (1")' : `÷ ${effectiveDivisor} (${effectiveWidth})`}
+                                            </span>
+                                            {currentElasticMaterial.packets > 0 && (
+                                              <span style={{ color: '#64748b' }}>
+                                                {currentElasticMaterial.packets} Pkts
+                                              </span>
+                                            )}
+                                            {(() => {
+                                              const rawImg = currentElasticMaterial.imageUrl || currentElasticMaterial.image || currentElasticMaterial.photo || currentElasticMaterial.imgUrl;
+                                              const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                              return cleanImg ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentElasticMaterial.name,
+                                                    code: formatItemCode(currentElasticMaterial, null, materials),
+                                                    stock: `${currentElasticMaterial.stock} ${currentElasticMaterial.unit || 'Roll'}`,
+                                                    location: currentElasticMaterial.location
+                                                  })}
+                                                  style={{
+                                                    border: 'none',
+                                                    background: '#059669',
+                                                    color: '#ffffff',
+                                                    fontSize: '9.5px',
+                                                    fontWeight: '800',
+                                                    padding: '1px 6px',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '3px'
+                                                  }}
+                                                  title="Click to zoom image"
+                                                >
+                                                  🔍 View Photo
+                                                </button>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        ) : (
+                                          <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                            Custom Name • Select item above to map inventory & details
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* 2. Material Issue Quantity & Unit Selector */}
-                            <div>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '5px' }}>
-                                2. TOTAL MATERIAL / QUANTITY TO ISSUE:
-                              </span>
-                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '6px', alignItems: 'center' }}>
-                                <input
-                                  type="number"
-                                  min="0.1"
-                                  step="any"
-                                  value={otherRollCount}
-                                  onChange={(e) => setOtherRollCount(e.target.value)}
-                                  placeholder="Qty..."
-                                  style={{
-                                    width: '100%', boxSizing: 'border-box', padding: '9px 12px', borderRadius: '7px',
-                                    border: '1.5px solid #7c3aed', fontSize: '15px', fontWeight: '900',
-                                    color: '#6b21a8', background: '#faf5ff', outline: 'none'
-                                  }}
-                                />
-                                <select
-                                  value={isManualOtherUnit ? 'manual' : normalizeAccUnit(otherUnit)}
-                                  onChange={(e) => {
-                                    if (e.target.value === 'manual') {
-                                      setIsManualOtherUnit(true);
-                                      if (manualUnitInput.trim()) {
-                                        setOtherUnit(manualUnitInput.trim());
-                                      }
-                                    } else {
-                                      setIsManualOtherUnit(false);
-                                      setOtherUnit(e.target.value);
-                                    }
-                                  }}
-                                  style={{
-                                    padding: '9px 8px', borderRadius: '7px',
-                                    border: '1.5px solid #7c3aed', fontSize: '12px', fontWeight: '800',
-                                    color: '#6b21a8', background: isManualOtherUnit ? '#f3e8ff' : '#ffffff', outline: 'none', cursor: 'pointer'
-                                  }}
-                                >
-                                  <option value="Mtr">Mtr (Meters)</option>
-                                  <option value="Roll">Roll (Rolls)</option>
-                                  <option value="Pcs">Pcs (Pieces)</option>
-                                  <option value="Box">Box (Boxes)</option>
-                                  <option value="Pkt">Pkt (Packets)</option>
-                                  <option value="Cone">Cone (Cones)</option>
-                                  <option value="Kg">Kg (Kilograms)</option>
-                                  <option value="Dozen">Dozen (12 Pcs)</option>
-                                  <option value="Gross">Gross (144 Pcs)</option>
-                                  <option value="manual">✏️ Custom Unit</option>
-                                </select>
-                              </div>
-
-                              {isManualOtherUnit && (
-                                <div style={{
-                                  marginTop: '6px',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  background: '#faf5ff',
-                                  padding: '6px 8px',
-                                  borderRadius: '7px',
-                                  border: '1.5px solid #7c3aed'
-                                }}>
-                                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#6b21a8', whiteSpace: 'nowrap' }}>
-                                    ✏️ Unit:
-                                  </span>
-                                  <input
-                                    type="text"
-                                    autoFocus
-                                    placeholder="Type unit (e.g. Set, Bundle, Thaan, Bag)..."
-                                    value={manualUnitInput}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      setManualUnitInput(val);
-                                      setOtherUnit(val || 'Unit');
-                                    }}
-                                    style={{
-                                      flex: 1,
-                                      padding: '5px 8px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #c084fc',
-                                      fontSize: '12px',
-                                      fontWeight: '800',
-                                      color: '#0f172a',
-                                      background: '#ffffff',
-                                      outline: 'none'
-                                    }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setIsManualOtherUnit(false);
-                                      setOtherUnit('Roll');
-                                    }}
-                                    style={{
-                                      padding: '5px 8px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #d8b4fe',
-                                      background: '#f3e8ff',
-                                      color: '#6b21a8',
-                                      fontSize: '11px',
-                                      fontWeight: '800',
-                                      cursor: 'pointer',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                    title="Switch back to preset units"
-                                  >
-                                    ✕ Preset
-                                  </button>
-                                </div>
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                    {withoutLotActive ? `Direct (${effectiveWidth})` : `${elasticSizeInput || 0} ${elasticUnit === 'cm' ? 'CM' : 'Inch'}`}
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                    <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                      {withoutLotActive ? `${effPcs} Pcs ÷ ${effectiveDivisor}` : (elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`)}
+                                    </code>
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
+                                    {withoutLotActive ? `1/${effectiveDivisor} Roll` : `${ePerPc} m`}
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                    {effPcs}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right', background: '#dcfce7' }}>
+                                    <div style={{ fontSize: '18px', fontWeight: '900', color: '#065f46', lineHeight: '1.1' }}>
+                                      {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} <span style={{ fontSize: '13px', fontWeight: '800' }}>Rolls</span>
+                                    </div>
+                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#047857', marginTop: '2px' }}>
+                                      {withoutLotActive ? `(${effPcs} ÷ ${effectiveDivisor} = ${(effPcs / effectiveDivisor).toFixed(2)} Rolls)` : `Total: ${eTotal} m • (÷ ${effectiveDivisor} for ${effectiveWidth})`}
+                                    </div>
+                                    <span style={{ fontSize: '10px', background: '#059669', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
+                                      Total Issue: {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} Rolls
+                                    </span>
+                                  </td>
+                                </tr>
                               )}
-                              <div style={{
-                                fontSize: '11px',
-                                fontWeight: '800',
-                                color: '#6b21a8',
-                                background: '#f3e8ff',
-                                padding: '5px 8px',
-                                borderRadius: '6px',
-                                marginTop: '6px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between'
-                              }}>
-                                <span>Total To Issue:</span>
-                                <strong>{otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s)</strong>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
 
-                      {/* ELASTIC INPUT: WITHOUT BOM DIRECT PIECE DIVISION BY INCH DIVISOR */}
-                      {withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                        <div style={{
-                          padding: '14px 16px',
-                          borderRadius: '10px',
-                          background: '#ecfdf5',
-                          border: '1.5px solid #86efac',
-                          boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
-                            <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                              ELASTIC ALLOCATION
-                            </label>
-                            <span style={{ fontSize: '11px', background: '#dcfce7', color: '#047857', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
-                              Selected: {effectiveWidth} &bull; Rule: Pcs ÷ {effectiveDivisor}
-                            </span>
-                          </div>
+                              {/* TAPE ROW */}
+                              {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                                <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
+                                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                      {/* Material Image Swatch Thumbnail */}
+                                      {(() => {
+                                        const rawImg = currentTapeMaterial?.imageUrl || currentTapeMaterial?.image || currentTapeMaterial?.photo || currentTapeMaterial?.imgUrl;
+                                        const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                        return (
+                                          <div
+                                            onClick={() => {
+                                              if (cleanImg) {
+                                                setPreviewPhotoUrl({
+                                                  url: cleanImg,
+                                                  title: currentTapeMaterial?.name || tapeMaterialName || 'Tape Material',
+                                                  code: currentTapeMaterial?.id || currentTapeMaterial?.itemCode || '',
+                                                  stock: `${currentTapeMaterial?.stock || 0} ${currentTapeMaterial?.unit || 'Mtr'}`,
+                                                  location: currentTapeMaterial?.location || ''
+                                                });
+                                              }
+                                            }}
+                                            title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this tape item"}
+                                            style={{
+                                              width: '56px',
+                                              height: '56px',
+                                              borderRadius: '8px',
+                                              border: cleanImg ? '2px solid #3b82f6' : '1.5px dashed #cbd5e1',
+                                              background: cleanImg ? '#ffffff' : '#f8fafc',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              flexShrink: 0,
+                                              cursor: cleanImg ? 'zoom-in' : 'default',
+                                              overflow: 'hidden',
+                                              boxShadow: cleanImg ? '0 2px 6px rgba(59, 130, 246, 0.22)' : 'none',
+                                              position: 'relative',
+                                              transition: 'all 0.15s ease',
+                                              marginTop: '2px'
+                                            }}
+                                            onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                          >
+                                            {cleanImg ? (
+                                              <>
+                                                <img
+                                                  src={cleanImg}
+                                                  alt={currentTapeMaterial?.name || 'Tape'}
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                />
+                                                <div style={{
+                                                  position: 'absolute',
+                                                  bottom: 0,
+                                                  left: 0,
+                                                  right: 0,
+                                                  background: 'rgba(30, 64, 175, 0.85)',
+                                                  color: '#ffffff',
+                                                  fontSize: '8px',
+                                                  fontWeight: '800',
+                                                  textAlign: 'center',
+                                                  padding: '1px 0',
+                                                  letterSpacing: '0.5px'
+                                                }}>
+                                                  ZOOM
+                                                </div>
+                                              </>
+                                            ) : (
+                                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                <Package size={20} />
+                                                <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
 
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                            gap: '12px',
-                            background: '#ffffff',
-                            padding: '12px 14px',
-                            borderRadius: '8px',
-                            border: '1px solid #bbf7d0',
-                            alignItems: 'center'
-                          }}>
-                            {/* 1. Pieces Input */}
-                            <div>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                1. ENTER / VERIFY PIECES:
-                              </span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={issuePcs}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
-                                  }}
-                                  placeholder="Enter Pcs..."
-                                  style={{
-                                    width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
-                                    border: '1.5px solid #059669', fontSize: '15px', fontWeight: '800',
-                                    color: '#0f172a', background: '#f8fafc', outline: 'none'
-                                  }}
-                                />
-                                <span style={{ fontSize: '12px', fontWeight: '800', color: '#047857' }}>Pcs</span>
-                              </div>
-                            </div>
+                                      {/* Right Controls: Name, Dropdown & Details */}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        {/* Top: Bullet & Editable Material Name */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
+                                          <div style={{ flex: 1, position: 'relative' }}>
+                                            <input
+                                              type="text"
+                                              value={tapeMaterialName}
+                                              onChange={(e) => setTapeMaterialName(e.target.value)}
+                                              placeholder="Tape Material Name (e.g. Tape 2 Inch)..."
+                                              title="Click to edit tape material name directly"
+                                              style={{
+                                                width: '100%',
+                                                boxSizing: 'border-box',
+                                                padding: '5px 8px',
+                                                paddingRight: '26px',
+                                                borderRadius: '6px',
+                                                border: '1.5px solid #93c5fd',
+                                                background: '#eff6ff',
+                                                color: '#1d4ed8',
+                                                fontSize: '13px',
+                                                fontWeight: '800',
+                                                outline: 'none',
+                                                transition: 'all 0.15s ease'
+                                              }}
+                                            />
+                                            <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', opacity: 0.7 }}>
+                                              <Edit2 size={12} />
+                                            </span>
+                                          </div>
+                                        </div>
 
-                            {/* 2. Inch Width & Divisor (Editable) */}
-                            <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
-                                <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
-                                  2. INCH DIVISOR ({effectiveWidth}):
-                                </span>
-                                <span style={{ fontSize: '9px', background: '#dcfce7', color: '#047857', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
-                                  Editable
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
-                                <span style={{ fontSize: '20px', fontWeight: '900', color: '#047857', lineHeight: '1' }}>÷</span>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  step="any"
-                                  value={customDivisor !== '' ? customDivisor : defaultElasticDivisor}
-                                  onChange={(e) => setCustomDivisor(e.target.value)}
-                                  title="Click to edit divisor number directly (e.g. 25, 23, 20...)"
-                                  style={{
-                                    width: '68px',
-                                    boxSizing: 'border-box',
-                                    padding: '3px 6px',
-                                    borderRadius: '6px',
-                                    border: '2px solid #059669',
-                                    background: '#ffffff',
-                                    fontSize: '18px',
-                                    fontWeight: '900',
-                                    color: '#047857',
-                                    textAlign: 'center',
-                                    outline: 'none',
-                                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.15)'
-                                  }}
-                                />
-                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
-                              </div>
-                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
-                                {[
-                                  { label: '1 Inch', div: 25 },
-                                  { label: '1.5 Inch', div: 23 },
-                                  { label: '2 Inch', div: 23 }
-                                ].map(item => {
-                                  const isSelected = effectiveWidth.includes(item.label) && Number(effectiveDivisor) === item.div;
-                                  return (
-                                    <button
-                                      key={item.label}
-                                      type="button"
-                                      onClick={() => {
-                                        setElasticWidth(item.label);
-                                        setCustomDivisor(String(item.div));
-                                      }}
-                                      style={{
-                                        padding: '1px 6px',
-                                        fontSize: '9.5px',
-                                        fontWeight: '800',
-                                        borderRadius: '4px',
-                                        border: isSelected ? '1px solid #059669' : '1px solid #cbd5e1',
-                                        background: isSelected ? '#dcfce7' : '#f8fafc',
-                                        color: isSelected ? '#047857' : '#64748b',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      {item.label} (÷{item.div})
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
+                                        {/* Middle: Map to choose material dropdown (Tape category only) */}
+                                        <div style={{ marginBottom: '6px' }}>
+                                          <SearchableMaterialSelect
+                                            materials={tapeMaterials}
+                                            value={selectedTapeMaterialId}
+                                            onChange={handleSelectTapeMaterial}
+                                            placeholder="🔍 Map Tape Item (with Photos)..."
+                                            themeColor="#2563eb"
+                                            componentHint="Tape"
+                                            compact={true}
+                                            showCategoryFilter={false}
+                                            onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                          />
+                                        </div>
 
-                            {/* 3. Result Amount to Issue */}
-                            <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#047857', display: 'block', marginBottom: '4px' }}>
-                                3. TOTAL ROLLS TO ISSUE:
-                              </span>
-                              <div style={{ fontSize: '22px', fontWeight: '900', color: '#047857', lineHeight: '1.1' }}>
-                                {Math.ceil(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor)} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
-                              </div>
-                              <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
-                                ({parseInt(issuePcs || lotDetails?.quantity || 0, 10)} ÷ {effectiveDivisor} = {(parseInt(issuePcs || lotDetails?.quantity || 0, 10) / effectiveDivisor).toFixed(2)} Rolls)
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* ELASTIC INPUT (WITH BOM STANDARD MODE) */}
-                      {!withoutLotActive && (materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                        <div style={{
-                          padding: '14px',
-                          borderRadius: '10px',
-                          background: '#ffffff',
-                          border: '1.5px solid #86efac',
-                          boxShadow: '0 2px 6px rgba(5, 150, 105, 0.06)'
-                        }}>
-                          <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#047857', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }}></span>
-                              ELASTIC SIZE INPUT
-                            </span>
-                            <span style={{ fontSize: '11px', background: '#dcfce7', color: '#059669', padding: '2px 8px', borderRadius: '4px', fontWeight: '700' }}>
-                              Formula: {String(elasticUnit).toLowerCase() === 'cm' ? '÷ 100' : String(elasticUnit).toLowerCase() === 'mtr' ? '× 1' : String(elasticUnit).toLowerCase() === 'yard' ? '× 0.9144' : '× 0.0254'}
-                            </span>
-                          </label>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: '8px', alignItems: 'center' }}>
-                            <input
-                              type="number"
-                              step="any"
-                              min="0"
-                              value={elasticSizeInput}
-                              onChange={(e) => setElasticSizeInput(e.target.value)}
-                              placeholder="e.g. 50"
-                              style={{
-                                width: '100%', boxSizing: 'border-box', padding: '10px 14px', borderRadius: '8px',
-                                border: '1.5px solid #059669', fontSize: '16px', fontWeight: '800',
-                                color: '#0f172a', background: '#ffffff', outline: 'none'
-                              }}
-                            />
-                            <SmartSelectWithManual
-                              value={elasticUnit}
-                              onChange={setElasticUnit}
-                              options={[
-                                { label: 'Inch (×0.0254)', value: 'inch' },
-                                { label: 'CM (÷100)', value: 'cm' },
-                                { label: 'Mtr (×1)', value: 'mtr' },
-                                { label: 'Yard (×0.9144)', value: 'yard' },
-                                { label: 'MM (÷1000)', value: 'mm' }
-                              ]}
-                              placeholder="Unit"
-                              manualPlaceholder="e.g. inch"
-                              manualLabel="+ Manual Unit"
-                              unitMode={true}
-                              icon="ruler"
-                              theme="emerald"
-                            />
-                          </div>
-
-                          {/* Elastic Presets */}
-                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
-                            {[
-                              { label: '50 Inch (1.27m)', size: '50', u: 'inch' },
-                              { label: '32 Inch (0.81m)', size: '32', u: 'inch' },
-                              { label: '40 Inch (1.02m)', size: '40', u: 'inch' }
-                            ].map(p => (
-                              <button
-                                key={p.label}
-                                type="button"
-                                onClick={() => {
-                                  setElasticSizeInput(p.size);
-                                  setElasticUnit(p.u);
-                                }}
-                                style={{
-                                  padding: '4px 9px', borderRadius: '6px',
-                                  border: elasticSizeInput === p.size && elasticUnit === p.u ? '1.5px solid #059669' : '1px solid #cbd5e1',
-                                  background: elasticSizeInput === p.size && elasticUnit === p.u ? '#dcfce7' : '#ffffff',
-                                  color: elasticSizeInput === p.size && elasticUnit === p.u ? '#059669' : '#475569',
-                                  fontSize: '11px', fontWeight: '700', cursor: 'pointer'
-                                }}
-                              >
-                                {p.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* TAPE CONSUMPTION (DIRECT PIECES ÷ 45 RULE - NO SIZE INPUT) */}
-                      {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
-                        <div style={{
-                          padding: '14px 16px',
-                          borderRadius: '10px',
-                          background: '#eff6ff',
-                          border: '1.5px solid #93c5fd',
-                          boxShadow: '0 2px 6px rgba(37, 99, 235, 0.06)'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '6px' }}>
-                            <label style={{ fontSize: '12.5px', fontWeight: '800', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px', margin: 0 }}>
-                              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6' }}></span>
-                              TAPE ALLOCATION (DIRECT PIECES ÷ 45)
-                            </label>
-                            <span style={{ fontSize: '11px', background: '#dbeafe', color: '#1d4ed8', padding: '2px 8px', borderRadius: '4px', fontWeight: '800' }}>
-                              Formula: Issue Pcs ÷ 45 = Total Tape Rolls
-                            </span>
-                          </div>
-
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                            gap: '12px',
-                            background: '#ffffff',
-                            padding: '12px 14px',
-                            borderRadius: '8px',
-                            border: '1px solid #bfdbfe',
-                            alignItems: 'center'
-                          }}>
-                            {/* 1. Pieces Input */}
-                            <div>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b', display: 'block', marginBottom: '4px' }}>
-                                1. ENTER / VERIFY PIECES:
-                              </span>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                <input
-                                  type="number"
-                                  min="1"
-                                  value={issuePcs}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setIssuePcs(val === '' ? '' : Math.max(1, parseInt(val, 10) || 1));
-                                  }}
-                                  placeholder="Enter Pcs..."
-                                  style={{
-                                    width: '100%', boxSizing: 'border-box', padding: '8px 12px', borderRadius: '6px',
-                                    border: '1.5px solid #3b82f6', fontSize: '15px', fontWeight: '800',
-                                    color: '#0f172a', background: '#f8fafc', outline: 'none'
-                                  }}
-                                />
-                                <span style={{ fontSize: '12px', fontWeight: '800', color: '#1e40af' }}>Pcs</span>
-                              </div>
-                            </div>
-
-                            {/* 2. Divisor 45 (Editable) */}
-                            <div style={{ textAlign: 'center', borderLeft: '1px dashed #cbd5e1', borderRight: '1px dashed #cbd5e1', padding: '0 8px' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginBottom: '3px' }}>
-                                <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#64748b' }}>
-                                  2. STANDARD DIVISOR:
-                                </span>
-                                <span style={{ fontSize: '9px', background: '#dbeafe', color: '#1d4ed8', padding: '1px 5px', borderRadius: '4px', fontWeight: '800' }}>
-                                  Editable
-                                </span>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px', margin: '3px 0' }}>
-                                <span style={{ fontSize: '20px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1' }}>÷</span>
-                                <input
-                                  type="number"
-                                  min="2"
-                                  step="any"
-                                  value={tapeDivisor !== '' && Number(tapeDivisor) > 1 ? tapeDivisor : 45}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    setTapeDivisor(val);
-                                  }}
-                                  title="Click to edit tape divisor (Standard: 45 pcs per roll)"
-                                  style={{
-                                    width: '68px',
-                                    boxSizing: 'border-box',
-                                    padding: '3px 6px',
-                                    borderRadius: '6px',
-                                    border: '2px solid #2563eb',
-                                    background: '#ffffff',
-                                    fontSize: '18px',
-                                    fontWeight: '900',
-                                    color: '#1d4ed8',
-                                    textAlign: 'center',
-                                    outline: 'none',
-                                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.15)'
-                                  }}
-                                />
-                                <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Pcs / Roll</span>
-                              </div>
-                              <div style={{ display: 'flex', gap: '4px', justifyContent: 'center', marginTop: '4px' }}>
-                                {[
-                                  { label: '÷ 45 (Std)', val: '45' },
-                                  { label: '÷ 40', val: '40' },
-                                  { label: '÷ 50', val: '50' }
-                                ].map(p => {
-                                  const isSel = (tapeDivisor === p.val || (p.val === '45' && (!tapeDivisor || tapeDivisor === '45' || Number(tapeDivisor) <= 1)));
-                                  return (
-                                    <button
-                                      key={p.val}
-                                      type="button"
-                                      onClick={() => setTapeDivisor(p.val)}
-                                      style={{
-                                        padding: '1px 5px',
-                                        fontSize: '9.5px',
-                                        fontWeight: '800',
-                                        borderRadius: '3px',
-                                        border: isSel ? '1px solid #2563eb' : '1px solid #cbd5e1',
-                                        background: isSel ? '#dbeafe' : '#f8fafc',
-                                        color: isSel ? '#1d4ed8' : '#64748b',
-                                        cursor: 'pointer'
-                                      }}
-                                    >
-                                      {p.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-
-                            {/* 3. Result Amount to Issue */}
-                            <div style={{ textAlign: 'right' }}>
-                              <span style={{ fontSize: '10.5px', fontWeight: '800', color: '#1e40af', display: 'block', marginBottom: '4px' }}>
-                                3. TAPE AMOUNT TO ISSUE:
-                              </span>
-                              {(() => {
-                                const currentTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
-                                const tapePcsNum = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
-                                const rollsToIssue = Math.ceil(tapePcsNum / currentTapeDiv);
-                                const exactDec = (tapePcsNum / currentTapeDiv).toFixed(2);
-                                return (
-                                  <>
-                                    <div style={{ fontSize: '22px', fontWeight: '900', color: '#1d4ed8', lineHeight: '1.1' }}>
-                                      {rollsToIssue} <span style={{ fontSize: '14px', fontWeight: '800' }}>Roll(s)</span>
+                                        {/* Bottom: All material details according to issue */}
+                                        {currentTapeMaterial ? (
+                                          <div style={{
+                                            display: 'flex',
+                                            flexWrap: 'wrap',
+                                            gap: '4px',
+                                            alignItems: 'center',
+                                            fontSize: '10.5px',
+                                            background: '#eff6ff',
+                                            padding: '5px 7px',
+                                            borderRadius: '6px',
+                                            border: '1px dashed #bfdbfe'
+                                          }}>
+                                            <span style={{ fontWeight: '800', color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: '3px' }}>
+                                              ITEM CODE: {formatItemCode(currentTapeMaterial, null, materials)}
+                                            </span>
+                                            <span style={{ fontWeight: '700', color: currentTapeMaterial.stock > 0 ? '#1d4ed8' : '#dc2626' }}>
+                                              Stock: {currentTapeMaterial.stock} {currentTapeMaterial.unit || 'Mtr'}
+                                            </span>
+                                            {currentTapeMaterial.location && (
+                                              <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                <MapPin size={10} color="#3b82f6" />
+                                                {currentTapeMaterial.location}
+                                              </span>
+                                            )}
+                                            {(() => {
+                                              const rawImg = currentTapeMaterial.imageUrl || currentTapeMaterial.image || currentTapeMaterial.photo || currentTapeMaterial.imgUrl;
+                                              const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                              return cleanImg ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentTapeMaterial.name,
+                                                    code: formatItemCode(currentTapeMaterial, null, materials),
+                                                    stock: `${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Mtr'}`,
+                                                    location: currentTapeMaterial.location
+                                                  })}
+                                                  style={{
+                                                    border: 'none',
+                                                    background: '#2563eb',
+                                                    color: '#ffffff',
+                                                    fontSize: '9.5px',
+                                                    fontWeight: '800',
+                                                    padding: '1px 6px',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '3px'
+                                                  }}
+                                                  title="Click to zoom image"
+                                                >
+                                                  🔍 View Photo
+                                                </button>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        ) : (
+                                          <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                            Custom Name • Select item above to map inventory & details
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
-                                    <div style={{ fontSize: '11px', fontWeight: '700', color: '#64748b', marginTop: '3px' }}>
-                                      ({tapePcsNum} ÷ {currentTapeDiv} = {exactDec} Rolls)
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>
+                                    Direct ({effTapeDiv} Pcs/Roll)
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                    <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '800' }}>
+                                      {effPcs} Pcs ÷ {effTapeDiv}
+                                    </code>
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8', fontSize: '13px', background: '#eff6ff' }}>
+                                    1/{effTapeDiv} Roll
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                    {effPcs}
+                                  </td>
+                                  <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
+                                    <div>
+                                      <span style={{ fontSize: '16px' }}>{tapeCalculatedRolls} Roll(s)</span>
+                                      {effPcs > 0 && (
+                                        <span style={{ fontSize: '10.5px', display: 'block', color: '#64748b', fontWeight: '700' }}>
+                                          ({tapeExactRolls} Exact)
+                                        </span>
+                                      )}
                                     </div>
-                                  </>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </div>
+                                  </td>
+                                </tr>
+                              )}
+
+                              {/* BONE ROW (Shown if bone or all) */}
+                              {(materialMode === 'bone' || materialMode === 'all') && (
+                                <tr style={{ background: '#ffffff', borderBottom: 'none' }}>
+                                  <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                                      {/* Material Image Swatch Thumbnail */}
+                                      {(() => {
+                                        const rawImg = currentBoneMaterial?.imageUrl || currentBoneMaterial?.image || currentBoneMaterial?.photo || currentBoneMaterial?.imgUrl;
+                                        const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                        return (
+                                          <div
+                                            onClick={() => {
+                                              if (cleanImg) {
+                                                setPreviewPhotoUrl({
+                                                  url: cleanImg,
+                                                  title: currentBoneMaterial?.name || boneMaterialName || 'Bone Material',
+                                                  code: currentBoneMaterial?.id || currentBoneMaterial?.itemCode || '',
+                                                  stock: `${currentBoneMaterial?.stock || 0} ${currentBoneMaterial?.unit || 'Roll'}`,
+                                                  location: currentBoneMaterial?.location || ''
+                                                });
+                                              }
+                                            }}
+                                            title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this bone item"}
+                                            style={{
+                                              width: '56px',
+                                              height: '56px',
+                                              borderRadius: '8px',
+                                              border: cleanImg ? '2px solid #0284c7' : '1.5px dashed #cbd5e1',
+                                              background: cleanImg ? '#ffffff' : '#f8fafc',
+                                              display: 'flex',
+                                              flexDirection: 'column',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              flexShrink: 0,
+                                              cursor: cleanImg ? 'zoom-in' : 'default',
+                                              overflow: 'hidden',
+                                              boxShadow: cleanImg ? '0 2px 6px rgba(2, 132, 199, 0.22)' : 'none',
+                                              position: 'relative',
+                                              transition: 'all 0.15s ease',
+                                              marginTop: '2px'
+                                            }}
+                                            onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+                                          >
+                                            {cleanImg ? (
+                                              <>
+                                                <img
+                                                  src={cleanImg}
+                                                  alt={currentBoneMaterial?.name || 'Bone'}
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                                                  style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                                />
+                                                <div style={{
+                                                  position: 'absolute',
+                                                  bottom: 0,
+                                                  left: 0,
+                                                  right: 0,
+                                                  background: 'rgba(2, 132, 199, 0.85)',
+                                                  color: '#ffffff',
+                                                  fontSize: '8px',
+                                                  fontWeight: '800',
+                                                  textAlign: 'center',
+                                                  padding: '1px 0',
+                                                  letterSpacing: '0.5px'
+                                                }}>
+                                                  ZOOM
+                                                </div>
+                                              </>
+                                            ) : (
+                                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                                                <Package size={20} />
+                                                <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
+
+                                      {/* Right Controls: Name, Dropdown & Details */}
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        {/* Top: Bullet & Editable Material Name */}
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                                          <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }}></span>
+                                          <div style={{ flex: 1, position: 'relative' }}>
+                                            <input
+                                              type="text"
+                                              value={boneMaterialName}
+                                              onChange={(e) => setBoneMaterialName(e.target.value)}
+                                              placeholder="Bone Material Name (e.g. Bone Chinese)..."
+                                              title="Click to edit bone material name directly"
+                                              style={{
+                                                width: '100%',
+                                                boxSizing: 'border-box',
+                                                padding: '5px 8px',
+                                                paddingRight: '26px',
+                                                borderRadius: '6px',
+                                                border: '1.5px solid #7dd3fc',
+                                                background: '#f0f9ff',
+                                                color: '#0369a1',
+                                                fontSize: '13px',
+                                                fontWeight: '800',
+                                                outline: 'none',
+                                                transition: 'all 0.15s ease'
+                                              }}
+                                            />
+                                            <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#0284c7', opacity: 0.7 }}>
+                                              <Edit2 size={12} />
+                                            </span>
+                                          </div>
+                                        </div>
+
+                                        {/* Middle: Map to choose material dropdown (Bone category only) */}
+                                        <div style={{ marginBottom: '6px' }}>
+                                          <SearchableMaterialSelect
+                                            materials={boneMaterials}
+                                            value={selectedBoneMaterialId}
+                                            onChange={handleSelectBoneMaterial}
+                                            placeholder="🔍 Map Bone Item (with Photos)..."
+                                            themeColor="#0284c7"
+                                            componentHint="Bone"
+                                            compact={true}
+                                            showCategoryFilter={false}
+                                            onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
+                                          />
+                                        </div>
+
+                                        {/* Bottom: All material details according to issue */}
+                                        {currentBoneMaterial ? (
+                                          <div style={{
+                                            display: 'flex',
+                                            flexWrap: 'wrap',
+                                            gap: '4px',
+                                            alignItems: 'center',
+                                            fontSize: '10.5px',
+                                            background: '#f0f9ff',
+                                            padding: '5px 7px',
+                                            borderRadius: '6px',
+                                            border: '1px dashed #bae6fd'
+                                          }}>
+                                            <span style={{ fontWeight: '800', color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '3px' }}>
+                                              ITEM CODE: {formatItemCode(currentBoneMaterial, null, materials)}
+                                            </span>
+                                            <span style={{ fontWeight: '700', color: currentBoneMaterial.stock > 0 ? '#0284c7' : '#dc2626' }}>
+                                              Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Roll'}
+                                            </span>
+                                            {currentBoneMaterial.location && (
+                                              <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                                                <MapPin size={10} color="#0284c7" />
+                                                {currentBoneMaterial.location}
+                                              </span>
+                                            )}
+                                            {(() => {
+                                              const rawImg = currentBoneMaterial.imageUrl || currentBoneMaterial.image || currentBoneMaterial.photo || currentBoneMaterial.imgUrl;
+                                              const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
+                                              return cleanImg ? (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setPreviewPhotoUrl({
+                                                    url: cleanImg,
+                                                    title: currentBoneMaterial.name,
+                                                    code: formatItemCode(currentBoneMaterial, null, materials),
+                                                    stock: `${currentBoneMaterial.stock} ${currentBoneMaterial.unit || 'Roll'}`,
+                                                    location: currentBoneMaterial.location
+                                                  })}
+                                                  style={{
+                                                    border: 'none',
+                                                    background: '#0284c7',
+                                                    color: '#ffffff',
+                                                    fontSize: '9.5px',
+                                                    fontWeight: '800',
+                                                    padding: '1px 6px',
+                                                    borderRadius: '4px',
+                                                    cursor: 'pointer',
+                                                    display: 'inline-flex',
+                                                    alignItems: 'center',
+                                                    gap: '3px'
+                                                  }}
+                                                  title="Click to zoom image"
+                                                >
+                                                  🔍 View Photo
+                                                </button>
+                                              ) : null;
+                                            })()}
+                                          </div>
+                                        ) : (
+                                          <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
+                                            Custom Name • Select item above to map inventory & details
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
+                                    Direct: {boneWeightKg || '0'} Kg
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
+                                    <code style={{ background: '#f0f9ff', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
+                                      Weight-Wise Issue
+                                    </code>
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#0284c7', fontSize: '14px', background: '#f0f9ff' }}>
+                                    {effPcs > 0 ? `${(parseFloat(boneWeightKg || 0) / effPcs).toFixed(4)} kg` : '—'}
+                                  </td>
+                                  <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
+                                    {effPcs || '—'}
+                                  </td>
+                                  <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#0369a1', fontSize: '15px', background: '#e0f2fe' }}>
+                                    <div>{boneWeightKg || '0'} Kg</div>
+                                    <div style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', marginTop: '2px' }}>
+                                      Direct Floor Issue
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* EXCEL SHEET PRODUCTION ROW PREVIEW */}
+                  <div style={{ marginTop: '16px', borderTop: '1px dashed #cbd5e1', paddingTop: '14px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <Table size={14} color="#059669" />
+                        <span>Excel Sheet Output Preview ({materialMode === 'elastic' ? 'Elastic' : materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'All'}):</span>
+                      </span>
+                      {materialMode !== 'tape' && materialMode !== 'bone' && (
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          Total Requirement: <strong>{calcResult.totalElasticMtr} Mtr</strong> &bull; <strong>÷ {effectiveDivisor} = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})</strong>
+                        </span>
                       )}
                     </div>
 
-                    {/* EXACT BREAKDOWN TABLE: ELASTIC, TAPE & BONE */}
-                    <div style={{ marginTop: '16px', overflowX: 'auto', borderRadius: '10px', border: '1.5px solid #cbd5e1', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
+                    <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
                         <thead>
-                          <tr style={{ background: '#0f172a', color: '#ffffff', fontSize: '12px', fontWeight: '800' }}>
-                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', minWidth: '290px' }}>Material (Editable & Mapped)</th>
-                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Input</th>
-                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'center' }}>Conversion Formula</th>
-                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Per Pc (In Mtr)</th>
-                            <th style={{ padding: '10px 14px', borderRight: '1px solid #334155', textAlign: 'right' }}>Pcs</th>
-                            <th style={{ padding: '10px 14px', textAlign: 'right' }}>Total Requirement</th>
+                          <tr style={{ background: '#f1f5f9', color: '#0f172a', fontWeight: '800', borderBottom: '1.5px solid #cbd5e1' }}>
+                            <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>DATE</th>
+                            {!withoutLotActive && (
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Lot No.</th>
+                            )}
+                            <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
+                            <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Mapped Material</th>
+                            <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs (Issued)</th>
+                            <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
+                            {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
+                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Tape Roll(s) (Pcs ÷ {(effectiveTapeDivisor > 1 ? effectiveTapeDivisor : 45)})</th>
+                            )}
+                            {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                              <th style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>Elastic Per Pc (In mtr.)</th>
+                            )}
+                            {(materialMode === 'bone' || materialMode === 'all') && (
+                              <th style={{ padding: '8px 10px' }}>Bone Weight (Kg)</th>
+                            )}
                           </tr>
                         </thead>
                         <tbody>
-                          {(() => {
-                            const effPcs = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
-                            const ePerPc = parseFloat(calcResult.elasticPerPcMtr || (elasticUnit === 'cm' ? (parseFloat(elasticSizeInput) || 0) / 100 : (parseFloat(elasticSizeInput) || 0) * 0.0254).toFixed(4)) || 0;
-                            const eTotal = parseFloat((ePerPc * effPcs).toFixed(4));
-
-                            const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
-                            const tapeExactRolls = effPcs > 0 ? parseFloat((effPcs / effTapeDiv).toFixed(2)) : 0;
-                            const tapeCalculatedRolls = effPcs > 0 ? Math.ceil(effPcs / effTapeDiv) : 0;
-
-                            return (
-                              <>
-                                {/* ELASTIC ROW */}
-                                {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                                  <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'both' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
-                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                        {/* Material Image Swatch Thumbnail */}
-                                        {(() => {
-                                          const rawImg = currentElasticMaterial?.imageUrl || currentElasticMaterial?.image || currentElasticMaterial?.photo || currentElasticMaterial?.imgUrl;
-                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                          return (
-                                            <div
-                                              onClick={() => {
-                                                if (cleanImg) {
-                                                  setPreviewPhotoUrl({
-                                                    url: cleanImg,
-                                                    title: currentElasticMaterial?.name || elasticMaterialName || 'Elastic Material',
-                                                    code: currentElasticMaterial?.id || currentElasticMaterial?.itemCode || '',
-                                                    stock: `${currentElasticMaterial?.stock || 0} ${currentElasticMaterial?.unit || 'Roll'}`,
-                                                    location: currentElasticMaterial?.location || ''
-                                                  });
-                                                }
-                                              }}
-                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this elastic item"}
-                                              style={{
-                                                width: '56px',
-                                                height: '56px',
-                                                borderRadius: '8px',
-                                                border: cleanImg ? '2px solid #059669' : '1.5px dashed #cbd5e1',
-                                                background: cleanImg ? '#ffffff' : '#f8fafc',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                flexShrink: 0,
-                                                cursor: cleanImg ? 'zoom-in' : 'default',
-                                                overflow: 'hidden',
-                                                boxShadow: cleanImg ? '0 2px 6px rgba(5, 150, 105, 0.2)' : 'none',
-                                                position: 'relative',
-                                                transition: 'all 0.15s ease',
-                                                marginTop: '2px'
-                                              }}
-                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
-                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                            >
-                                              {cleanImg ? (
-                                                <>
-                                                  <img
-                                                    src={cleanImg}
-                                                    alt={currentElasticMaterial?.name || 'Elastic'}
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                                  />
-                                                  <div style={{
-                                                    position: 'absolute',
-                                                    bottom: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    background: 'rgba(5, 150, 105, 0.85)',
-                                                    color: '#ffffff',
-                                                    fontSize: '8px',
-                                                    fontWeight: '800',
-                                                    textAlign: 'center',
-                                                    padding: '1px 0',
-                                                    letterSpacing: '0.5px'
-                                                  }}>
-                                                    ZOOM
-                                                  </div>
-                                                </>
-                                              ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-                                                  <Package size={20} />
-                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Right Controls: Name, Dropdown & Details */}
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                          {/* Top: Bullet & Editable Material Name */}
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669', flexShrink: 0 }}></span>
-                                            <div style={{ flex: 1, position: 'relative' }}>
-                                              <input
-                                                type="text"
-                                                value={elasticMaterialName}
-                                                onChange={(e) => setElasticMaterialName(e.target.value)}
-                                                placeholder="Material Name (e.g. Elastic 1 Inch)..."
-                                                title="Click to edit material name directly"
-                                                style={{
-                                                  width: '100%',
-                                                  boxSizing: 'border-box',
-                                                  padding: '5px 8px',
-                                                  paddingRight: '26px',
-                                                  borderRadius: '6px',
-                                                  border: '1.5px solid #86efac',
-                                                  background: '#f0fdf4',
-                                                  color: '#047857',
-                                                  fontSize: '13px',
-                                                  fontWeight: '800',
-                                                  outline: 'none',
-                                                  transition: 'all 0.15s ease'
-                                                }}
-                                              />
-                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#059669', opacity: 0.7 }}>
-                                                <Edit2 size={12} />
-                                              </span>
-                                            </div>
-                                          </div>
-
-                                          {/* Middle: Map to choose material dropdown (Elastic category only) */}
-                                          <div style={{ marginBottom: '6px' }}>
-                                            <SearchableMaterialSelect
-                                              materials={elasticMaterials}
-                                              value={selectedElasticMaterialId}
-                                              onChange={handleSelectElasticMaterial}
-                                              placeholder="🔍 Map Elastic Item (with Photos)..."
-                                              themeColor="#059669"
-                                              componentHint="Elastic"
-                                              compact={true}
-                                              showCategoryFilter={false}
-                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                            />
-                                          </div>
-
-                                          {/* Bottom: All material details according to issue */}
-                                          {currentElasticMaterial ? (
-                                            <div style={{
-                                              display: 'flex',
-                                              flexWrap: 'wrap',
-                                              gap: '4px',
-                                              alignItems: 'center',
-                                              fontSize: '10.5px',
-                                              background: '#ecfdf5',
-                                              padding: '5px 7px',
-                                              borderRadius: '6px',
-                                              border: '1px dashed #a7f3d0'
-                                            }}>
-                                              <span style={{ fontWeight: '800', color: '#065f46', background: '#dcfce7', padding: '1px 5px', borderRadius: '3px' }}>
-                                                ITEM CODE: {formatItemCode(currentElasticMaterial, null, materials)}
-                                              </span>
-                                              <span style={{ fontWeight: '700', color: currentElasticMaterial.stock > 0 ? '#047857' : '#dc2626' }}>
-                                                Stock: {currentElasticMaterial.stock} {currentElasticMaterial.unit || 'Roll'}
-                                              </span>
-                                              {currentElasticMaterial.location && (
-                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                                  <MapPin size={10} color="#059669" />
-                                                  {currentElasticMaterial.location}
-                                                </span>
-                                              )}
-                                              <span style={{ color: '#047857', fontWeight: '800' }}>
-                                                {effectiveDivisor === 25 ? '÷ 25 (1")' : `÷ ${effectiveDivisor} (${effectiveWidth})`}
-                                              </span>
-                                              {currentElasticMaterial.packets > 0 && (
-                                                <span style={{ color: '#64748b' }}>
-                                                  {currentElasticMaterial.packets} Pkts
-                                                </span>
-                                              )}
-                                              {(() => {
-                                                const rawImg = currentElasticMaterial.imageUrl || currentElasticMaterial.image || currentElasticMaterial.photo || currentElasticMaterial.imgUrl;
-                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                                return cleanImg ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setPreviewPhotoUrl({
-                                                      url: cleanImg,
-                                                      title: currentElasticMaterial.name,
-                                                      code: formatItemCode(currentElasticMaterial, null, materials),
-                                                      stock: `${currentElasticMaterial.stock} ${currentElasticMaterial.unit || 'Roll'}`,
-                                                      location: currentElasticMaterial.location
-                                                    })}
-                                                    style={{
-                                                      border: 'none',
-                                                      background: '#059669',
-                                                      color: '#ffffff',
-                                                      fontSize: '9.5px',
-                                                      fontWeight: '800',
-                                                      padding: '1px 6px',
-                                                      borderRadius: '4px',
-                                                      cursor: 'pointer',
-                                                      display: 'inline-flex',
-                                                      alignItems: 'center',
-                                                      gap: '3px'
-                                                    }}
-                                                    title="Click to zoom image"
-                                                  >
-                                                    🔍 View Photo
-                                                  </button>
-                                                ) : null;
-                                              })()}
-                                            </div>
-                                          ) : (
-                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                              Custom Name • Select item above to map inventory & details
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                      {withoutLotActive ? `Direct (${effectiveWidth})` : `${elasticSizeInput || 0} ${elasticUnit === 'cm' ? 'CM' : 'Inch'}`}
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                      <code style={{ background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                        {withoutLotActive ? `${effPcs} Pcs ÷ ${effectiveDivisor}` : (elasticUnit === 'cm' ? `${elasticSizeInput || 0} ÷ 100` : `${elasticSizeInput || 0} × 0.0254`)}
-                                      </code>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#047857', fontSize: '14px', background: '#f0fdf4' }}>
-                                      {withoutLotActive ? `1/${effectiveDivisor} Roll` : `${ePerPc} m`}
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                      {effPcs}
-                                    </td>
-                                    <td style={{ padding: '10px 14px', textAlign: 'right', background: '#dcfce7' }}>
-                                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#065f46', lineHeight: '1.1' }}>
-                                        {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} <span style={{ fontSize: '13px', fontWeight: '800' }}>Rolls</span>
-                                      </div>
-                                      <div style={{ fontSize: '11px', fontWeight: '700', color: '#047857', marginTop: '2px' }}>
-                                        {withoutLotActive ? `(${effPcs} ÷ ${effectiveDivisor} = ${(effPcs / effectiveDivisor).toFixed(2)} Rolls)` : `Total: ${eTotal} m • (÷ ${effectiveDivisor} for ${effectiveWidth})`}
-                                      </div>
-                                      <span style={{ fontSize: '10px', background: '#059669', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
-                                        Total Issue: {withoutLotActive ? Math.ceil(effPcs / effectiveDivisor) : Math.ceil(eTotal / effectiveDivisor)} Rolls
-                                      </span>
-                                    </td>
-                                  </tr>
-                                )}
-
-                                {/* TAPE ROW */}
-                                {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
-                                  <tr style={{ background: '#ffffff', borderBottom: (materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
-                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                        {/* Material Image Swatch Thumbnail */}
-                                        {(() => {
-                                          const rawImg = currentTapeMaterial?.imageUrl || currentTapeMaterial?.image || currentTapeMaterial?.photo || currentTapeMaterial?.imgUrl;
-                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                          return (
-                                            <div
-                                              onClick={() => {
-                                                if (cleanImg) {
-                                                  setPreviewPhotoUrl({
-                                                    url: cleanImg,
-                                                    title: currentTapeMaterial?.name || tapeMaterialName || 'Tape Material',
-                                                    code: currentTapeMaterial?.id || currentTapeMaterial?.itemCode || '',
-                                                    stock: `${currentTapeMaterial?.stock || 0} ${currentTapeMaterial?.unit || 'Mtr'}`,
-                                                    location: currentTapeMaterial?.location || ''
-                                                  });
-                                                }
-                                              }}
-                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this tape item"}
-                                              style={{
-                                                width: '56px',
-                                                height: '56px',
-                                                borderRadius: '8px',
-                                                border: cleanImg ? '2px solid #3b82f6' : '1.5px dashed #cbd5e1',
-                                                background: cleanImg ? '#ffffff' : '#f8fafc',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                flexShrink: 0,
-                                                cursor: cleanImg ? 'zoom-in' : 'default',
-                                                overflow: 'hidden',
-                                                boxShadow: cleanImg ? '0 2px 6px rgba(59, 130, 246, 0.22)' : 'none',
-                                                position: 'relative',
-                                                transition: 'all 0.15s ease',
-                                                marginTop: '2px'
-                                              }}
-                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
-                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                            >
-                                              {cleanImg ? (
-                                                <>
-                                                  <img
-                                                    src={cleanImg}
-                                                    alt={currentTapeMaterial?.name || 'Tape'}
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                                  />
-                                                  <div style={{
-                                                    position: 'absolute',
-                                                    bottom: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    background: 'rgba(30, 64, 175, 0.85)',
-                                                    color: '#ffffff',
-                                                    fontSize: '8px',
-                                                    fontWeight: '800',
-                                                    textAlign: 'center',
-                                                    padding: '1px 0',
-                                                    letterSpacing: '0.5px'
-                                                  }}>
-                                                    ZOOM
-                                                  </div>
-                                                </>
-                                              ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-                                                  <Package size={20} />
-                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Right Controls: Name, Dropdown & Details */}
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                          {/* Top: Bullet & Editable Material Name */}
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#3b82f6', flexShrink: 0 }}></span>
-                                            <div style={{ flex: 1, position: 'relative' }}>
-                                              <input
-                                                type="text"
-                                                value={tapeMaterialName}
-                                                onChange={(e) => setTapeMaterialName(e.target.value)}
-                                                placeholder="Tape Material Name (e.g. Tape 2 Inch)..."
-                                                title="Click to edit tape material name directly"
-                                                style={{
-                                                  width: '100%',
-                                                  boxSizing: 'border-box',
-                                                  padding: '5px 8px',
-                                                  paddingRight: '26px',
-                                                  borderRadius: '6px',
-                                                  border: '1.5px solid #93c5fd',
-                                                  background: '#eff6ff',
-                                                  color: '#1d4ed8',
-                                                  fontSize: '13px',
-                                                  fontWeight: '800',
-                                                  outline: 'none',
-                                                  transition: 'all 0.15s ease'
-                                                }}
-                                              />
-                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#3b82f6', opacity: 0.7 }}>
-                                                <Edit2 size={12} />
-                                              </span>
-                                            </div>
-                                          </div>
-
-                                          {/* Middle: Map to choose material dropdown (Tape category only) */}
-                                          <div style={{ marginBottom: '6px' }}>
-                                            <SearchableMaterialSelect
-                                              materials={tapeMaterials}
-                                              value={selectedTapeMaterialId}
-                                              onChange={handleSelectTapeMaterial}
-                                              placeholder="🔍 Map Tape Item (with Photos)..."
-                                              themeColor="#2563eb"
-                                              componentHint="Tape"
-                                              compact={true}
-                                              showCategoryFilter={false}
-                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                            />
-                                          </div>
-
-                                          {/* Bottom: All material details according to issue */}
-                                          {currentTapeMaterial ? (
-                                            <div style={{
-                                              display: 'flex',
-                                              flexWrap: 'wrap',
-                                              gap: '4px',
-                                              alignItems: 'center',
-                                              fontSize: '10.5px',
-                                              background: '#eff6ff',
-                                              padding: '5px 7px',
-                                              borderRadius: '6px',
-                                              border: '1px dashed #bfdbfe'
-                                            }}>
-                                              <span style={{ fontWeight: '800', color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: '3px' }}>
-                                                ITEM CODE: {formatItemCode(currentTapeMaterial, null, materials)}
-                                              </span>
-                                              <span style={{ fontWeight: '700', color: currentTapeMaterial.stock > 0 ? '#1d4ed8' : '#dc2626' }}>
-                                                Stock: {currentTapeMaterial.stock} {currentTapeMaterial.unit || 'Mtr'}
-                                              </span>
-                                              {currentTapeMaterial.location && (
-                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                                  <MapPin size={10} color="#3b82f6" />
-                                                  {currentTapeMaterial.location}
-                                                </span>
-                                              )}
-                                              {(() => {
-                                                const rawImg = currentTapeMaterial.imageUrl || currentTapeMaterial.image || currentTapeMaterial.photo || currentTapeMaterial.imgUrl;
-                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                                return cleanImg ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setPreviewPhotoUrl({
-                                                      url: cleanImg,
-                                                      title: currentTapeMaterial.name,
-                                                      code: formatItemCode(currentTapeMaterial, null, materials),
-                                                      stock: `${currentTapeMaterial.stock} ${currentTapeMaterial.unit || 'Mtr'}`,
-                                                      location: currentTapeMaterial.location
-                                                    })}
-                                                    style={{
-                                                      border: 'none',
-                                                      background: '#2563eb',
-                                                      color: '#ffffff',
-                                                      fontSize: '9.5px',
-                                                      fontWeight: '800',
-                                                      padding: '1px 6px',
-                                                      borderRadius: '4px',
-                                                      cursor: 'pointer',
-                                                      display: 'inline-flex',
-                                                      alignItems: 'center',
-                                                      gap: '3px'
-                                                    }}
-                                                    title="Click to zoom image"
-                                                  >
-                                                    🔍 View Photo
-                                                  </button>
-                                                ) : null;
-                                              })()}
-                                            </div>
-                                          ) : (
-                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                              Custom Name • Select item above to map inventory & details
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8' }}>
-                                      Direct ({effTapeDiv} Pcs/Roll)
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                      <code style={{ background: '#eff6ff', color: '#1d4ed8', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '800' }}>
-                                        {effPcs} Pcs ÷ {effTapeDiv}
-                                      </code>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#1d4ed8', fontSize: '13px', background: '#eff6ff' }}>
-                                      1/{effTapeDiv} Roll
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                      {effPcs}
-                                    </td>
-                                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#1e3a8a', fontSize: '15px', background: '#dbeafe' }}>
-                                      <div>
-                                        <span style={{ fontSize: '16px' }}>{tapeCalculatedRolls} Roll(s)</span>
-                                        {effPcs > 0 && (
-                                          <span style={{ fontSize: '10.5px', display: 'block', color: '#64748b', fontWeight: '700' }}>
-                                            ({tapeExactRolls} Exact)
-                                          </span>
-                                        )}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-
-                                {/* BONE ROW (Shown if bone or all) */}
-                                {(materialMode === 'bone' || materialMode === 'all') && (
-                                  <tr style={{ background: '#ffffff', borderBottom: 'none' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f1f5f9', minWidth: '320px' }}>
-                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                        {/* Material Image Swatch Thumbnail */}
-                                        {(() => {
-                                          const rawImg = currentBoneMaterial?.imageUrl || currentBoneMaterial?.image || currentBoneMaterial?.photo || currentBoneMaterial?.imgUrl;
-                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                          return (
-                                            <div
-                                              onClick={() => {
-                                                if (cleanImg) {
-                                                  setPreviewPhotoUrl({
-                                                    url: cleanImg,
-                                                    title: currentBoneMaterial?.name || boneMaterialName || 'Bone Material',
-                                                    code: currentBoneMaterial?.id || currentBoneMaterial?.itemCode || '',
-                                                    stock: `${currentBoneMaterial?.stock || 0} ${currentBoneMaterial?.unit || 'Roll'}`,
-                                                    location: currentBoneMaterial?.location || ''
-                                                  });
-                                                }
-                                              }}
-                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this bone item"}
-                                              style={{
-                                                width: '56px',
-                                                height: '56px',
-                                                borderRadius: '8px',
-                                                border: cleanImg ? '2px solid #0284c7' : '1.5px dashed #cbd5e1',
-                                                background: cleanImg ? '#ffffff' : '#f8fafc',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                flexShrink: 0,
-                                                cursor: cleanImg ? 'zoom-in' : 'default',
-                                                overflow: 'hidden',
-                                                boxShadow: cleanImg ? '0 2px 6px rgba(2, 132, 199, 0.22)' : 'none',
-                                                position: 'relative',
-                                                transition: 'all 0.15s ease',
-                                                marginTop: '2px'
-                                              }}
-                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
-                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                            >
-                                              {cleanImg ? (
-                                                <>
-                                                  <img
-                                                    src={cleanImg}
-                                                    alt={currentBoneMaterial?.name || 'Bone'}
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                                  />
-                                                  <div style={{
-                                                    position: 'absolute',
-                                                    bottom: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    background: 'rgba(2, 132, 199, 0.85)',
-                                                    color: '#ffffff',
-                                                    fontSize: '8px',
-                                                    fontWeight: '800',
-                                                    textAlign: 'center',
-                                                    padding: '1px 0',
-                                                    letterSpacing: '0.5px'
-                                                  }}>
-                                                    ZOOM
-                                                  </div>
-                                                </>
-                                              ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-                                                  <Package size={20} />
-                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>No Photo</span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Right Controls: Name, Dropdown & Details */}
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                          {/* Top: Bullet & Editable Material Name */}
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#0284c7', flexShrink: 0 }}></span>
-                                            <div style={{ flex: 1, position: 'relative' }}>
-                                              <input
-                                                type="text"
-                                                value={boneMaterialName}
-                                                onChange={(e) => setBoneMaterialName(e.target.value)}
-                                                placeholder="Bone Material Name (e.g. Bone Chinese)..."
-                                                title="Click to edit bone material name directly"
-                                                style={{
-                                                  width: '100%',
-                                                  boxSizing: 'border-box',
-                                                  padding: '5px 8px',
-                                                  paddingRight: '26px',
-                                                  borderRadius: '6px',
-                                                  border: '1.5px solid #7dd3fc',
-                                                  background: '#f0f9ff',
-                                                  color: '#0369a1',
-                                                  fontSize: '13px',
-                                                  fontWeight: '800',
-                                                  outline: 'none',
-                                                  transition: 'all 0.15s ease'
-                                                }}
-                                              />
-                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#0284c7', opacity: 0.7 }}>
-                                                <Edit2 size={12} />
-                                              </span>
-                                            </div>
-                                          </div>
-
-                                          {/* Middle: Map to choose material dropdown (Bone category only) */}
-                                          <div style={{ marginBottom: '6px' }}>
-                                            <SearchableMaterialSelect
-                                              materials={boneMaterials}
-                                              value={selectedBoneMaterialId}
-                                              onChange={handleSelectBoneMaterial}
-                                              placeholder="🔍 Map Bone Item (with Photos)..."
-                                              themeColor="#0284c7"
-                                              componentHint="Bone"
-                                              compact={true}
-                                              showCategoryFilter={false}
-                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                            />
-                                          </div>
-
-                                          {/* Bottom: All material details according to issue */}
-                                          {currentBoneMaterial ? (
-                                            <div style={{
-                                              display: 'flex',
-                                              flexWrap: 'wrap',
-                                              gap: '4px',
-                                              alignItems: 'center',
-                                              fontSize: '10.5px',
-                                              background: '#f0f9ff',
-                                              padding: '5px 7px',
-                                              borderRadius: '6px',
-                                              border: '1px dashed #bae6fd'
-                                            }}>
-                                              <span style={{ fontWeight: '800', color: '#0369a1', background: '#e0f2fe', padding: '1px 5px', borderRadius: '3px' }}>
-                                                ITEM CODE: {formatItemCode(currentBoneMaterial, null, materials)}
-                                              </span>
-                                              <span style={{ fontWeight: '700', color: currentBoneMaterial.stock > 0 ? '#0284c7' : '#dc2626' }}>
-                                                Stock: {currentBoneMaterial.stock} {currentBoneMaterial.unit || 'Roll'}
-                                              </span>
-                                              {currentBoneMaterial.location && (
-                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                                  <MapPin size={10} color="#0284c7" />
-                                                  {currentBoneMaterial.location}
-                                                </span>
-                                              )}
-                                              {(() => {
-                                                const rawImg = currentBoneMaterial.imageUrl || currentBoneMaterial.image || currentBoneMaterial.photo || currentBoneMaterial.imgUrl;
-                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                                return cleanImg ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setPreviewPhotoUrl({
-                                                      url: cleanImg,
-                                                      title: currentBoneMaterial.name,
-                                                      code: formatItemCode(currentBoneMaterial, null, materials),
-                                                      stock: `${currentBoneMaterial.stock} ${currentBoneMaterial.unit || 'Roll'}`,
-                                                      location: currentBoneMaterial.location
-                                                    })}
-                                                    style={{
-                                                      border: 'none',
-                                                      background: '#0284c7',
-                                                      color: '#ffffff',
-                                                      fontSize: '9.5px',
-                                                      fontWeight: '800',
-                                                      padding: '1px 6px',
-                                                      borderRadius: '4px',
-                                                      cursor: 'pointer',
-                                                      display: 'inline-flex',
-                                                      alignItems: 'center',
-                                                      gap: '3px'
-                                                    }}
-                                                    title="Click to zoom image"
-                                                  >
-                                                    🔍 View Photo
-                                                  </button>
-                                                ) : null;
-                                              })()}
-                                            </div>
-                                          ) : (
-                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                              Custom Name • Select item above to map inventory & details
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                      Direct: {boneWeightKg || '0'} Kg
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'center' }}>
-                                      <code style={{ background: '#f0f9ff', color: '#0369a1', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                        Weight-Wise Issue
-                                      </code>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '900', color: '#0284c7', fontSize: '14px', background: '#f0f9ff' }}>
-                                      {effPcs > 0 ? `${(parseFloat(boneWeightKg || 0) / effPcs).toFixed(4)} kg` : '—'}
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f1f5f9', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                      {effPcs || '—'}
-                                    </td>
-                                    <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: '900', color: '#0369a1', fontSize: '15px', background: '#e0f2fe' }}>
-                                      <div>{boneWeightKg || '0'} Kg</div>
-                                      <div style={{ fontSize: '11px', fontWeight: '800', color: '#0284c7', marginTop: '2px' }}>
-                                        Direct Floor Issue
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )}
-
-                                {/* OTHER ACCESSORIES ROW */}
-                                {materialMode === 'other' && (
-                                  <tr style={{ background: '#faf5ff' }}>
-                                    <td style={{ padding: '10px 12px', borderRight: '1px solid #f3e8ff', minWidth: '320px' }}>
-                                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                                        {/* Material Image Swatch Thumbnail */}
-                                        {(() => {
-                                          const rawImg = currentOtherMaterial?.imageUrl || currentOtherMaterial?.image || currentOtherMaterial?.photo || currentOtherMaterial?.imgUrl;
-                                          const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                          return (
-                                            <div
-                                              onClick={() => {
-                                                if (cleanImg) {
-                                                  setPreviewPhotoUrl({
-                                                    url: cleanImg,
-                                                    title: currentOtherMaterial?.name || otherMaterialName || 'Other Accessory',
-                                                    code: currentOtherMaterial?.id || currentOtherMaterial?.itemCode || '',
-                                                    stock: `${currentOtherMaterial?.stock || 0} ${currentOtherMaterial?.unit || otherUnit || 'Roll'}`,
-                                                    location: currentOtherMaterial?.location || ''
-                                                  });
-                                                }
-                                              }}
-                                              title={cleanImg ? "Click to view & zoom material photo" : "No photo available for this accessory item"}
-                                              style={{
-                                                width: '56px',
-                                                height: '56px',
-                                                borderRadius: '8px',
-                                                border: cleanImg ? '2px solid #7c3aed' : '1.5px dashed #cbd5e1',
-                                                background: cleanImg ? '#ffffff' : '#f8fafc',
-                                                display: 'flex',
-                                                flexDirection: 'column',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                flexShrink: 0,
-                                                cursor: cleanImg ? 'zoom-in' : 'default',
-                                                overflow: 'hidden',
-                                                boxShadow: cleanImg ? '0 2px 6px rgba(124, 58, 237, 0.22)' : 'none',
-                                                position: 'relative',
-                                                transition: 'all 0.15s ease',
-                                                marginTop: '2px'
-                                              }}
-                                              onMouseEnter={(e) => { if (cleanImg) e.currentTarget.style.transform = 'scale(1.06)'; }}
-                                              onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-                                            >
-                                              {cleanImg ? (
-                                                <>
-                                                  <img
-                                                    src={cleanImg}
-                                                    alt={currentOtherMaterial?.name || otherMaterialName || 'Accessory'}
-                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                                                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                                                  />
-                                                  <div style={{
-                                                    position: 'absolute',
-                                                    bottom: 0,
-                                                    left: 0,
-                                                    right: 0,
-                                                    background: 'rgba(124, 58, 237, 0.85)',
-                                                    color: '#ffffff',
-                                                    fontSize: '8px',
-                                                    fontWeight: '800',
-                                                    textAlign: 'center',
-                                                    padding: '1px 0',
-                                                    letterSpacing: '0.5px'
-                                                  }}>
-                                                    ZOOM
-                                                  </div>
-                                                </>
-                                              ) : (
-                                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#7c3aed' }}>
-                                                  <Package size={20} />
-                                                  <span style={{ fontSize: '7.5px', fontWeight: '700', marginTop: '2px', textTransform: 'uppercase' }}>Accessory</span>
-                                                </div>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
-
-                                        {/* Right Controls: Name, Dropdown & Details */}
-                                        <div style={{ flex: 1, minWidth: 0 }}>
-                                          {/* Top: Bullet & Editable Material Name */}
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#7c3aed', flexShrink: 0 }}></span>
-                                            <div style={{ flex: 1, position: 'relative' }}>
-                                              <input
-                                                type="text"
-                                                value={otherMaterialName}
-                                                onChange={(e) => setOtherMaterialName(e.target.value)}
-                                                placeholder="Material Name (e.g. Drawcord, Zipper)..."
-                                                title="Click to edit accessory material name directly"
-                                                style={{
-                                                  width: '100%',
-                                                  boxSizing: 'border-box',
-                                                  padding: '5px 8px',
-                                                  paddingRight: '26px',
-                                                  borderRadius: '6px',
-                                                  border: '1.5px solid #d8b4fe',
-                                                  background: '#faf5ff',
-                                                  color: '#6b21a8',
-                                                  fontSize: '13px',
-                                                  fontWeight: '800',
-                                                  outline: 'none',
-                                                  transition: 'all 0.15s ease'
-                                                }}
-                                              />
-                                              <span style={{ position: 'absolute', right: '7px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#7c3aed', opacity: 0.7 }}>
-                                                <Edit2 size={12} />
-                                              </span>
-                                            </div>
-                                          </div>
-
-                                          {/* Middle: Map to choose material dropdown */}
-                                          <div style={{ marginBottom: '6px' }}>
-                                            <SearchableMaterialSelect
-                                              materials={otherMaterials}
-                                              value={selectedOtherMaterialId}
-                                              onChange={handleSelectOtherMaterial}
-                                              placeholder={`— Map Store Material (${otherMaterials.length}) —`}
-                                              themeColor="#7c3aed"
-                                              compact={true}
-                                              onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                                            />
-                                          </div>
-
-                                          {/* Bottom: All material details according to issue */}
-                                          {currentOtherMaterial ? (
-                                            <div style={{
-                                              display: 'flex',
-                                              flexWrap: 'wrap',
-                                              gap: '4px',
-                                              alignItems: 'center',
-                                              fontSize: '10.5px',
-                                              background: '#f5f3ff',
-                                              padding: '5px 7px',
-                                              borderRadius: '6px',
-                                              border: '1px dashed #d8b4fe'
-                                            }}>
-                                              <span style={{ fontWeight: '800', color: '#6b21a8', background: '#ede9fe', padding: '1px 5px', borderRadius: '3px' }}>
-                                                ITEM CODE: {formatItemCode(currentOtherMaterial, null, materials)}
-                                              </span>
-                                              <span style={{ fontWeight: '700', color: currentOtherMaterial.stock > 0 ? '#059669' : '#dc2626' }}>
-                                                Stock: {currentOtherMaterial.stock} {normalizeAccUnit(currentOtherMaterial.unit || otherUnit || 'Roll')}
-                                              </span>
-                                              {currentOtherMaterial.location && (
-                                                <span style={{ color: '#475569', display: 'flex', alignItems: 'center', gap: '2px' }}>
-                                                  <MapPin size={10} color="#7c3aed" />
-                                                  {currentOtherMaterial.location}
-                                                </span>
-                                              )}
-                                              {(() => {
-                                                const rawImg = currentOtherMaterial.imageUrl || currentOtherMaterial.image || currentOtherMaterial.photo || currentOtherMaterial.imgUrl;
-                                                const cleanImg = rawImg ? getCleanImageUrl(rawImg) : '';
-                                                return cleanImg ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => setPreviewPhotoUrl({
-                                                      url: cleanImg,
-                                                      title: currentOtherMaterial.name,
-                                                      code: formatItemCode(currentOtherMaterial, null, materials),
-                                                      stock: `${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit || otherUnit || 'Roll')}`,
-                                                      location: currentOtherMaterial.location
-                                                    })}
-                                                    style={{
-                                                      border: 'none',
-                                                      background: '#7c3aed',
-                                                      color: '#ffffff',
-                                                      fontSize: '9.5px',
-                                                      fontWeight: '800',
-                                                      padding: '1px 6px',
-                                                      borderRadius: '4px',
-                                                      cursor: 'pointer',
-                                                      display: 'inline-flex',
-                                                      alignItems: 'center',
-                                                      gap: '3px'
-                                                    }}
-                                                    title="Click to zoom image"
-                                                  >
-                                                    🔍 View Photo
-                                                  </button>
-                                                ) : null;
-                                              })()}
-                                            </div>
-                                          ) : (
-                                            <div style={{ fontSize: '10px', color: '#64748b', fontStyle: 'italic', paddingLeft: '4px' }}>
-                                              Custom Accessory • Select item above to map store inventory & details
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '700', color: '#0f172a' }}>
-                                      Direct ({otherRollCount || 1} {normalizeAccUnit(otherUnit)})
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'center' }}>
-                                      <code style={{ background: '#f3e8ff', color: '#7c3aed', padding: '3px 8px', borderRadius: '4px', fontSize: '12px', fontWeight: '700' }}>
-                                        Direct Floor Issue
-                                      </code>
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '800', color: '#6b21a8' }}>
-                                      —
-                                    </td>
-                                    <td style={{ padding: '12px 14px', borderRight: '1px solid #f3e8ff', textAlign: 'right', fontWeight: '800', color: '#0f172a' }}>
-                                      {effPcs}
-                                    </td>
-                                    <td style={{ padding: '10px 14px', textAlign: 'right', background: '#f3e8ff' }}>
-                                      <div style={{ fontSize: '18px', fontWeight: '900', color: '#6b21a8', lineHeight: '1.1' }}>
-                                        {otherRollCount || 1} <span style={{ fontSize: '13px', fontWeight: '800' }}>{normalizeAccUnit(otherUnit)}(s)</span>
-                                      </div>
-                                      <div style={{ fontSize: '11px', fontWeight: '700', color: '#7c3aed', marginTop: '2px' }}>
-                                        Direct Floor Handover
-                                      </div>
-                                      <span style={{ fontSize: '10px', background: '#7c3aed', color: '#ffffff', padding: '1px 6px', borderRadius: '4px', fontWeight: '800', display: 'inline-block', marginTop: '3px' }}>
-                                        Total Issue: {otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s)
-                                      </span>
-                                    </td>
-                                  </tr>
-                                )}
-                              </>
-                            );
-                          })()}
+                          <tr style={{ background: '#ffffff', color: '#0f172a' }}>
+                            <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>{issueDate}</td>
+                            {!withoutLotActive && (
+                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#059669' }}>
+                                {lotDetails?.lotNo || searchLotInput || '—'}
+                              </td>
+                            )}
+                            <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '700' }}>
+                              {withoutLotActive ? (withoutLotStyle || 'LOWER') : (lotDetails?.garmentType || lotDetails?.style || 'LOWER')}
+                            </td>
+                            <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
+                              {materialMode === 'elastic' ? (
+                                <span style={{ color: '#047857' }}>
+                                  {cleanMaterialName(elasticMaterialName) || 'Elastic'} {formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials) ? `[${formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials)}]` : ''}
+                                </span>
+                              ) : materialMode === 'tape' ? (
+                                <span style={{ color: '#1d4ed8' }}>
+                                  {cleanMaterialName(tapeMaterialName) || 'Tape'} {formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials) ? `[${formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials)}]` : ''}
+                                </span>
+                              ) : materialMode === 'bone' ? (
+                                <span style={{ color: '#0369a1' }}>
+                                  {cleanMaterialName(boneMaterialName) || 'Bone'} {formatItemCode(currentBoneMaterial || selectedBoneMaterialId, null, materials) ? `[${formatItemCode(currentBoneMaterial || selectedBoneMaterialId, null, materials)}]` : ''}
+                                </span>
+                              ) : materialMode === 'other' ? (
+                                <span style={{ color: '#7c3aed' }}>
+                                  {cleanMaterialName(otherMaterialName) || 'Other Accessory'} {formatItemCode(currentOtherMaterial || selectedOtherMaterialId, null, materials) ? `[${formatItemCode(currentOtherMaterial || selectedOtherMaterialId, null, materials)}]` : ''}
+                                </span>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <span style={{ color: '#047857' }}>{cleanMaterialName(elasticMaterialName)} {formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials) ? `[${formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials)}]` : ''}</span>
+                                  <span style={{ color: '#1d4ed8', fontSize: '11px' }}>{cleanMaterialName(tapeMaterialName)} {formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials) ? `[${formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials)}]` : ''}</span>
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
+                              {issuePcs}
+                            </td>
+                            <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
+                              {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
+                            </td>
+                            {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (() => {
+                              const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
+                              const effPcsNum = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
+                              return (
+                                <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#1d4ed8', background: '#eff6ff' }}>
+                                  {Math.ceil(effPcsNum / effTapeDiv)} Roll(s)
+                                  {effPcsNum > 0 && (
+                                    <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', marginLeft: '4px' }}>
+                                      ({(effPcsNum / effTapeDiv).toFixed(2)})
+                                    </span>
+                                  )}
+                                </td>
+                              );
+                            })()}
+                            {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
+                              <td style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
+                                {calcResult.elasticPerPcMtr || 0}
+                              </td>
+                            )}
+                            {(materialMode === 'bone' || materialMode === 'all') && (
+                              <td style={{ padding: '8px 10px', fontWeight: '800', color: '#0284c7', background: '#f0f9ff' }}>
+                                {boneWeightKg || '0'} Kg
+                              </td>
+                            )}
+                          </tr>
                         </tbody>
                       </table>
                     </div>
-
-                    {/* EXCEL SHEET PRODUCTION ROW PREVIEW */}
-                    <div style={{ marginTop: '16px', borderTop: '1px dashed #cbd5e1', paddingTop: '14px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
-                        <span style={{ fontSize: '12px', fontWeight: '800', color: '#334155', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Table size={14} color="#059669" />
-                          <span>Excel Sheet Output Preview ({materialMode === 'elastic' ? 'Elastic' : materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'All'}):</span>
-                        </span>
-                        {materialMode !== 'tape' && materialMode !== 'bone' && (
-                          <span style={{ fontSize: '11px', color: '#64748b' }}>
-                            Total Requirement: <strong>{calcResult.totalElasticMtr} Mtr</strong> &bull; <strong>÷ {effectiveDivisor} = {calcResult.recommendedRolls || Math.ceil((calcResult.totalElasticMtr || 0) / effectiveDivisor)} Roll(s) ({effectiveWidth})</strong>
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ overflowX: 'auto', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', textAlign: 'left' }}>
-                          <thead>
-                            <tr style={{ background: '#f1f5f9', color: '#0f172a', fontWeight: '800', borderBottom: '1.5px solid #cbd5e1' }}>
-                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>DATE</th>
-                              {!withoutLotActive && (
-                                <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Lot No.</th>
-                              )}
-                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Item Name</th>
-                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Mapped Material</th>
-                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Pcs (Issued)</th>
-                              <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Supervisor Name</th>
-                              {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (
-                                <th style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>Tape Roll(s) (Pcs ÷ {(effectiveTapeDivisor > 1 ? effectiveTapeDivisor : 45)})</th>
-                              )}
-                              {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                                <th style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none' }}>Elastic Per Pc (In mtr.)</th>
-                              )}
-                              {(materialMode === 'bone' || materialMode === 'all') && (
-                                <th style={{ padding: '8px 10px' }}>Bone Weight (Kg)</th>
-                              )}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr style={{ background: '#ffffff', color: '#0f172a' }}>
-                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>{issueDate}</td>
-                              {!withoutLotActive && (
-                                <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#059669' }}>
-                                  {lotDetails?.lotNo || searchLotInput || '—'}
-                                </td>
-                              )}
-                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '700' }}>
-                                {withoutLotActive ? (withoutLotStyle || 'LOWER') : (lotDetails?.garmentType || lotDetails?.style || 'LOWER')}
-                              </td>
-                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
-                                {materialMode === 'elastic' ? (
-                                  <span style={{ color: '#047857' }}>
-                                    {cleanMaterialName(elasticMaterialName) || 'Elastic'} {formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials) ? `[${formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials)}]` : ''}
-                                  </span>
-                                ) : materialMode === 'tape' ? (
-                                  <span style={{ color: '#1d4ed8' }}>
-                                    {cleanMaterialName(tapeMaterialName) || 'Tape'} {formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials) ? `[${formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials)}]` : ''}
-                                  </span>
-                                ) : materialMode === 'bone' ? (
-                                  <span style={{ color: '#0369a1' }}>
-                                    {cleanMaterialName(boneMaterialName) || 'Bone'} {formatItemCode(currentBoneMaterial || selectedBoneMaterialId, null, materials) ? `[${formatItemCode(currentBoneMaterial || selectedBoneMaterialId, null, materials)}]` : ''}
-                                  </span>
-                                ) : materialMode === 'other' ? (
-                                  <span style={{ color: '#7c3aed' }}>
-                                    {cleanMaterialName(otherMaterialName) || 'Other Accessory'} {formatItemCode(currentOtherMaterial || selectedOtherMaterialId, null, materials) ? `[${formatItemCode(currentOtherMaterial || selectedOtherMaterialId, null, materials)}]` : ''}
-                                  </span>
-                                ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ color: '#047857' }}>{cleanMaterialName(elasticMaterialName)} {formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials) ? `[${formatItemCode(currentElasticMaterial || selectedElasticMaterialId, null, materials)}]` : ''}</span>
-                                    <span style={{ color: '#1d4ed8', fontSize: '11px' }}>{cleanMaterialName(tapeMaterialName)} {formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials) ? `[${formatItemCode(currentTapeMaterial || selectedTapeMaterialId, null, materials)}]` : ''}</span>
-                                  </div>
-                                )}
-                              </td>
-                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800' }}>
-                                {issuePcs}
-                              </td>
-                              <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0' }}>
-                                {lotDetails?.supervisor || issuerName || 'ROHIT / MONU'}
-                              </td>
-                              {(materialMode === 'tape' || materialMode === 'both' || materialMode === 'all') && (() => {
-                                const effTapeDiv = (effectiveTapeDivisor && parseFloat(effectiveTapeDivisor) > 1) ? parseFloat(effectiveTapeDivisor) : 45;
-                                const effPcsNum = parseInt(issuePcs || lotDetails?.quantity || 0, 10);
-                                return (
-                                  <td style={{ padding: '8px 10px', borderRight: '1px solid #e2e8f0', fontWeight: '800', color: '#1d4ed8', background: '#eff6ff' }}>
-                                    {Math.ceil(effPcsNum / effTapeDiv)} Roll(s)
-                                    {effPcsNum > 0 && (
-                                      <span style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', marginLeft: '4px' }}>
-                                        ({(effPcsNum / effTapeDiv).toFixed(2)})
-                                      </span>
-                                    )}
-                                  </td>
-                                );
-                              })()}
-                              {(materialMode === 'elastic' || materialMode === 'both' || materialMode === 'all') && (
-                                <td style={{ padding: '8px 10px', borderRight: (materialMode === 'bone' || materialMode === 'all') ? '1px solid #e2e8f0' : 'none', fontWeight: '800', color: '#047857', background: '#f0fdf4' }}>
-                                  {calcResult.elasticPerPcMtr || 0}
-                                </td>
-                              )}
-                              {(materialMode === 'bone' || materialMode === 'all') && (
-                                <td style={{ padding: '8px 10px', fontWeight: '800', color: '#0284c7', background: '#f0f9ff' }}>
-                                  {boneWeightKg || '0'} Kg
-                                </td>
-                              )}
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
                   </div>
+                </div>
+              )}
 
                 {/* STEP 2: ISSUE DETAILS & ORIGINAL BILL SPECIFICATIONS */}
                 <div style={{
@@ -7679,53 +7601,26 @@ export default function ElasticIssueView({
                       </div>
                     )}
 
-                    {/* OTHER ACCESSORIES SPECIFICATION & MATERIAL MAPPING (FOR OTHER MODE) */}
+                    {/* OTHER ACCESSORIES SUMMARY (CONFIGURED IN GRID) */}
                     {materialMode === 'other' && (
                       <div style={{
-                        padding: '12px 14px',
-                        borderRadius: '10px',
-                        background: '#faf5ff',
-                        border: '1.5px solid #d8b4fe',
+                        padding: '10px 14px',
+                        borderRadius: '8px',
+                        background: '#f8fafc',
+                        border: '1px solid #cbd5e1',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '10px'
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '11.5px',
+                        color: '#475569'
                       }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Package size={14} color="#7c3aed" />
-                            <span>Other Accessory Specification & Material Mapping:</span>
-                          </span>
-                          <span style={{
-                            fontSize: '10.5px',
-                            background: '#f3e8ff',
-                            color: '#7c3aed',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            fontWeight: '800'
-                          }}>
-                            {normalizeAccUnit(otherUnit)}-Wise Floor Issue
-                          </span>
-                        </div>
-
-                        {/* Mapped Other Inventory Item Dropdown */}
-                        <div>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
-                            <label style={{ fontSize: '11px', fontWeight: '700', color: '#6b21a8', margin: 0 }}>
-                              MATERIAL NAME MAPPING (ACCESSORIES):
-                            </label>
-                            <span style={{ fontSize: '10px', color: '#7c3aed', fontWeight: '700' }}>
-                              {otherMaterials.length} Items Available
-                            </span>
-                          </div>
-                          <SearchableMaterialSelect
-                            materials={otherMaterials}
-                            value={selectedOtherMaterialId}
-                            onChange={handleSelectOtherMaterial}
-                            placeholder="— Select Accessory Inventory Item —"
-                            themeColor="#7c3aed"
-                            onPreviewPhoto={(photoData) => setPreviewPhotoUrl(photoData)}
-                          />
-                        </div>
+                        <span style={{ fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <CheckCircle2 size={14} color="#059669" />
+                          <span>Other Accessories Configured: <strong>{otherItems.length} Item(s)</strong> in Grid Above</span>
+                        </span>
+                        <span style={{ fontWeight: '800', color: '#0f172a' }}>
+                          Total Quantity: {otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0)} Unit(s)
+                        </span>
                       </div>
                     )}
 
@@ -8442,16 +8337,16 @@ export default function ElasticIssueView({
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#7c3aed' }}></span>
                                 <span style={{ fontSize: '11px', color: '#6b21a8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                                  • {(otherMaterialName || 'OTHER ACCESSORY').toUpperCase()} REQUIREMENT
+                                  • OTHER ACCESSORIES ALLOCATION ({otherItems.length} ITEM{otherItems.length > 1 ? 'S' : ''})
                                 </span>
                               </div>
                               <div style={{ fontSize: '12px', color: '#6b21a8', fontWeight: '700', marginTop: '3px' }}>
-                                Manual Floor Issue for {issuePcs || lotDetails?.quantity || 0} Pcs
+                                {otherItems.map(it => `${it.materialName || it.componentType} (${it.totalQty || 1} ${it.unit})`).join(' • ')}
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
                               <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '700', textTransform: 'uppercase', display: 'block' }}>
-                                ISSUE UNIT
+                                TOTAL ITEMS
                               </span>
                               <span style={{
                                 fontSize: '13px',
@@ -8462,7 +8357,7 @@ export default function ElasticIssueView({
                                 padding: '2px 8px',
                                 borderRadius: '6px'
                               }}>
-                                {normalizeAccUnit(otherUnit)}
+                                {otherItems.length} Item(s)
                               </span>
                             </div>
                           </div>
@@ -8489,19 +8384,19 @@ export default function ElasticIssueView({
                               </div>
                               <div>
                                 <div style={{ fontSize: '10.5px', fontWeight: '800', letterSpacing: '0.6px', textTransform: 'uppercase', opacity: 0.95 }}>
-                                  TOTAL ISSUE QUANTITY
+                                  TOTAL MATERIAL ALLOCATIONS
                                 </div>
                                 <div style={{ fontSize: '11.5px', fontWeight: '600', opacity: 0.95 }}>
-                                  {otherMaterialName}: {otherRollCount || 1} {normalizeAccUnit(otherUnit)}(s)
+                                  {otherItems.length} Item(s) configured in Grid for deduction
                                 </div>
                               </div>
                             </div>
                             <div style={{ textAlign: 'right' }}>
-                              <div style={{ fontSize: '28px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
-                                = {otherRollCount || 1} <span style={{ fontSize: '18px', fontWeight: '800' }}>{normalizeAccUnit(otherUnit)}(s)</span>
+                              <div style={{ fontSize: '26px', fontWeight: '900', lineHeight: '1', letterSpacing: '-0.5px' }}>
+                                = {otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0)} <span style={{ fontSize: '16px', fontWeight: '800' }}>Total Units</span>
                               </div>
                               <div style={{ fontSize: '10.5px', opacity: 0.85, fontWeight: '700', marginTop: '3px' }}>
-                                {currentOtherMaterial ? `Live Stock: ${currentOtherMaterial.stock} ${normalizeAccUnit(currentOtherMaterial.unit)}` : 'Direct Floor Handover'}
+                                Direct Floor Handover ({otherItems.length} distinct item{otherItems.length > 1 ? 's' : ''})
                               </div>
                             </div>
                           </div>

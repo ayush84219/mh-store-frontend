@@ -273,15 +273,27 @@ export default function OnlyCutting({
 
       return matchesSearch && matchesFabric;
     }).sort((a, b) => {
+      const parseTime = (val) => {
+        if (!val) return 0;
+        const t = new Date(val).getTime();
+        if (!isNaN(t) && t > 0) return t;
+        const dmy = String(val).match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+        if (dmy) {
+          const d = new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10)).getTime();
+          if (!isNaN(d)) return d;
+        }
+        return 0;
+      };
+
       if (sortBy === 'date_desc') {
-        const dateB = String(b.Saved_At || b.Date_of_Issue || '');
-        const dateA = String(a.Saved_At || a.Date_of_Issue || '');
-        return dateB.localeCompare(dateA) || Number(b.id) - Number(a.id);
+        const timeB = parseTime(b.Saved_At) || parseTime(b.Date_of_Issue) || (Number(b.id) || 0);
+        const timeA = parseTime(a.Saved_At) || parseTime(a.Date_of_Issue) || (Number(a.id) || 0);
+        return (timeB - timeA) || (Number(b.id) - Number(a.id));
       }
       if (sortBy === 'date_asc') {
-        const dateA = String(a.Saved_At || a.Date_of_Issue || '');
-        const dateB = String(b.Saved_At || b.Date_of_Issue || '');
-        return dateA.localeCompare(dateB) || Number(a.id) - Number(b.id);
+        const timeA = parseTime(a.Saved_At) || parseTime(a.Date_of_Issue) || (Number(a.id) || 0);
+        const timeB = parseTime(b.Saved_At) || parseTime(b.Date_of_Issue) || (Number(b.id) || 0);
+        return (timeA - timeB) || (Number(a.id) - Number(b.id));
       }
       if (sortBy === 'latest') return Number(b.id) - Number(a.id);
       if (sortBy === 'oldest') return Number(a.id) - Number(b.id);
@@ -647,7 +659,7 @@ export default function OnlyCutting({
                 }}>
                   <th style={{ padding: '10px 12px', border: '1px solid var(--border-color)', width: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>#</th>
                   <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '110px' }}>Lot Number</th>
-                  <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '105px' }}>Date of Issue</th>
+                  <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '135px' }}>Date of Issue / Saved At</th>
                   <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '140px' }}>Party / Client</th>
                   <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '150px' }}>Fabric</th>
                   <th style={{ padding: '10px 14px', border: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', minWidth: '140px' }}>Garment Type</th>
@@ -705,12 +717,32 @@ export default function OnlyCutting({
                           </div>
                         </td>
 
-                        {/* Date of Issue */}
+                        {/* Date of Issue / Saved At */}
                         <td
-                          style={{ padding: '10px 14px', border: '1px solid var(--border-color)', whiteSpace: 'nowrap', fontWeight: '500' }}
+                          style={{ padding: '10px 14px', border: '1px solid var(--border-color)', whiteSpace: 'nowrap' }}
                           onClick={() => toggleExpandLot(lot.Lot_Number)}
+                          title={lot.Saved_At ? `Saved At: ${lot.Saved_At}` : `Date of Issue: ${lot.Date_of_Issue || '—'}`}
                         >
-                          {lot.Date_of_Issue || '—'}
+                          {(() => {
+                            const raw = lot.Saved_At || lot.Date_of_Issue;
+                            if (!raw) return '—';
+                            const d = new Date(raw);
+                            if (!isNaN(d.getTime())) {
+                              const isFullTimestamp = typeof raw === 'string' && (raw.includes(':') || raw.includes('GMT'));
+                              if (isFullTimestamp) {
+                                const datePart = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                                const timePart = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+                                return (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                                    <span style={{ fontWeight: '600', color: 'var(--text-main)', fontSize: '12.5px' }}>{datePart}</span>
+                                    <span style={{ fontSize: '10.5px', color: '#2563eb', fontWeight: '600', fontFamily: 'monospace' }}>{timePart}</span>
+                                  </div>
+                                );
+                              }
+                              return <span style={{ fontWeight: '500' }}>{d.toLocaleDateString('en-GB')}</span>;
+                            }
+                            return <span style={{ fontWeight: '500' }}>{raw}</span>;
+                          })()}
                         </td>
 
                         {/* Party / Client */}
