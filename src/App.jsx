@@ -1367,7 +1367,8 @@ export default function App() {
           unit: item.unit,
           itemCode: item.itemCode || (mat ? (mat.itemCode || mat.stCode || mat.materialCode || '') : '') || '',
           location: item.location || (mat ? mat.location : '') || '',
-          materialId: item.materialId || ''
+          materialId: item.materialId || '',
+          imageUrl: item.imageUrl || (mat ? (mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '') : '') || ''
         };
       })
     };

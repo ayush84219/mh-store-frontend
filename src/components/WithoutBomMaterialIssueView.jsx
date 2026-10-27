@@ -34,7 +34,9 @@ import {
   CheckCircle2,
   ChevronDown,
   Settings,
-  Filter
+  Filter,
+  Camera,
+  Upload
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -149,14 +151,43 @@ export const getMaterialStoreStock = (m, allMaterials = []) => {
   return Number(m.stock || m.availableStock || 0);
 };
 
-// Helper to calculate Total Pieces (Cutting Total Pieces according to lot wise), Issued Pcs, and Variance (Cutting - Issue)
+// Helper to calculate Total Pieces (Cutting Total Pieces according to lot wise), Issued Qty/Units, and Variance (Cutting - Issue)
 export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {}, designs = []) => {
-  if (!log) return { totalPieces: 0, issuePcs: 0, variance: 0, totalStoreStock: 0, stockBreakdown: [], cuttingVolume: 0, isDirect: true };
-  const mats = log.materials || [];
-  const issuePcs = mats.reduce((sum, m) => sum + (Number(m.qty) || 0), 0);
+  if (!log) {
+    return {
+      totalPieces: 0,
+      issuePcs: 0,
+      variance: 0,
+      hasVariance: false,
+      varianceText: '—',
+      varianceBadge: '',
+      primaryUnit: 'Pcs',
+      isPieceBased: true,
+      formattedIssueQty: '0 Pcs',
+      unitTotals: {},
+      totalStoreStock: 0,
+      stockBreakdown: [],
+      cuttingVolume: 0,
+      isDirect: true
+    };
+  }
 
-  const cleanLot = String(log.lotId || '').trim().toLowerCase();
-  const isDirect = !cleanLot || cleanLot === 'direct-item' || cleanLot.includes('direct');
+  const mats = log.materials || [];
+  const rawLot = String(log.lotId || '').trim();
+  const cleanLot = rawLot.toLowerCase();
+
+  // Comprehensive check for Without Lot / Direct Requisitions
+  const isDirect = !cleanLot ||
+    cleanLot === 'direct-item' ||
+    cleanLot === 'w/o lot' ||
+    cleanLot === 'without lot' ||
+    cleanLot === 'no lot' ||
+    cleanLot === 'none' ||
+    cleanLot === 'n/a' ||
+    cleanLot.includes('direct') ||
+    cleanLot.includes('w/o') ||
+    cleanLot.includes('without') ||
+    cleanLot.includes('no lot');
 
   // 1. Resolve Cutting Total Pieces for this lot from cuttingMap (cutting_header database)
   let cuttingVolume = 0;
@@ -177,12 +208,46 @@ export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {},
     }
   }
 
-  // 3. Fallback to log.volume / log.pieces if recorded
+  // 3. Fallback to log.volume / log.pieces if recorded (ONLY for genuine cutting lots, never for W/O LOT)
   if (!cuttingVolume && !isDirect) {
     const rawVol = Number(log.volume !== undefined && log.volume !== null ? log.volume : (log.pieces || 0));
-    if (rawVol > 0) {
+    if (rawVol > 1) {
       cuttingVolume = rawVol;
     }
+  }
+
+  // Calculate unit breakdown and detect piece-based vs non-piece materials
+  const unitTotals = {};
+  let totalRawQty = 0;
+  let hasPieces = false;
+  let hasNonPieces = false;
+
+  mats.forEach(m => {
+    const q = Number(m.qty) || 0;
+    totalRawQty += q;
+    const rawUnit = String(m.unit || 'Pcs').trim();
+    const uUpper = rawUnit.toUpperCase();
+    const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+    if (isPc) {
+      hasPieces = true;
+    } else {
+      hasNonPieces = true;
+    }
+    const normUnit = isPc ? 'Pcs' : rawUnit;
+    unitTotals[normUnit] = (unitTotals[normUnit] || 0) + q;
+  });
+
+  const unitsList = Object.keys(unitTotals);
+  const primaryUnit = unitsList.length === 1 ? unitsList[0] : (hasNonPieces ? (hasPieces ? 'Mixed' : unitsList[0] || 'Units') : 'Pcs');
+  const isPieceBased = hasPieces && !hasNonPieces;
+
+  let formattedIssueQty = '0 Pcs';
+  if (unitsList.length === 0) {
+    formattedIssueQty = '0 Pcs';
+  } else if (unitsList.length === 1) {
+    formattedIssueQty = `${unitTotals[unitsList[0]].toLocaleString('en-IN')} ${unitsList[0]}`;
+  } else {
+    formattedIssueQty = unitsList.map(u => `${unitTotals[u].toLocaleString('en-IN')} ${u}`).join(' + ');
   }
 
   // Stock breakdown for materials inventory reference
@@ -205,15 +270,50 @@ export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {},
   });
   const totalStoreStock = stockBreakdown.reduce((sum, item) => sum + (item.storeStock || 0), 0);
 
-  // Total Pieces shows ONLY cutting total pieces according to lot wise
+  // Total Pieces shows ONLY cutting total pieces according to lot wise (0 for Direct / Without Lot)
   const totalPieces = isDirect ? 0 : cuttingVolume;
-  const variance = totalPieces > 0 ? (totalPieces - issuePcs) : -issuePcs;
+
+  // Variance calculation:
+  // Variance against Cutting Pieces ONLY makes sense if lot has cutting pieces AND materials are piece-based!
+  // If unit is LTR, ROLL, MTR, KG: subtracting rolls/litres from cutting pieces is mathematically invalid.
+  let variance = 0;
+  let hasVariance = false;
+  let varianceText = '—';
+  let varianceBadge = '';
+
+  if (isDirect) {
+    hasVariance = false;
+    varianceText = '—';
+    varianceBadge = 'Direct Issue';
+  } else if (totalPieces > 0) {
+    if (isPieceBased) {
+      variance = totalPieces - totalRawQty;
+      hasVariance = true;
+      varianceText = variance > 0 ? `+${variance.toLocaleString('en-IN')} Pcs` : `${variance.toLocaleString('en-IN')} Pcs`;
+      varianceBadge = variance === 0 ? 'BALANCED' : variance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED';
+    } else {
+      hasVariance = false;
+      varianceText = '—';
+      varianceBadge = `Issued in ${primaryUnit}`;
+    }
+  } else {
+    hasVariance = false;
+    varianceText = '—';
+    varianceBadge = 'No Lot Qty';
+  }
 
   return {
     totalPieces,
     totalStoreStock,
-    issuePcs,
+    issuePcs: totalRawQty,
     variance,
+    hasVariance,
+    varianceText,
+    varianceBadge,
+    primaryUnit,
+    isPieceBased,
+    formattedIssueQty,
+    unitTotals,
     stockBreakdown,
     cuttingVolume,
     isDirect
@@ -1433,21 +1533,72 @@ export default function WithoutBomMaterialIssueView({
   // Helper to extract clean photo URL for any material in logs or materials prop
   const getMaterialPhoto = (m) => {
     if (!m) return '';
-    const direct = m.imageUrl || m.photo || m.image || m.imgUrl;
+    const direct = m.imageUrl || m.photo || m.image || m.imgUrl || m.pic;
     if (direct) return getCleanImageUrl(direct);
+
     const mId = m.materialId || m.id;
-    const mName = m.name || m.materialName || m.bomItemName;
-    if (mId || mName) {
-      const match = (materials || []).find(mat =>
-        (mId && String(mat.id) === String(mId)) ||
-        (mName && String(mat.name).trim().toLowerCase() === String(mName).trim().toLowerCase()) ||
-        (m.itemCode && String(mat.itemCode || '').trim().toLowerCase() === String(m.itemCode).trim().toLowerCase())
-      );
-      if (match) {
-        const foundImg = match.imageUrl || match.image || match.photo || match.imgUrl;
-        if (foundImg) return getCleanImageUrl(foundImg);
+    const rawName = String(m.name || m.materialName || m.bomItemName || '').trim();
+    const cleanName = rawName.toLowerCase();
+    const rawCode = String(getItemCodeDisplay(m) || m.itemCode || m.stCode || '').trim();
+    const cleanCode = rawCode.toLowerCase();
+
+    // Pool of all available material references
+    const pool = [
+      ...(Array.isArray(materials) ? materials : []),
+      ...(typeof window !== 'undefined' && Array.isArray(window.__gpdms_materials) ? window.__gpdms_materials : [])
+    ];
+
+    if (pool.length > 0) {
+      // 1. Match by exact ID
+      if (mId) {
+        const idStr = String(mId).trim().toLowerCase();
+        const match = pool.find(mat => mat && String(mat.id).trim().toLowerCase() === idStr);
+        if (match) {
+          const fImg = match.imageUrl || match.image || match.photo || match.imgUrl;
+          if (fImg) return getCleanImageUrl(fImg);
+        }
+      }
+
+      // 2. Match by Item Code (ST... / MT...)
+      if (cleanCode && !cleanCode.startsWith('itm-')) {
+        const match = pool.find(mat => {
+          if (!mat) return false;
+          const c = String(mat.itemCode || mat.stCode || '').trim().toLowerCase();
+          return c && c === cleanCode;
+        });
+        if (match) {
+          const fImg = match.imageUrl || match.image || match.photo || match.imgUrl;
+          if (fImg) return getCleanImageUrl(fImg);
+        }
+      }
+
+      // 3. Match by exact Name
+      if (cleanName) {
+        const match = pool.find(mat => {
+          if (!mat) return false;
+          const n = String(mat.name || '').trim().toLowerCase();
+          return n && n === cleanName;
+        });
+        if (match) {
+          const fImg = match.imageUrl || match.image || match.photo || match.imgUrl;
+          if (fImg) return getCleanImageUrl(fImg);
+        }
+      }
+
+      // 4. Match by partial/contained Name (e.g. "bengen" in "bengen 5 ltr")
+      if (cleanName && cleanName.length >= 3) {
+        const match = pool.find(mat => {
+          if (!mat) return false;
+          const n = String(mat.name || '').trim().toLowerCase();
+          return n && (n.includes(cleanName) || cleanName.includes(n));
+        });
+        if (match) {
+          const fImg = match.imageUrl || match.image || match.photo || match.imgUrl;
+          if (fImg) return getCleanImageUrl(fImg);
+        }
       }
     }
+
     return '';
   };
 
@@ -2159,7 +2310,18 @@ export default function WithoutBomMaterialIssueView({
 
   // Generate Official PDF Document
   const generatePDFVoucher = (issueData) => {
-    const isDirect = issueData?.issueMode === 'item_only' || String(issueData?.lotId || '').toLowerCase().includes('direct');
+    const cleanLot = String(issueData?.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+    const isDirect = issueData?.issueMode === 'item_only' || !cleanLot ||
+      cleanLot === 'direct-item' ||
+      cleanLot === 'w/o lot' ||
+      cleanLot === 'without lot' ||
+      cleanLot === 'no lot' ||
+      cleanLot === 'none' ||
+      cleanLot === 'n/a' ||
+      cleanLot.includes('direct') ||
+      cleanLot.includes('w/o') ||
+      cleanLot.includes('without') ||
+      cleanLot.includes('no lot');
     const doc = new jsPDF('p', 'mm', 'a4');
     const pw = doc.internal.pageSize.getWidth();
     const ph = doc.internal.pageSize.getHeight();
@@ -2189,7 +2351,7 @@ export default function WithoutBomMaterialIssueView({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
     doc.setTextColor(234, 88, 12);
-    const modeTitle = `MATERIAL ISSUE WITHOUT BOM (LOT #${issueData.lotId})`;
+    const modeTitle = isDirect ? 'MATERIAL ISSUE WITHOUT BOM (WITHOUT LOT)' : `MATERIAL ISSUE WITHOUT BOM (LOT #${issueData.lotId})`;
     doc.text(modeTitle, im, y);
 
     doc.setFontSize(8);
@@ -2225,9 +2387,11 @@ export default function WithoutBomMaterialIssueView({
     doc.text('Lot / Brand:', im + 128, y + 8);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(234, 88, 12);
-    const lotBrandText = (issueData.brandName || issueData.brand)
-      ? `LOT #${issueData.lotId} (${issueData.brandName || issueData.brand})`
-      : `LOT #${issueData.lotId}`;
+    const lotBrandText = isDirect
+      ? 'WITHOUT LOT REQUISITION'
+      : (issueData.brandName || issueData.brand)
+        ? `LOT #${issueData.lotId} (${issueData.brandName || issueData.brand})`
+        : `LOT #${issueData.lotId}`;
     doc.text(lotBrandText, im + 148, y + 8);
     doc.setTextColor(15, 23, 42);
 
@@ -2240,7 +2404,7 @@ export default function WithoutBomMaterialIssueView({
     doc.setFont('helvetica', 'bold');
     doc.text('Batch Volume:', im + 72, y + 17);
     doc.setFont('helvetica', 'normal');
-    doc.text(isDirect ? 'Ad-Hoc Store Issue' : `${(issueData.pieces || 0).toLocaleString()} Garment Pieces`, im + 95, y + 17);
+    doc.text(isDirect ? 'Direct Store Issue (No Lot Cutting)' : `${(issueData.pieces || 0).toLocaleString()} Garment Pieces`, im + 95, y + 17);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Status:', im + 128, y + 17);
@@ -2461,6 +2625,7 @@ export default function WithoutBomMaterialIssueView({
       const issuedItemsPayload = validItems.map(i => {
         const effectiveType = i.isCustomType ? (i.customComponentType?.trim() || 'Custom Accessory') : (i.componentType || 'DORI');
         const effectiveName = i.entryMode === 'manual' ? (i.materialName?.trim() || `${effectiveType} Item`) : i.materialName;
+        const liveMat = (materials || []).find(m => String(m.id) === String(i.materialId));
         return {
           materialId: i.materialId || '',
           materialName: effectiveName,
@@ -2470,7 +2635,8 @@ export default function WithoutBomMaterialIssueView({
           itemCode: getItemCodeDisplay(i, materials) || (i.itemCode && !i.itemCode.toUpperCase().startsWith('ITM-') ? i.itemCode : '') || (i.entryMode === 'manual' ? 'MANUAL' : ''),
           color: i.color || '',
           availableStock: i.availableStock || 0,
-          location: i.location || (i.entryMode === 'manual' ? 'Custom Entry' : '')
+          location: i.location || (i.entryMode === 'manual' ? 'Custom Entry' : ''),
+          imageUrl: i.imageUrl || (liveMat ? (liveMat.imageUrl || liveMat.image || liveMat.photo || liveMat.imgUrl || '') : '') || ''
         };
       });
 
@@ -2513,10 +2679,12 @@ export default function WithoutBomMaterialIssueView({
           }
           const effectiveType = rawType;
           const effectiveName = i.entryMode === 'manual' ? (i.materialName?.trim() || `${effectiveType} Item`) : i.materialName;
+          const liveMat = (materials || []).find(m => String(m.id) === String(i.materialId));
           return {
             ...i,
             componentType: effectiveType,
             materialName: effectiveName,
+            imageUrl: i.imageUrl || (liveMat ? (liveMat.imageUrl || liveMat.image || liveMat.photo || liveMat.imgUrl || '') : '') || '',
             itemCode: getItemCodeDisplay(i, materials) || (i.itemCode && !i.itemCode.toUpperCase().startsWith('ITM-') ? i.itemCode : '') || (i.entryMode === 'manual' ? 'MANUAL' : '')
           };
         })
@@ -2770,21 +2938,35 @@ export default function WithoutBomMaterialIssueView({
 
   // Helper to build issueData from a history log
   const buildIssueDataFromLog = (log) => {
-    const cleanLot = String(log.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
-    const resolvedCutting = (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
-      (log.volume > 1 ? Number(log.volume) : 0);
+    const rawLot = String(log.lotId || '').trim();
+    const cleanLot = rawLot.replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+    const isDirect = !cleanLot ||
+      cleanLot === 'direct-item' ||
+      cleanLot === 'w/o lot' ||
+      cleanLot === 'without lot' ||
+      cleanLot === 'no lot' ||
+      cleanLot === 'none' ||
+      cleanLot === 'n/a' ||
+      cleanLot.includes('direct') ||
+      cleanLot.includes('w/o') ||
+      cleanLot.includes('without') ||
+      cleanLot.includes('no lot');
+
+    const resolvedCutting = isDirect ? 0 : ((effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
+      (log.volume > 1 ? Number(log.volume) : 0));
     const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
     const defaultQty = resolvedCutting + onePct;
 
     return {
       voucherId: log.id,
       date: log.date || new Date().toLocaleDateString('en-GB'),
-      issueMode: String(log.lotId || '').toLowerCase().includes('direct') ? 'item_only' : 'floor_lot',
-      lotId: log.lotId || 'DIRECT-ITEM',
+      issueMode: isDirect ? 'item_only' : 'floor_lot',
+      lotId: isDirect ? (rawLot || 'DIRECT-ITEM') : log.lotId,
+      isDirect,
       brand: log.brand || log.brandName || '',
       brandName: log.brandName || log.brand || '',
-      style: log.style || log.category || 'Store Issue',
-      pieces: log.volume || 1,
+      style: log.style || log.category || (isDirect ? 'Direct Material Requisition' : 'Store Floor Issue'),
+      pieces: isDirect ? 1 : (log.volume || 1),
       cuttingPieces: resolvedCutting,
       onePercentAllowance: onePct,
       defaultAutoIssueQty: defaultQty,
@@ -2805,7 +2987,8 @@ export default function WithoutBomMaterialIssueView({
           location: getMaterialLocation(m) || m.location || 'Main Store',
           availableStock: m.qty || 0,
           totalQty: m.qty || 1,
-          unit: m.unit || 'Pcs'
+          unit: m.unit || 'Pcs',
+          imageUrl: getMaterialPhoto(m) || m.imageUrl || ''
         };
       })
     };
@@ -2813,17 +2996,30 @@ export default function WithoutBomMaterialIssueView({
 
   // Generate complete, robust HTML for printable challan sheet (Dual Copy - Pure Black & White)
   const generatePrintHtml = (issueData) => {
-    const lotText = issueData.lotId ? `LOT #${issueData.lotId}` : 'LOT REQUIRED';
+    const rawLot = String(issueData.lotId || '').trim();
+    const cleanLot = rawLot.replace(/^LOT\s*#?/i, '').trim().toLowerCase();
+    const isDirectLot = issueData.isDirect || !cleanLot ||
+      cleanLot === 'direct-item' ||
+      cleanLot === 'w/o lot' ||
+      cleanLot === 'without lot' ||
+      cleanLot === 'no lot' ||
+      cleanLot === 'none' ||
+      cleanLot === 'n/a' ||
+      cleanLot.includes('direct') ||
+      cleanLot.includes('w/o') ||
+      cleanLot.includes('without') ||
+      cleanLot.includes('no lot');
+
+    const lotText = isDirectLot ? 'WITHOUT LOT (DIRECT REQUISITION)' : (issueData.lotId ? `LOT #${issueData.lotId}` : 'LOT REQUIRED');
     const voucherId = issueData.voucherId || nextVoucherId || 'CHALLAN';
     const dateStr = issueData.date || new Date().toLocaleDateString('en-GB');
     const items = issueData.items || [];
     const remarksHtml = issueData.remarks ? `<div class="remarks"><strong>Remarks / Allocation Notes:</strong> ${issueData.remarks}</div>` : '';
 
-    const cleanLot = String(issueData.lotId || '').replace(/^LOT\s*#?/i, '').trim().toLowerCase();
-    const resolvedCutting = Number(issueData.cuttingPieces) ||
+    const resolvedCutting = isDirectLot ? 0 : (Number(issueData.cuttingPieces) ||
       (effectiveCuttingMap && effectiveCuttingMap[cleanLot] ? Number(effectiveCuttingMap[cleanLot]) : 0) ||
       (activeLotCutting && String(activeLotCutting.lotNumber).trim().toLowerCase() === cleanLot ? Number(activeLotCutting.totalPieces) : 0) ||
-      (Number(issueData.pieces) > 1 ? Number(issueData.pieces) : 0);
+      (Number(issueData.pieces) > 1 ? Number(issueData.pieces) : 0));
 
     const onePct = resolvedCutting > 0 ? Math.round(resolvedCutting * 0.01) : 0;
     const totalAllowedWith1Pct = resolvedCutting + onePct;
@@ -2858,7 +3054,9 @@ export default function WithoutBomMaterialIssueView({
           <div class="field"><span class="lbl">REQUISITION TYPE:</span> <span>${issueData.style || 'Direct Requisition'}</span></div>
           <div class="field">
             <span class="lbl">CUTTING PIECES / VOLUME:</span>
-            ${resolvedCutting > 0 ? `
+            ${isDirectLot ? `
+              <strong class="volume-val">Direct Store Issue (No Lot Cutting)</strong>
+            ` : resolvedCutting > 0 ? `
               <strong class="volume-val">${resolvedCutting.toLocaleString()} Pcs</strong>
               ${isOnePercentExtraIssued ? `
                 <div class="extra-badge">✓ +1% EXTRA MATERIAL ISSUED: ${totalAllowedWith1Pct.toLocaleString()} PCS</div>
@@ -3575,11 +3773,24 @@ export default function WithoutBomMaterialIssueView({
     withoutBomLogs.forEach((log) => {
       const rawBrand = (log.brand || log.brandName || '').trim();
       const rawLot = String(log.lotId || '').trim();
-      const isDirect = !rawLot || rawLot === 'DIRECT-ITEM' || rawLot.toLowerCase().includes('direct');
+      const cleanLot = rawLot.toLowerCase();
+      const isDirect = !cleanLot ||
+        cleanLot === 'direct-item' ||
+        cleanLot === 'w/o lot' ||
+        cleanLot === 'without lot' ||
+        cleanLot === 'no lot' ||
+        cleanLot === 'none' ||
+        cleanLot === 'n/a' ||
+        cleanLot.includes('direct') ||
+        cleanLot.includes('w/o') ||
+        cleanLot.includes('without') ||
+        cleanLot.includes('no lot');
 
-      const effectiveLot = isDirect ? 'DIRECT REQUISITION' : `LOT #${rawLot}`;
+      const effectiveLot = isDirect ? 'WITHOUT LOT REQUISITION' : `LOT #${rawLot}`;
       const { totalPieces: logVol } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
-      grandTotalPieces += logVol;
+      if (!isDirect) {
+        grandTotalPieces += logVol;
+      }
 
       if (rawBrand) {
         uniqueBrands.add(rawBrand);
@@ -3603,10 +3814,10 @@ export default function WithoutBomMaterialIssueView({
           brand: rawBrand || '',
           challans: new Set(),
           materials: {},
-          totalPieces: logVol
+          totalPieces: isDirect ? 0 : logVol
         };
       } else {
-        if (logVol > lotSummaryMap[effectiveLot].totalPieces) {
+        if (!isDirect && logVol > lotSummaryMap[effectiveLot].totalPieces) {
           lotSummaryMap[effectiveLot].totalPieces = logVol;
         }
       }
@@ -3679,10 +3890,31 @@ export default function WithoutBomMaterialIssueView({
 
     // Build Rows for Main Log Table
     const tableRowsHtml = withoutBomLogs.map((log, idx) => {
-      const isDirect = !log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct');
-      const lotDisplay = isDirect ? 'DIRECT REQUISITION' : `LOT #${log.lotId}`;
+      const rawLot = String(log.lotId || '').trim();
+      const cleanLot = rawLot.toLowerCase();
+      const isDirect = !cleanLot ||
+        cleanLot === 'direct-item' ||
+        cleanLot === 'w/o lot' ||
+        cleanLot === 'without lot' ||
+        cleanLot === 'no lot' ||
+        cleanLot === 'none' ||
+        cleanLot === 'n/a' ||
+        cleanLot.includes('direct') ||
+        cleanLot.includes('w/o') ||
+        cleanLot.includes('without') ||
+        cleanLot.includes('no lot');
+      const lotDisplay = isDirect ? 'WITHOUT LOT REQUISITION' : `LOT #${rawLot}`;
       const brandDisplay = (log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : '';
-      const { totalPieces, issuePcs, variance } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+      const {
+        totalPieces,
+        issuePcs,
+        variance,
+        hasVariance,
+        varianceText,
+        varianceBadge,
+        primaryUnit,
+        formattedIssueQty
+      } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
 
       const materialsHtml = (log.materials || []).map(m => {
         const photo = getMaterialPhoto(m);
@@ -3720,21 +3952,27 @@ export default function WithoutBomMaterialIssueView({
           </td>
           <td style="text-align: right; vertical-align: top; white-space: nowrap;">
             <div style="font-weight: 900; font-size: 11.5px; color: #000000;">
-              ${totalPieces > 0 ? `${totalPieces.toLocaleString('en-IN')} Pcs` : '—'}
+              ${!isDirect && totalPieces > 0 ? `${totalPieces.toLocaleString('en-IN')} Pcs` : '—'}
             </div>
-            ${totalPieces > 0 ? `
+            ${!isDirect && totalPieces > 0 ? `
               <div style="font-size: 8.5px; font-weight: 800; color: #1d4ed8; margin-top: 1px;">
                 ✂️ CUTTING PCS
               </div>
-            ` : ''}
+            ` : `<div style="font-size: 8.5px; font-weight: 700; color: #64748b; margin-top: 1px;">${isDirect ? 'DIRECT / W/O LOT' : 'NO LOT QTY'}</div>`}
           </td>
           <td style="text-align: right; font-weight: 900; font-size: 11.5px; color: #ea580c; white-space: nowrap; vertical-align: top;">
-            ${issuePcs.toLocaleString('en-IN')} Pcs
+            ${formattedIssueQty}
           </td>
           <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; vertical-align: top;">
-            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${variance === 0 ? '#bbf7d0' : variance > 0 ? '#bfdbfe' : '#fecaca'}; background: ${variance === 0 ? '#f0fdf4' : variance > 0 ? '#eff6ff' : '#fef2f2'}; color: ${variance === 0 ? '#15803d' : variance > 0 ? '#1d4ed8' : '#b91c1c'};">
-              ${variance > 0 ? `+${variance.toLocaleString('en-IN')}` : variance.toLocaleString('en-IN')} Pcs
-            </span>
+            ${hasVariance ? `
+              <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${variance === 0 ? '#bbf7d0' : variance > 0 ? '#bfdbfe' : '#fecaca'}; background: ${variance === 0 ? '#f0fdf4' : variance > 0 ? '#eff6ff' : '#fef2f2'}; color: ${variance === 0 ? '#15803d' : variance > 0 ? '#1d4ed8' : '#b91c1c'};">
+                ${varianceText}
+              </span>
+              <div style="font-size: 8.5px; font-weight: 800; color: ${variance === 0 ? '#166534' : variance > 0 ? '#1e40af' : '#991b1b'}; margin-top: 1px;">${varianceBadge}</div>
+            ` : `
+              <span style="color: #64748b; font-size: 11px; font-weight: 700;">—</span>
+              <div style="font-size: 8.5px; font-weight: 700; color: ${isDirect ? '#64748b' : '#0369a1'}; margin-top: 1px;">${varianceBadge || (isDirect ? 'Direct Issue' : `Issued in ${primaryUnit}`)}</div>
+            `}
           </td>
           <td style="font-size: 10px;">${log.personName || 'Store In-charge'}</td>
           <td style="font-size: 10px; font-weight: 700;">
@@ -4168,16 +4406,12 @@ export default function WithoutBomMaterialIssueView({
             <strong style="color: #0f172a;">${grandTotalPieces.toLocaleString('en-IN')} Pcs</strong>
           </div>
           <div class="summary-card" style="background: #fff7ed;">
-            <span style="color: #c2410c;">ISSUE PCS</span>
-            <strong style="color: #c2410c;">${totalQtyIssued.toLocaleString('en-IN')} Pcs</strong>
+            <span style="color: #c2410c;">TOTAL ISSUED</span>
+            <strong style="color: #c2410c;">${totalQtyIssued.toLocaleString('en-IN')} Units / Pcs</strong>
           </div>
-          <div class="summary-card" style="background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
-            <span style="color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">VARIANCE (CUTTING - ISSUE)</span>
-            <strong style="color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs</strong>
-          </div>
-          <div class="summary-card">
-            <span>TOTAL UNIQUE LOTS</span>
-            <strong>${uniqueLots.size} Lot(s)</strong>
+          <div class="summary-card" style="background: #f8fafc;">
+            <span style="color: #0f172a;">TOTAL UNIQUE LOTS</span>
+            <strong style="color: #0f172a;">${uniqueLots.size} Lot(s)</strong>
           </div>
           <div class="summary-card">
             <span>TOTAL BRANDS</span>
@@ -4198,7 +4432,7 @@ export default function WithoutBomMaterialIssueView({
               <th style="width: 130px;">LOT &amp; BRAND</th>
               <th>ISSUED MATERIALS (WITH PHOTO &amp; QTY)</th>
               <th style="width: 115px; text-align: right;">TOTAL PIECES (CUTTING)</th>
-              <th style="width: 85px; text-align: right;">ISSUE PCS</th>
+              <th style="width: 95px; text-align: right;">ISSUED QTY</th>
               <th style="width: 105px; text-align: right;">VARIANCE (CUTTING - ISSUE)</th>
               <th style="width: 90px;">ISSUED BY</th>
               <th style="width: 105px;">RECEIVED BY</th>
@@ -4215,12 +4449,10 @@ export default function WithoutBomMaterialIssueView({
                 ${grandTotalPieces.toLocaleString('en-IN')} Pcs Cutting
               </td>
               <td style="text-align: right; font-weight: 900; font-size: 12px; color: #ea580c; white-space: nowrap; background: #fff7ed;">
-                ${totalQtyIssued.toLocaleString('en-IN')} Pcs
+                ${totalQtyIssued.toLocaleString('en-IN')} Units
               </td>
-              <td style="text-align: right; font-weight: 900; font-size: 11.5px; white-space: nowrap; background: ${grandVariance === 0 ? '#f0fdf4' : grandVariance > 0 ? '#eff6ff' : '#fef2f2'};">
-                <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; border: 1px solid ${grandVariance === 0 ? '#bbf7d0' : grandVariance > 0 ? '#bfdbfe' : '#fecaca'}; color: ${grandVariance === 0 ? '#15803d' : grandVariance > 0 ? '#1d4ed8' : '#b91c1c'};">
-                  ${grandVariance > 0 ? `+${grandVariance.toLocaleString('en-IN')}` : grandVariance.toLocaleString('en-IN')} Pcs
-                </span>
+              <td style="text-align: right; font-weight: 900; font-size: 11px; white-space: nowrap; color: #166534; background: #f0fdf4;">
+                ✓ Register Verified
               </td>
               <td colspan="3" style="font-size: 10px; color: #475569; font-weight: 700;">
                 ${totalLineItems} Material Item Rows Across ${uniqueLots.size} Lot(s)
@@ -5922,7 +6154,7 @@ export default function WithoutBomMaterialIssueView({
 
       {/* ── TAB CONTENT: WITHOUT-BOM HISTORY ── */}
       {activeTab === 'history' && (
-        <div className="panel" style={{ padding: '18px 22px', borderRadius: '12px', background: '#ffffff', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
+        <div className="panel" style={{ padding: '14px 14px', borderRadius: '12px', background: '#ffffff', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
             <div>
               <h4 style={{ margin: 0, fontSize: '15px', fontWeight: '800', color: '#0f172a' }}>
@@ -6844,74 +7076,155 @@ export default function WithoutBomMaterialIssueView({
               )}
             </div>
           ) : (
-            <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+            <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px', background: '#ffffff' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
                 <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase' }}>
-                    <th style={{ padding: '10px 12px' }}>Challan / Bill No</th>
-                    <th style={{ padding: '10px 12px' }}>Date</th>
-                    <th style={{ padding: '10px 12px' }}>Lot Reference</th>
-                    <th style={{ padding: '10px 12px' }}>Issued Materials</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Total Pieces (Cutting)</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Issue Pcs</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Variance (Cutting - Issue)</th>
-                    <th style={{ padding: '10px 12px' }}>Issued By</th>
-                    <th style={{ padding: '10px 12px' }}>Received By</th>
-                    <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
+                  <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '10.5px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                    <th style={{ padding: '8px 8px', width: '92px' }}>Challan #</th>
+                    <th style={{ padding: '8px 6px', width: '78px' }}>Date</th>
+                    <th style={{ padding: '8px 8px', width: '102px' }}>Lot / Type</th>
+                    <th style={{ padding: '8px 10px', minWidth: '180px' }}>Issued Materials</th>
+                    <th style={{ padding: '8px 6px', width: '82px', textAlign: 'right' }}>Cutting</th>
+                    <th style={{ padding: '8px 6px', width: '78px', textAlign: 'right' }}>Issued</th>
+                    <th style={{ padding: '8px 6px', width: '88px', textAlign: 'right' }}>Variance</th>
+                    <th style={{ padding: '8px 6px', width: '72px' }}>Issued By</th>
+                    <th style={{ padding: '8px 6px', width: '82px' }}>Received By</th>
+                    <th style={{ padding: '8px 6px', width: '112px', textAlign: 'center' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {withoutBomLogs.map((log, idx) => {
-                    const { totalPieces, issuePcs, variance, isDirect } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+                    const {
+                      totalPieces,
+                      issuePcs,
+                      variance,
+                      hasVariance,
+                      varianceText,
+                      varianceBadge,
+                      primaryUnit,
+                      formattedIssueQty,
+                      isDirect
+                    } = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+
+                    const rawLot = String(log.lotId || '').trim();
+                    const cleanLot = rawLot.toLowerCase();
+                    const isDirectLot = isDirect || !cleanLot || cleanLot === 'w/o lot' || cleanLot.includes('w/o') || cleanLot.includes('without') || cleanLot.includes('no lot') || cleanLot.includes('direct');
+
+                    const dateParts = String(log.date || '').split(' ');
+                    const dateStr = dateParts[0] || '—';
+                    const timeStr = dateParts.slice(1).join(' ');
+
                     return (
                       <tr key={log.id || idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: '800' }}>
-                          <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '3px 8px', borderRadius: '6px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                        <td style={{ padding: '7px 8px', fontWeight: '800', verticalAlign: 'middle' }}>
+                          <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 6px', borderRadius: '5px', fontSize: '11px', whiteSpace: 'nowrap' }}>
                             {log.id}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#64748b', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                          {log.date}
+                        <td style={{ padding: '7px 6px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ lineHeight: '1.25' }}>
+                            <div style={{ fontWeight: '700', color: '#334155', fontSize: '11.5px' }}>{dateStr}</div>
+                            {timeStr && <div style={{ fontSize: '9.5px', color: '#94a3b8', fontWeight: '600' }}>{timeStr}</div>}
+                          </div>
                         </td>
-                        <td style={{ padding: '10px 12px', fontWeight: '700', color: '#0f172a' }}>
-                          {!log.lotId || log.lotId === 'DIRECT-ITEM' || String(log.lotId).toLowerCase().includes('direct') ? (
-                            <span style={{ fontSize: '11px', background: '#f0fdf4', color: '#166534', padding: '2px 6px', borderRadius: '4px', fontWeight: '800' }}>
-                              DIRECT ITEM REQUISITION
-                            </span>
+                        <td style={{ padding: '7px 8px', verticalAlign: 'middle' }}>
+                          {isDirectLot ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', padding: '1.5px 5px', borderRadius: '4px', fontWeight: '800', width: 'fit-content', border: '1px solid #bbf7d0', whiteSpace: 'nowrap' }}>
+                                WITHOUT LOT
+                              </span>
+                              {log.style && log.style !== 'Direct Item Requisition' && (
+                                <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600' }}>
+                                  {log.style}
+                                </span>
+                              )}
+                            </div>
                           ) : (
-                            <span>LOT #{log.lotId}{(log.brand || log.brandName) ? ` (${log.brand || log.brandName})` : ''}</span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                              <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                LOT #{log.lotId}
+                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: '9px', background: '#f1f5f9', padding: '0px 4px', borderRadius: '3px', color: '#475569', fontWeight: '800' }}>
+                                  W/O BOM
+                                </span>
+                                {(log.brand || log.brandName) && (
+                                  <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '700' }}>
+                                    {log.brand || log.brandName}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           )}
-                          <span style={{ marginLeft: '6px', fontSize: '10px', background: '#f1f5f9', padding: '1px 5px', borderRadius: '4px', color: '#475569', fontWeight: '800' }}>
-                            W/O BOM
-                          </span>
                         </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <td style={{ padding: '7px 10px', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                             {(log.materials || []).slice(0, 4).map((m, mIdx) => {
                               const photoSrc = getMaterialPhoto(m);
                               const categoryName = getMaterialCategory(m);
                               const loc = getMaterialLocation(m);
                               return (
-                                <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                <div key={mIdx} style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
                                   {photoSrc ? (
                                     <img
                                       src={photoSrc}
                                       alt={m.name || 'material'}
-                                      style={{ width: '24px', height: '24px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', flexShrink: 0 }}
+                                      onClick={() => setMainPreviewPhoto({ url: photoSrc, name: m.name || m.bomItemName || 'Material', itemCode: getItemCodeDisplay(m) || m.itemCode || '' })}
+                                      title="Click to zoom photo"
+                                      style={{
+                                        width: '24px',
+                                        height: '24px',
+                                        objectFit: 'cover',
+                                        borderRadius: '4px',
+                                        border: '1.5px solid #059669',
+                                        flexShrink: 0,
+                                        cursor: 'zoom-in',
+                                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                                      }}
                                       onError={(e) => { e.currentTarget.style.display = 'none'; }}
                                     />
                                   ) : (
-                                    <span style={{ fontSize: '11px', color: '#94a3b8', flexShrink: 0 }}>📦</span>
+                                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', flexShrink: 0 }}>
+                                      <span style={{ fontSize: '11px', color: '#94a3b8' }}>📦</span>
+                                      <label
+                                        htmlFor={`attach-log-file-${log.id || 'challan'}-${mIdx}`}
+                                        title={`Upload / attach photo for ${m.name || 'material'}`}
+                                        style={{
+                                          fontSize: '9px',
+                                          fontWeight: '800',
+                                          color: '#0284c7',
+                                          background: '#f0f9ff',
+                                          border: '1px dashed #7dd3fc',
+                                          padding: '1px 4px',
+                                          borderRadius: '3px',
+                                          cursor: 'pointer',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '2px',
+                                          lineHeight: 1.2
+                                        }}
+                                      >
+                                        <Camera size={9} />
+                                        <span>Pic</span>
+                                        <input
+                                          id={`attach-log-file-${log.id || 'challan'}-${mIdx}`}
+                                          type="file"
+                                          accept="image/*"
+                                          style={{ display: 'none' }}
+                                          onChange={(e) => handleAttachPhotoToExistingMaterial(m, log, e)}
+                                        />
+                                      </label>
+                                    </div>
                                   )}
                                   {categoryName && (
                                     <span style={{
-                                      fontSize: '9.5px',
+                                      fontSize: '9px',
                                       fontWeight: '800',
                                       background: '#f1f5f9',
                                       color: '#1e293b',
                                       border: '1px solid #cbd5e1',
-                                      padding: '1px 5px',
-                                      borderRadius: '4px',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px',
                                       textTransform: 'uppercase',
                                       letterSpacing: '0.3px',
                                       whiteSpace: 'nowrap'
@@ -6919,18 +7232,18 @@ export default function WithoutBomMaterialIssueView({
                                       {categoryName}
                                     </span>
                                   )}
-                                  <span style={{ fontSize: '12px', color: '#0f172a' }}>
+                                  <span style={{ fontSize: '11.5px', color: '#0f172a' }}>
                                     <strong>{m.name || m.bomItemName}:</strong> {m.qty} {m.unit || 'pcs'}
                                   </span>
                                   {loc && (
                                     <span style={{
-                                      fontSize: '9.5px',
+                                      fontSize: '9px',
                                       fontWeight: '800',
                                       background: '#fff7ed',
                                       color: '#c2410c',
                                       border: '1px solid #fed7aa',
-                                      padding: '1px 5px',
-                                      borderRadius: '4px',
+                                      padding: '0px 4px',
+                                      borderRadius: '3px',
                                       whiteSpace: 'nowrap'
                                     }}>
                                       📍 {loc}
@@ -6940,101 +7253,102 @@ export default function WithoutBomMaterialIssueView({
                               );
                             })}
                             {(log.materials || []).length > 4 && (
-                              <span style={{ fontSize: '10.5px', color: '#ea580c', fontWeight: '700', marginLeft: '4px' }}>
+                              <span style={{ fontSize: '10px', color: '#ea580c', fontWeight: '700', marginLeft: '4px' }}>
                                 +{(log.materials || []).length - 4} more item(s)
                               </span>
                             )}
                           </div>
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
-                            {totalPieces > 0 ? (
-                              <>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', whiteSpace: 'nowrap' }}>
-                                  <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '13px' }}>
-                                    {totalPieces.toLocaleString('en-IN')}
-                                  </span>
-                                  <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '600' }}>Pcs</span>
-                                </div>
-                                <span style={{
-                                  fontSize: '9.5px',
-                                  fontWeight: '800',
-                                  background: '#eff6ff',
-                                  color: '#1d4ed8',
-                                  border: '1px solid #bfdbfe',
-                                  padding: '1.5px 6px',
-                                  borderRadius: '4px',
-                                  whiteSpace: 'nowrap',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '3px'
-                                }}>
-                                  ✂️ Cutting: {totalPieces.toLocaleString('en-IN')} Pcs
-                                </span>
-                              </>
-                            ) : (
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
-                                <span style={{ fontWeight: '700', color: '#94a3b8', fontSize: '12px' }}>—</span>
-                                <span style={{ fontSize: '9px', color: '#64748b', background: '#f1f5f9', padding: '1px 5px', borderRadius: '3px' }}>
-                                  {isDirect ? 'Direct Issue' : 'No Lot Qty'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
+                        <td style={{ padding: '7px 6px', textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {!isDirectLot && totalPieces > 0 ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                              <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px' }}>
+                                {totalPieces.toLocaleString('en-IN')} <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
+                              </span>
+                              <span style={{
+                                fontSize: '8.5px',
+                                fontWeight: '700',
+                                background: '#eff6ff',
+                                color: '#1d4ed8',
+                                border: '1px solid #bfdbfe',
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                ✂️ Cutting
+                              </span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                              <span style={{ fontWeight: '700', color: '#94a3b8', fontSize: '11.5px' }}>—</span>
+                              <span style={{ fontSize: '8.5px', color: '#64748b', background: '#f1f5f9', padding: '1px 4px', borderRadius: '3px', fontWeight: '700' }}>
+                                {isDirectLot ? 'Direct' : 'No Lot Qty'}
+                              </span>
+                            </div>
+                          )}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
-                          <span style={{ fontWeight: '900', color: '#ea580c', fontSize: '12.5px' }}>{issuePcs.toLocaleString('en-IN')}</span>
-                          <span style={{ fontSize: '11px', color: '#64748b', marginLeft: '3px' }}>Pcs</span>
-                          <div style={{ fontSize: '9px', color: '#9a3412', fontWeight: '700', marginTop: '2px' }}>
+                        <td style={{ padding: '7px 6px', textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#ea580c', fontSize: '12px' }}>{formattedIssueQty}</span>
+                          <div style={{ fontSize: '8.5px', color: '#9a3412', fontWeight: '800' }}>
                             ISSUED
                           </div>
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
-                          {totalPieces > 0 ? (
-                            <>
+                        <td style={{ padding: '7px 6px', textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {hasVariance ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
                               <span style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '2px',
-                                padding: '2px 7px',
-                                borderRadius: '6px',
-                                fontSize: '11.5px',
+                                padding: '1.5px 5px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
                                 fontWeight: '800',
                                 border: '1px solid',
                                 background: variance === 0 ? '#f0fdf4' : variance > 0 ? '#eff6ff' : '#fef2f2',
                                 borderColor: variance === 0 ? '#bbf7d0' : variance > 0 ? '#bfdbfe' : '#fecaca',
                                 color: variance === 0 ? '#15803d' : variance > 0 ? '#1d4ed8' : '#b91c1c'
                               }}>
-                                {variance > 0 ? `+${variance.toLocaleString('en-IN')}` : variance.toLocaleString('en-IN')} Pcs
+                                {varianceText}
                               </span>
-                              <div style={{
-                                fontSize: '9px',
+                              <span style={{
+                                fontSize: '8.5px',
                                 fontWeight: '800',
-                                marginTop: '2px',
                                 color: variance === 0 ? '#166534' : variance > 0 ? '#1e40af' : '#991b1b'
                               }}>
-                                {variance === 0 ? 'BALANCED' : variance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED'}
-                              </div>
-                            </>
+                                {varianceBadge}
+                              </span>
+                            </div>
                           ) : (
-                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
-                              —
-                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                              <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: '700' }}>—</span>
+                              <span style={{
+                                fontSize: '8.5px',
+                                color: isDirectLot ? '#64748b' : '#0369a1',
+                                background: isDirectLot ? '#f1f5f9' : '#e0f2fe',
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                fontWeight: '700'
+                              }}>
+                                {varianceBadge || (isDirectLot ? 'Direct Issue' : `Issued in ${primaryUnit}`)}
+                              </span>
+                            </div>
                           )}
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '600' }}>
-                          {log.personName || 'Store In-charge'}
+                        <td style={{ padding: '7px 6px', color: '#334155', fontWeight: '700', fontSize: '11px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {log.personName || 'Store'}
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#0f172a', fontWeight: '700' }}>
-                          {log.receiverName || 'Cutting Master'}
-                          {log.receiverDept && (
-                            <span style={{ display: 'block', fontSize: '11px', color: '#64748b', fontWeight: '500' }}>
-                              {log.receiverDept}
-                            </span>
-                          )}
+                        <td style={{ padding: '7px 6px', color: '#0f172a', fontWeight: '700', fontSize: '11px', verticalAlign: 'middle' }}>
+                          <div style={{ lineHeight: '1.2' }}>
+                            <div style={{ whiteSpace: 'nowrap' }}>{log.receiverName || 'Cutting'}</div>
+                            {log.receiverDept && (
+                              <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
+                                {log.receiverDept}
+                              </div>
+                            )}
+                          </div>
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right' }}>
-                          <div style={{ display: 'inline-flex', gap: '6px' }}>
+                        <td style={{ padding: '7px 6px', textAlign: 'center', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                             <button
                               type="button"
                               onClick={() => {
@@ -7042,65 +7356,64 @@ export default function WithoutBomMaterialIssueView({
                                 handleDirectPrintWindow(issueData, log.id);
                               }}
                               style={{
-                                padding: '5px 12px',
-                                borderRadius: '6px',
-                                border: '1.5px solid #0f172a',
+                                padding: '4px 7px',
+                                borderRadius: '5px',
+                                border: '1px solid #0f172a',
                                 background: '#0f172a',
                                 color: '#ffffff',
-                                fontSize: '11.5px',
+                                fontSize: '11px',
                                 fontWeight: '700',
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                gap: '3px',
+                                whiteSpace: 'nowrap'
                               }}
                               title="Direct 1-Click Print"
                             >
-                              <Printer size={13} style={{ color: '#ea580c' }} />
+                              <Printer size={12} style={{ color: '#ea580c' }} />
                               <span>Print</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDownloadChallanPdf(log)}
                               style={{
-                                padding: '5px 10px',
-                                borderRadius: '6px',
-                                border: '1.5px solid #dc2626',
+                                padding: '4px 6px',
+                                borderRadius: '5px',
+                                border: '1px solid #f87171',
                                 background: '#fef2f2',
                                 color: '#dc2626',
-                                fontSize: '11.5px',
+                                fontSize: '11px',
                                 fontWeight: '700',
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px',
-                                transition: 'all 0.15s ease'
+                                gap: '2px',
+                                whiteSpace: 'nowrap'
                               }}
                               title="Direct 1-Click Export Challan to PDF"
                             >
-                              <Download size={13} style={{ color: '#dc2626' }} />
+                              <Download size={12} />
                               <span>PDF</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleReprintHistory(log)}
                               style={{
-                                padding: '5px 10px',
-                                borderRadius: '6px',
+                                padding: '4px 5px',
+                                borderRadius: '5px',
                                 border: '1px solid #cbd5e1',
                                 background: '#ffffff',
                                 color: '#475569',
-                                fontSize: '11.5px',
-                                fontWeight: '600',
+                                fontSize: '11px',
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                justifyContent: 'center'
                               }}
                               title="Preview on-screen and download PDF"
                             >
-                              <Eye size={13} />
-                              <span>Preview</span>
+                              <Eye size={12} />
                             </button>
                           </div>
                         </td>
@@ -7109,38 +7422,72 @@ export default function WithoutBomMaterialIssueView({
                   })}
                 </tbody>
                 {(() => {
-                  const screenTotalPieces = withoutBomLogs.reduce((sum, log) => sum + getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs).totalPieces, 0);
-                  const screenIssuePcs = withoutBomLogs.reduce((sum, log) => sum + getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs).issuePcs, 0);
-                  const screenVariance = screenTotalPieces - screenIssuePcs;
+                  const metricsList = withoutBomLogs.map(log => getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs));
+                  const screenTotalPieces = metricsList.reduce((sum, m) => sum + m.totalPieces, 0);
+
+                  const grandUnitTotals = {};
+                  metricsList.forEach(m => {
+                    Object.entries(m.unitTotals || {}).forEach(([u, q]) => {
+                      grandUnitTotals[u] = (grandUnitTotals[u] || 0) + q;
+                    });
+                  });
+
+                  const grandPcsIssued = grandUnitTotals['Pcs'] || 0;
+                  const nonPcsSummary = Object.entries(grandUnitTotals)
+                    .filter(([u]) => u !== 'Pcs')
+                    .map(([u, q]) => `${q.toLocaleString('en-IN')} ${u}`)
+                    .join(' • ');
+
+                  const pcsVariance = screenTotalPieces - grandPcsIssued;
+
                   return (
                     <tfoot>
-                      <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '800', fontSize: '12px' }}>
-                        <td colSpan={4} style={{ padding: '10px 12px', textAlign: 'right', color: '#475569', textTransform: 'uppercase' }}>
+                      <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '800', fontSize: '11.5px' }}>
+                        <td colSpan={4} style={{ padding: '8px 8px', textAlign: 'right', color: '#475569', textTransform: 'uppercase' }}>
                           Grand Total ({withoutBomLogs.length} Challans):
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <span style={{ fontWeight: '900', color: '#0f172a' }}>{screenTotalPieces.toLocaleString('en-IN')}</span> <span style={{ fontSize: '11px', color: '#64748b' }}>Pcs Cutting</span>
+                        <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#0f172a' }}>{screenTotalPieces.toLocaleString('en-IN')}</span> <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <span style={{ fontWeight: '900', color: '#ea580c' }}>{screenIssuePcs.toLocaleString('en-IN')}</span> <span style={{ fontSize: '11px', color: '#64748b' }}>Pcs</span>
+                        <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {grandPcsIssued > 0 && (
+                            <div>
+                              <span style={{ fontWeight: '900', color: '#ea580c' }}>{grandPcsIssued.toLocaleString('en-IN')}</span> <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
+                            </div>
+                          )}
+                          {nonPcsSummary && (
+                            <div style={{ fontSize: '9.5px', color: '#0369a1', fontWeight: '800' }}>
+                              {nonPcsSummary}
+                            </div>
+                          )}
+                          {!grandPcsIssued && !nonPcsSummary && (
+                            <span style={{ fontWeight: '900', color: '#ea580c' }}>0</span>
+                          )}
                         </td>
-                        <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <span style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '2px',
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontSize: '11.5px',
-                            fontWeight: '900',
-                            border: '1px solid',
-                            background: screenVariance === 0 ? '#f0fdf4' : screenVariance > 0 ? '#eff6ff' : '#fef2f2',
-                            borderColor: screenVariance === 0 ? '#bbf7d0' : screenVariance > 0 ? '#bfdbfe' : '#fecaca',
-                            color: screenVariance === 0 ? '#15803d' : screenVariance > 0 ? '#1d4ed8' : '#b91c1c'
-                          }}>
-                            {screenVariance > 0 ? `+${screenVariance.toLocaleString('en-IN')}` : screenVariance.toLocaleString('en-IN')} Pcs Balance
-                          </span>
+                        <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          {screenTotalPieces > 0 && grandPcsIssued > 0 ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              padding: '2px 6px',
+                              borderRadius: '5px',
+                              fontSize: '11px',
+                              fontWeight: '900',
+                              border: '1px solid',
+                              background: pcsVariance === 0 ? '#f0fdf4' : pcsVariance > 0 ? '#eff6ff' : '#fef2f2',
+                              borderColor: pcsVariance === 0 ? '#bbf7d0' : pcsVariance > 0 ? '#bfdbfe' : '#fecaca',
+                              color: pcsVariance === 0 ? '#15803d' : pcsVariance > 0 ? '#1d4ed8' : '#b91c1c'
+                            }}>
+                              {pcsVariance > 0 ? `+${pcsVariance.toLocaleString('en-IN')}` : pcsVariance.toLocaleString('en-IN')} Pcs Bal
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                              —
+                            </span>
+                          )}
                         </td>
+                        <td colSpan={3}></td>
                       </tr>
                     </tfoot>
                   );
