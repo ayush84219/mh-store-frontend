@@ -1616,6 +1616,18 @@ export default function GeneratePOView({
   };
 
   const handleDownloadPOFromHistory = async (po) => {
+    if (!po) return;
+
+    if (!po.requisitionRaisedBy && !po.preparedBy && !po.approvedBy) {
+      const wantToSet = window.confirm(
+        `Notice: Signatures are not set for PO ${po.poNumber}.\n\nWould you like to set signatures now before downloading the PDF?\n\n• Click OK to set signatures\n• Click Cancel to download with empty signature lines`
+      );
+      if (wantToSet) {
+        handleOpenSignatureModal(po);
+        return;
+      }
+    }
+
     let poRows = [];
     if (Array.isArray(po.items)) {
       poRows = po.items;
@@ -1634,9 +1646,9 @@ export default function GeneratePOView({
         orderTime: po.date ? po.date.split(' ')[1] : nowTime(),
         expectedDate: po.deliveryDate || null,
         expectedTime: null,
-        requisitionRaisedBy: po.requisitionRaisedBy || "SYSTEM",
-        preparedBy: po.preparedBy || "SYSTEM",
-        approvedBy: po.approvedBy || "SYSTEM",
+        requisitionRaisedBy: (po.requisitionRaisedBy || '').trim(),
+        preparedBy: (po.preparedBy || '').trim(),
+        approvedBy: (po.approvedBy || '').trim(),
         remarks: po.remarks || "",
         createdAt: po.date || new Date().toISOString(),
         brandEnabled: poRows.some(r => r.brand) || !!po.brand,
@@ -2216,6 +2228,12 @@ export default function GeneratePOView({
     getLocalStorageItem(LOCAL_STORAGE_KEYS.APPROVED_NAMES, DEFAULT_APPROVED_NAMES)
   );
 
+  const [editingPoSignatures, setEditingPoSignatures] = useState(null);
+  const [editSigRaised, setEditSigRaised] = useState("");
+  const [editSigPrep, setEditSigPrep] = useState("");
+  const [editSigApp, setEditSigApp] = useState("");
+  const [isSavingSignatures, setIsSavingSignatures] = useState(false);
+
   const [searchPoNumber, setSearchPoNumber] = useState("");
   const [isLoadingPO, setIsLoadingPO] = useState(false);
   const [availablePONumbers, setAvailablePONumbers] = useState([]);
@@ -2792,6 +2810,57 @@ export default function GeneratePOView({
     setSavedApprovedNames(getLocalStorageItem(LOCAL_STORAGE_KEYS.APPROVED_NAMES, DEFAULT_APPROVED_NAMES));
   };
 
+  function handleOpenSignatureModal(po) {
+    if (!po) return;
+    setEditingPoSignatures(po);
+    setEditSigRaised(po.requisitionRaisedBy || "");
+    setEditSigPrep(po.preparedBy || "");
+    setEditSigApp(po.approvedBy || "");
+  }
+
+  async function handleSaveSignatures() {
+    if (!editingPoSignatures) return;
+    setIsSavingSignatures(true);
+    const targetId = editingPoSignatures.id || editingPoSignatures.poNumber;
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/pos/${encodeURIComponent(targetId)}/signatures`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requisitionRaisedBy: editSigRaised.trim(),
+          preparedBy: editSigPrep.trim(),
+          approvedBy: editSigApp.trim()
+        })
+      });
+      if (res.ok) {
+        editingPoSignatures.requisitionRaisedBy = editSigRaised.trim();
+        editingPoSignatures.preparedBy = editSigPrep.trim();
+        editingPoSignatures.approvedBy = editSigApp.trim();
+
+        setLivePOs(prev => prev.map(p => {
+          if (p.id === editingPoSignatures.id || p.poNumber === editingPoSignatures.poNumber) {
+            return {
+              ...p,
+              requisitionRaisedBy: editSigRaised.trim(),
+              preparedBy: editSigPrep.trim(),
+              approvedBy: editSigApp.trim()
+            };
+          }
+          return p;
+        }));
+
+        setEditingPoSignatures(null);
+      } else {
+        alert("Failed to update signatures in database.");
+      }
+    } catch (err) {
+      console.error("Failed to update signatures:", err);
+      alert("Error saving signatures: " + err.message);
+    } finally {
+      setIsSavingSignatures(false);
+    }
+  }
+
   // Google Sheets & Database load handler
   const handleLoadPO = async () => {
     if (!searchPoNumber.trim()) return setLoadError("Please enter a PO number");
@@ -2963,7 +3032,10 @@ export default function GeneratePOView({
         total: totals.grandTotal,
         date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
         deliveryDate: expectedDate ? new Date(expectedDate).toLocaleDateString('en-GB') : '',
-        status: 'Sent to Vendor'
+        status: 'Sent to Vendor',
+        requisitionRaisedBy: (requisitionRaisedBy || payload.meta?.requisitionRaisedBy || '').trim(),
+        preparedBy: (preparedBy || payload.meta?.preparedBy || '').trim(),
+        approvedBy: (approvedBy || payload.meta?.approvedBy || '').trim()
       };
 
       // Call parent MySQL database sync callback
@@ -4822,9 +4894,34 @@ export default function GeneratePOView({
                           </span>
                         </td>
                         <td style={{ padding: '12px 10px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                          <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
-                          <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
-                          <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                            <div>
+                              <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
+                              <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
+                              <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenSignatureModal(po)}
+                              style={{
+                                padding: '3px 8px',
+                                fontSize: '10.5px',
+                                fontWeight: '700',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '6px',
+                                background: 'var(--bg-secondary)',
+                                color: 'var(--text-main)',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                whiteSpace: 'nowrap'
+                              }}
+                              title="Edit signatures for this PO"
+                            >
+                              ✏️ Edit
+                            </button>
+                          </div>
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
@@ -5372,6 +5469,100 @@ export default function GeneratePOView({
             <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
               <button className="btn btn-secondary" onClick={() => setShowAddDeptDialog(false)} style={{ borderRadius: '8px' }}>
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Edit PO Signatures */}
+      {editingPoSignatures && (
+        <div className="modal-overlay" style={{ zIndex: 99999 }}>
+          <div className="modal-content animate-scale" style={{ maxWidth: '440px', borderRadius: '16px' }}>
+            <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h3 className="modal-title" style={{ fontSize: '1.15rem', fontWeight: '800', margin: 0, color: 'var(--text-main)' }}>
+                  Edit PO Signatures
+                </h3>
+                <span style={{ fontSize: '11px', color: 'var(--accent-color)', fontWeight: '700' }}>
+                  {editingPoSignatures.poNumber} • {editingPoSignatures.vendorName || 'General PO'}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditingPoSignatures(null)}
+                style={{ borderRadius: '50%', padding: '6px' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                Update the designated signature names for this Purchase Order. Once saved, they will appear on the table and on the printed PDF.
+              </p>
+
+              <div>
+                <label className="FormLabel" style={{ display: 'block', marginBottom: '4px', fontWeight: '700', fontSize: '12px' }}>
+                  Requisition Raised By:
+                </label>
+                <SmartDropdown
+                  value={editSigRaised}
+                  onChange={setEditSigRaised}
+                  options={savedRequisitionNames}
+                  placeholder="Select or type raiser name..."
+                  localStorageKey={LOCAL_STORAGE_KEYS.REQUISITION_NAMES}
+                  onSaveToLocalStorage={refreshSavedNames}
+                />
+              </div>
+
+              <div>
+                <label className="FormLabel" style={{ display: 'block', marginBottom: '4px', fontWeight: '700', fontSize: '12px' }}>
+                  Prepared By:
+                </label>
+                <SmartDropdown
+                  value={editSigPrep}
+                  onChange={setEditSigPrep}
+                  options={savedPreparedNames}
+                  placeholder="Select or type preparer name..."
+                  localStorageKey={LOCAL_STORAGE_KEYS.PREPARED_NAMES}
+                  onSaveToLocalStorage={refreshSavedNames}
+                />
+              </div>
+
+              <div>
+                <label className="FormLabel" style={{ display: 'block', marginBottom: '4px', fontWeight: '700', fontSize: '12px' }}>
+                  Authorized By (Approved By):
+                </label>
+                <SmartDropdown
+                  value={editSigApp}
+                  onChange={setEditSigApp}
+                  options={savedApprovedNames}
+                  placeholder="Select or type approver name..."
+                  localStorageKey={LOCAL_STORAGE_KEYS.APPROVED_NAMES}
+                  onSaveToLocalStorage={refreshSavedNames}
+                />
+              </div>
+            </div>
+
+            <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setEditingPoSignatures(null)}
+                style={{ borderRadius: '8px', fontSize: '12px' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSaveSignatures}
+                disabled={isSavingSignatures}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontSize: '12px', fontWeight: '700' }}
+              >
+                {isSavingSignatures ? 'Saving...' : <><CheckCircle size={15} /> Save Signatures</>}
               </button>
             </div>
           </div>

@@ -3338,6 +3338,70 @@ export default function MaterialIssueView({
               )}
             </div>
 
+            {/* Previously Issued Materials Banner for Selected Lot */}
+            {selectedLotAudit && Object.keys(selectedLotAudit.materialsSummary || {}).length > 0 && (
+              <div style={{
+                marginBottom: '16px',
+                padding: '12px 16px',
+                borderRadius: '10px',
+                background: '#fffbeb',
+                border: '1.5px solid #fde68a',
+                boxShadow: '0 2px 6px rgba(217, 119, 6, 0.08)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ fontSize: '16px' }}>⚠️</span>
+                    <strong style={{ fontSize: '13px', color: '#92400e' }}>
+                      Previously Issued Materials for Lot #{selectedLotAudit.lotId} ({selectedLotAudit.allLogs.length} transaction{selectedLotAudit.allLogs.length > 1 ? 's' : ''})
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-xs"
+                    onClick={() => setSelectedLotAuditDetail(selectedLotAudit)}
+                    style={{ fontSize: '11px', padding: '2px 8px' }}
+                  >
+                    View Full Audit
+                  </button>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '8px' }}>
+                  {Object.values(selectedLotAudit.materialsSummary).map((mat, idx) => (
+                    <div key={idx} style={{
+                      background: '#ffffff',
+                      borderRadius: '6px',
+                      border: '1px solid #fde68a',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '6px'
+                    }}>
+                      <div>
+                        <span style={{ fontSize: '10px', fontWeight: '800', color: '#92400e', background: '#fef3c7', padding: '1px 5px', borderRadius: '3px', marginRight: '4px' }}>
+                          {mat.bomItemName}
+                        </span>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: '#1e293b' }}>
+                          {mat.materialName}
+                        </span>
+                      </div>
+                      <span style={{
+                        fontSize: '12px',
+                        fontWeight: '900',
+                        color: '#c2410c',
+                        background: '#fff7ed',
+                        padding: '2px 7px',
+                        borderRadius: '5px',
+                        border: '1px solid #ffedd5',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {mat.totalIssuedQty.toLocaleString('en-IN')} {mat.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Full-Width Spacious BOM Component & Inventory Item Map Table (Matching Image 1) */}
             <div className="custom-table-container" style={{ width: '100%', paddingBottom: '6px' }}>
               <table className="custom-table" style={{ fontSize: '13.5px', width: '100%', tableLayout: 'auto' }}>

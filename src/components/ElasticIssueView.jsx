@@ -720,7 +720,7 @@ function SearchableMaterialSelect({
 export default function ElasticIssueView({
   materials: initialMaterialsProp = [],
   onUpdateMaterial,
-  syncMaterialsToDb,
+  syncMaterialsToDb = () => { },
   currencySymbol = '₹',
   currentUser = null,
   prefilledLotNo = '',

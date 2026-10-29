@@ -793,7 +793,7 @@ export default function App() {
             setRacks(list);
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     };
     fetchWarehouseLocations();
   }, []);
@@ -1224,45 +1224,26 @@ export default function App() {
         return b.id.localeCompare(a.id);
       });
     });
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/designs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...designWithTime, actorName: currentUser?.name || 'Designer' })
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to save design');
-      }
-    } catch (err) {
-      console.error('Failed to save design to SQLite:', err);
-      setToast({
-        type: 'error',
-        title: 'Design Save Error',
-        message: err.message || 'Failed to save design to server.'
-      });
-    }
   };
 
+  // Helper to persist updated material stock to the backend database
+  const syncMaterialsToDb = (changedMaterials) => {
+    if (!changedMaterials) return;
+    const items = Array.isArray(changedMaterials) ? changedMaterials : [changedMaterials];
+    if (items.length === 0) return;
 
-  // Helper to sync material stock updates to backend (safeguarded against mass requests)
-  const syncMaterialsToDb = async (updatedMaterials) => {
-    if (!Array.isArray(updatedMaterials) || updatedMaterials.length === 0) return;
-    try {
-      // Safety guard: if an entire catalog (>50 items) is mistakenly passed, slice it to prevent freezing
-      const batch = updatedMaterials.slice(0, 50);
-      await Promise.all(
-        batch.map(m =>
-          fetch(`${getBackendUrl()}/api/materials/${m.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(m)
-          }).catch(err => console.warn(`PUT material ${m?.id} error:`, err))
-        )
-      );
-    } catch (err) {
-      console.error('Failed to sync materials to DB:', err);
-    }
+    items.forEach(async (m) => {
+      if (!m || !m.id) return;
+      try {
+        await fetch(`${getBackendUrl()}/api/materials/${encodeURIComponent(m.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(m)
+        });
+      } catch (err) {
+        console.warn(`Failed to sync material ${m.id} to DB:`, err);
+      }
+    });
   };
 
   const handleAddPO = (newPO) => {
