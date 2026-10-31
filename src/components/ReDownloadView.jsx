@@ -400,36 +400,47 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
         toDataURL_QR(recvUrl, 320)
       ]);
 
+      const orderDatePart = po.date ? (po.date.includes(' ') ? po.date.split(' ')[0] : po.date) : formatDateSafe(new Date());
+      const orderTimePart = po.date && po.date.includes(' ') ? po.date.split(' ')[1] : '';
+      const poRows = Array.isArray(po.items) ? po.items : [];
+
       const payload = {
         meta: {
           poNumber: po.poNumber,
-          orderDate: po.date,
-          orderTime: "10:00",
-          expectedDate: po.deliveryDate,
+          lotNo: po.lotNo || null,
+          designName: po.designName || null,
+          orderDate: orderDatePart,
+          orderTime: orderTimePart,
+          expectedDate: po.deliveryDate || null,
           expectedTime: "",
-          requisitionRaisedBy: po.requisitionRaisedBy || "N/A",
-          preparedBy: po.preparedBy || "N/A",
-          approvedBy: po.approvedBy || "N/A",
+          requisitionRaisedBy: (po.requisitionRaisedBy || '').trim(),
+          preparedBy: (po.preparedBy || '').trim(),
+          approvedBy: (po.approvedBy || '').trim(),
           remarks: po.remarks || "",
+          brandEnabled: poRows.some(r => r.brand) || !!po.brand,
+          shadeEnabled: poRows.some(r => r.shade || (r.description && r.description !== r.name)),
+          gstEnabled: (po.taxRate > 0 || po.tax > 0),
+          gstPercentage: po.taxRate || 0
         },
-        supplierName: po.vendorName,
+        supplierName: po.vendorName || '',
         supplierAddress: po.vendorAddress || "",
         supplierEmail: po.vendorEmail || "",
         supplierPhone: po.vendorPhone || "",
-        rows: Array.isArray(po.items) ? po.items.map((it, idx) => ({
-          line: idx + 1,
-          department: it.department || "Production",
-          description: it.name,
-          shade: it.description || "",
-          uom: it.unit || "PCS",
-          qty: it.qty,
-          rate: it.price,
-          amount: it.qty * it.price
-        })) : [],
+        rows: poRows.map((it, idx) => ({
+          line: it.line || (idx + 1),
+          department: it.department || it.dept || "Trims",
+          description: it.name || it.description || it.item || "",
+          brand: it.brand || "",
+          shade: it.shade || (it.description && it.description !== it.name ? it.description : ""),
+          uom: it.unit || it.uom || "PCS",
+          qty: parseFloat(it.qty ?? it.quantity) || 0,
+          rate: parseFloat(it.price ?? it.rate) || 0,
+          amount: (parseFloat(it.qty ?? it.quantity) || 0) * (parseFloat(it.price ?? it.rate) || 0)
+        })),
         totals: {
-          sub: po.subtotal,
-          gstAmount: po.tax,
-          grandTotal: po.total
+          sub: po.subtotal || 0,
+          gstAmount: po.tax || 0,
+          grandTotal: po.total || 0
         }
       };
 

@@ -1074,6 +1074,14 @@ export default function MaterialIssueView({
   };
   const [selectedLotAuditDetail, setSelectedLotAuditDetail] = useState(null);
   const [printLotAudit, setPrintLotAudit] = useState(null);
+  const [dbExtraIssues, setDbExtraIssues] = useState([]);
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/extra-material-issues`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setDbExtraIssues(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
   const [isSnapshotBreakdownOpen, setIsSnapshotBreakdownOpen] = useState(false);
   // Print Preview (issue confirmation) modal
   const [previewIssue, setPreviewIssue] = useState(null); // { design, pieces, items, isReissue, personName }
@@ -1832,6 +1840,174 @@ export default function MaterialIssueView({
     if (!selectedDesignId) return null;
     return lotAuditSummary.find(l => String(l.lotId) === String(selectedDesignId)) || null;
   }, [selectedDesignId, lotAuditSummary]);
+
+  // Previously issued materials for the currently entered or selected Lot Number
+  const previouslyIssuedForCurrentLot = useMemo(() => {
+    const rawInput = String(
+      selectedDesignId ||
+      (searchQuery.trim() ? (designs.find(d => String(d.id).toLowerCase() === searchQuery.trim().toLowerCase() || String(d.lotNo2 || '').toLowerCase() === searchQuery.trim().toLowerCase())?.id || '') : '')
+    ).trim();
+
+    if (!rawInput) return null;
+
+    const clean = rawInput.toLowerCase();
+    const isDirect = clean === 'direct-item' ||
+      clean === 'w/o lot' ||
+      clean === 'without lot' ||
+      clean === 'no lot' ||
+      clean === 'none' ||
+      clean === 'n/a' ||
+      clean.includes('direct') ||
+      clean.includes('without');
+    if (isDirect) return null;
+
+    const normTarget = clean.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+    if (!normTarget) return null;
+
+    const allKnownLogs = [...(issueLogs || [])];
+
+    const matchingLogs = allKnownLogs.filter(l => {
+      if (l.isReturn) return false;
+      const rawL = String(l.lotId || l.lotNumber || l.lot || l.designId || '').trim().toLowerCase();
+      if (!rawL) return false;
+      const normL = rawL.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return normL === normTarget || rawL === clean;
+    });
+
+    const matchingExtraIssues = (dbExtraIssues || []).filter(ex => {
+      const rawL = String(ex.lotId || ex.lotNumber || ex.lot || '').trim().toLowerCase();
+      if (!rawL) return false;
+      const normL = rawL.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return normL === normTarget || rawL === clean;
+    });
+
+    if (matchingLogs.length === 0 && matchingExtraIssues.length === 0) return null;
+
+    const matMap = {};
+    let totalLineItems = 0;
+    const challanIds = new Set();
+
+    const findCatalogInfo = (name, matId) => {
+      if (!materials || !Array.isArray(materials)) return { code: '', cat: '' };
+      const matched = materials.find(mat =>
+        (matId && String(mat.id) === String(matId)) ||
+        (mat.name && String(mat.name).trim().toLowerCase() === String(name).trim().toLowerCase())
+      );
+      if (!matched) return { code: '', cat: '' };
+      const rawCode = matched.itemCode || matched.stCode || matched.materialCode || '';
+      const code = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+      return { code, cat: matched.category || matched.componentType || '' };
+    };
+
+    matchingLogs.forEach(l => {
+      if (l.id) challanIds.add(l.id);
+      const mats = (Array.isArray(l.materials) && l.materials.length > 0)
+        ? l.materials
+        : (Array.isArray(l.items) && l.items.length > 0 ? l.items : []);
+
+      if (mats.length === 0 && (l.materialName || l.material)) {
+        mats.push({
+          name: l.materialName || l.material,
+          qty: l.quantity || l.qty || l.pieces || 0,
+          unit: l.unit || 'Pcs',
+          itemCode: l.itemCode || '',
+          category: l.category || ''
+        });
+      }
+
+      mats.forEach(m => {
+        if (!m) return;
+        const name = String(m.name || m.materialName || m.bomItemName || 'Material Item').trim();
+        const qty = Number(m.qty !== undefined ? m.qty : (m.totalQty !== undefined ? m.totalQty : 0)) || 0;
+        const rawUnit = String(m.unit || 'Pcs').trim();
+        const uUpper = rawUnit.toUpperCase();
+        const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+        const normUnit = isPc ? 'Pcs' : rawUnit;
+
+        const catalog = findCatalogInfo(name, m.materialId);
+        const cat = String(m.category || m.componentType || m.bomItemName || catalog.cat || '').trim();
+        const code = String(m.itemCode || catalog.code || '').trim();
+        const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+        if (!matMap[key]) {
+          matMap[key] = {
+            key,
+            name,
+            unit: normUnit,
+            category: cat,
+            itemCode: code,
+            totalQty: 0,
+            challans: []
+          };
+        }
+
+        matMap[key].totalQty += qty;
+        totalLineItems += 1;
+        matMap[key].challans.push({
+          id: l.id || 'Challan',
+          date: l.date || '',
+          qty,
+          unit: normUnit,
+          issuer: l.personName || 'Store',
+          receiver: l.receiverName || 'Cutting',
+          receiverDept: l.receiverDept || ''
+        });
+      });
+    });
+
+    matchingExtraIssues.forEach(ex => {
+      const chId = ex.slipNo || ex.id || 'Extra-Issue';
+      challanIds.add(chId);
+      const name = String(ex.materialName || ex.bomItemName || 'Material Item').trim();
+      const qty = Number(ex.extraQty !== undefined ? ex.extraQty : (ex.qty !== undefined ? ex.qty : ex.quantity)) || 0;
+      const rawUnit = String(ex.unit || 'Pcs').trim();
+      const uUpper = rawUnit.toUpperCase();
+      const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+      const normUnit = isPc ? 'Pcs' : rawUnit;
+
+      const catalog = findCatalogInfo(name, ex.materialId);
+      const cat = String(ex.category || ex.componentType || ex.bomItemName || catalog.cat || 'EXTRA').trim();
+      const code = String(ex.itemCode || catalog.code || '').trim();
+      const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+      if (!matMap[key]) {
+        matMap[key] = {
+          key,
+          name,
+          unit: normUnit,
+          category: cat,
+          itemCode: code,
+          totalQty: 0,
+          challans: []
+        };
+      }
+
+      matMap[key].totalQty += qty;
+      totalLineItems += 1;
+      matMap[key].challans.push({
+        id: chId,
+        date: ex.date || ex.created_at || '',
+        qty,
+        unit: normUnit,
+        issuer: ex.personName || ex.issuerName || 'Store',
+        receiver: ex.receiverName || 'Cutting',
+        receiverDept: ex.receiverDept || ''
+      });
+    });
+
+    const materialsList = Object.values(matMap);
+    if (materialsList.length === 0 || materialsList.every(m => m.totalQty === 0)) {
+      return null;
+    }
+
+    return {
+      lotNo: rawInput,
+      normLot: normTarget,
+      totalChallans: challanIds.size,
+      totalLineItems,
+      materials: materialsList
+    };
+  }, [selectedDesignId, searchQuery, issueLogs, dbExtraIssues, designs, materials]);
 
   // Filtered lot audit summary for report view
   const filteredLotAudits = useMemo(() => {

@@ -3050,6 +3050,8 @@ export default function App() {
                   currentUser={currentUser}
                   currencySymbol={currencySymbol}
                   onNavigate={setActiveTab}
+                  materials={materials}
+                  issueLogs={issueLogs}
                 />
               )}
 
@@ -3063,6 +3065,7 @@ export default function App() {
                   currentUser={currentUser}
                   currencySymbol={currencySymbol}
                   onNavigate={setActiveTab}
+                  issueLogs={issueLogs}
                 />
               )}
 

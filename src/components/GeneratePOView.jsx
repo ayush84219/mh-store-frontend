@@ -1390,6 +1390,10 @@ export default function GeneratePOView({
   const [poSearchQuery, setPoSearchQuery] = useState('');
   const [poStatusFilter, setPoStatusFilter] = useState('all');
   const [poMaterialFilter, setPoMaterialFilter] = useState('all');
+  const [poDateSort, setPoDateSort] = useState('newest'); // 'newest' | 'oldest'
+  const [poDateFilter, setPoDateFilter] = useState('all'); // 'all' | 'today' | 'yesterday' | 'last7' | 'thisMonth' | 'custom'
+  const [poCustomStartDate, setPoCustomStartDate] = useState('');
+  const [poCustomEndDate, setPoCustomEndDate] = useState('');
   const [poHistoryPage, setPoHistoryPage] = useState(0);
   const [poHistoryRpp, setPoHistoryRpp] = useState(10);
   const [historyLogs, setHistoryLogs] = useState([]);
@@ -1397,6 +1401,35 @@ export default function GeneratePOView({
   const [loadingLivePOs, setLoadingLivePOs] = useState(false);
   const [backendMaterialsList, setBackendMaterialsList] = useState([]);
   const [extraVendors, setExtraVendors] = useState([]);
+
+  // Parse PO date or timestamp into epoch ms
+  const parsePoDate = useCallback((po) => {
+    if (!po) return 0;
+    const raw = String(po.date || po.createdAt || po.saved_at || '').trim();
+    if (raw) {
+      if (raw.includes('/')) {
+        const parts = raw.split(' ');
+        const dmy = parts[0].split('/');
+        if (dmy.length === 3) {
+          const day = parseInt(dmy[0], 10);
+          const month = parseInt(dmy[1], 10) - 1;
+          const year = parseInt(dmy[2], 10);
+          let hour = 0, min = 0;
+          if (parts[1]) {
+            const timeParts = parts[1].split(':');
+            hour = parseInt(timeParts[0], 10) || 0;
+            min = parseInt(timeParts[1], 10) || 0;
+          }
+          const d = new Date(year, month, day, hour, min);
+          if (!isNaN(d.getTime())) return d.getTime();
+        }
+      }
+      const isoTs = new Date(raw).getTime();
+      if (!isNaN(isoTs) && isoTs > 0) return isoTs;
+    }
+    const num = parseInt(String(po.poNumber || po.id || '').replace(/\D/g, ''), 10);
+    return num || 0;
+  }, []);
 
   const allVendors = useMemo(() => {
     const list = Array.isArray(vendors) ? [...vendors] : [];
@@ -1411,12 +1444,16 @@ export default function GeneratePOView({
   // Reset pagination when filter criteria change
   useEffect(() => {
     setPoHistoryPage(0);
-  }, [poSearchQuery, poStatusFilter, poMaterialFilter]);
+  }, [poSearchQuery, poStatusFilter, poMaterialFilter, poDateSort, poDateFilter, poCustomStartDate, poCustomEndDate]);
 
-  // Compute filtered PO history records
+  // Compute filtered & sorted PO history records
   const filteredHistoryPOs = useMemo(() => {
     const targetList = livePOs.length > 0 ? livePOs : (pos || []);
-    return targetList.filter(po => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const todayEnd = todayStart + 86400000 - 1;
+
+    const filtered = targetList.filter(po => {
       const q = poSearchQuery.toLowerCase().trim();
       const s = (po.status || 'Sent to Vendor').toLowerCase();
 
@@ -1446,6 +1483,36 @@ export default function GeneratePOView({
         matchesMaterial = found;
       }
 
+      let matchesDate = true;
+      if (poDateFilter !== 'all') {
+        const poTs = parsePoDate(po);
+        if (poTs > 1000000000) {
+          if (poDateFilter === 'today') {
+            matchesDate = poTs >= todayStart && poTs <= todayEnd;
+          } else if (poDateFilter === 'yesterday') {
+            const yesterdayStart = todayStart - 86400000;
+            const yesterdayEnd = todayStart - 1;
+            matchesDate = poTs >= yesterdayStart && poTs <= yesterdayEnd;
+          } else if (poDateFilter === 'last7') {
+            const last7Start = todayStart - (6 * 86400000);
+            matchesDate = poTs >= last7Start && poTs <= todayEnd;
+          } else if (poDateFilter === 'thisMonth') {
+            const mStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+            const mEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+            matchesDate = poTs >= mStart && poTs <= mEnd;
+          } else if (poDateFilter === 'custom') {
+            if (poCustomStartDate) {
+              const cs = new Date(poCustomStartDate + 'T00:00:00').getTime();
+              if (!isNaN(cs) && poTs < cs) matchesDate = false;
+            }
+            if (poCustomEndDate) {
+              const ce = new Date(poCustomEndDate + 'T23:59:59').getTime();
+              if (!isNaN(ce) && poTs > ce) matchesDate = false;
+            }
+          }
+        }
+      }
+
       let matchesSearch = true;
       if (q) {
         const cleanQ = q.replace(/^po-?/i, '').trim();
@@ -1472,9 +1539,26 @@ export default function GeneratePOView({
           itemNames.includes(q);
       }
 
-      return matchesStatus && matchesMaterial && matchesSearch;
+      return matchesStatus && matchesMaterial && matchesDate && matchesSearch;
     });
-  }, [livePOs, pos, poSearchQuery, poStatusFilter, poMaterialFilter]);
+
+    // Sort Newest First or Oldest First
+    return filtered.sort((a, b) => {
+      const tsA = parsePoDate(a);
+      const tsB = parsePoDate(b);
+      const numA = parseInt(String(a.poNumber || a.id || '').replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.poNumber || b.id || '').replace(/\D/g, ''), 10) || 0;
+
+      if (poDateSort === 'oldest') {
+        if (tsA !== tsB && tsA > 0 && tsB > 0) return tsA - tsB;
+        return numA - numB;
+      } else {
+        // 'newest' (default)
+        if (tsA !== tsB && tsA > 0 && tsB > 0) return tsB - tsA;
+        return numB - numA;
+      }
+    });
+  }, [livePOs, pos, poSearchQuery, poStatusFilter, poMaterialFilter, poDateFilter, poDateSort, poCustomStartDate, poCustomEndDate, parsePoDate]);
 
   // Compute paginated slice of PO records
   const paginatedHistoryPOs = useMemo(() => {
@@ -1592,7 +1676,7 @@ export default function GeneratePOView({
                   department: dept,
                   description: desc,
                   brand: item.brand || "",
-                  shade: isMySQL ? (item.description || "") : (item.shade || ""),
+                  shade: item.shade || (isMySQL && item.description && item.name !== item.description ? item.description : "") || "",
                   uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
                   qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
                   rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
@@ -1618,16 +1702,6 @@ export default function GeneratePOView({
   const handleDownloadPOFromHistory = async (po) => {
     if (!po) return;
 
-    if (!po.requisitionRaisedBy && !po.preparedBy && !po.approvedBy) {
-      const wantToSet = window.confirm(
-        `Notice: Signatures are not set for PO ${po.poNumber}.\n\nWould you like to set signatures now before downloading the PDF?\n\n• Click OK to set signatures\n• Click Cancel to download with empty signature lines`
-      );
-      if (wantToSet) {
-        handleOpenSignatureModal(po);
-        return;
-      }
-    }
-
     let poRows = [];
     if (Array.isArray(po.items)) {
       poRows = po.items;
@@ -1639,11 +1713,16 @@ export default function GeneratePOView({
       }
     }
 
+    const orderDatePart = po.date ? (po.date.includes(' ') ? po.date.split(' ')[0] : po.date) : todayISO();
+    const orderTimePart = po.date && po.date.includes(' ') ? po.date.split(' ')[1] : '';
+
     const payload = {
       meta: {
         poNumber: po.poNumber,
-        orderDate: po.date ? po.date.split(' ')[0] : todayISO(),
-        orderTime: po.date ? po.date.split(' ')[1] : nowTime(),
+        lotNo: po.lotNo || null,
+        designName: po.designName || null,
+        orderDate: orderDatePart,
+        orderTime: orderTimePart,
         expectedDate: po.deliveryDate || null,
         expectedTime: null,
         requisitionRaisedBy: (po.requisitionRaisedBy || '').trim(),
@@ -1652,7 +1731,7 @@ export default function GeneratePOView({
         remarks: po.remarks || "",
         createdAt: po.date || new Date().toISOString(),
         brandEnabled: poRows.some(r => r.brand) || !!po.brand,
-        shadeEnabled: poRows.some(r => r.description),
+        shadeEnabled: poRows.some(r => r.shade || (r.description && r.description !== r.name)),
         gstEnabled: po.tax > 0,
         gstPercentage: po.taxRate || 18,
       },
@@ -1667,11 +1746,11 @@ export default function GeneratePOView({
           department: r.department || r.dept || "Trims",
           description: isMySQLFormat ? r.name : (r.description || r.item || ""),
           brand: r.brand || "",
-          shade: isMySQLFormat ? r.description : (r.shade || ""),
-          uom: isMySQLFormat ? r.unit : (r.uom || r.unit || "PCS"),
-          qty: parseFloat(isMySQLFormat ? r.qty : (r.qty || r.quantity)) || 0,
-          rate: parseFloat(isMySQLFormat ? r.price : (r.rate || r.price)) || 0,
-          amount: (parseFloat(isMySQLFormat ? r.qty : r.qty) || 0) * (parseFloat(isMySQLFormat ? r.price : r.rate) || 0)
+          shade: r.shade || (isMySQLFormat && r.description && r.description !== r.name ? r.description : ""),
+          uom: isMySQLFormat ? (r.unit || r.uom || "PCS") : (r.uom || r.unit || "PCS"),
+          qty: parseFloat(isMySQLFormat ? (r.qty ?? r.quantity) : (r.qty || r.quantity)) || 0,
+          rate: parseFloat(isMySQLFormat ? (r.price ?? r.rate) : (r.rate || r.price)) || 0,
+          amount: (parseFloat(isMySQLFormat ? (r.qty ?? r.quantity) : (r.qty || r.quantity)) || 0) * (parseFloat(isMySQLFormat ? (r.price ?? r.rate) : (r.rate || r.price)) || 0)
         };
       }),
       totals: {
@@ -2941,7 +3020,7 @@ export default function GeneratePOView({
                   department: dept,
                   description: desc,
                   brand: item.brand || "",
-                  shade: isMySQL ? (item.description || "") : (item.shade || ""),
+                  shade: item.shade || (isMySQL && item.description && item.name !== item.description ? item.description : "") || "",
                   uom: isMySQL ? (item.unit || "PCS") : (item.uom || item.unit || "PCS"),
                   qty: parseFloat(isMySQL ? item.qty : (item.qty || item.quantity)) || 0,
                   rate: parseFloat(isMySQL ? item.price : (item.rate || item.price)) || 0
@@ -3009,12 +3088,27 @@ export default function GeneratePOView({
 
       // Save locally to MySQL Database via Parent App Handler
       const mappedItemsForMySQL = payload.rows.map(r => ({
+        line: r.line,
+        department: r.department || 'Trims',
         name: r.description,
+        description: r.description,
+        brand: r.brand || '',
+        shade: r.shade || '',
         qty: r.qty,
+        rate: r.rate,
         price: r.rate,
         unit: r.uom,
-        description: r.shade || ''
+        uom: r.uom,
+        amount: (r.qty || 0) * (r.rate || 0)
       }));
+
+      const formattedOrderDate = orderDate
+        ? (orderDate.includes('-') ? orderDate.split('-').reverse().join('/') : orderDate) + (orderTime ? ` ${orderTime.slice(0, 5)}` : '')
+        : (new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+
+      const formattedDeliveryDate = expectedDate
+        ? (expectedDate.includes('-') ? expectedDate.split('-').reverse().join('/') : expectedDate)
+        : '';
 
       const mySqlPo = {
         id: `PO${Math.floor(1000 + Math.random() * 9000)}`,
@@ -3030,16 +3124,21 @@ export default function GeneratePOView({
         taxRate: gstPercentage,
         tax: totals.gstAmount,
         total: totals.grandTotal,
-        date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
-        deliveryDate: expectedDate ? new Date(expectedDate).toLocaleDateString('en-GB') : '',
+        date: formattedOrderDate,
+        deliveryDate: formattedDeliveryDate,
         status: 'Sent to Vendor',
         requisitionRaisedBy: (requisitionRaisedBy || payload.meta?.requisitionRaisedBy || '').trim(),
         preparedBy: (preparedBy || payload.meta?.preparedBy || '').trim(),
-        approvedBy: (approvedBy || payload.meta?.approvedBy || '').trim()
+        approvedBy: (approvedBy || payload.meta?.approvedBy || '').trim(),
+        remarks: (remarks || payload.meta?.remarks || '').trim()
       };
 
       // Call parent MySQL database sync callback
       await onAddPO(mySqlPo);
+      setLivePOs(prev => {
+        const filtered = prev.filter(p => p.poNumber !== mySqlPo.poNumber && p.id !== mySqlPo.id);
+        return [mySqlPo, ...filtered];
+      });
 
       // Auto-save manual vendor if requested
       if (isManualVendor && saveManualVendorToDb && payload.supplierName?.trim()) {
@@ -4736,6 +4835,54 @@ export default function GeneratePOView({
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', background: 'var(--bg-secondary)', padding: '10px 14px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
             <select
               className="FilterSelect"
+              value={poDateSort}
+              onChange={e => setPoDateSort(e.target.value)}
+              title="Sort Order (New / Old)"
+              style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '700', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', cursor: 'pointer' }}
+            >
+              <option value="newest">⚡ Newest First (New → Old)</option>
+              <option value="oldest">⏳ Oldest First (Old → New)</option>
+            </select>
+
+            <select
+              className="FilterSelect"
+              value={poDateFilter}
+              onChange={e => setPoDateFilter(e.target.value)}
+              title="Date Period Filter"
+              style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', cursor: 'pointer' }}
+            >
+              <option value="all">📅 All Dates</option>
+              <option value="today">📅 Today</option>
+              <option value="yesterday">📅 Yesterday</option>
+              <option value="last7">📅 Last 7 Days</option>
+              <option value="thisMonth">📅 This Month</option>
+              <option value="custom">📅 Custom Date Range...</option>
+            </select>
+
+            {poDateFilter === 'custom' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={poCustomStartDate}
+                  onChange={e => setPoCustomStartDate(e.target.value)}
+                  style={{ height: '38px', fontSize: '12px', padding: '0 8px', borderRadius: '8px', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
+                  title="From Date"
+                />
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>to</span>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={poCustomEndDate}
+                  onChange={e => setPoCustomEndDate(e.target.value)}
+                  style={{ height: '38px', fontSize: '12px', padding: '0 8px', borderRadius: '8px', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}
+                  title="To Date"
+                />
+              </div>
+            )}
+
+            <select
+              className="FilterSelect"
               value={poStatusFilter}
               onChange={e => setPoStatusFilter(e.target.value)}
               style={{ height: '38px', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '12.5px', padding: '0 10px', fontWeight: '600', backgroundColor: 'var(--bg-primary)', color: 'var(--text-main)' }}
@@ -4894,33 +5041,10 @@ export default function GeneratePOView({
                           </span>
                         </td>
                         <td style={{ padding: '12px 10px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                            <div>
-                              <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
-                              <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
-                              <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenSignatureModal(po)}
-                              style={{
-                                padding: '3px 8px',
-                                fontSize: '10.5px',
-                                fontWeight: '700',
-                                border: '1px solid var(--border-color)',
-                                borderRadius: '6px',
-                                background: 'var(--bg-secondary)',
-                                color: 'var(--text-main)',
-                                cursor: 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '3px',
-                                whiteSpace: 'nowrap'
-                              }}
-                              title="Edit signatures for this PO"
-                            >
-                              ✏️ Edit
-                            </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
+                            <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
+                            <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
                           </div>
                         </td>
                         <td style={{ padding: '12px 10px', textAlign: 'center' }}>

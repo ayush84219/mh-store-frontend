@@ -725,7 +725,8 @@ export default function ElasticIssueView({
   currentUser = null,
   prefilledLotNo = '',
   setPrefilledLotNo = () => { },
-  onNavigate = () => { }
+  onNavigate = () => { },
+  issueLogs: initialIssueLogsProp = []
 }) {
   // Tab Mode: 'generator' (Issue Form) or 'history' (Past Issue Slips)
   const [viewMode, setViewMode] = useState('generator');
@@ -1006,6 +1007,333 @@ export default function ElasticIssueView({
       setMaterials(initialMaterialsProp);
     }
   }, [initialMaterialsProp]);
+
+  // ── Previously Issued Materials State & Data Fetching ──────────────────────
+  const [fetchedIssueLogs, setFetchedIssueLogs] = useState([]);
+  const [dbExtraIssues, setDbExtraIssues] = useState([]);
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/issue-logs`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) setFetchedIssueLogs(data);
+      })
+      .catch(() => {});
+
+    fetch(`${getBackendUrl()}/api/extra-material-issues`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => {
+        if (Array.isArray(data)) setDbExtraIssues(data);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Previously issued materials for the currently entered Lot Number (matches Without BOM view)
+  const previouslyIssuedForCurrentLot = useMemo(() => {
+    const rawInput = String(searchLotInput?.trim() || lotDetails?.lotNo || '').trim();
+    if (!rawInput) return null;
+
+    const clean = rawInput.toLowerCase();
+    // Direct issues / without lot are not production lots
+    const isDirect = clean === 'direct-item' ||
+      clean === 'w/o lot' ||
+      clean === 'without lot' ||
+      clean === 'no lot' ||
+      clean === 'none' ||
+      clean === 'n/a' ||
+      clean.includes('direct') ||
+      clean.includes('without');
+    if (isDirect) return null;
+
+    const normTarget = clean.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+    if (!normTarget) return null;
+
+    const matchesLot = (val) => {
+      if (!val) return false;
+      const s = String(val).trim().toLowerCase();
+      const n = s.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return n === normTarget || s === clean;
+    };
+
+    // Combine all known issue logs
+    const allLogs = [...(initialIssueLogsProp || []), ...(fetchedIssueLogs || [])];
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const localWithoutBom = localStorage.getItem('without_bom_logs');
+        if (localWithoutBom) {
+          const parsed = JSON.parse(localWithoutBom);
+          if (Array.isArray(parsed)) {
+            parsed.forEach(p => {
+              if (p && p.id && !allLogs.some(l => String(l.id || '').toUpperCase() === String(p.id).toUpperCase())) {
+                allLogs.push(p);
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    // Deduplicate allLogs by id
+    const dedupeLogs = [];
+    const seenLogIds = new Set();
+    allLogs.forEach(l => {
+      const idKey = String(l.id || l.slipNo || '').trim().toUpperCase();
+      if (idKey && !seenLogIds.has(idKey)) {
+        seenLogIds.add(idKey);
+        dedupeLogs.push(l);
+      } else if (!idKey) {
+        dedupeLogs.push(l);
+      }
+    });
+
+    // Filter logs for this lot
+    const matchingLogs = dedupeLogs.filter(l => matchesLot(l.lotId || l.lotNumber || l.lot || l.lotNo || l.designId));
+
+    // Also include extra material issues from dbExtraIssues for this lot
+    const matchingExtraIssues = (dbExtraIssues || []).filter(ex => matchesLot(ex.lotId || ex.lotNumber || ex.lot || ex.lotNo));
+
+    // Also include elastic issueHistory
+    const matchingHistory = (issueHistory || []).filter(h => {
+      const hSlip = String(h.slipNo || '').trim().toUpperCase();
+      if (seenLogIds.has(hSlip)) return false; // already in matchingLogs
+      return matchesLot(h.lotNo || h.lotId || h.lotNumber);
+    });
+
+    if (matchingLogs.length === 0 && matchingExtraIssues.length === 0 && matchingHistory.length === 0) {
+      return null;
+    }
+
+    // Aggregate by material
+    const matMap = {};
+    let totalLineItems = 0;
+    const challanIds = new Set();
+
+    const findCatalogInfo = (name, matId) => {
+      if (!materials || !Array.isArray(materials)) return { code: '', cat: '' };
+      const matched = materials.find(mat =>
+        (matId && String(mat.id) === String(matId)) ||
+        (mat.name && String(mat.name).trim().toLowerCase() === String(name).trim().toLowerCase())
+      );
+      if (!matched) return { code: '', cat: '' };
+      const rawCode = matched.itemCode || matched.stCode || matched.materialCode || '';
+      const code = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+      return { code, cat: matched.category || matched.componentType || '' };
+    };
+
+    const addMat = (item) => {
+      const rawName = String(item.name || item.materialName || item.bomItemName || 'Material Item').trim();
+      if (!rawName || rawName === '—' || rawName === '-') return;
+      const name = cleanMaterialName(rawName) || rawName;
+      const qty = Number(item.qty !== undefined ? item.qty : (item.totalQty !== undefined ? item.totalQty : (item.rolls || 0))) || 0;
+      if (qty <= 0) return;
+
+      const rawUnit = String(item.unit || 'Pcs').trim();
+      const uUpper = rawUnit.toUpperCase();
+      const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+      const normUnit = isPc ? 'Pcs' : normalizeAccUnit(rawUnit);
+
+      const catalog = findCatalogInfo(name, item.materialId);
+      const cat = String(item.category || item.componentType || catalog.cat || '').trim();
+      const code = String(formatItemCode(item.itemCode || catalog.code, null, materials) || item.itemCode || catalog.code || '').trim();
+      const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+      if (!matMap[key]) {
+        matMap[key] = {
+          key,
+          name,
+          unit: normUnit,
+          category: cat,
+          itemCode: code,
+          totalQty: 0,
+          challans: []
+        };
+      }
+
+      matMap[key].totalQty += qty;
+      totalLineItems += 1;
+      if (item.challanId) {
+        challanIds.add(item.challanId);
+        if (!matMap[key].challans.some(c => c.id === item.challanId)) {
+          matMap[key].challans.push({
+            id: item.challanId,
+            date: item.date || '',
+            qty,
+            unit: normUnit,
+            issuer: item.issuer || 'Store',
+            receiver: item.receiver || 'Cutting'
+          });
+        }
+      }
+    };
+
+    // 1. Process matchingLogs
+    matchingLogs.forEach(l => {
+      const chId = l.id || l.slipNo || 'Challan';
+      const chDate = l.date || '';
+      const issuer = l.personName || l.issuerName || 'Store';
+      const receiver = l.receiverName || 'Cutting';
+
+      const mats = (Array.isArray(l.materials) && l.materials.length > 0)
+        ? l.materials
+        : (Array.isArray(l.items) && l.items.length > 0 ? l.items : []);
+
+      if (mats.length === 0 && (l.materialName || l.material)) {
+        mats.push({
+          name: l.materialName || l.material,
+          qty: l.quantity || l.qty || l.pieces || l.volume || 0,
+          unit: l.unit || 'Pcs',
+          itemCode: l.itemCode || '',
+          category: l.category || ''
+        });
+      }
+
+      mats.forEach(m => {
+        if (!m) return;
+        addMat({
+          name: m.name || m.materialName || m.bomItemName,
+          qty: m.qty !== undefined ? m.qty : (m.totalQty !== undefined ? m.totalQty : m.volume),
+          unit: m.unit,
+          materialId: m.materialId,
+          itemCode: m.itemCode || m.stCode,
+          category: m.category || m.componentType,
+          challanId: chId,
+          date: chDate,
+          issuer,
+          receiver
+        });
+      });
+    });
+
+    // 2. Process matchingExtraIssues
+    matchingExtraIssues.forEach(ex => {
+      const chId = ex.slipNo || ex.id || 'Extra-Issue';
+      const chDate = ex.date || ex.created_at || '';
+      const issuer = ex.personName || ex.issuerName || 'Store';
+      const receiver = ex.receiverName || 'Cutting';
+      addMat({
+        name: ex.materialName || ex.bomItemName,
+        qty: ex.extraQty !== undefined ? ex.extraQty : (ex.qty !== undefined ? ex.qty : ex.quantity),
+        unit: ex.unit,
+        materialId: ex.materialId,
+        itemCode: ex.itemCode,
+        category: ex.category || ex.componentType || 'EXTRA',
+        challanId: chId,
+        date: chDate,
+        issuer,
+        receiver
+      });
+    });
+
+    // 3. Process matchingHistory
+    matchingHistory.forEach(h => {
+      const chId = h.slipNo || 'Elastic-Issue';
+      const chDate = h.date || h.issueDate || '';
+      const issuer = h.issuerName || 'Store';
+      const receiver = h.receiverName || 'Cutting';
+
+      if (Array.isArray(h.deductedItems) && h.deductedItems.length > 0) {
+        h.deductedItems.forEach(di => {
+          addMat({
+            name: di.materialName || di.bomItemName,
+            qty: di.totalRequired || di.qty,
+            unit: di.unit,
+            materialId: di.materialId,
+            itemCode: di.itemCode,
+            category: di.bomItemName || di.category || 'ELASTIC',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        });
+      } else if (Array.isArray(h.otherItems) && h.otherItems.length > 0) {
+        h.otherItems.forEach(oi => {
+          addMat({
+            name: oi.materialName || oi.componentType,
+            qty: oi.totalQty || oi.qty,
+            unit: oi.unit,
+            materialId: oi.materialId,
+            itemCode: oi.itemCode,
+            category: oi.componentType || 'OTHER',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        });
+      } else {
+        const mode = h.materialMode || 'elastic';
+        if (mode === 'elastic' || mode === 'both' || mode === 'all') {
+          const isMtr = String(h.unitType || '').toLowerCase() === 'mtr';
+          addMat({
+            name: h.elasticMaterialName || 'Elastic Waistband Roll',
+            qty: isMtr && Number(h.totalElasticMtr) > 0 ? Number(h.totalElasticMtr) : (Number(h.rolls) || 1),
+            unit: isMtr ? 'Mtr' : 'Roll',
+            itemCode: h.elasticItemCode || '',
+            category: 'ELASTIC',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        }
+        if (mode === 'tape' || mode === 'both' || mode === 'all') {
+          const isMtr = Number(h.totalTapeMtr) > 0;
+          addMat({
+            name: h.tapeMaterialName || 'Tape Roll',
+            qty: isMtr ? Number(h.totalTapeMtr) : (Number(h.tapeRollCount || h.rolls) || 1),
+            unit: isMtr ? 'Mtr' : 'Roll',
+            itemCode: h.tapeItemCode || '',
+            category: 'TAPE',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        }
+        if (mode === 'bone' || mode === 'all') {
+          const isKg = Number(h.boneWeightKg) > 0;
+          addMat({
+            name: h.boneMaterialName || 'Bone Pocketing Roll',
+            qty: isKg ? Number(h.boneWeightKg) : (Number(h.boneRolls || h.boneRollCount || h.rolls) || 1),
+            unit: isKg ? 'Kg' : 'Roll',
+            itemCode: h.boneItemCode || '',
+            category: 'BONE',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        }
+        if (mode === 'other') {
+          addMat({
+            name: h.otherMaterialName || 'Other Accessory',
+            qty: Number(h.otherRollCount || h.rolls || 1),
+            unit: h.otherUnit || 'Roll',
+            itemCode: h.otherItemCode || '',
+            category: 'OTHER',
+            challanId: chId,
+            date: chDate,
+            issuer,
+            receiver
+          });
+        }
+      }
+    });
+
+    const materialsList = Object.values(matMap);
+    if (materialsList.length === 0 || materialsList.every(m => m.totalQty === 0)) {
+      return null;
+    }
+
+    return {
+      lotNo: rawInput,
+      normLot: normTarget,
+      totalChallans: challanIds.size,
+      totalLineItems,
+      materials: materialsList
+    };
+  }, [searchLotInput, lotDetails, initialIssueLogsProp, fetchedIssueLogs, dbExtraIssues, issueHistory, materials]);
   const [elasticMaterialName, setElasticMaterialName] = useState('Elastic');
   const [selectedElasticMaterialId, setSelectedElasticMaterialId] = useState('');
   const [tapeMaterialName, setTapeMaterialName] = useState('Tape');
@@ -4907,6 +5235,143 @@ export default function ElasticIssueView({
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT ── */}
+            {previouslyIssuedForCurrentLot && (
+              <div style={{
+                marginBottom: '18px',
+                padding: '14px 18px',
+                borderRadius: '10px',
+                background: '#fffbeb',
+                border: '1.5px solid #fde68a',
+                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  borderBottom: '1px solid #fef3c7',
+                  paddingBottom: '10px',
+                  marginBottom: '12px'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      background: '#fef3c7',
+                      color: '#b45309',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '16px'
+                    }}>
+                      📦
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#92400e' }}>
+                          Already Issued Materials for Lot #{previouslyIssuedForCurrentLot.lotNo}
+                        </span>
+                        <span style={{
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          background: '#d97706',
+                          color: '#ffffff',
+                          padding: '1px 8px',
+                          borderRadius: '12px'
+                        }}>
+                          {previouslyIssuedForCurrentLot.materials.length} Item{previouslyIssuedForCurrentLot.materials.length > 1 ? 's' : ''} Issued
+                        </span>
+                      </div>
+                      <span style={{ fontSize: '11.5px', color: '#b45309' }}>
+                        Yeh materials pehle se iss Lot ke liye issue ho chuke hain ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''}):
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Items Grid */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: '10px'
+                }}>
+                  {previouslyIssuedForCurrentLot.materials.map((m, mIdx) => (
+                    <div
+                      key={m.key || mIdx}
+                      style={{
+                        background: '#ffffff',
+                        border: '1.5px solid #fde68a',
+                        borderRadius: '8px',
+                        padding: '10px 14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: '12px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}
+                    >
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          {m.category && (
+                            <span style={{
+                              fontSize: '9.5px',
+                              fontWeight: '800',
+                              color: '#92400e',
+                              background: '#fef3c7',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              textTransform: 'uppercase'
+                            }}>
+                              {m.category}
+                            </span>
+                          )}
+                          <span style={{
+                            fontSize: '13px',
+                            fontWeight: '800',
+                            color: '#0f172a',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis'
+                          }}>
+                            {m.name}
+                          </span>
+                        </div>
+                        {m.itemCode && (
+                          <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                            Code: {m.itemCode}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
+                          Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
+                          {m.challans[0]?.date && ` • ${String(m.challans[0].date).split(' ')[0]}`}
+                        </div>
+                      </div>
+
+                      {/* Quantity Pill */}
+                      <div style={{
+                        textAlign: 'right',
+                        background: '#fff7ed',
+                        border: '1px solid #fed7aa',
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        flexShrink: 0
+                      }}>
+                        <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
+                          {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                        </div>
+                        <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
+                          Issued Qty
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

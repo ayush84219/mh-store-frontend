@@ -1672,6 +1672,322 @@ export default function ExtraMaterialIssueView({
     return summary;
   }, [lotPreviousIssues]);
 
+  // Previously issued materials for the currently entered or selected Lot Number
+  const previouslyIssuedForCurrentLot = useMemo(() => {
+    const rawInput = String(
+      issueMethod === 'without_bom'
+        ? (woLotId || '')
+        : (selectedDesignId || (searchLotQuery.trim() ? (designs.find(d => String(d.id).toLowerCase() === searchLotQuery.trim().toLowerCase() || String(d.lotNo2 || '').toLowerCase() === searchLotQuery.trim().toLowerCase())?.id || '') : ''))
+    ).trim();
+
+    if (!rawInput) return null;
+
+    const clean = rawInput.toLowerCase();
+    const isDirect = clean === 'direct-item' ||
+      clean === 'w/o lot' ||
+      clean === 'without lot' ||
+      clean === 'no lot' ||
+      clean === 'none' ||
+      clean === 'n/a' ||
+      clean.includes('direct') ||
+      clean.includes('without');
+    if (isDirect) return null;
+
+    const normTarget = clean.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+    if (!normTarget) return null;
+
+    // Combine all issue logs (regular issues + without-BOM issues) + dbExtraIssues
+    const allKnownLogs = [...(allIssueLogs || [])];
+
+    // Filter logs for this lot
+    const matchingLogs = allKnownLogs.filter(l => {
+      if (l.isReturn) return false;
+      const rawL = String(l.lotId || l.lotNumber || l.lot || l.designId || '').trim().toLowerCase();
+      if (!rawL) return false;
+      const normL = rawL.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return normL === normTarget || rawL === clean;
+    });
+
+    // Also filter extra material issues from dbExtraIssues for this lot
+    const matchingExtraIssues = (dbExtraIssues || []).filter(ex => {
+      const rawL = String(ex.lotId || ex.lotNumber || ex.lot || '').trim().toLowerCase();
+      if (!rawL) return false;
+      const normL = rawL.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return normL === normTarget || rawL === clean;
+    });
+
+    if (matchingLogs.length === 0 && matchingExtraIssues.length === 0) return null;
+
+    // Aggregate by material
+    const matMap = {};
+    let totalLineItems = 0;
+    const challanIds = new Set();
+
+    // Helper to find catalog code & category
+    const findCatalogInfo = (name, matId) => {
+      if (!materials || !Array.isArray(materials)) return { code: '', cat: '' };
+      const matched = materials.find(mat =>
+        (matId && String(mat.id) === String(matId)) ||
+        (mat.name && String(mat.name).trim().toLowerCase() === String(name).trim().toLowerCase())
+      );
+      if (!matched) return { code: '', cat: '' };
+      const rawCode = matched.itemCode || matched.stCode || matched.materialCode || '';
+      const code = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+      return { code, cat: matched.category || matched.componentType || '' };
+    };
+
+    // 1. Process regular & without-BOM issue logs
+    matchingLogs.forEach(l => {
+      if (l.id) challanIds.add(l.id);
+      const mats = (Array.isArray(l.materials) && l.materials.length > 0)
+        ? l.materials
+        : (Array.isArray(l.items) && l.items.length > 0 ? l.items : []);
+
+      if (mats.length === 0 && (l.materialName || l.material)) {
+        mats.push({
+          name: l.materialName || l.material,
+          qty: l.quantity || l.qty || l.pieces || 0,
+          unit: l.unit || 'Pcs',
+          itemCode: l.itemCode || '',
+          category: l.category || ''
+        });
+      }
+
+      mats.forEach(m => {
+        if (!m) return;
+        const name = String(m.name || m.materialName || m.bomItemName || 'Material Item').trim();
+        const qty = Number(m.qty !== undefined ? m.qty : (m.totalQty !== undefined ? m.totalQty : 0)) || 0;
+        const rawUnit = String(m.unit || 'Pcs').trim();
+        const uUpper = rawUnit.toUpperCase();
+        const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+        const normUnit = isPc ? 'Pcs' : rawUnit;
+
+        const catalog = findCatalogInfo(name, m.materialId);
+        const cat = String(m.category || m.componentType || m.bomItemName || catalog.cat || '').trim();
+        const code = String(m.itemCode || catalog.code || '').trim();
+        const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+        if (!matMap[key]) {
+          matMap[key] = {
+            key,
+            name,
+            unit: normUnit,
+            category: cat,
+            itemCode: code,
+            totalQty: 0,
+            challans: []
+          };
+        }
+
+        matMap[key].totalQty += qty;
+        totalLineItems += 1;
+        matMap[key].challans.push({
+          id: l.id || 'Challan',
+          date: l.date || '',
+          qty,
+          unit: normUnit,
+          issuer: l.personName || 'Store',
+          receiver: l.receiverName || 'Cutting',
+          receiverDept: l.receiverDept || ''
+        });
+      });
+    });
+
+    // 2. Process dedicated extra material issues table records
+    matchingExtraIssues.forEach(ex => {
+      const chId = ex.slipNo || ex.id || 'Extra-Issue';
+      challanIds.add(chId);
+      const name = String(ex.materialName || ex.bomItemName || 'Material Item').trim();
+      const qty = Number(ex.extraQty !== undefined ? ex.extraQty : (ex.qty !== undefined ? ex.qty : ex.quantity)) || 0;
+      const rawUnit = String(ex.unit || 'Pcs').trim();
+      const uUpper = rawUnit.toUpperCase();
+      const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+      const normUnit = isPc ? 'Pcs' : rawUnit;
+
+      const catalog = findCatalogInfo(name, ex.materialId);
+      const cat = String(ex.category || ex.componentType || ex.bomItemName || catalog.cat || 'EXTRA').trim();
+      const code = String(ex.itemCode || catalog.code || '').trim();
+      const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+      if (!matMap[key]) {
+        matMap[key] = {
+          key,
+          name,
+          unit: normUnit,
+          category: cat,
+          itemCode: code,
+          totalQty: 0,
+          challans: []
+        };
+      }
+
+      matMap[key].totalQty += qty;
+      totalLineItems += 1;
+      matMap[key].challans.push({
+        id: chId,
+        date: ex.date || ex.created_at || '',
+        qty,
+        unit: normUnit,
+        issuer: ex.personName || ex.issuerName || 'Store',
+        receiver: ex.receiverName || 'Cutting',
+        receiverDept: ex.receiverDept || ''
+      });
+    });
+
+    const materialsList = Object.values(matMap);
+    if (materialsList.length === 0 || materialsList.every(m => m.totalQty === 0)) {
+      return null;
+    }
+
+    return {
+      lotNo: rawInput,
+      normLot: normTarget,
+      totalChallans: challanIds.size,
+      totalLineItems,
+      materials: materialsList
+    };
+  }, [issueMethod, woLotId, selectedDesignId, searchLotQuery, allIssueLogs, dbExtraIssues, designs, materials]);
+
+  const renderAlreadyIssuedBanner = (info) => {
+    if (!info || !info.materials || info.materials.length === 0) return null;
+
+    return (
+      <div style={{
+        marginBottom: '16px',
+        padding: '14px 18px',
+        borderRadius: '10px',
+        background: '#fffbeb',
+        border: '1.5px solid #fde68a',
+        boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          borderBottom: '1px solid #fef3c7',
+          paddingBottom: '10px',
+          marginBottom: '12px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              background: '#fef3c7',
+              color: '#b45309',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '16px'
+            }}>
+              📦
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '13.5px', fontWeight: '800', color: '#92400e' }}>
+                  Already Issued Materials for Lot #{info.lotNo}
+                </span>
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '800',
+                  background: '#d97706',
+                  color: '#ffffff',
+                  padding: '1px 8px',
+                  borderRadius: '12px'
+                }}>
+                  {info.materials.length} Item{info.materials.length > 1 ? 's' : ''} Issued
+                </span>
+              </div>
+              <span style={{ fontSize: '11.5px', color: '#b45309' }}>
+                Yeh materials pehle se iss Lot ke liye issue ho chuke hain ({info.totalChallans} challan{info.totalChallans > 1 ? 's' : ''}):
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Items Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+          gap: '10px'
+        }}>
+          {info.materials.map((m, mIdx) => (
+            <div
+              key={m.key || mIdx}
+              style={{
+                background: '#ffffff',
+                border: '1.5px solid #fde68a',
+                borderRadius: '8px',
+                padding: '10px 14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+              }}
+            >
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  {m.category && (
+                    <span style={{
+                      fontSize: '9.5px',
+                      fontWeight: '800',
+                      color: '#92400e',
+                      background: '#fef3c7',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      textTransform: 'uppercase'
+                    }}>
+                      {m.category}
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: '13px',
+                    fontWeight: '800',
+                    color: '#0f172a',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}>
+                    {m.name}
+                  </span>
+                </div>
+                {m.itemCode && (
+                  <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                    Code: {m.itemCode}
+                  </div>
+                )}
+                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
+                  Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
+                  {m.challans[0]?.date && ` • ${m.challans[0].date.split(' ')[0]}`}
+                </div>
+              </div>
+
+              {/* Quantity Pill */}
+              <div style={{
+                textAlign: 'right',
+                background: '#fff7ed',
+                border: '1px solid #fed7aa',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                flexShrink: 0
+              }}>
+                <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
+                  {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                </div>
+                <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
+                  Issued Qty
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   // Unified Cutting Records & Live Matrix details according to entered/selected Lot
   const activeLotForCutting = issueMethod === 'without_bom' ? String(woLotId || '') : String(selectedDesignId || '');
 
@@ -4068,6 +4384,24 @@ export default function ExtraMaterialIssueView({
               )}
             </div>
 
+            {previouslyIssuedForCurrentLot && (
+              <div style={{
+                fontSize: '11px',
+                color: '#b45309',
+                fontWeight: '700',
+                background: '#fffbeb',
+                border: '1px solid #fde68a',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}>
+                <span>📦</span>
+                <span>{previouslyIssuedForCurrentLot.materials.length} item(s) already issued ({previouslyIssuedForCurrentLot.totalChallans} challans)</span>
+              </div>
+            )}
+
             {/* Lots List */}
             <div style={{
               overflowY: 'auto',
@@ -4418,6 +4752,9 @@ export default function ExtraMaterialIssueView({
                   {/* ── LIVE CUTTING DETAILS FOR SELECTED LOT (SAME AS MATERIAL ISSUE) ── */}
                   {renderCuttingCard(selectedDesign?.id || selectedDesignId, selectedDesign?.brand)}
                 </div>
+
+                {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT (WITH-BOM MODE) ── */}
+                {renderAlreadyIssuedBanner(previouslyIssuedForCurrentLot)}
 
                 {/* BOM Components Table Card */}
                 <div style={{
@@ -5043,6 +5380,11 @@ export default function ExtraMaterialIssueView({
                         <option key={d.id} value={d.id}>{d.name || d.style || d.category}</option>
                       ))}
                     </datalist>
+                    {previouslyIssuedForCurrentLot && (
+                      <span style={{ fontSize: '11px', color: '#b45309', fontWeight: '700', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        📦 {previouslyIssuedForCurrentLot.materials.length} material(s) already issued before ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''})
+                      </span>
+                    )}
                   </div>
 
                   {/* Style / Garment Name */}
@@ -5194,6 +5536,9 @@ export default function ExtraMaterialIssueView({
                 {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER (SAME AS MATERIAL ISSUE) ── */}
                 {renderCuttingCard(woLotId, woBrand)}
               </div>
+
+              {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT (WITHOUT-BOM MODE) ── */}
+              {renderAlreadyIssuedBanner(previouslyIssuedForCurrentLot)}
 
               {/* Material Items Requisition Table Card */}
               <div style={{

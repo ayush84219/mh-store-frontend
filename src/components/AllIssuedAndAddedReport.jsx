@@ -123,6 +123,7 @@ export default function AllIssuedAndAddedReport({
   const [weightCaptures, setWeightCaptures] = useState([]);
   const [materialsList, setMaterialsList] = useState([]);
   const [designsList, setDesignsList] = useState([]);
+  const [itemCodesList, setItemCodesList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Filters State - Default to 'material_issue' to immediately show the Challan / Bill report
@@ -146,14 +147,15 @@ export default function AllIssuedAndAddedReport({
     setIsLoading(true);
     const backendUrl = getBackendUrl();
     try {
-      const [bRes, elRes, exRes, issRes, wtRes, matRes, desRes] = await Promise.all([
+      const [bRes, elRes, exRes, issRes, wtRes, matRes, desRes, icRes] = await Promise.all([
         fetch(`${backendUrl}/api/bone-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/elastic-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/extra-material-issues`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/issue-logs`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/weight-capture`).catch(() => ({ ok: false })),
         fetch(`${backendUrl}/api/materials`).catch(() => ({ ok: false })),
-        fetch(`${backendUrl}/api/designs`).catch(() => ({ ok: false }))
+        fetch(`${backendUrl}/api/designs`).catch(() => ({ ok: false })),
+        fetch(`${backendUrl}/api/item-codes`).catch(() => ({ ok: false }))
       ]);
 
       if (bRes && bRes.ok) {
@@ -206,6 +208,11 @@ export default function AllIssuedAndAddedReport({
       if (desRes && desRes.ok) {
         const d = await desRes.json();
         setDesignsList(Array.isArray(d) ? d : []);
+      }
+      if (icRes && icRes.ok) {
+        const d = await icRes.json();
+        const list = Array.isArray(d) ? d : (d?.data || []);
+        setItemCodesList(list);
       }
     } catch (err) {
       console.error('Error fetching movement report datasets:', err);
@@ -832,8 +839,19 @@ export default function AllIssuedAndAddedReport({
 
     // 5. INGEST ADD MATERIAL (WEIGHT CAPTURE & INWARD ADDITIONS)
     (weightCaptures || []).forEach(w => {
-      const docNo = w.barcodeId || w.invoiceNo || `ADD-${w.id}`;
-      const dObj = parseToDateObject(w.capturedAt || w.createdAt || w.created_at);
+      const docNo = w.barcodeId || w.itemCode || w.materialCode || w.invoiceNo || `ADD-${w.id}`;
+      const dObj = parseToDateObject(w.capturedAt || w.createdAt || w.created_at || (w.date && w.time ? `${w.date} ${w.time}` : w.date));
+
+      const matchedItemCode = (itemCodesList || []).find(ic =>
+        (w.itemCode && String(ic.item_code || '').toLowerCase() === String(w.itemCode).toLowerCase()) ||
+        (w.materialCode && String(ic.item_code || '').toLowerCase() === String(w.materialCode).toLowerCase()) ||
+        (w.materialName && ic.item_name && String(ic.item_name).toLowerCase().trim() === String(w.materialName).toLowerCase().trim())
+      );
+
+      const matchedMat = (effectiveMaterials || []).find(m =>
+        (w.materialCode && String(m.itemCode || m.stCode || m.id || '').toLowerCase() === String(w.materialCode).toLowerCase()) ||
+        (w.materialName && String(m.name || m.materialName || '').toLowerCase().trim() === String(w.materialName).toLowerCase().trim())
+      );
 
       const photo = resolveRecordPhoto([
         w.imageUrl,
@@ -848,9 +866,23 @@ export default function AllIssuedAndAddedReport({
         w.category
       ]);
 
+      const resolvedItemCode = w.itemCode || w.materialCode || matchedItemCode?.item_code || matchedMat?.itemCode || w.barcodeId || w.stCode || 'ST00000';
+      const resolvedBrand = w.brand || matchedItemCode?.brand || matchedMat?.brand || '—';
+      const resolvedCategory = w.category || matchedItemCode?.category || matchedMat?.category || 'Store Inward';
+      const resolvedRate = (w.rate != null && w.rate !== '') ? Number(w.rate) : ((w.price != null && w.price !== '') ? Number(w.price) : ((w.cost != null && w.cost !== '') ? Number(w.cost) : (matchedItemCode?.rate != null ? Number(matchedItemCode.rate) : 0)));
+      const resolvedPo = w.po || w.poNumber || w.po_number || '—';
+      const resolvedLocation = w.storeLocation || w.location || 'Main Store';
+      const resolvedOperator = w.storeIncharge || w.operator || w.incharge || 'Pooja';
+      const resolvedEntryMode = (w.entryMode === 'Manual' || w.entryMode === 'Manually' || w.status === 'Manual' || w.status === 'Manually') ? 'Manually' : 'Weight Machine';
+
+      const preciseTime = w.capturedAt
+        ? new Date(w.capturedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+        : (w.time || formatDisplayTime(dObj));
+
       list.push({
         id: `wt-${w.id || docNo}`,
-        docNo,
+        rawId: w.id,
+        docNo: resolvedItemCode || docNo,
         type: 'added_material',
         typeLabel: 'Add Material (Inward)',
         typeIcon: '📥',
@@ -858,30 +890,32 @@ export default function AllIssuedAndAddedReport({
         dateObj: dObj,
         dateYmd: formatDateToYMD(dObj),
         displayDate: formatDisplayDate(dObj),
-        displayTime: formatDisplayTime(dObj),
+        displayTime: preciseTime,
         lotNo: w.lotNo || '—',
-        poNo: w.poNumber || '—',
-        style: w.category || '—',
-        brand: '—',
-        itemCode: w.materialCode || w.itemCode || w.barcodeId || 'INWARD-ACC',
-        materialName: w.materialName || 'New Added Material',
-        category: w.category || 'Store Inward',
+        poNo: resolvedPo,
+        style: w.style || w.category || '—',
+        brand: resolvedBrand,
+        itemCode: resolvedItemCode,
+        materialName: w.materialName || w.material || 'New Added Material',
+        category: resolvedCategory,
         qty: Number(w.pieces || w.packets || (w.netWeightKg ? `${w.netWeightKg} Kg` : 1)),
         unit: w.unit || (w.pieces ? 'Pcs' : 'Kg'),
+        rate: resolvedRate,
         extraDetails: {
-          pieces: w.pieces || 0,
-          packets: w.packets || 0,
+          pieces: Number(w.pieces || 0),
+          packets: Number(w.packets || 1),
+          rate: resolvedRate,
           netWeightKg: w.netWeightKg || 0,
           grossWeightKg: w.grossWeightKg || 0,
           tareWeightKg: w.tareWeightKg || 0,
           invoiceNo: w.invoiceNo || '—',
-          entryMode: w.entryMode || w.status || 'Weight Capture'
+          entryMode: resolvedEntryMode
         },
-        issuerName: w.storeIncharge || 'Store Team',
+        issuerName: resolvedOperator,
         receiverName: 'Accessories Warehouse',
         receiverDept: 'Main Warehouse',
         supplier: w.supplier || '—',
-        location: w.storeLocation || 'Main Store',
+        location: resolvedLocation,
         remarks: w.remarks || '',
         photo,
         raw: w
@@ -889,7 +923,7 @@ export default function AllIssuedAndAddedReport({
     });
 
     return list;
-  }, [boneIssues, elasticIssues, extraIssues, issueLogs, weightCaptures, materialPhotoMap]);
+  }, [boneIssues, elasticIssues, extraIssues, issueLogs, weightCaptures, materialPhotoMap, itemCodesList, effectiveMaterials]);
 
   // ── Apply Filtering (DAILY WISE, DATE WISE, TYPE, SEARCH) ──────────────────────
 
@@ -960,6 +994,7 @@ export default function AllIssuedAndAddedReport({
         (r.docNo && r.docNo.toLowerCase().includes(q)) ||
         (r.materialName && r.materialName.toLowerCase().includes(q)) ||
         (r.itemCode && r.itemCode.toLowerCase().includes(q)) ||
+        (r.brand && r.brand.toLowerCase().includes(q)) ||
         (r.lotNo && r.lotNo.toLowerCase().includes(q)) ||
         (r.poNo && r.poNo.toLowerCase().includes(q)) ||
         (r.style && r.style.toLowerCase().includes(q)) ||
@@ -1212,38 +1247,62 @@ export default function AllIssuedAndAddedReport({
       alert('No records available to export.');
       return;
     }
-    const headers = [
-      'S.No', 'Date', 'Time', 'Movement Type', 'Doc / Slip #',
-      'Material Name', 'Item Code', 'Category', 'Lot #', 'PO #',
-      'Quantity', 'Unit', 'Issued To', 'Department', 'Issued By',
-      'Supplier', 'Location', 'Remarks'
-    ];
-    const rows = filteredRecords.map((r, i) => [
-      i + 1,
-      `"${r.displayDate}"`,
-      `"${r.displayTime || ''}"`,
-      `"${r.typeLabel}"`,
-      `"${r.docNo}"`,
-      `"${(r.materialName || '').replace(/"/g, '""')}"`,
-      `"${r.itemCode || ''}"`,
-      `"${r.category || ''}"`,
-      `"${r.lotNo && r.lotNo !== 'N/A' ? r.lotNo : ''}"`,
-      `"${r.poNo && r.poNo !== '—' ? r.poNo : ''}"`,
-      r.qty,
-      `"${r.unit || ''}"`,
-      `"${(r.receiverName || '').replace(/"/g, '""')}"`,
-      `"${(r.receiverDept || '').replace(/"/g, '""')}"`,
-      `"${(r.issuerName || '').replace(/"/g, '""')}"`,
-      `"${(r.supplier && r.supplier !== '—' ? r.supplier : '').replace(/"/g, '""')}"`,
-      `"${(r.location || '').replace(/"/g, '""')}"`,
-      `"${(r.remarks || '').replace(/"/g, '""')}"`
-    ]);
+    const isAddOnly = movementFilter === 'add_material';
+    const headers = isAddOnly
+      ? ['#', 'Date', 'Time', 'Item Code', 'PO #', 'Material Name', 'Category', 'Quantity', 'Unit', 'Packets', 'Rate', 'Total Value', 'Brand', 'Location', 'Incharge', 'Status']
+      : [
+          'S.No', 'Date', 'Time', 'Movement Type', 'Doc / Slip #',
+          'Material Name', 'Item Code', 'Category', 'Lot #', 'PO #',
+          'Quantity', 'Unit', 'Issued To', 'Department', 'Issued By',
+          'Supplier', 'Location', 'Remarks'
+        ];
+
+    const rows = isAddOnly
+      ? filteredRecords.map((r, i) => [
+          r.rawId || (i + 1),
+          `"${r.displayDate}"`,
+          `"${r.displayTime || ''}"`,
+          `"${r.itemCode || r.docNo || ''}"`,
+          `"${r.poNo && r.poNo !== '—' ? r.poNo : ''}"`,
+          `"${(r.materialName || '').replace(/"/g, '""')}"`,
+          `"${r.category || ''}"`,
+          r.qty,
+          `"${r.unit || ''}"`,
+          r.extraDetails?.packets || 1,
+          r.rate || 0,
+          (Number(r.rate || 0) * Number(r.qty || 0)).toFixed(2),
+          `"${(r.brand && r.brand !== '—' && r.brand !== 'General' ? r.brand : '').replace(/"/g, '""')}"`,
+          `"${(r.location || '').replace(/"/g, '""')}"`,
+          `"${(r.issuerName || '').replace(/"/g, '""')}"`,
+          `"${(r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually') ? 'Manually' : 'Weight Machine'}"`
+        ])
+      : filteredRecords.map((r, i) => [
+          i + 1,
+          `"${r.displayDate}"`,
+          `"${r.displayTime || ''}"`,
+          `"${r.typeLabel}"`,
+          `"${r.docNo}"`,
+          `"${(r.materialName || '').replace(/"/g, '""')}"`,
+          `"${r.itemCode || ''}"`,
+          `"${r.category || ''}"`,
+          `"${r.lotNo && r.lotNo !== 'N/A' ? r.lotNo : ''}"`,
+          `"${r.poNo && r.poNo !== '—' ? r.poNo : ''}"`,
+          r.qty,
+          `"${r.unit || ''}"`,
+          `"${(r.receiverName || '').replace(/"/g, '""')}"`,
+          `"${(r.receiverDept || '').replace(/"/g, '""')}"`,
+          `"${(r.issuerName || '').replace(/"/g, '""')}"`,
+          `"${(r.supplier && r.supplier !== '—' ? r.supplier : '').replace(/"/g, '""')}"`,
+          `"${(r.location || '').replace(/"/g, '""')}"`,
+          `"${(r.remarks || '').replace(/"/g, '""')}"`
+        ]);
+
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\r\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Material_Movement_Details_${todayStr}.csv`;
+    link.download = isAddOnly ? `Material_Inward_Add_Report_${todayStr}.csv` : `Material_Movement_Details_${todayStr}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1337,6 +1396,84 @@ export default function AllIssuedAndAddedReport({
     }
   };
 
+  // ── Print Single Record Slip via Browser Print ──────────────────────────────
+  const printRecordSlip = (r) => {
+    if (!r) return;
+    const printWin = window.open('', '_blank', 'width=750,height=800');
+    if (!printWin) {
+      alert('Popup was blocked by browser. Please allow popups to print slip.');
+      return;
+    }
+    const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Transaction Slip - ${r.docNo}</title>
+        <style>
+          @page { size: A5 portrait; margin: 10mm; }
+          * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+          body { margin: 0; padding: 16px; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .header { border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+          .title { font-size: 15px; font-weight: 900; margin: 0; }
+          .sub { font-size: 10.5px; color: #333; margin-top: 2px; }
+          .badge { display: inline-block; padding: 3px 8px; border: 1px solid #000; border-radius: 4px; font-size: 11px; font-weight: 700; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
+          th, td { border: 1px solid #000; padding: 5px 8px; text-align: left; vertical-align: middle; }
+          th { background: #f1f5f9; font-weight: 800; width: 38%; }
+          .img-box { text-align: center; margin: 12px 0; }
+          .img-box img { max-width: 120px; max-height: 120px; border-radius: 6px; border: 1px solid #000; object-fit: cover; }
+          .signs { margin-top: 36px; display: flex; justify-content: space-between; font-size: 10.5px; }
+          @media print { .no-print { display: none !important; } }
+        </style>
+      </head>
+      <body>
+        <div class="no-print" style="margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center;">
+          <button onclick="window.print()" style="padding: 7px 16px; background: #000; color: #fff; font-weight: 800; border: none; border-radius: 6px; cursor: pointer;">🖨️ Print Slip</button>
+          <button onclick="window.close()" style="padding: 6px 12px; background: #64748b; color: #fff; border: none; border-radius: 6px; cursor: pointer;">Close</button>
+        </div>
+        <div class="header">
+          <div>
+            <div class="title">MH TEXTILES - MATERIAL TRANSACTION SLIP</div>
+            <div class="sub">${r.typeLabel.toUpperCase()} | Official Store Record</div>
+          </div>
+          <div>
+            <span class="badge">${r.docNo}</span>
+          </div>
+        </div>
+        ${r.photo ? `
+          <div class="img-box">
+            <img src="${getCleanImageUrl(r.photo)}" alt="Material photo" />
+          </div>
+        ` : ''}
+        <table>
+          <tr><th>Document / Slip #</th><td><strong>${r.docNo}</strong></td></tr>
+          <tr><th>Movement Type</th><td>${r.typeLabel}</td></tr>
+          <tr><th>Date & Time</th><td>${r.displayDate} ${r.displayTime || ''}</td></tr>
+          <tr><th>Material Name</th><td><strong>${r.materialName}</strong></td></tr>
+          <tr><th>Item Code</th><td><code>${r.itemCode || '—'}</code></td></tr>
+          <tr><th>Category</th><td>${r.category || '—'}</td></tr>
+          <tr><th>Quantity & Unit</th><td><strong>${r.qty} ${r.unit}</strong></td></tr>
+          ${r.lotNo && r.lotNo !== '—' && r.lotNo !== 'N/A' ? `<tr><th>Lot Number</th><td>Lot ${r.lotNo}</td></tr>` : ''}
+          ${r.poNo && r.poNo !== '—' ? `<tr><th>PO Number</th><td>${r.poNo}</td></tr>` : ''}
+          ${r.brand && r.brand !== '—' && r.brand !== 'General' ? `<tr><th>Brand</th><td>${r.brand}</td></tr>` : ''}
+          <tr><th>Store Location</th><td>${r.location || 'Main Store'}</td></tr>
+          <tr><th>Issued By / Incharge</th><td>${r.issuerName || '—'}</td></tr>
+          <tr><th>Issued To / Dept</th><td>${r.receiverName || '—'} (${r.receiverDept || '—'})</td></tr>
+          ${r.remarks ? `<tr><th>Remarks</th><td>${r.remarks}</td></tr>` : ''}
+        </table>
+        <div class="signs">
+          <div>Receiver Sign: _____________________</div>
+          <div>Authorized Sign: _____________________</div>
+        </div>
+      </body>
+      </html>
+    `;
+    printWin.document.open();
+    printWin.document.write(html);
+    printWin.document.close();
+  };
+
   // ── Download Entire Filtered Report as B&W PDF ──────────────────────────────
   const downloadReportPdf = (isBW = true) => {
     if (filteredRecords.length === 0) {
@@ -1365,19 +1502,39 @@ export default function AllIssuedAndAddedReport({
         38
       );
 
-      const tableBody = filteredRecords.map((r, i) => [
-        i + 1,
-        `${r.displayDate}\n${r.displayTime || ''}`,
-        r.typeLabel,
-        r.docNo,
-        `${r.materialName}\nCode: ${r.itemCode}`,
-        r.lotNo !== 'N/A' && r.lotNo !== '—' ? `Lot ${r.lotNo}${r.poNo !== '—' ? `\nPO: ${r.poNo}` : ''}` : '—',
-        `${r.qty} ${r.unit}${r.extraDetails?.rolls ? `\n(${r.extraDetails.rolls} Rolls)` : ''}`,
-        `${r.receiverName || '—'}\n${r.receiverDept || ''}`,
-        r.issuerName || '—',
-        r.location || '—',
-        r.remarks || '—'
-      ]);
+      const isAddMaterialOnly = movementFilter === 'add_material';
+
+      const tableHead = isAddMaterialOnly
+        ? [['#', 'Time & Date', 'PO #', 'Material Name', 'Item Code', 'Category', 'Quantity', 'Brand', 'Location', 'Incharge', 'Status']]
+        : [['#', 'Date & Time', 'Type', 'Doc/Slip #', 'Material Item', 'Lot # / PO #', 'Quantity', 'Issued To', 'Issued By', 'Location', 'Remarks']];
+
+      const tableBody = isAddMaterialOnly
+        ? filteredRecords.map((r, i) => [
+            r.rawId || (i + 1),
+            `${r.displayTime || ''}\n${r.displayDate}`,
+            r.poNo && r.poNo !== '—' ? r.poNo : '—',
+            r.materialName || '—',
+            r.itemCode || r.docNo || '—',
+            r.category || '—',
+            `${r.qty} ${r.unit}${Number(r.rate) > 0 ? `\n@ ₹${r.rate}` : ''}`,
+            r.brand && r.brand !== '—' && r.brand !== 'General' ? r.brand : '—',
+            r.location || '—',
+            r.issuerName || '—',
+            (r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually') ? 'Manually' : 'Weight Machine'
+          ])
+        : filteredRecords.map((r, i) => [
+            i + 1,
+            `${r.displayDate}\n${r.displayTime || ''}`,
+            r.typeLabel,
+            r.docNo,
+            `${r.materialName}\nCode: ${r.itemCode}`,
+            r.lotNo !== 'N/A' && r.lotNo !== '—' ? `Lot ${r.lotNo}${r.poNo !== '—' ? `\nPO: ${r.poNo}` : ''}` : '—',
+            `${r.qty} ${r.unit}${r.extraDetails?.rolls ? `\n(${r.extraDetails.rolls} Rolls)` : ''}`,
+            `${r.receiverName || '—'}\n${r.receiverDept || ''}`,
+            r.issuerName || '—',
+            r.location || '—',
+            r.remarks || '—'
+          ]);
 
       autoTable(doc, {
         startY: 56,
@@ -1400,7 +1557,19 @@ export default function AllIssuedAndAddedReport({
           cellPadding: 4,
           overflow: 'linebreak'
         },
-        columnStyles: {
+        columnStyles: isAddMaterialOnly ? {
+          0: { cellWidth: 28, halign: 'center' },
+          1: { cellWidth: 55 },
+          2: { cellWidth: 45, halign: 'center' },
+          3: { cellWidth: 110 },
+          4: { cellWidth: 65 },
+          5: { cellWidth: 65 },
+          6: { cellWidth: 65, halign: 'right' },
+          7: { cellWidth: 65 },
+          8: { cellWidth: 70 },
+          9: { cellWidth: 55 },
+          10: { cellWidth: 'auto', halign: 'center' }
+        } : {
           0: { cellWidth: 24, halign: 'center' },
           1: { cellWidth: 58 },
           2: { cellWidth: 62 },
@@ -1413,7 +1582,7 @@ export default function AllIssuedAndAddedReport({
           9: { cellWidth: 65 },
           10: { cellWidth: 'auto' }
         },
-        head: [['#', 'Date & Time', 'Type', 'Doc/Slip #', 'Material Item', 'Lot # / PO #', 'Quantity', 'Issued To', 'Issued By', 'Location', 'Remarks']],
+        head: tableHead,
         body: tableBody
       });
 
@@ -1445,28 +1614,92 @@ export default function AllIssuedAndAddedReport({
       return;
     }
 
-    const tableRowsHtml = filteredRecords.map((r, i) => `
-      <tr>
-        <td style="text-align: center; font-weight: bold;">${i + 1}</td>
-        <td style="white-space: nowrap;"><strong>${r.displayDate}</strong><br/><small style="color: #333;">${r.displayTime || ''}</small></td>
-        <td><span class="badge">${r.typeLabel}</span></td>
-        <td style="font-weight: bold; white-space: nowrap;">${r.docNo}</td>
-        <td>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            ${r.photo ? `<img src="${getCleanImageUrl(r.photo)}" style="width: 26px; height: 26px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; flex-shrink: 0;" onerror="this.style.display='none'" />` : ''}
-            <div>
-              <strong>${r.materialName}</strong><br/><small>Code: ${r.itemCode} | ${r.category}</small>
-            </div>
-          </div>
-        </td>
-        <td style="white-space: nowrap;">${r.lotNo && r.lotNo !== 'N/A' ? `<strong>Lot ${r.lotNo}</strong>` : '—'}${r.poNo && r.poNo !== '—' ? `<br/><small>PO: ${r.poNo}</small>` : ''}</td>
-        <td style="text-align: center; font-weight: 800; white-space: nowrap;">${r.qty} ${r.unit}${r.extraDetails?.rolls > 1 ? `<br/><small>(${r.extraDetails.rolls} Rolls)</small>` : ''}</td>
-        <td><strong>${formatPersonName(r.receiverName)}</strong><br/><small>${r.receiverDept}</small></td>
-        <td>${formatPersonName(r.issuerName)}</td>
-        <td>${r.location}</td>
-        <td style="max-width: 140px; word-break: break-word;">${r.remarks || '—'}</td>
-      </tr>
-    `).join('');
+    const isAddOnly = movementFilter === 'add_material';
+
+    const tableRowsHtml = isAddOnly
+      ? filteredRecords.map((r, i) => `
+        <tr>
+          <td style="text-align: center; font-weight: bold; color: #2563eb; vertical-align: middle;">
+            #${r.rawId || (i + 1)}<br/>
+            <small style="color: #64748b; font-family: monospace;">${r.itemCode || r.docNo}</small>
+          </td>
+          <td style="text-align: center; vertical-align: middle; padding: 3px; width: 44px;">
+            ${r.photo ? `
+              <img
+                src="${getCleanImageUrl(r.photo)}"
+                alt=""
+                style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; display: block; margin: 0 auto;"
+                onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'color:#94a3b8; font-size:11px;\\'>📷</span>';"
+              />
+            ` : `
+              <div style="width: 34px; height: 34px; border-radius: 4px; border: 1px dashed #cbd5e1; display: flex; align-items: center; justify-content: center; margin: 0 auto; color: #94a3b8; font-size: 11px;">
+                📷
+              </div>
+            `}
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;">
+            <strong>${r.displayTime || ''}</strong><br/>
+            <small style="color: #64748b;">${r.displayDate}</small>
+          </td>
+          <td style="text-align: center; vertical-align: middle;">
+            ${r.poNo && r.poNo !== '—' ? `<span class="badge" style="background:#ede9fe; color:#6d28d9; border-color:#c4b5fd;">${r.poNo}</span>` : '—'}
+          </td>
+          <td style="vertical-align: middle;">
+            <strong>${r.materialName}</strong><br/>
+            <small style="color: #4338ca; font-family: monospace;">🏷️ ${r.itemCode || r.docNo}</small>
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;">
+            ${r.category && r.category !== 'Store Inward' ? `<span class="badge" style="background:#fef3c7; color:#92400e; border-color:#fde68a;">${r.category.toUpperCase()}</span>` : '—'}
+          </td>
+          <td style="text-align: right; font-weight: 800; white-space: nowrap; vertical-align: middle;">
+            <span style="color: #2563eb; font-size: 11px;">${Number(r.qty).toLocaleString('en-IN')} ${r.unit}</span>
+            ${Number(r.rate) > 0 ? `<br/><small style="color:#059669;">@ ₹${r.rate}/unit</small>` : ''}
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;">
+            ${r.brand && r.brand !== '—' && r.brand !== 'General' ? `<span class="badge" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;">🏢 ${r.brand}</span>` : '—'}
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;">
+            <strong>📍 ${r.location || 'Main Store'}</strong><br/>
+            <small style="color:#64748b;">👤 ${r.issuerName || 'Pooja'}</small>
+          </td>
+          <td style="text-align: center; white-space: nowrap; vertical-align: middle;">
+            <span class="badge" style="${(r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually') ? 'background:#eff6ff; color:#2563eb; border-color:#bfdbfe;' : 'background:#f0fdf4; color:#059669; border-color:#bbf7d0;'}">
+              ${(r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually') ? '📝 Manually' : '⚖️ Weight Machine'}
+            </span>
+          </td>
+        </tr>
+      `).join('')
+      : filteredRecords.map((r, i) => `
+        <tr>
+          <td style="text-align: center; font-weight: bold; vertical-align: middle;">${i + 1}</td>
+          <td style="text-align: center; vertical-align: middle; padding: 3px; width: 44px;">
+            ${r.photo ? `
+              <img
+                src="${getCleanImageUrl(r.photo)}"
+                alt=""
+                style="width: 34px; height: 34px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc; display: block; margin: 0 auto;"
+                onerror="this.onerror=null; this.parentElement.innerHTML='<span style=\\'color:#94a3b8; font-size:11px;\\'>📷</span>';"
+              />
+            ` : `
+              <div style="width: 32px; height: 32px; border-radius: 4px; border: 1px dashed #ccc; display: flex; align-items: center; justify-content: center; margin: 0 auto; color: #94a3b8; font-size: 10px;">
+                📷
+              </div>
+            `}
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;"><strong>${r.displayDate}</strong><br/><small style="color: #333;">${r.displayTime || ''}</small></td>
+          <td style="vertical-align: middle;"><span class="badge">${r.typeLabel}</span></td>
+          <td style="font-weight: bold; white-space: nowrap; vertical-align: middle;">${r.docNo}</td>
+          <td style="vertical-align: middle;">
+            <strong>${r.materialName}</strong><br/><small>Code: ${r.itemCode} | ${r.category}</small>
+          </td>
+          <td style="white-space: nowrap; vertical-align: middle;">${r.lotNo && r.lotNo !== 'N/A' ? `<strong>Lot ${r.lotNo}</strong>` : '—'}${r.poNo && r.poNo !== '—' ? `<br/><small>PO: ${r.poNo}</small>` : ''}</td>
+          <td style="text-align: center; font-weight: 800; white-space: nowrap; vertical-align: middle;">${r.qty} ${r.unit}${r.extraDetails?.rolls > 1 ? `<br/><small>(${r.extraDetails.rolls} Rolls)</small>` : ''}</td>
+          <td style="vertical-align: middle;"><strong>${formatPersonName(r.receiverName)}</strong><br/><small>${r.receiverDept}</small></td>
+          <td style="vertical-align: middle;">${formatPersonName(r.issuerName)}</td>
+          <td style="vertical-align: middle;">${r.location}</td>
+          <td style="max-width: 140px; word-break: break-word; vertical-align: middle;">${r.remarks || '—'}</td>
+        </tr>
+      `).join('');
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -1587,7 +1820,7 @@ export default function AllIssuedAndAddedReport({
           table.report-table th, table.report-table td {
             border: 1px solid #000000;
             padding: 5px 6px;
-            vertical-align: top;
+            vertical-align: middle;
           }
           table.report-table th {
             background-color: #f1f5f9;
@@ -1596,6 +1829,12 @@ export default function AllIssuedAndAddedReport({
             font-size: 9px;
             letter-spacing: 0.03em;
             text-align: left;
+          }
+          img {
+            max-width: 100%;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            image-rendering: -webkit-optimize-contrast;
           }
           .badge {
             display: inline-block;
@@ -1671,19 +1910,35 @@ export default function AllIssuedAndAddedReport({
 
         <table class="report-table">
           <thead>
-            <tr>
-              <th style="width: 26px; text-align: center;">#</th>
-              <th style="width: 70px;">Date &amp; Time</th>
-              <th style="width: 80px;">Type</th>
-              <th style="width: 85px;">Doc / Slip #</th>
-              <th>Material Name &amp; Code</th>
-              <th style="width: 75px;">Lot / PO #</th>
-              <th style="width: 65px; text-align: center;">Quantity</th>
-              <th style="width: 90px;">Issued To / Dept</th>
-              <th style="width: 75px;">Issued By</th>
-              <th style="width: 75px;">Location</th>
-              <th style="width: 100px;">Remarks</th>
-            </tr>
+            ${isAddOnly ? `
+              <tr>
+                <th style="width: 75px; text-align: center;">#/ITEM CODE</th>
+                <th style="width: 48px; text-align: center;">IMAGE</th>
+                <th style="width: 75px;">TIME</th>
+                <th style="width: 55px; text-align: center;">PO NUMBER</th>
+                <th>MATERIAL NAME</th>
+                <th style="width: 75px;">CATEGORY</th>
+                <th style="width: 85px; text-align: right;">QUANTITY</th>
+                <th style="width: 75px;">BRAND NAME</th>
+                <th style="width: 90px;">LOCATION</th>
+                <th style="width: 80px; text-align: center;">STATUS</th>
+              </tr>
+            ` : `
+              <tr>
+                <th style="width: 26px; text-align: center;">#</th>
+                <th style="width: 44px; text-align: center;">IMAGE</th>
+                <th style="width: 70px;">Date &amp; Time</th>
+                <th style="width: 80px;">Type</th>
+                <th style="width: 85px;">Doc / Slip #</th>
+                <th>Material Name &amp; Code</th>
+                <th style="width: 75px;">Lot / PO #</th>
+                <th style="width: 65px; text-align: center;">Quantity</th>
+                <th style="width: 90px;">Issued To / Dept</th>
+                <th style="width: 75px;">Issued By</th>
+                <th style="width: 75px;">Location</th>
+                <th style="width: 100px;">Remarks</th>
+              </tr>
+            `}
           </thead>
           <tbody>
             ${tableRowsHtml}
@@ -1881,6 +2136,12 @@ export default function AllIssuedAndAddedReport({
             overflow: visible !important;
             box-shadow: none !important;
             border: none !important;
+          }
+
+          img {
+            max-width: 100% !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
         }
       `}</style>
@@ -3083,30 +3344,323 @@ export default function AllIssuedAndAddedReport({
                     textAlign: 'left'
                   }}>
                     <thead>
-                      <tr style={{
-                        background: 'var(--bg-secondary, #f8fafc)',
-                        borderBottom: '1px solid var(--border-color, #e2e8f0)',
-                        color: '#64748b',
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.05em'
-                      }}>
-                        <th style={{ padding: '10px 14px' }}>Time</th>
-                        <th style={{ padding: '10px 14px' }}>Type</th>
-                        <th style={{ padding: '10px 14px' }}>Doc / Slip #</th>
-                        <th style={{ padding: '10px 14px' }}>Material Item</th>
-                        <th style={{ padding: '10px 14px' }}>Lot # / PO #</th>
-                        <th style={{ padding: '10px 14px' }}>Quantity</th>
-                        <th style={{ padding: '10px 14px' }}>Issued To / Receiver</th>
-                        <th style={{ padding: '10px 14px' }}>Issued By / Incharge</th>
-                        <th style={{ padding: '10px 14px' }}>Remarks</th>
-                        <th className="no-print action-col" style={{ padding: '10px 14px', textAlign: 'center' }}>Action</th>
-                      </tr>
+                      {movementFilter === 'add_material' ? (
+                        <tr style={{
+                          background: 'var(--bg-secondary, #f8fafc)',
+                          borderBottom: '2px solid var(--border-color, #e2e8f0)',
+                          color: '#64748b',
+                          fontSize: '11px',
+                          fontWeight: '800',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.6px'
+                        }}>
+                          <th style={{ padding: '10px 14px', width: '110px' }}># / ITEM CODE</th>
+                          <th style={{ padding: '10px 14px', width: '50px' }}>IMAGE</th>
+                          <th style={{ padding: '10px 14px', width: '120px' }}>TIME</th>
+                          <th style={{ padding: '10px 14px', width: '90px' }}>PO NUMBER</th>
+                          <th style={{ padding: '10px 14px', minWidth: '180px' }}>MATERIAL NAME</th>
+                          <th style={{ padding: '10px 14px', width: '130px' }}>CATEGORY</th>
+                          <th style={{ padding: '10px 14px', width: '160px' }}>QUANTITY (PIECES)</th>
+                          <th style={{ padding: '10px 14px', width: '130px' }}>BRAND NAME</th>
+                          <th style={{ padding: '10px 14px', width: '160px' }}>LOCATION</th>
+                          <th style={{ padding: '10px 14px', width: '120px', textAlign: 'center' }}>STATUS</th>
+                          <th className="no-print action-col" style={{ padding: '10px 14px', width: '90px', textAlign: 'center' }}>ACTION</th>
+                        </tr>
+                      ) : (
+                        <tr style={{
+                          background: 'var(--bg-secondary, #f8fafc)',
+                          borderBottom: '1px solid var(--border-color, #e2e8f0)',
+                          color: '#64748b',
+                          fontSize: '11px',
+                          fontWeight: '700',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em'
+                        }}>
+                          <th style={{ padding: '10px 14px' }}>Time</th>
+                          <th style={{ padding: '10px 14px' }}>Type</th>
+                          <th style={{ padding: '10px 14px' }}>Doc / Slip #</th>
+                          <th style={{ padding: '10px 14px' }}>Material Item</th>
+                          <th style={{ padding: '10px 14px' }}>Lot # / PO #</th>
+                          <th style={{ padding: '10px 14px' }}>Quantity</th>
+                          <th style={{ padding: '10px 14px' }}>Issued To / Receiver</th>
+                          <th style={{ padding: '10px 14px' }}>Issued By / Incharge</th>
+                          <th style={{ padding: '10px 14px' }}>Remarks</th>
+                          <th className="no-print action-col" style={{ padding: '10px 14px', textAlign: 'center' }}>Action</th>
+                        </tr>
+                      )}
                     </thead>
                     <tbody>
                       {group.records.map((r, rIdx) => {
                           const badge = getTypeBadgeStyle(r.type);
+
+                          if (movementFilter === 'add_material') {
+                            const isManual = (r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually' || r.extraDetails?.entryMode === 'Manually' || r.extraDetails?.entryMode === 'Manual');
+                            const itemRate = Number(r.rate || r.raw?.rate || r.raw?.price || 0);
+                            const itemQty = Number(r.qty || 0);
+                            const itemTotal = itemRate * itemQty;
+                            const displayBrand = r.brand && r.brand !== '—' && r.brand !== 'General' ? r.brand : (r.raw?.brand || '');
+
+                            return (
+                              <tr
+                                key={r.id}
+                                style={{
+                                  background: rIdx % 2 === 0 ? '#ffffff' : '#f8fafc',
+                                  borderBottom: rIdx === group.records.length - 1 ? 'none' : '1px solid #f1f5f9',
+                                  transition: 'background 0.15s ease'
+                                }}
+                                className="hover-row"
+                              >
+                                {/* # / ITEM CODE */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <div style={{ fontWeight: '900', color: '#3b82f6', fontSize: '13px' }}>
+                                    #{r.rawId || r.raw?.id || (rIdx + 1)}
+                                  </div>
+                                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', fontFamily: 'monospace', marginTop: '2px' }}>
+                                    {r.itemCode || r.docNo}
+                                  </div>
+                                </td>
+
+                                {/* IMAGE */}
+                                <td style={{ padding: '8px 12px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {r.photo ? (
+                                    <div
+                                      onClick={() => setPreviewImage(r.photo)}
+                                      style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        overflow: 'hidden',
+                                        background: '#f8fafc',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        transition: 'transform 0.15s'
+                                      }}
+                                      onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; }}
+                                      onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
+                                      title="Click to view material photo"
+                                    >
+                                      <img
+                                        src={getCleanImageUrl(r.photo)}
+                                        alt="Material thumbnail"
+                                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                        onError={(e) => { e.target.style.display = 'none'; }}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div
+                                      style={{
+                                        width: '34px',
+                                        height: '34px',
+                                        borderRadius: '6px',
+                                        border: '1px dashed #cbd5e1',
+                                        background: '#f8fafc',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        color: '#94a3b8'
+                                      }}
+                                      title="No image uploaded"
+                                    >
+                                      <Camera size={14} />
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* TIME */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px', fontFamily: 'monospace' }}>
+                                    {r.displayTime || '—'}
+                                  </div>
+                                  {r.displayDate && (
+                                    <div style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', marginTop: '2px' }}>
+                                      {r.displayDate}
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* PO NUMBER */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {r.poNo && r.poNo !== '—' && r.poNo !== 'N/A' ? (
+                                    <span style={{
+                                      display: 'inline-block',
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      background: '#ede9fe',
+                                      color: '#6d28d9',
+                                      fontWeight: '800',
+                                      fontSize: '11px',
+                                      border: '1px solid rgba(109, 40, 217, 0.15)'
+                                    }}>
+                                      {r.poNo}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>
+                                  )}
+                                </td>
+
+                                {/* MATERIAL NAME */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle' }}>
+                                  <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '12.5px' }}>
+                                    {r.materialName}
+                                  </div>
+                                  {(r.itemCode || r.docNo) && (
+                                    <div style={{ marginTop: '2px' }}>
+                                      <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                        padding: '1px 6px',
+                                        borderRadius: '4px',
+                                        background: '#e0e7ff',
+                                        color: '#4338ca',
+                                        fontSize: '10px',
+                                        fontWeight: '800',
+                                        fontFamily: 'monospace'
+                                      }}>
+                                        🏷️ {r.itemCode || r.docNo}
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* CATEGORY */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {r.category && r.category !== 'Store Inward' ? (
+                                    <span style={{
+                                      display: 'inline-block',
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      background: '#fef3c7',
+                                      color: '#92400e',
+                                      fontWeight: '800',
+                                      fontSize: '11px',
+                                      border: '1px solid rgba(217, 119, 6, 0.25)',
+                                      textTransform: 'uppercase'
+                                    }}>
+                                      🏷️ {r.category}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                                  )}
+                                </td>
+
+                                {/* QUANTITY (PIECES) */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <div style={{ fontWeight: '900', color: '#2563eb', fontSize: '13.5px' }}>
+                                    {itemQty.toLocaleString('en-IN')} <span style={{ fontSize: '11px', color: '#64748b', fontWeight: '700' }}>{r.unit}</span>
+                                  </div>
+                                  {Number(r.extraDetails?.packets || r.raw?.packets) > 1 && (
+                                    <div style={{ fontSize: '10px', color: '#7e22ce', fontWeight: '700', marginTop: '2px' }}>
+                                      📦 {r.extraDetails?.packets || r.raw?.packets} Pkts
+                                    </div>
+                                  )}
+                                  {itemRate > 0 && (
+                                    <div style={{ fontSize: '10.5px', color: '#059669', fontWeight: '700', marginTop: '2px' }}>
+                                      @ ₹{itemRate}/unit
+                                      {itemQty > 0 && ` (₹${itemTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })})`}
+                                    </div>
+                                  )}
+                                </td>
+
+                                {/* BRAND NAME */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  {displayBrand ? (
+                                    <span style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      padding: '3px 8px',
+                                      borderRadius: '6px',
+                                      background: '#eff6ff',
+                                      color: '#1d4ed8',
+                                      fontWeight: '800',
+                                      fontSize: '11px',
+                                      border: '1px solid #bfdbfe'
+                                    }}>
+                                      🏢 {displayBrand}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                                  )}
+                                </td>
+
+                                {/* LOCATION */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '800', color: '#0f172a', fontSize: '11.5px' }}>
+                                    <MapPin size={12} style={{ color: '#6366f1' }} /> {r.location || 'Main Store'}
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10.5px', color: '#64748b', fontWeight: '700', marginTop: '2px' }}>
+                                    <User size={11} style={{ color: '#94a3b8' }} /> {r.issuerName || r.raw?.operator || r.raw?.storeIncharge || 'Pooja'}
+                                  </div>
+                                </td>
+
+                                {/* STATUS */}
+                                <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    padding: '3px 8px',
+                                    borderRadius: '12px',
+                                    fontSize: '10.5px',
+                                    fontWeight: '800',
+                                    backgroundColor: isManual ? '#eff6ff' : '#f0fdf4',
+                                    color: isManual ? '#2563eb' : '#059669',
+                                    border: `1px solid ${isManual ? '#bfdbfe' : '#bbf7d0'}`
+                                  }}>
+                                    {isManual ? '📝 Manually' : '⚖️ Weight Machine'}
+                                  </span>
+                                </td>
+
+                                {/* ACTIONS */}
+                                <td className="no-print action-cell" style={{ padding: '10px 14px', textAlign: 'center', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}>
+                                    <button
+                                      onClick={() => setSelectedRecord(r)}
+                                      style={{
+                                        padding: '4px 7px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border-color, #cbd5e1)',
+                                        background: 'var(--bg-secondary, #ffffff)',
+                                        color: '#2563eb',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '2px'
+                                      }}
+                                      title="View Full Details"
+                                    >
+                                      <Eye size={11} />
+                                      <span>View</span>
+                                    </button>
+                                    <button
+                                      onClick={() => downloadRecordPdf(r)}
+                                      style={{
+                                        padding: '4px 6px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #fecaca',
+                                        background: '#fef2f2',
+                                        color: '#dc2626',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center'
+                                      }}
+                                      title="Download Details (PDF Slip)"
+                                    >
+                                      <Download size={11} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          }
                           return (
                             <tr
                               key={r.id}
@@ -3334,32 +3888,325 @@ export default function AllIssuedAndAddedReport({
               textAlign: 'left'
             }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 2 }}>
-                <tr style={{
-                  background: 'var(--bg-secondary, #ffffff)',
-                  borderBottom: '2px solid var(--border-color, #e2e8f0)',
-                  color: '#64748b',
-                  fontSize: '11px',
-                  fontWeight: '700',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em'
-                }}>
-                  <th style={{ padding: '12px 14px', width: '40px' }}>#</th>
-                  <th style={{ padding: '12px 14px', width: '130px' }}>Date &amp; Time</th>
-                  <th style={{ padding: '12px 14px', width: '150px' }}>Movement Type</th>
-                  <th style={{ padding: '12px 14px', width: '140px' }}>Doc / Slip #</th>
-                  <th style={{ padding: '12px 14px', minWidth: '220px' }}>Material Item</th>
-                  <th style={{ padding: '12px 14px', width: '130px' }}>Lot # / Style</th>
-                  <th style={{ padding: '12px 14px', width: '120px' }}>Quantity</th>
-                  <th style={{ padding: '12px 14px', width: '160px' }}>Issued To / Receiver</th>
-                  <th style={{ padding: '12px 14px', width: '140px' }}>Issued By / Incharge</th>
-                  <th style={{ padding: '12px 14px', width: '130px' }}>Location / Rack</th>
-                  <th style={{ padding: '12px 14px', minWidth: '150px' }}>Remarks / Reason</th>
-                  <th className="no-print action-col" style={{ padding: '12px 14px', width: '70px', textAlign: 'center' }}>Action</th>
-                </tr>
+                {movementFilter === 'add_material' ? (
+                  <tr style={{
+                    background: 'var(--bg-secondary, #ffffff)',
+                    borderBottom: '2px solid var(--border-color, #e2e8f0)',
+                    color: '#64748b',
+                    fontSize: '11px',
+                    fontWeight: '800',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.6px'
+                  }}>
+                    <th style={{ padding: '14px 16px', width: '120px' }}># / ITEM CODE</th>
+                    <th style={{ padding: '10px 14px', width: '60px' }}>IMAGE</th>
+                    <th style={{ padding: '14px 16px', width: '130px' }}>TIME</th>
+                    <th style={{ padding: '14px 16px', width: '100px' }}>PO NUMBER</th>
+                    <th style={{ padding: '14px 16px', minWidth: '190px' }}>MATERIAL NAME</th>
+                    <th style={{ padding: '14px 16px', width: '140px' }}>CATEGORY</th>
+                    <th style={{ padding: '14px 16px', width: '170px' }}>QUANTITY (PIECES)</th>
+                    <th style={{ padding: '14px 16px', width: '140px' }}>BRAND NAME</th>
+                    <th style={{ padding: '14px 16px', width: '180px' }}>LOCATION</th>
+                    <th style={{ padding: '14px 16px', width: '130px', textAlign: 'center' }}>STATUS</th>
+                    <th className="no-print action-col" style={{ padding: '14px 16px', width: '90px', textAlign: 'center' }}>ACTION</th>
+                  </tr>
+                ) : (
+                  <tr style={{
+                    background: 'var(--bg-secondary, #ffffff)',
+                    borderBottom: '2px solid var(--border-color, #e2e8f0)',
+                    color: '#64748b',
+                    fontSize: '11px',
+                    fontWeight: '700',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em'
+                  }}>
+                    <th style={{ padding: '12px 14px', width: '40px' }}>#</th>
+                    <th style={{ padding: '12px 14px', width: '130px' }}>Date &amp; Time</th>
+                    <th style={{ padding: '12px 14px', width: '150px' }}>Movement Type</th>
+                    <th style={{ padding: '12px 14px', width: '140px' }}>Doc / Slip #</th>
+                    <th style={{ padding: '12px 14px', minWidth: '220px' }}>Material Item</th>
+                    <th style={{ padding: '12px 14px', width: '130px' }}>Lot # / Style</th>
+                    <th style={{ padding: '12px 14px', width: '120px' }}>Quantity</th>
+                    <th style={{ padding: '12px 14px', width: '160px' }}>Issued To / Receiver</th>
+                    <th style={{ padding: '12px 14px', width: '140px' }}>Issued By / Incharge</th>
+                    <th style={{ padding: '12px 14px', width: '130px' }}>Location / Rack</th>
+                    <th style={{ padding: '12px 14px', minWidth: '150px' }}>Remarks / Reason</th>
+                    <th className="no-print action-col" style={{ padding: '12px 14px', width: '70px', textAlign: 'center' }}>Action</th>
+                  </tr>
+                )}
               </thead>
               <tbody>
                 {filteredRecords.map((r, idx) => {
                   const badge = getTypeBadgeStyle(r.type);
+
+                  if (movementFilter === 'add_material') {
+                    const isManual = (r.raw?.entryMode === 'Manual' || r.raw?.entryMode === 'Manually' || r.raw?.status === 'Manual' || r.raw?.status === 'Manually' || r.extraDetails?.entryMode === 'Manually' || r.extraDetails?.entryMode === 'Manual');
+                    const itemRate = Number(r.rate || r.raw?.rate || r.raw?.price || 0);
+                    const itemQty = Number(r.qty || 0);
+                    const itemTotal = itemRate * itemQty;
+                    const displayBrand = r.brand && r.brand !== '—' && r.brand !== 'General' ? r.brand : (r.raw?.brand || '');
+
+                    return (
+                      <tr
+                        key={r.id}
+                        style={{
+                          background: idx % 2 === 0 ? '#ffffff' : '#f8fafc',
+                          borderBottom: '1px solid #f1f5f9',
+                          transition: 'background 0.15s ease'
+                        }}
+                        className="hover-row"
+                      >
+                        {/* # / ITEM CODE */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: '900', color: '#3b82f6', fontSize: '13px' }}>
+                            #{r.rawId || r.raw?.id || (idx + 1)}
+                          </div>
+                          <div style={{ fontSize: '11px', color: '#64748b', fontWeight: '700', fontFamily: 'monospace', marginTop: '2px' }}>
+                            {r.itemCode || r.docNo}
+                          </div>
+                        </td>
+
+                        {/* IMAGE */}
+                        <td style={{ padding: '10px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {r.photo ? (
+                            <div
+                              onClick={() => setPreviewImage(r.photo)}
+                              style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                overflow: 'hidden',
+                                background: '#f8fafc',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                transition: 'transform 0.15s'
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; }}
+                              onMouseLeave={e => { e.currentTarget.style.transform = 'none'; }}
+                              title="Click to view material photo"
+                            >
+                              <img
+                                src={getCleanImageUrl(r.photo)}
+                                alt="Material thumbnail"
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                            </div>
+                          ) : (
+                            <div
+                              style={{
+                                width: '38px',
+                                height: '38px',
+                                borderRadius: '6px',
+                                border: '1px dashed #cbd5e1',
+                                background: '#f8fafc',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#94a3b8'
+                              }}
+                              title="No image uploaded"
+                            >
+                              <Camera size={15} />
+                            </div>
+                          )}
+                        </td>
+
+                        {/* TIME */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px', fontFamily: 'monospace' }}>
+                            {r.displayTime || '—'}
+                          </div>
+                          {r.displayDate && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', fontWeight: '600', marginTop: '2px' }}>
+                              {r.displayDate}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* PO NUMBER */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {r.poNo && r.poNo !== '—' && r.poNo !== 'N/A' ? (
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              background: '#ede9fe',
+                              color: '#6d28d9',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid rgba(109, 40, 217, 0.15)'
+                            }}>
+                              {r.poNo}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* MATERIAL NAME */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle' }}>
+                          <div style={{ fontWeight: '800', color: '#0f172a', fontSize: '13px' }}>
+                            {r.materialName}
+                          </div>
+                          {(r.itemCode || r.docNo) && (
+                            <div style={{ marginTop: '3px' }}>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                background: '#e0e7ff',
+                                color: '#4338ca',
+                                fontSize: '10.5px',
+                                fontWeight: '800',
+                                fontFamily: 'monospace'
+                              }}>
+                                🏷️ {r.itemCode || r.docNo}
+                              </span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* CATEGORY */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {r.category && r.category !== 'Store Inward' ? (
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              background: '#fef3c7',
+                              color: '#92400e',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid rgba(217, 119, 6, 0.25)',
+                              textTransform: 'uppercase'
+                            }}>
+                              🏷️ {r.category}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* QUANTITY (PIECES) */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: '900', color: '#2563eb', fontSize: '14px' }}>
+                            {itemQty.toLocaleString('en-IN')} <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>{r.unit}</span>
+                          </div>
+                          {Number(r.extraDetails?.packets || r.raw?.packets) > 1 && (
+                            <div style={{ fontSize: '10.5px', color: '#7e22ce', fontWeight: '700', marginTop: '2px' }}>
+                              📦 {r.extraDetails?.packets || r.raw?.packets} Pkts
+                            </div>
+                          )}
+                          {itemRate > 0 && (
+                            <div style={{ fontSize: '11px', color: '#059669', fontWeight: '700', marginTop: '2px' }}>
+                              @ ₹{itemRate}/unit
+                              {itemQty > 0 && ` (₹${itemTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })})`}
+                            </div>
+                          )}
+                        </td>
+
+                        {/* BRAND NAME */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {displayBrand ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              fontWeight: '800',
+                              fontSize: '11.5px',
+                              border: '1px solid #bfdbfe'
+                            }}>
+                              🏢 {displayBrand}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontSize: '12px', fontStyle: 'italic' }}>—</span>
+                          )}
+                        </td>
+
+                        {/* LOCATION */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: '800', color: '#0f172a', fontSize: '12px' }}>
+                            <MapPin size={13} style={{ color: '#6366f1' }} /> {r.location || 'Main Store'}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#64748b', fontWeight: '700', marginTop: '3px' }}>
+                            <User size={12} style={{ color: '#94a3b8' }} /> {r.issuerName || r.raw?.operator || r.raw?.storeIncharge || 'Pooja'}
+                          </div>
+                        </td>
+
+                        {/* STATUS */}
+                        <td style={{ padding: '14px 16px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 10px',
+                            borderRadius: '12px',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            backgroundColor: isManual ? '#eff6ff' : '#f0fdf4',
+                            color: isManual ? '#2563eb' : '#059669',
+                            border: `1px solid ${isManual ? '#bfdbfe' : '#bbf7d0'}`
+                          }}>
+                            {isManual ? '📝 Manually' : '⚖️ Weight Machine'}
+                          </span>
+                        </td>
+
+                        {/* ACTIONS */}
+                        <td className="no-print action-cell" style={{ padding: '14px 16px', textAlign: 'center', verticalAlign: 'middle' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                            <button
+                              onClick={() => setSelectedRecord(r)}
+                              style={{
+                                padding: '4px 8px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border-color, #cbd5e1)',
+                                background: 'var(--bg-secondary, #ffffff)',
+                                color: '#2563eb',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px'
+                              }}
+                              title="View Full Details"
+                            >
+                              <Eye size={12} />
+                              <span>View</span>
+                            </button>
+                            <button
+                              onClick={() => downloadRecordPdf(r)}
+                              style={{
+                                padding: '4px 7px',
+                                borderRadius: '6px',
+                                border: '1px solid #fecaca',
+                                background: '#fef2f2',
+                                color: '#dc2626',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center'
+                              }}
+                              title="Download Details (PDF Slip)"
+                            >
+                              <Download size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
                   return (
                     <tr
                       key={r.id}
@@ -3789,6 +4636,20 @@ export default function AllIssuedAndAddedReport({
                   <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Supplier / Vendor</span>
                   <strong>{selectedRecord.supplier || '—'}</strong>
                 </div>
+
+                {selectedRecord.brand && selectedRecord.brand !== '—' && (
+                  <div style={{ padding: '10px', background: 'var(--bg-primary, #f8fafc)', borderRadius: '8px' }}>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Brand</span>
+                    <strong style={{ color: '#1d4ed8' }}>🏢 {selectedRecord.brand}</strong>
+                  </div>
+                )}
+
+                {Number(selectedRecord.rate) > 0 && (
+                  <div style={{ padding: '10px', background: 'var(--bg-primary, #f8fafc)', borderRadius: '8px' }}>
+                    <span style={{ color: '#64748b', fontSize: '11px', display: 'block' }}>Unit Rate &amp; Total</span>
+                    <strong style={{ color: '#059669' }}>₹{selectedRecord.rate}/unit (Total: ₹{(Number(selectedRecord.rate) * Number(selectedRecord.qty || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })})</strong>
+                  </div>
+                )}
               </div>
 
               {/* Remarks / Reason */}

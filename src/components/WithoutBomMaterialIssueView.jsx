@@ -151,6 +151,23 @@ export const getMaterialStoreStock = (m, allMaterials = []) => {
   return Number(m.stock || m.availableStock || 0);
 };
 
+// Helper to normalize and unify unit casing and variations across inventory & slips
+export const normalizeUnitName = (u) => {
+  if (!u) return 'Pcs';
+  const clean = String(u).trim();
+  const upper = clean.toUpperCase();
+  if (upper === 'PCS' || upper === 'PC' || upper === 'PIECE' || upper === 'PIECES') return 'Pcs';
+  if (upper === 'BOX' || upper === 'BOXES') return 'Box';
+  if (upper === 'PKT' || upper === 'PACKET' || upper === 'PACKETS') return 'Pkt';
+  if (upper === 'ROLL' || upper === 'ROLLS') return 'Roll';
+  if (upper === 'LTR' || upper === 'LITER' || upper === 'LITRE' || upper === 'LITRES') return 'Ltr';
+  if (upper === 'MTR' || upper === 'METER' || upper === 'METERS' || upper === 'MTRS') return 'Mtr';
+  if (upper === 'BUNDLE' || upper === 'BUNDLES') return 'Bundle';
+  if (upper === 'BOTTEL' || upper === 'BOTTLE' || upper === 'BOTTLES') return 'Bottle';
+  if (upper === 'KG' || upper === 'KGS' || upper === 'KILOGRAM') return 'Kg';
+  return clean.charAt(0).toUpperCase() + clean.slice(1).toLowerCase();
+};
+
 // Helper to calculate Total Pieces (Cutting Total Pieces according to lot wise), Issued Qty/Units, and Variance (Cutting - Issue)
 export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {}, designs = []) => {
   if (!log) {
@@ -233,7 +250,7 @@ export const getChallanPiecesMetrics = (log, allMaterials = [], cuttingMap = {},
     } else {
       hasNonPieces = true;
     }
-    const normUnit = isPc ? 'Pcs' : rawUnit;
+    const normUnit = isPc ? 'Pcs' : normalizeUnitName(rawUnit);
     unitTotals[normUnit] = (unitTotals[normUnit] || 0) + q;
   });
 
@@ -381,7 +398,7 @@ export const getMaterialItemMetrics = (m, log, allMaterials = [], cuttingMap = {
   const rawUnit = String(m.unit || 'Pcs').trim();
   const uUpper = rawUnit.toUpperCase();
   const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
-  const normUnit = isPc ? 'Pcs' : rawUnit;
+  const normUnit = isPc ? 'Pcs' : normalizeUnitName(rawUnit);
   const formattedQty = `${qty.toLocaleString('en-IN')} ${normUnit}`;
 
   const matName = String(m.name || m.bomItemName || m.materialName || '').trim().toLowerCase();
@@ -1333,6 +1350,14 @@ export default function WithoutBomMaterialIssueView({
   const [receiverDept, setReceiverDept] = useState('Cutting');
   const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [remarks, setRemarks] = useState('');
+  const [dbExtraIssues, setDbExtraIssues] = useState([]);
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/extra-material-issues`)
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setDbExtraIssues(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   // Available brands from designs list
   const availableBrands = useMemo(() => {
@@ -1834,6 +1859,70 @@ export default function WithoutBomMaterialIssueView({
   const [historyCategories, setHistoryCategories] = useState([]); // multi-select categories array e.g. ['TAG', 'LABEL']
   const [historyPersons, setHistoryPersons] = useState([]); // multi-select person array e.g. ['iss:paras', 'rec:PINTU']
 
+  // Table View & Layout Settings: View Mode ('item_wise' | 'compact_row'), Density ('standard' | 'compact'), Page Size (25, 50, 100, 'all')
+  const [historyViewMode, setHistoryViewMode] = useState(() => {
+    try {
+      return localStorage.getItem('without_bom_history_view_mode') || 'item_wise';
+    } catch (_) {
+      return 'item_wise';
+    }
+  });
+
+  const [historyDensity, setHistoryDensity] = useState(() => {
+    try {
+      return localStorage.getItem('without_bom_history_density') || 'standard';
+    } catch (_) {
+      return 'standard';
+    }
+  });
+
+  const [historyPageSize, setHistoryPageSize] = useState(() => {
+    try {
+      const saved = localStorage.getItem('without_bom_history_page_size');
+      return saved ? (saved === 'all' ? 'all' : Number(saved) || 50) : 50;
+    } catch (_) {
+      return 50;
+    }
+  });
+
+  const [historyCurrentPage, setHistoryCurrentPage] = useState(1);
+  const [expandedChallanIds, setExpandedChallanIds] = useState({});
+
+  const handleSetViewMode = (mode) => {
+    setHistoryViewMode(mode);
+    try { localStorage.setItem('without_bom_history_view_mode', mode); } catch (_) {}
+  };
+
+  const handleSetDensity = (density) => {
+    setHistoryDensity(density);
+    try { localStorage.setItem('without_bom_history_density', density); } catch (_) {}
+  };
+
+  const handleSetPageSize = (size) => {
+    setHistoryPageSize(size);
+    setHistoryCurrentPage(1);
+    try { localStorage.setItem('without_bom_history_page_size', String(size)); } catch (_) {}
+  };
+
+  const toggleExpandChallan = (challanId) => {
+    setExpandedChallanIds(prev => ({
+      ...prev,
+      [challanId]: !prev[challanId]
+    }));
+  };
+
+  const handleToggleAllExpanded = () => {
+    const allIds = withoutBomLogs.map(l => l.id).filter(Boolean);
+    const areAllExpanded = allIds.length > 0 && allIds.every(id => expandedChallanIds[id]);
+    if (areAllExpanded) {
+      setExpandedChallanIds({});
+    } else {
+      const newMap = {};
+      allIds.forEach(id => { newMap[id] = true; });
+      setExpandedChallanIds(newMap);
+    }
+  };
+
   // Scrollable Category Dropdown Menu State
   const [categoryDropdownOpen, setCategoryDropdownOpen] = useState(false);
   const [categorySearchTerm, setCategorySearchTerm] = useState('');
@@ -2041,12 +2130,33 @@ export default function WithoutBomMaterialIssueView({
       return normL === normTarget || rawL === clean;
     });
 
-    if (matchingLogs.length === 0) return null;
+    // Also include extra material issues from dbExtraIssues for this lot
+    const matchingExtraIssues = (dbExtraIssues || []).filter(ex => {
+      const rawL = String(ex.lotId || ex.lotNumber || ex.lot || '').trim().toLowerCase();
+      if (!rawL) return false;
+      const normL = rawL.replace(/^lot\s*#?/, '').replace(/^#/, '').trim();
+      return normL === normTarget || rawL === clean;
+    });
+
+    if (matchingLogs.length === 0 && matchingExtraIssues.length === 0) return null;
 
     // Aggregate by material
     const matMap = {};
     let totalLineItems = 0;
     const challanIds = new Set();
+
+    // Helper to find catalog code & category
+    const findCatalogInfo = (name, matId) => {
+      if (!materials || !Array.isArray(materials)) return { code: '', cat: '' };
+      const matched = materials.find(mat =>
+        (matId && String(mat.id) === String(matId)) ||
+        (mat.name && String(mat.name).trim().toLowerCase() === String(name).trim().toLowerCase())
+      );
+      if (!matched) return { code: '', cat: '' };
+      const rawCode = matched.itemCode || matched.stCode || matched.materialCode || '';
+      const code = String(rawCode).toUpperCase().startsWith('MT') ? '' : rawCode;
+      return { code, cat: matched.category || matched.componentType || '' };
+    };
 
     matchingLogs.forEach(l => {
       if (l.id) challanIds.add(l.id);
@@ -2072,8 +2182,9 @@ export default function WithoutBomMaterialIssueView({
         const uUpper = rawUnit.toUpperCase();
         const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
         const normUnit = isPc ? 'Pcs' : rawUnit;
-        const cat = String(m.category || m.componentType || getMaterialCategory(m) || '').trim();
-        const code = String(getItemCodeDisplay(m) || m.itemCode || '').trim();
+        const catalog = findCatalogInfo(name, m.materialId);
+        const cat = String(m.category || m.componentType || getMaterialCategory(m) || catalog.cat || '').trim();
+        const code = String(getItemCodeDisplay(m) || m.itemCode || catalog.code || '').trim();
         const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
 
         if (!matMap[key]) {
@@ -2102,6 +2213,46 @@ export default function WithoutBomMaterialIssueView({
       });
     });
 
+    matchingExtraIssues.forEach(ex => {
+      const chId = ex.slipNo || ex.id || 'Extra-Issue';
+      challanIds.add(chId);
+      const name = String(ex.materialName || ex.bomItemName || 'Material Item').trim();
+      const qty = Number(ex.extraQty !== undefined ? ex.extraQty : (ex.qty !== undefined ? ex.qty : ex.quantity)) || 0;
+      const rawUnit = String(ex.unit || 'Pcs').trim();
+      const uUpper = rawUnit.toUpperCase();
+      const isPc = uUpper === 'PCS' || uUpper === 'PC' || uUpper === 'PIECE' || uUpper === 'PIECES';
+      const normUnit = isPc ? 'Pcs' : rawUnit;
+
+      const catalog = findCatalogInfo(name, ex.materialId);
+      const cat = String(ex.category || ex.componentType || ex.bomItemName || catalog.cat || 'EXTRA').trim();
+      const code = String(ex.itemCode || catalog.code || '').trim();
+      const key = `${name.toLowerCase()}___${normUnit.toLowerCase()}`;
+
+      if (!matMap[key]) {
+        matMap[key] = {
+          key,
+          name,
+          unit: normUnit,
+          category: cat,
+          itemCode: code,
+          totalQty: 0,
+          challans: []
+        };
+      }
+
+      matMap[key].totalQty += qty;
+      totalLineItems += 1;
+      matMap[key].challans.push({
+        id: chId,
+        date: ex.date || ex.created_at || '',
+        qty,
+        unit: normUnit,
+        issuer: ex.personName || ex.issuerName || 'Store',
+        receiver: ex.receiverName || 'Cutting',
+        receiverDept: ex.receiverDept || ''
+      });
+    });
+
     const materialsList = Object.values(matMap);
     if (materialsList.length === 0 || materialsList.every(m => m.totalQty === 0)) {
       return null;
@@ -2114,7 +2265,7 @@ export default function WithoutBomMaterialIssueView({
       totalLineItems,
       materials: materialsList
     };
-  }, [lotNo, issueLogs, rawWithoutBomLogs, materials]);
+  }, [lotNo, issueLogs, rawWithoutBomLogs, dbExtraIssues, materials]);
 
   // Distinct categories available in Without-BOM logs + count of challans having them
   const availableHistoryCategories = useMemo(() => {
@@ -2266,6 +2417,30 @@ export default function WithoutBomMaterialIssueView({
     (historyCategories.length > 0 ? historyCategories.length : 0) +
     (historyPersons.length > 0 ? historyPersons.length : 0) +
     (historySearch ? 1 : 0);
+
+  // Reset pagination to first page when any filter changes
+  useEffect(() => {
+    setHistoryCurrentPage(1);
+  }, [historySearch, historyDateFrom, historyDateTo, historyCategories, historyPersons]);
+
+  const totalHistoryCount = withoutBomLogs.length;
+  const totalPages = useMemo(() => {
+    if (historyPageSize === 'all' || !historyPageSize) return 1;
+    return Math.max(1, Math.ceil(totalHistoryCount / Number(historyPageSize)));
+  }, [totalHistoryCount, historyPageSize]);
+
+  // Safe page index within bounds
+  const safeCurrentPage = Math.min(Math.max(1, historyCurrentPage), totalPages);
+
+  // Paginated logs slice
+  const paginatedLogs = useMemo(() => {
+    if (historyPageSize === 'all' || !historyPageSize) {
+      return withoutBomLogs;
+    }
+    const size = Number(historyPageSize);
+    const start = (safeCurrentPage - 1) * size;
+    return withoutBomLogs.slice(start, start + size);
+  }, [withoutBomLogs, safeCurrentPage, historyPageSize]);
 
   // Base default accessory component types
   const BASE_COMPONENT_TYPES = useMemo(() => ['DORI', 'ELASTIC', 'ZIP'], []);
@@ -7508,131 +7683,622 @@ export default function WithoutBomMaterialIssueView({
               )}
             </div>
           ) : (
-            <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px', background: '#ffffff' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '10.5px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                    <th style={{ padding: '8px 8px', width: '92px' }}>Challan #</th>
-                    <th style={{ padding: '8px 6px', width: '78px' }}>Date</th>
-                    <th style={{ padding: '8px 8px', width: '102px' }}>Lot / Type</th>
-                    <th style={{ padding: '8px 10px', minWidth: '180px' }}>Issued Materials</th>
-                    <th style={{ padding: '8px 6px', width: '82px', textAlign: 'right' }}>Cutting</th>
-                    <th style={{ padding: '8px 6px', width: '78px', textAlign: 'right' }}>Issued</th>
-                    <th style={{ padding: '8px 6px', width: '88px', textAlign: 'right' }}>Variance</th>
-                    <th style={{ padding: '8px 6px', width: '72px' }}>Issued By</th>
-                    <th style={{ padding: '8px 6px', width: '82px' }}>Received By</th>
-                    <th style={{ padding: '8px 6px', width: '112px', textAlign: 'center' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {withoutBomLogs.map((log, idx) => {
-                    const rawLot = String(log.lotId || '').trim();
-                    const cleanLot = rawLot.toLowerCase();
-                    const isDirectLot = !cleanLot || cleanLot === 'w/o lot' || cleanLot.includes('w/o') || cleanLot.includes('without') || cleanLot.includes('no lot') || cleanLot.includes('direct');
+            <div>
+              {/* ── TABLE VIEW & DISPLAY CONTROLS BAR ── */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '10px',
+                marginBottom: '10px',
+                padding: '8px 12px',
+                background: '#ffffff',
+                border: '1px solid #cbd5e1',
+                borderRadius: '8px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+              }}>
+                {/* Left: View Mode (Item-Wise vs Compact 1-Row) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '11px', fontWeight: '800', color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    View Mode:
+                  </span>
+                  <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleSetViewMode('item_wise')}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '5px',
+                        border: 'none',
+                        background: historyViewMode === 'item_wise' ? '#0f172a' : 'transparent',
+                        color: historyViewMode === 'item_wise' ? '#ffffff' : '#475569',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="Item-wise view: multi-item challans grouped together with merged columns (no repeated challan / buttons)"
+                    >
+                      <span>📑 Item-Wise (Merged Grouping)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSetViewMode('compact_row')}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '5px',
+                        border: 'none',
+                        background: historyViewMode === 'compact_row' ? '#0f172a' : 'transparent',
+                        color: historyViewMode === 'compact_row' ? '#ffffff' : '#475569',
+                        fontSize: '11.5px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="Compact 1-row view: strictly 1 row per challan with material tags & expandable accordion (ideal for 200+ overall history)"
+                    >
+                      <span>📋 Compact (1 Row / Challan)</span>
+                    </button>
+                  </div>
+                </div>
 
-                    const dateParts = String(log.date || '').split(' ');
-                    const dateStr = dateParts[0] || '—';
-                    const timeStr = dateParts.slice(1).join(' ');
+                {/* Right: Expand All (in compact mode) + Density + Page Size */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                  {historyViewMode === 'compact_row' && (
+                    <button
+                      type="button"
+                      onClick={handleToggleAllExpanded}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        border: '1px solid #cbd5e1',
+                        background: '#ffffff',
+                        color: '#334155',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: 'pointer'
+                      }}
+                      title="Expand or collapse details for all challans on screen"
+                    >
+                      {withoutBomLogs.length > 0 && withoutBomLogs.every(l => expandedChallanIds[l.id]) ? '▲ Collapse All' : '▼ Expand All Details'}
+                    </button>
+                  )}
 
-                    const mats = (Array.isArray(log.materials) && log.materials.length > 0) ? log.materials : [null];
-                    const matCount = mats.length;
-                    const challanBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                  {/* Spacing Density Toggle */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Density:</span>
+                    <button
+                      type="button"
+                      onClick={() => handleSetDensity(historyDensity === 'compact' ? 'standard' : 'compact')}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '5px',
+                        border: '1px solid #cbd5e1',
+                        background: historyDensity === 'compact' ? '#eff6ff' : '#ffffff',
+                        color: historyDensity === 'compact' ? '#1d4ed8' : '#475569',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '3px'
+                      }}
+                      title="Toggle tight compact padding vs standard padding"
+                    >
+                      <span>{historyDensity === 'compact' ? '📏 Tight (Compact)' : '📐 Standard'}</span>
+                    </button>
+                  </div>
 
-                    return (
-                      <React.Fragment key={log.id || idx}>
-                        {mats.map((m, mIdx) => {
-                          const matMetrics = getMaterialItemMetrics(m, log, materials, effectiveCuttingMap, designs);
-                          const photoSrc = m ? getMaterialPhoto(m) : null;
-                          const categoryName = m ? getMaterialCategory(m) : '';
-                          const loc = m ? getMaterialLocation(m) : '';
-                          const isFirstMat = mIdx === 0;
-                          const isLastMat = mIdx === matCount - 1;
+                  {/* Page Size Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: '700', color: '#64748b' }}>Per Page:</span>
+                    <div style={{ display: 'inline-flex', gap: '3px' }}>
+                      {[25, 50, 100, 'all'].map(sz => {
+                        const isSelected = String(historyPageSize) === String(sz);
+                        return (
+                          <button
+                            key={sz}
+                            type="button"
+                            onClick={() => handleSetPageSize(sz)}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              border: isSelected ? '1px solid #0f172a' : '1px solid #e2e8f0',
+                              background: isSelected ? '#0f172a' : '#ffffff',
+                              color: isSelected ? '#ffffff' : '#475569',
+                              fontSize: '11px',
+                              fontWeight: isSelected ? '800' : '600',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {sz === 'all' ? 'All' : sz}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-                          return (
+              {/* Table Container */}
+              <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: totalPages > 1 ? '10px 10px 0 0' : '10px', background: '#ffffff' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: historyDensity === 'compact' ? '11px' : '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '1.5px solid #cbd5e1', color: '#475569', fontSize: '10.5px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 6px' : '8px 8px', width: '92px' }}>Challan #</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '78px' }}>Date</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 6px' : '8px 8px', width: '102px' }}>Lot / Type</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 8px' : '8px 10px', minWidth: '180px' }}>Issued Materials</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '82px', textAlign: 'right' }}>Cutting</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '78px', textAlign: 'right' }}>Issued</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '88px', textAlign: 'right' }}>Variance</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '72px' }}>Issued By</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '82px' }}>Received By</th>
+                      <th style={{ padding: historyDensity === 'compact' ? '6px 5px' : '8px 6px', width: '112px', textAlign: 'center' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {paginatedLogs.map((log, idx) => {
+                      const rawLot = String(log.lotId || '').trim();
+                      const cleanLot = rawLot.toLowerCase();
+                      const isDirectLot = !cleanLot || cleanLot === 'w/o lot' || cleanLot.includes('w/o') || cleanLot.includes('without') || cleanLot.includes('no lot') || cleanLot.includes('direct');
+
+                      const dateParts = String(log.date || '').split(' ');
+                      const dateStr = dateParts[0] || '—';
+                      const timeStr = dateParts.slice(1).join(' ');
+
+                      const mats = (Array.isArray(log.materials) && log.materials.length > 0) ? log.materials : [null];
+                      const matCount = mats.length;
+                      const challanBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+                      const padY = historyDensity === 'compact' ? '4px' : '7px';
+                      const padX = historyDensity === 'compact' ? '6px' : '8px';
+                      const cellPad = `${padY} ${padX}`;
+                      const isExpanded = Boolean(expandedChallanIds[log.id]);
+
+                      // ─────────── MODE 2: COMPACT 1-ROW / CHALLAN WITH ACCORDION ───────────
+                      if (historyViewMode === 'compact_row') {
+                        const challanMetrics = getChallanPiecesMetrics(log, materials, effectiveCuttingMap, designs);
+                        return (
+                          <React.Fragment key={log.id || idx}>
                             <tr
-                              key={`${log.id || idx}-${mIdx}`}
                               style={{
-                                background: challanBg,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                background: isExpanded ? '#f0fdf4' : challanBg,
+                                borderBottom: isExpanded ? 'none' : '1px solid #e2e8f0',
+                                transition: 'background 0.15s ease'
                               }}
                             >
-                              {/* Challan # - Always visible on every detail row */}
-                              <td style={{
-                                padding: '7px 8px',
-                                fontWeight: '800',
-                                verticalAlign: 'middle',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexWrap: 'nowrap' }}>
+                              {/* Challan # */}
+                              <td style={{ padding: cellPad, fontWeight: '800', verticalAlign: 'middle' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'nowrap' }}>
                                   <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 5px', borderRadius: '4px', fontSize: '11px', whiteSpace: 'nowrap' }}>
                                     {log.id}
                                   </span>
                                   {matCount > 1 && (
-                                    <span style={{ fontSize: '9px', background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', padding: '1px 3px', borderRadius: '3px', fontWeight: '800' }}>
-                                      #{mIdx + 1}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleExpandChallan(log.id)}
+                                      style={{
+                                        fontSize: '9.5px',
+                                        background: isExpanded ? '#0f172a' : '#f1f5f9',
+                                        color: isExpanded ? '#ffffff' : '#475569',
+                                        border: '1px solid #cbd5e1',
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        fontWeight: '800',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      title={isExpanded ? 'Collapse material items' : 'Expand material items'}
+                                    >
+                                      {isExpanded ? '▲' : '▼'} {matCount} items
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Date */}
+                              <td style={{ padding: cellPad, verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                <div style={{ lineHeight: '1.2' }}>
+                                  <div style={{ fontWeight: '700', color: '#334155', fontSize: '11px' }}>{dateStr}</div>
+                                  {timeStr && <div style={{ fontSize: '9px', color: '#94a3b8' }}>{timeStr}</div>}
+                                </div>
+                              </td>
+
+                              {/* Lot Reference */}
+                              <td style={{ padding: cellPad, verticalAlign: 'middle' }}>
+                                {isDirectLot ? (
+                                  <span style={{ fontSize: '9.5px', background: '#f0fdf4', color: '#166534', padding: '1px 4px', borderRadius: '3px', fontWeight: '800', border: '1px solid #bbf7d0', whiteSpace: 'nowrap' }}>
+                                    WITHOUT LOT
+                                  </span>
+                                ) : (
+                                  <div style={{ lineHeight: '1.2' }}>
+                                    <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '11.5px', whiteSpace: 'nowrap' }}>
+                                      LOT #{log.lotId}
+                                    </span>
+                                    {(log.brand || log.brandName) && (
+                                      <div style={{ fontSize: '9px', color: '#64748b', fontWeight: '600' }}>
+                                        {log.brand || log.brandName}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Issued Materials - Clean Inline Tags */}
+                              <td style={{ padding: cellPad, verticalAlign: 'middle' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                  {mats.slice(0, 2).map((m, mIdx) => {
+                                    if (!m) return null;
+                                    const cat = getMaterialCategory(m);
+                                    return (
+                                      <span
+                                        key={mIdx}
+                                        style={{
+                                          fontSize: '10.5px',
+                                          background: '#ffffff',
+                                          border: '1px solid #cbd5e1',
+                                          padding: '1px 5px',
+                                          borderRadius: '4px',
+                                          color: '#1e293b',
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        {cat && <span style={{ fontSize: '8.5px', color: '#64748b', fontWeight: '800' }}>[{cat}]</span>}
+                                        <span><strong>{m.name || m.bomItemName || 'Item'}:</strong> {m.qty} {m.unit || 'Pcs'}</span>
+                                      </span>
+                                    );
+                                  })}
+                                  {mats.length > 2 && (
+                                    <span
+                                      onClick={() => toggleExpandChallan(log.id)}
+                                      style={{
+                                        fontSize: '9.5px',
+                                        color: '#0284c7',
+                                        fontWeight: '800',
+                                        cursor: 'pointer',
+                                        background: '#f0f9ff',
+                                        border: '1px solid #bae6fd',
+                                        padding: '1px 5px',
+                                        borderRadius: '3px',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      title="Click to view all items"
+                                    >
+                                      +{mats.length - 2} more...
                                     </span>
                                   )}
                                 </div>
                               </td>
 
-                              {/* Date & Time - Always visible on every detail row */}
-                              <td style={{
-                                padding: '7px 6px',
-                                verticalAlign: 'middle',
-                                whiteSpace: 'nowrap',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                <div style={{ lineHeight: '1.25' }}>
-                                  <div style={{ fontWeight: '700', color: '#334155', fontSize: '11.5px' }}>{dateStr}</div>
-                                  {timeStr && <div style={{ fontSize: '9.5px', color: '#94a3b8', fontWeight: '600' }}>{timeStr}</div>}
-                                </div>
-                              </td>
-
-                              {/* Lot Reference - PROMINENTLY SHOWN ON EVERY SINGLE DETAIL ROW (1, 2, 3, 4, 5, etc.) */}
-                              <td style={{
-                                padding: '7px 8px',
-                                verticalAlign: 'middle',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                {isDirectLot ? (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', padding: '1.5px 5px', borderRadius: '4px', fontWeight: '800', width: 'fit-content', border: '1px solid #bbf7d0', whiteSpace: 'nowrap' }}>
-                                      WITHOUT LOT
+                              {/* Cutting Total Pieces */}
+                              <td style={{ padding: cellPad, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                {!isDirectLot && challanMetrics.totalPieces > 0 ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                                    <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '11.5px' }}>
+                                      {challanMetrics.totalPieces.toLocaleString('en-IN')} <span style={{ fontSize: '9.5px', color: '#64748b' }}>Pcs</span>
                                     </span>
-                                    {log.style && log.style !== 'Direct Item Requisition' && (
-                                      <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600' }}>
-                                        {log.style}
-                                      </span>
-                                    )}
+                                    <span style={{ fontSize: '8px', fontWeight: '700', background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '0 3px', borderRadius: '2px' }}>
+                                      ✂️ Cutting
+                                    </span>
                                   </div>
                                 ) : (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                                    <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                                      LOT #{log.lotId}
-                                    </span>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                                      <span style={{ fontSize: '9px', background: '#f1f5f9', padding: '0px 4px', borderRadius: '3px', color: '#475569', fontWeight: '800' }}>
-                                        W/O BOM
-                                      </span>
-                                      {(log.brand || log.brandName) && (
-                                        <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '700' }}>
-                                          {log.brand || log.brandName}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
+                                  <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: '700' }}>—</span>
                                 )}
                               </td>
 
+                              {/* Issued Total Qty */}
+                              <td style={{ padding: cellPad, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                <span style={{ fontWeight: '900', color: '#ea580c', fontSize: '11.5px' }}>
+                                  {challanMetrics.formattedIssueQty}
+                                </span>
+                              </td>
+
+                              {/* Variance */}
+                              <td style={{ padding: cellPad, textAlign: 'right', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                {challanMetrics.hasVariance ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
+                                    <span style={{
+                                      display: 'inline-flex',
+                                      padding: '1px 4px',
+                                      borderRadius: '3px',
+                                      fontSize: '10.5px',
+                                      fontWeight: '800',
+                                      border: '1px solid',
+                                      background: challanMetrics.variance === 0 ? '#f0fdf4' : challanMetrics.variance > 0 ? '#eff6ff' : '#fef2f2',
+                                      borderColor: challanMetrics.variance === 0 ? '#bbf7d0' : challanMetrics.variance > 0 ? '#bfdbfe' : '#fecaca',
+                                      color: challanMetrics.variance === 0 ? '#15803d' : challanMetrics.variance > 0 ? '#1d4ed8' : '#b91c1c'
+                                    }}>
+                                      {challanMetrics.varianceText}
+                                    </span>
+                                    <span style={{ fontSize: '8px', fontWeight: '800', color: challanMetrics.variance === 0 ? '#166534' : challanMetrics.variance > 0 ? '#1e40af' : '#991b1b' }}>
+                                      {challanMetrics.varianceBadge}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '11px' }}>—</span>
+                                )}
+                              </td>
+
+                              {/* Issued By */}
+                              <td style={{ padding: cellPad, color: '#334155', fontWeight: '700', fontSize: '11px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                {log.personName || 'Store'}
+                              </td>
+
+                              {/* Received By */}
+                              <td style={{ padding: cellPad, color: '#0f172a', fontWeight: '700', fontSize: '11px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                <div>{log.receiverName || 'Cutting'}</div>
+                                {log.receiverDept && <div style={{ fontSize: '9px', color: '#64748b' }}>{log.receiverDept}</div>}
+                              </td>
+
+                              {/* Actions */}
+                              <td style={{ padding: cellPad, textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const issueData = buildIssueDataFromLog(log);
+                                      handleDirectPrintWindow(issueData, log.id);
+                                    }}
+                                    style={{
+                                      padding: '3px 6px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #0f172a',
+                                      background: '#0f172a',
+                                      color: '#ffffff',
+                                      fontSize: '10.5px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px'
+                                    }}
+                                    title="Direct 1-Click Print"
+                                  >
+                                    <Printer size={11} style={{ color: '#ea580c' }} />
+                                    <span>Print</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadChallanPdf(log)}
+                                    style={{
+                                      padding: '3px 5px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #f87171',
+                                      background: '#fef2f2',
+                                      color: '#dc2626',
+                                      fontSize: '10.5px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '2px'
+                                    }}
+                                    title="Download Challan PDF"
+                                  >
+                                    <Download size={11} />
+                                    <span>PDF</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReprintHistory(log)}
+                                    style={{
+                                      padding: '3px 5px',
+                                      borderRadius: '4px',
+                                      border: '1px solid #cbd5e1',
+                                      background: '#ffffff',
+                                      color: '#475569',
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center'
+                                    }}
+                                    title="Preview on-screen"
+                                  >
+                                    <Eye size={11} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* Accordion Expanded Detail Drawer */}
+                            {isExpanded && (
+                              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                                <td colSpan={10} style={{ padding: '8px 12px' }}>
+                                  <div style={{ background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.03)' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', borderBottom: '1px dashed #e2e8f0', paddingBottom: '6px' }}>
+                                      <span style={{ fontSize: '11px', fontWeight: '800', color: '#0f172a' }}>
+                                        📦 Material Items in Challan <strong style={{ color: '#ea580c' }}>{log.id}</strong> ({matCount} items)
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleExpandChallan(log.id)}
+                                        style={{ border: 'none', background: 'transparent', color: '#64748b', fontSize: '11px', fontWeight: '700', cursor: 'pointer' }}
+                                      >
+                                        Close ▲
+                                      </button>
+                                    </div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
+                                      {mats.map((m, mIdx) => {
+                                        const matMetrics = getMaterialItemMetrics(m, log, materials, effectiveCuttingMap, designs);
+                                        const photoSrc = m ? getMaterialPhoto(m) : null;
+                                        const cat = m ? getMaterialCategory(m) : '';
+                                        const loc = m ? getMaterialLocation(m) : '';
+                                        return (
+                                          <div
+                                            key={mIdx}
+                                            style={{
+                                              border: '1px solid #cbd5e1',
+                                              borderRadius: '6px',
+                                              padding: '8px',
+                                              background: '#fdfdfe',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              gap: '8px'
+                                            }}
+                                          >
+                                            {photoSrc ? (
+                                              <img
+                                                src={photoSrc}
+                                                alt={m?.name || 'material'}
+                                                onClick={() => setMainPreviewPhoto({ url: photoSrc, name: m?.name || 'Material', itemCode: getItemCodeDisplay(m) || '' })}
+                                                style={{ width: '32px', height: '32px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #059669', cursor: 'zoom-in', flexShrink: 0 }}
+                                              />
+                                            ) : (
+                                              <div style={{ width: '32px', height: '32px', background: '#f1f5f9', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', flexShrink: 0 }}>
+                                                📦
+                                              </div>
+                                            )}
+                                            <div style={{ flex: 1, minWidth: 0, fontSize: '11px', lineHeight: '1.3' }}>
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                                {cat && <span style={{ fontSize: '8.5px', background: '#f1f5f9', padding: '1px 4px', borderRadius: '3px', fontWeight: '800', color: '#334155' }}>{cat}</span>}
+                                                <strong style={{ color: '#0f172a' }}>{m?.name || m?.bomItemName || 'Material'}</strong>
+                                              </div>
+                                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'wrap' }}>
+                                                <span style={{ fontWeight: '800', color: '#ea580c' }}>{matMetrics.formattedQty}</span>
+                                                {loc && <span style={{ fontSize: '9px', color: '#c2410c', background: '#fff7ed', padding: '0 4px', borderRadius: '2px', border: '1px solid #fed7aa' }}>📍 {loc}</span>}
+                                                {matMetrics.hasVariance && (
+                                                  <span style={{ fontSize: '9px', fontWeight: '800', color: matMetrics.variance === 0 ? '#15803d' : matMetrics.variance > 0 ? '#1d4ed8' : '#b91c1c' }}>
+                                                    {matMetrics.varianceText} ({matMetrics.varianceBadge})
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      }
+
+                      // ─────────── MODE 1: ITEM-WISE ROWS (MERGED GROUPING) ───────────
+                      return (
+                        <React.Fragment key={log.id || idx}>
+                          {mats.map((m, mIdx) => {
+                            const matMetrics = getMaterialItemMetrics(m, log, materials, effectiveCuttingMap, designs);
+                            const photoSrc = m ? getMaterialPhoto(m) : null;
+                            const categoryName = m ? getMaterialCategory(m) : '';
+                            const loc = m ? getMaterialLocation(m) : '';
+                            const isFirstMat = mIdx === 0;
+                            const isLastMat = mIdx === matCount - 1;
+
+                            return (
+                              <tr
+                                key={`${log.id || idx}-${mIdx}`}
+                                style={{
+                                  background: challanBg,
+                                  borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                }}
+                              >
+                              {/* Challan # - Merged with rowSpan for clean grouping */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    fontWeight: '800',
+                                    verticalAlign: 'middle',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1',
+                                    borderRight: '1px solid #f1f5f9'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                                    <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '2px 5px', borderRadius: '4px', fontSize: '11px', whiteSpace: 'nowrap', width: 'fit-content' }}>
+                                      {log.id}
+                                    </span>
+                                    {matCount > 1 && (
+                                      <span style={{ fontSize: '9px', background: '#e0f2fe', color: '#0369a1', border: '1px solid #bae6fd', padding: '1px 4px', borderRadius: '3px', fontWeight: '800', width: 'fit-content' }}>
+                                        {matCount} items
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+
+                              {/* Date & Time - Merged with rowSpan */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    verticalAlign: 'middle',
+                                    whiteSpace: 'nowrap',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1',
+                                    borderRight: '1px solid #f1f5f9'
+                                  }}
+                                >
+                                  <div style={{ lineHeight: '1.25' }}>
+                                    <div style={{ fontWeight: '700', color: '#334155', fontSize: '11.5px' }}>{dateStr}</div>
+                                    {timeStr && <div style={{ fontSize: '9.5px', color: '#94a3b8', fontWeight: '600' }}>{timeStr}</div>}
+                                  </div>
+                                </td>
+                              )}
+
+                              {/* Lot Reference - Merged with rowSpan */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    verticalAlign: 'middle',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1',
+                                    borderRight: '1px solid #f1f5f9'
+                                  }}
+                                >
+                                  {isDirectLot ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                      <span style={{ fontSize: '10px', background: '#f0fdf4', color: '#166534', padding: '1.5px 5px', borderRadius: '4px', fontWeight: '800', width: 'fit-content', border: '1px solid #bbf7d0', whiteSpace: 'nowrap' }}>
+                                        WITHOUT LOT
+                                      </span>
+                                      {log.style && log.style !== 'Direct Item Requisition' && (
+                                        <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600' }}>
+                                          {log.style}
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                      <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                                        LOT #{log.lotId}
+                                      </span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '9px', background: '#f1f5f9', padding: '0px 4px', borderRadius: '3px', color: '#475569', fontWeight: '800' }}>
+                                          W/O BOM
+                                        </span>
+                                        {(log.brand || log.brandName) && (
+                                          <span style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '700' }}>
+                                            {log.brand || log.brandName}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </td>
+                              )}
+
                               {/* Issued Material Detail (individual row per material) */}
                               <td style={{
-                                padding: '6px 8px',
+                                padding: cellPad,
                                 verticalAlign: 'middle',
                                 borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                borderBottom: isLastMat ? '2px solid #cbd5e1' : undefined
                               }}>
                                 {m ? (
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
@@ -7728,12 +8394,12 @@ export default function WithoutBomMaterialIssueView({
 
                               {/* Total Pieces (Cutting) for this material - Always shows lot cutting pieces */}
                               <td style={{
-                                padding: '6px 6px',
+                                padding: cellPad,
                                 textAlign: 'right',
                                 verticalAlign: 'middle',
                                 whiteSpace: 'nowrap',
                                 borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                borderBottom: isLastMat ? '2px solid #cbd5e1' : undefined
                               }}>
                                 {!isDirectLot && matMetrics.cuttingPieces > 0 ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
@@ -7765,12 +8431,12 @@ export default function WithoutBomMaterialIssueView({
 
                               {/* Issued Qty for this material */}
                               <td style={{
-                                padding: '6px 6px',
+                                padding: cellPad,
                                 textAlign: 'right',
                                 verticalAlign: 'middle',
                                 whiteSpace: 'nowrap',
                                 borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                borderBottom: isLastMat ? '2px solid #cbd5e1' : undefined
                               }}>
                                 <span style={{ fontWeight: '900', color: '#ea580c', fontSize: '12px' }}>{matMetrics.formattedQty}</span>
                                 <div style={{ fontSize: '8.5px', color: '#9a3412', fontWeight: '800' }}>
@@ -7780,12 +8446,12 @@ export default function WithoutBomMaterialIssueView({
 
                               {/* Variance for this material */}
                               <td style={{
-                                padding: '6px 6px',
+                                padding: cellPad,
                                 textAlign: 'right',
                                 verticalAlign: 'middle',
                                 whiteSpace: 'nowrap',
                                 borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
+                                borderBottom: isLastMat ? '2px solid #cbd5e1' : undefined
                               }}>
                                 {matMetrics.hasVariance ? (
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
@@ -7829,117 +8495,133 @@ export default function WithoutBomMaterialIssueView({
                                 )}
                               </td>
 
-                              {/* Issued By - Always visible on every detail row */}
-                              <td style={{
-                                padding: '7px 6px',
-                                color: '#334155',
-                                fontWeight: '700',
-                                fontSize: '11px',
-                                verticalAlign: 'middle',
-                                whiteSpace: 'nowrap',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                {log.personName || 'Store'}
-                              </td>
+                              {/* Issued By - Merged with rowSpan */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    color: '#334155',
+                                    fontWeight: '700',
+                                    fontSize: '11px',
+                                    verticalAlign: 'middle',
+                                    whiteSpace: 'nowrap',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1',
+                                    borderLeft: '1px solid #f1f5f9'
+                                  }}
+                                >
+                                  {log.personName || 'Store'}
+                                </td>
+                              )}
 
-                              {/* Received By - Always visible on every detail row */}
-                              <td style={{
-                                padding: '7px 6px',
-                                color: '#0f172a',
-                                fontWeight: '700',
-                                fontSize: '11px',
-                                verticalAlign: 'middle',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                <div style={{ lineHeight: '1.2' }}>
-                                  <div style={{ whiteSpace: 'nowrap' }}>{log.receiverName || 'Cutting'}</div>
-                                  {log.receiverDept && (
-                                    <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
-                                      {log.receiverDept}
-                                    </div>
-                                  )}
-                                </div>
-                              </td>
+                              {/* Received By - Merged with rowSpan */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    color: '#0f172a',
+                                    fontWeight: '700',
+                                    fontSize: '11px',
+                                    verticalAlign: 'middle',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1'
+                                  }}
+                                >
+                                  <div style={{ lineHeight: '1.2' }}>
+                                    <div style={{ whiteSpace: 'nowrap' }}>{log.receiverName || 'Cutting'}</div>
+                                    {log.receiverDept && (
+                                      <div style={{ fontSize: '9.5px', color: '#64748b', fontWeight: '600', textTransform: 'uppercase' }}>
+                                        {log.receiverDept}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
 
-                              {/* Actions - Always visible on every detail row */}
-                              <td style={{
-                                padding: '7px 6px',
-                                textAlign: 'center',
-                                verticalAlign: 'middle',
-                                borderTop: !isFirstMat ? '1px dashed #e2e8f0' : undefined,
-                                borderBottom: isLastMat ? '1.5px solid #cbd5e1' : undefined
-                              }}>
-                                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const issueData = buildIssueDataFromLog(log);
-                                      handleDirectPrintWindow(issueData, log.id);
-                                    }}
-                                    style={{
-                                      padding: '4px 7px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #0f172a',
-                                      background: '#0f172a',
-                                      color: '#ffffff',
-                                      fontSize: '11px',
-                                      fontWeight: '700',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '3px',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                    title="Direct 1-Click Print"
-                                  >
-                                    <Printer size={12} style={{ color: '#ea580c' }} />
-                                    <span>Print</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadChallanPdf(log)}
-                                    style={{
-                                      padding: '4px 6px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #f87171',
-                                      background: '#fef2f2',
-                                      color: '#dc2626',
-                                      fontSize: '11px',
-                                      fontWeight: '700',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '2px',
-                                      whiteSpace: 'nowrap'
-                                    }}
-                                    title="Direct 1-Click Export Challan to PDF"
-                                  >
-                                    <Download size={12} />
-                                    <span>PDF</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReprintHistory(log)}
-                                    style={{
-                                      padding: '4px 5px',
-                                      borderRadius: '5px',
-                                      border: '1px solid #cbd5e1',
-                                      background: '#ffffff',
-                                      color: '#475569',
-                                      fontSize: '11px',
-                                      cursor: 'pointer',
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center'
-                                    }}
-                                    title="Preview on-screen and download PDF"
-                                  >
-                                    <Eye size={12} />
-                                  </button>
-                                </div>
-                              </td>
+                              {/* Actions - Merged with rowSpan */}
+                              {isFirstMat && (
+                                <td
+                                  rowSpan={matCount}
+                                  style={{
+                                    padding: cellPad,
+                                    textAlign: 'center',
+                                    verticalAlign: 'middle',
+                                    background: challanBg,
+                                    borderBottom: '2px solid #cbd5e1'
+                                  }}
+                                >
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const issueData = buildIssueDataFromLog(log);
+                                        handleDirectPrintWindow(issueData, log.id);
+                                      }}
+                                      style={{
+                                        padding: '4px 7px',
+                                        borderRadius: '5px',
+                                        border: '1px solid #0f172a',
+                                        background: '#0f172a',
+                                        color: '#ffffff',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      title="Direct 1-Click Print"
+                                    >
+                                      <Printer size={12} style={{ color: '#ea580c' }} />
+                                      <span>Print</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadChallanPdf(log)}
+                                      style={{
+                                        padding: '4px 6px',
+                                        borderRadius: '5px',
+                                        border: '1px solid #f87171',
+                                        background: '#fef2f2',
+                                        color: '#dc2626',
+                                        fontSize: '11px',
+                                        fontWeight: '700',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '2px',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                      title="Direct 1-Click Export Challan to PDF"
+                                    >
+                                      <Download size={12} />
+                                      <span>PDF</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleReprintHistory(log)}
+                                      style={{
+                                        padding: '4px 5px',
+                                        borderRadius: '5px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        color: '#475569',
+                                        fontSize: '11px',
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                      }}
+                                      title="Preview on-screen and download PDF"
+                                    >
+                                      <Eye size={12} />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -7952,16 +8634,29 @@ export default function WithoutBomMaterialIssueView({
                   const screenTotalPieces = metricsList.reduce((sum, m) => sum + m.totalPieces, 0);
 
                   const grandUnitTotals = {};
-                  metricsList.forEach(m => {
-                    Object.entries(m.unitTotals || {}).forEach(([u, q]) => {
-                      grandUnitTotals[u] = (grandUnitTotals[u] || 0) + q;
+                  let totalLineItems = 0;
+                  withoutBomLogs.forEach(log => {
+                    const mats = (Array.isArray(log.materials) && log.materials.length > 0) ? log.materials : [null];
+                    mats.forEach(m => {
+                      if (!m) return;
+                      totalLineItems++;
+                      const rawU = m.unit || 'Pcs';
+                      const normU = normalizeUnitName(rawU);
+                      const q = Number(m.qty) || 0;
+                      grandUnitTotals[normU] = (grandUnitTotals[normU] || 0) + q;
                     });
                   });
 
                   const grandPcsIssued = grandUnitTotals['Pcs'] || 0;
-                  const nonPcsSummary = Object.entries(grandUnitTotals)
+                  const nonPcsEntries = Object.entries(grandUnitTotals)
                     .filter(([u]) => u !== 'Pcs')
-                    .map(([u, q]) => `${q.toLocaleString('en-IN')} ${u}`)
+                    .sort((a, b) => b[1] - a[1]);
+
+                  const nonPcsSummary = nonPcsEntries
+                    .map(([u, q]) => {
+                      const formattedQ = (q % 1 === 0 ? q : Number(q.toFixed(2))).toLocaleString('en-IN');
+                      return `${formattedQ} ${u}`;
+                    })
                     .join(' • ');
 
                   const pcsVariance = screenTotalPieces - grandPcsIssued;
@@ -7970,7 +8665,7 @@ export default function WithoutBomMaterialIssueView({
                     <tfoot>
                       <tr style={{ background: '#f8fafc', borderTop: '2px solid #cbd5e1', fontWeight: '800', fontSize: '11.5px' }}>
                         <td colSpan={4} style={{ padding: '8px 8px', textAlign: 'right', color: '#475569', textTransform: 'uppercase' }}>
-                          Grand Total ({withoutBomLogs.length} Challans):
+                          Grand Total ({withoutBomLogs.length.toLocaleString('en-IN')} Challans{totalLineItems > withoutBomLogs.length ? `, ${totalLineItems.toLocaleString('en-IN')} Items` : ''}):
                         </td>
                         <td style={{ padding: '8px 6px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <span style={{ fontWeight: '900', color: '#0f172a' }}>{screenTotalPieces.toLocaleString('en-IN')}</span> <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
@@ -7982,7 +8677,7 @@ export default function WithoutBomMaterialIssueView({
                             </div>
                           )}
                           {nonPcsSummary && (
-                            <div style={{ fontSize: '9.5px', color: '#0369a1', fontWeight: '800' }}>
+                            <div style={{ fontSize: '9.5px', color: '#0369a1', fontWeight: '800', marginTop: grandPcsIssued > 0 ? '2px' : 0 }}>
                               {nonPcsSummary}
                             </div>
                           )}
@@ -8020,9 +8715,71 @@ export default function WithoutBomMaterialIssueView({
                 })()}
               </table>
             </div>
-          )}
-        </div>
-      )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 14px',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderTop: 'none',
+                borderRadius: '0 0 10px 10px',
+                fontSize: '11.5px',
+                color: '#475569',
+                flexWrap: 'wrap',
+                gap: '8px'
+              }}>
+                <div>
+                  Showing <strong>{((safeCurrentPage - 1) * (historyPageSize === 'all' ? withoutBomLogs.length : Number(historyPageSize))) + 1}</strong> to <strong>{Math.min(safeCurrentPage * (historyPageSize === 'all' ? withoutBomLogs.length : Number(historyPageSize)), withoutBomLogs.length)}</strong> of <strong>{withoutBomLogs.length.toLocaleString('en-IN')}</strong> challans
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage <= 1}
+                    onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '5px',
+                      border: '1px solid #cbd5e1',
+                      background: safeCurrentPage <= 1 ? '#f1f5f9' : '#ffffff',
+                      color: safeCurrentPage <= 1 ? '#94a3b8' : '#0f172a',
+                      fontWeight: '700',
+                      fontSize: '11px',
+                      cursor: safeCurrentPage <= 1 ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    ‹ Previous
+                  </button>
+                  <span style={{ fontWeight: '700', color: '#1e293b' }}>
+                    Page {safeCurrentPage} of {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage >= totalPages}
+                    onClick={() => setHistoryCurrentPage(p => Math.min(totalPages, p + 1))}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '5px',
+                      border: '1px solid #cbd5e1',
+                      background: safeCurrentPage >= totalPages ? '#f1f5f9' : '#ffffff',
+                      color: safeCurrentPage >= totalPages ? '#94a3b8' : '#0f172a',
+                      fontWeight: '700',
+                      fontSize: '11px',
+                      cursor: safeCurrentPage >= totalPages ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    Next ›
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )}
 
       {/* ── MODAL: BEAUTIFUL ON-SCREEN CHALLAN / BILL PREVIEW WITH PRINT & DOWNLOAD ── */}
       {previewModal && (
