@@ -1419,6 +1419,7 @@ export default function App() {
           stock: (Number(ext.stock) || 0) + (Number(newMat.stock) || 0),
           packets: (Number(ext.packets) || 0) + (Number(newMat.packets) || 1),
           location: newMat.location || ext.location,
+          brand: newMat.brand || ext.brand,
           poNumber: newMat.poNumber || ext.poNumber,
           invoiceNo: newMat.invoiceNo || ext.invoiceNo,
           imageUrl: newMat.imageUrl || ext.imageUrl

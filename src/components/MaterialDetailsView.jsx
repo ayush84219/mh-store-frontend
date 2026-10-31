@@ -13,35 +13,47 @@ import { getCleanImageUrl } from '../utils/designHelpers';
 import useDebounce from '../utils/useDebounce';
 
 // ─── Brand Detection Helper ─────────────────────────────────────────────────
-// Detects known fashion/garment brands from material name
+// Detects known fashion/garment brands from material name or fields
 const KNOWN_BRANDS = [
-  'adidas', 'addidas', 'nike', 'coach', 'gucci', 'prada', 'hermes', 'herms',
+  'brooks brother', 'brooks brothers', 'criminal damage', 'stone island', 'cp company',
+  'calvin klein', 'ralph lauren', 'hugo boss', 'under armour', 'loro piana', 'fashion patti',
+  'stain off', 'adidas', 'addidas', 'nike', 'coach', 'gucci', 'prada', 'hermes', 'herms',
   'diesel', 'deisel', 'h&m', 'hm', 'zara', 'levis', "levi's", 'gap',
   'versace', 'armani', 'puma', 'reebok', 'fila', 'tommy', 'hilfiger',
   'hacket', 'hackett', 'burberry', 'ralph', 'lauren', 'calvin', 'klein',
   'dior', 'chanel', 'louis', 'vuitton', 'balenciaga', 'off-white', 'supreme',
-  'moncler', 'stone island', 'cp company', 'lacoste', 'hugo', 'boss',
+  'moncler', 'lacoste', 'hugo', 'boss',
   'jack', 'jones', 'pepe', 'wrangler', 'arrow', 'van heusen', 'raymond',
-  'brooksb', 'brooks', 'criminal', 'hacket'
+  'brooksb', 'brooks', 'criminal', 'represent', 'youngla', 'gymshark', 'uniqlo',
+  'essentials', 'jordan', 'casablanca', 'ovo', 'barbour', 'rlx', 'superdry',
+  'allsaints', 'terrex', 'fendi', 'skechers', 'asics', 'gant', 'loropiane',
+  'kapil', 'bengen', 'acitone', 'pasting'
 ];
 
 // Brand color palette — each brand gets a distinct hue
 const BRAND_COLORS = {
-  adidas: { bg: 'rgba(0,0,0,0.08)', color: '#111', border: 'rgba(0,0,0,0.2)' },
-  addidas: { bg: 'rgba(0,0,0,0.08)', color: '#111', border: 'rgba(0,0,0,0.2)' },
-  nike: { bg: 'rgba(239,68,68,0.1)', color: '#b91c1c', border: 'rgba(239,68,68,0.25)' },
-  coach: { bg: 'rgba(161,97,17,0.1)', color: '#92400e', border: 'rgba(161,97,17,0.3)' },
-  gucci: { bg: 'rgba(22,101,52,0.1)', color: '#166534', border: 'rgba(22,101,52,0.25)' },
-  hermes: { bg: 'rgba(234,88,12,0.12)', color: '#c2410c', border: 'rgba(234,88,12,0.3)' },
-  herms: { bg: 'rgba(234,88,12,0.12)', color: '#c2410c', border: 'rgba(234,88,12,0.3)' },
-  diesel: { bg: 'rgba(99,102,241,0.1)', color: '#4f46e5', border: 'rgba(99,102,241,0.25)' },
-  deisel: { bg: 'rgba(99,102,241,0.1)', color: '#4f46e5', border: 'rgba(99,102,241,0.25)' },
-  default: { bg: 'rgba(245,158,11,0.12)', color: '#b45309', border: 'rgba(245,158,11,0.3)' }
+  adidas: { bg: 'rgba(0,0,0,0.07)', color: 'var(--text-main)', border: 'rgba(100,116,139,0.3)' },
+  addidas: { bg: 'rgba(0,0,0,0.07)', color: 'var(--text-main)', border: 'rgba(100,116,139,0.3)' },
+  nike: { bg: 'rgba(239,68,68,0.1)', color: '#dc2626', border: 'rgba(239,68,68,0.3)' },
+  coach: { bg: 'rgba(180,83,9,0.1)', color: '#b45309', border: 'rgba(180,83,9,0.3)' },
+  gucci: { bg: 'rgba(22,101,52,0.1)', color: '#16a34a', border: 'rgba(22,101,52,0.3)' },
+  hermes: { bg: 'rgba(234,88,12,0.12)', color: '#ea580c', border: 'rgba(234,88,12,0.3)' },
+  herms: { bg: 'rgba(234,88,12,0.12)', color: '#ea580c', border: 'rgba(234,88,12,0.3)' },
+  diesel: { bg: 'rgba(99,102,241,0.12)', color: '#6366f1', border: 'rgba(99,102,241,0.3)' },
+  deisel: { bg: 'rgba(99,102,241,0.12)', color: '#6366f1', border: 'rgba(99,102,241,0.3)' },
+  zara: { bg: 'rgba(15,23,42,0.08)', color: 'var(--text-main)', border: 'rgba(15,23,42,0.25)' },
+  dior: { bg: 'rgba(236,72,153,0.1)', color: '#db2777', border: 'rgba(236,72,153,0.3)' },
+  gant: { bg: 'rgba(14,165,233,0.1)', color: '#0284c7', border: 'rgba(14,165,233,0.3)' },
+  hackett: { bg: 'rgba(79,70,229,0.1)', color: '#4f46e5', border: 'rgba(79,70,229,0.3)' },
+  hacket: { bg: 'rgba(79,70,229,0.1)', color: '#4f46e5', border: 'rgba(79,70,229,0.3)' },
+  tommy: { bg: 'rgba(225,29,72,0.1)', color: '#e11d48', border: 'rgba(225,29,72,0.3)' },
+  puma: { bg: 'rgba(249,115,22,0.1)', color: '#ea580c', border: 'rgba(249,115,22,0.3)' },
+  default: { bg: 'rgba(59,130,246,0.09)', color: '#2563eb', border: 'rgba(59,130,246,0.25)' }
 };
 
 const getBrandFromName = (name) => {
   if (!name) return null;
-  const lower = name.toLowerCase();
+  const lower = String(name).toLowerCase();
   for (const brand of KNOWN_BRANDS) {
     if (lower.includes(brand)) {
       return brand;
@@ -51,6 +63,8 @@ const getBrandFromName = (name) => {
 };
 
 const getBrandDisplay = (brand) => {
+  if (!brand) return '—';
+  const clean = String(brand).toLowerCase().trim();
   const map = {
     adidas: 'ADIDAS', addidas: 'ADIDAS',
     nike: 'NIKE',
@@ -73,14 +87,88 @@ const getBrandDisplay = (brand) => {
     burberry: 'BURBERRY',
     ralph: 'RALPH LAUREN',
     calvin: 'CALVIN KLEIN',
+    'calvin klein': 'CALVIN KLEIN',
     dior: 'DIOR',
     chanel: 'CHANEL',
     lacoste: 'LACOSTE',
     hugo: 'HUGO BOSS', boss: 'HUGO BOSS',
+    'hugo boss': 'HUGO BOSS',
+    'brooks brother': 'BROOKS BROTHERS', 'brooks brothers': 'BROOKS BROTHERS',
     brooksb: 'BROOKS BROTHERS', brooks: 'BROOKS BROTHERS',
-    criminal: 'CRIMINAL DAMAGE',
+    'criminal damage': 'CRIMINAL DAMAGE', criminal: 'CRIMINAL DAMAGE',
+    represent: 'REPRESENT',
+    youngla: 'YOUNGLA',
+    gymshark: 'GYMSHARK',
+    uniqlo: 'UNIQLO',
+    essentials: 'ESSENTIALS',
+    jordan: 'JORDAN',
+    'under armour': 'UNDER ARMOUR',
+    casablanca: 'CASABLANCA',
+    ovo: 'OVO',
+    barbour: 'BARBOUR',
+    rlx: 'RLX',
+    superdry: 'SUPERDRY',
+    allsaints: 'ALLSAINTS',
+    terrex: 'TERREX',
+    fendi: 'FENDI',
+    skechers: 'SKECHERS',
+    asics: 'ASICS',
+    gant: 'GANT',
+    'loro piana': 'LORO PIANA', loropiane: 'LORO PIANA',
+    kapil: 'KAPIL',
+    'fashion patti': 'FASHION PATTI',
+    'stain off': 'STAIN OFF',
+    bengen: 'BENGEN',
+    acitone: 'ACITONE',
+    pasting: 'PASTING'
   };
-  return map[brand] || brand.toUpperCase();
+  return map[clean] || clean.toUpperCase();
+};
+
+const getMaterialBrand = (m) => {
+  if (!m) return '—';
+  const rawBrand = m.brand || m.brandName || m.brand_name;
+  if (rawBrand && typeof rawBrand === 'string') {
+    const trimmed = rawBrand.trim();
+    if (
+      trimmed &&
+      trimmed !== '—' &&
+      trimmed !== '-' &&
+      trimmed.toLowerCase() !== 'n/a' &&
+      trimmed.toLowerCase() !== 'null' &&
+      trimmed.toLowerCase() !== 'undefined' &&
+      trimmed.toLowerCase() !== 'general' &&
+      trimmed.toLowerCase() !== 'default'
+    ) {
+      const detected = getBrandFromName(trimmed);
+      return detected ? getBrandDisplay(detected) : getBrandDisplay(trimmed);
+    }
+  }
+
+  const nameBrand = getBrandFromName(m.name);
+  if (nameBrand) {
+    return getBrandDisplay(nameBrand);
+  }
+
+  if (m.style && typeof m.style === 'string') {
+    const styleBrand = getBrandFromName(m.style);
+    if (styleBrand) return getBrandDisplay(styleBrand);
+  }
+
+  return '—';
+};
+
+const getBrandColorStyle = (brandName) => {
+  if (!brandName || brandName === '—') {
+    return { bg: 'transparent', color: 'var(--text-muted)', border: 'transparent' };
+  }
+  const lower = brandName.toLowerCase();
+  for (const [key, val] of Object.entries(BRAND_COLORS)) {
+    if (key !== 'default' && lower.includes(key)) {
+      return val;
+    }
+  }
+  return BRAND_COLORS.default;
 };
 
 // ─── Format Date & Time Helper ────────────────────────────────────────────────
@@ -1011,6 +1099,8 @@ export default function MaterialDetailsView({
         String(m.itemCode || '').toLowerCase().includes(query) ||
         String(m.id || '').toLowerCase().includes(query) ||
         String(m.name || '').toLowerCase().includes(query) ||
+        String(m.brand || '').toLowerCase().includes(query) ||
+        String(getMaterialBrand(m) || '').toLowerCase().includes(query) ||
         String(m.category || '').toLowerCase().includes(query) ||
         String(m.color || '').toLowerCase().includes(query) ||
         String(m.location || '').toLowerCase().includes(query) ||
@@ -1075,6 +1165,7 @@ export default function MaterialDetailsView({
   // Add Material Form State
   const [itemCode, setItemCode] = useState('');
   const [name, setName] = useState('');
+  const [brand, setBrand] = useState('');
   const [category, setCategory] = useState('Fabric');
   const [stock, setStock] = useState(0);
   const [unit, setUnit] = useState('meters');
@@ -1122,6 +1213,11 @@ export default function MaterialDetailsView({
     );
     if (matched) {
       if (!name || name === matched.name) setName(matched.name);
+      if (matched.brand) setBrand(matched.brand);
+      else if (matched.name) {
+        const dBrand = getBrandFromName(matched.name);
+        if (dBrand) setBrand(getBrandDisplay(dBrand));
+      }
       if (matched.category) setCategory(matched.category);
       if (matched.unit) setUnit(matched.unit);
       if (matched.location && !location) setLocation(matched.location);
@@ -1154,8 +1250,9 @@ export default function MaterialDetailsView({
   const handleExcelExport = () => {
     // Structure data for Excel sheet
     const excelData = materials.map(m => ({
-      'Material ID': m.id,
-      'Name': m.name,
+      'Item Code': m.itemCode || m.id,
+      'Material Name': m.name,
+      'Brand': getMaterialBrand(m),
       'Category': m.category,
       'Color/Style': m.color || 'Default',
       'Location': m.location || 'Main Store',
@@ -1214,6 +1311,7 @@ export default function MaterialDetailsView({
       id: materialId,
       itemCode: finalItemCode,
       name: name.trim(),
+      brand: brand.trim() || matchedExistingMaterial?.brand || undefined,
       category,
       stock: Number(stock),
       unit,
@@ -1243,6 +1341,7 @@ export default function MaterialDetailsView({
     // Reset state
     setItemCode('');
     setName('');
+    setBrand('');
     setStock(0);
     setCost(0);
     setThreshold(50);
@@ -1431,7 +1530,7 @@ export default function MaterialDetailsView({
             </div>
             <div className="form-grid">
               <div className="form-group">
-                <label className="form-label">Material Name</label>
+                <label className="form-label">Material Name <span style={{ color: '#ef4444' }}>*</span></label>
                 <input
                   type="text"
                   className="form-input"
@@ -1443,6 +1542,26 @@ export default function MaterialDetailsView({
               </div>
 
               <div className="form-group">
+                <label className="form-label">Brand Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  placeholder="e.g. ADIDAS, NIKE, DIESEL, ZARA"
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  list="mdv-brand-suggestions"
+                  autoComplete="on"
+                />
+                <datalist id="mdv-brand-suggestions">
+                  {['ADIDAS', 'NIKE', 'COACH', 'GUCCI', 'HERMÈS', 'DIESEL', 'H&M', 'ZARA', "LEVI'S", 'GAP', 'VERSACE', 'ARMANI', 'PUMA', 'REEBOK', 'FILA', 'TOMMY', 'HACKETT', 'BURBERRY', 'RALPH LAUREN', 'CALVIN KLEIN', 'DIOR', 'CHANEL', 'LACOSTE', 'HUGO BOSS', 'BROOKS BROTHERS', 'CRIMINAL DAMAGE', 'REPRESENT', 'YOUNGLA', 'GYMSHARK', 'UNIQLO', 'ESSENTIALS', 'JORDAN', 'UNDER ARMOUR', 'CASABLANCA', 'OVO', 'BARBOUR', 'RLX', 'SUPERDRY', 'ALLSAINTS', 'TERREX', 'FENDI', 'SKECHERS', 'ASICS', 'GANT', 'LORO PIANA', 'KAPIL', 'FASHION PATTI', 'STAIN OFF', 'BENGEN', 'ACITONE', 'PASTING'].map((b, idx) => (
+                    <option key={idx} value={b} />
+                  ))}
+                </datalist>
+              </div>
+            </div>
+
+            <div className="form-grid">
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                 <label className="form-label">Material Category <span style={{ color: '#ef4444' }}>*</span></label>
                 <input
                   type="text"
@@ -2014,6 +2133,7 @@ export default function MaterialDetailsView({
                 <th style={{ width: '130px', minWidth: '110px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Item Code</th>
                 <th style={{ width: '65px', minWidth: '55px', textAlign: 'center', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Photo</th>
                 <th style={{ minWidth: '160px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Material Details</th>
+                <th style={{ minWidth: '115px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Brand Name</th>
                 <th style={{ minWidth: '100px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Category</th>
                 <th style={{ minWidth: '100px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Color / Shade</th>
                 <th style={{ minWidth: '160px', fontWeight: '700', fontSize: '11.5px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Storage Rack</th>
@@ -2026,7 +2146,7 @@ export default function MaterialDetailsView({
             <tbody>
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan="10" style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                  <td colSpan="11" style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
                     <Layers size={36} style={{ margin: '0 auto 10px auto', opacity: 0.35, color: 'var(--accent-color)' }} />
                     <div style={{ fontWeight: '700', fontSize: '14.5px', color: 'var(--text-main)' }}>No Materials Found</div>
                     <div style={{ fontSize: '12px', marginTop: '4px' }}>No raw materials match the current filters or search term.</div>
@@ -2149,30 +2269,36 @@ export default function MaterialDetailsView({
                             <strong style={{ display: 'block', fontSize: '13.5px', color: 'var(--text-main)', fontWeight: '700' }}>{m.name}</strong>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
                               <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: '500' }}>Threshold: {m.threshold} {m.unit}</span>
-                              {(() => {
-                                const brand = getBrandFromName(m.name);
-                                if (!brand) return null;
-                                const display = getBrandDisplay(brand);
-                                const colors = BRAND_COLORS[brand] || BRAND_COLORS.default;
-                                return (
-                                  <span style={{
-                                    fontSize: '9.5px',
-                                    fontWeight: '900',
-                                    letterSpacing: '0.08em',
-                                    padding: '1px 6px',
-                                    borderRadius: '4px',
-                                    backgroundColor: colors.bg,
-                                    color: colors.color,
-                                    border: `1px solid ${colors.border}`,
-                                    textTransform: 'uppercase',
-                                    flexShrink: 0
-                                  }}>
-                                    {display}
-                                  </span>
-                                );
-                              })()}
                             </div>
                           </div>
+                        </td>
+                        <td style={{ minWidth: '115px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                          {(() => {
+                            const brand = getMaterialBrand(m);
+                            if (!brand || brand === '—') {
+                              return <span style={{ color: 'var(--text-muted)', fontSize: '12.5px', fontWeight: '500' }}>—</span>;
+                            }
+                            const brandStyle = getBrandColorStyle(brand);
+                            return (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontSize: '11px',
+                                fontWeight: '800',
+                                letterSpacing: '0.04em',
+                                backgroundColor: brandStyle.bg,
+                                color: brandStyle.color,
+                                border: `1px solid ${brandStyle.border}`,
+                                textTransform: 'uppercase',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                🏢 {brand}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td>
                           <span className="status-badge" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-main)', border: '1px solid var(--border-color)', fontSize: '11px', fontWeight: '600', padding: '3px 8px', borderRadius: '6px' }}>
@@ -2301,7 +2427,7 @@ export default function MaterialDetailsView({
                       </tr>
                       {expandedMaterialId === m.id && (
                         <tr>
-                          <td colSpan="10" style={{ padding: '16px', backgroundColor: 'var(--bg-primary)' }}>
+                          <td colSpan="11" style={{ padding: '16px', backgroundColor: 'var(--bg-primary)' }}>
                             <div style={{
                               backgroundColor: 'var(--bg-secondary)',
                               border: '1px solid var(--border-color)',
