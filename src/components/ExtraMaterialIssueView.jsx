@@ -6,7 +6,7 @@ import {
   Layers, Search, CheckCircle2, AlertTriangle, Printer,
   FileText, Shield, ShieldAlert, ArrowRight, RotateCcw, Clock,
   Package, ChevronDown, CheckCircle, HelpCircle,
-  TrendingUp, Sparkles, Filter, RefreshCw, Eye, BarChart3,
+  TrendingUp, Sparkles, Filter, RefreshCw, Eye, EyeOff, Boxes, BarChart3,
   User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode,
   Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn, Download
 } from 'lucide-react';
@@ -1052,6 +1052,8 @@ export default function ExtraMaterialIssueView({
     setExpandedAuditLots(prev => ({ ...prev, [lotId]: !prev[lotId] }));
   };
   const [showAllBom, setShowAllBom] = useState(false);
+  const [showAlreadyIssued, setShowAlreadyIssued] = useState(false);
+  const [dismissedAlreadyIssuedLots, setDismissedAlreadyIssuedLots] = useState([]);
 
   // ── Cutting Details & In-Memory Cache ─────────────────────────────────────
   const CUTTING_CACHE_MAX_ENTRIES = 100;
@@ -1152,15 +1154,18 @@ export default function ExtraMaterialIssueView({
 
   const confirmAddWoItem = (compName = '') => {
     const finalComp = (compName !== undefined && compName !== null ? String(compName) : '').trim();
+    const lotCutting = activeLotCutting?.totalPieces > 0 ? activeLotCutting.totalPieces : (parseFloat(woPieces) > 0 ? parseFloat(woPieces) : 100);
+    const initialBase = Math.ceil(Number(lotCutting) * 1);
     setWoItems(prev => [
       ...prev,
       {
         id: Date.now(),
         componentName: finalComp,
         materialId: '',
-        baseQty: '',
+        baseQty: initialBase,
         multiplier: 1,
-        extraQty: '',
+        multiplierOp: 'multiply',
+        extraQty: initialBase,
         unit: 'Pcs',
         reason: EXTRA_REASONS[0],
         remarks: ''
@@ -1179,17 +1184,27 @@ export default function ExtraMaterialIssueView({
   };
 
   const handleUpdateWoItem = (id, field, value) => {
+    const lotCutting = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
     setWoItems(prev => prev.map(it => {
       if (it.id !== id) return it;
       const updated = { ...it, [field]: value };
-      if (field === 'baseQty') {
-        const b = parseFloat(value) || 0;
+      if (field === 'multiplier' || field === 'multiplierOp') {
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        updated.extraQty = value === '' ? '' : Math.round(b * factor * 100) / 100;
-      } else if (field === 'multiplier' || field === 'multiplierOp') {
-        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
-        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.round(b * factor * 100) / 100;
+        // Multiplier scales garment cutting volume to get this accessory's Base Quantity!
+        // e.g. cutting 300 * multiplier 10 = base quantity 3,000 buttons!
+        const newBase = Math.ceil(lotCutting * factor);
+        updated.baseQty = newBase;
+        updated.extraQty = newBase;
+      } else if (field === 'baseQty') {
+        if (value === '') {
+          updated.baseQty = '';
+        } else {
+          const b = parseFloat(value) || 0;
+          updated.baseQty = Math.ceil(b);
+          updated.extraQty = Math.ceil(b);
+        }
+      } else if (field === 'extraQty') {
+        updated.extraQty = value === '' ? '' : Math.ceil(parseFloat(value) || 0);
       }
       if (field === 'materialId') {
         const mat = materials.find(m => String(m.id) === String(value));
@@ -1869,15 +1884,17 @@ export default function ExtraMaterialIssueView({
 
   const renderAlreadyIssuedBanner = (info) => {
     if (!info || !info.materials || info.materials.length === 0) return null;
+    if (dismissedAlreadyIssuedLots.includes(info.lotNo)) return null;
 
     return (
       <div style={{
         marginBottom: '16px',
-        padding: '14px 18px',
+        padding: showAlreadyIssued ? '14px 18px' : '10px 18px',
         borderRadius: '10px',
         background: '#fffbeb',
         border: '1.5px solid #fde68a',
-        boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+        boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)',
+        transition: 'all 0.2s ease'
       }}>
         <div style={{
           display: 'flex',
@@ -1885,9 +1902,9 @@ export default function ExtraMaterialIssueView({
           justifyContent: 'space-between',
           flexWrap: 'wrap',
           gap: '10px',
-          borderBottom: '1px solid #fef3c7',
-          paddingBottom: '10px',
-          marginBottom: '12px'
+          borderBottom: showAlreadyIssued ? '1px solid #fef3c7' : 'none',
+          paddingBottom: showAlreadyIssued ? '10px' : '0',
+          marginBottom: showAlreadyIssued ? '12px' : '0'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{
@@ -1924,85 +1941,141 @@ export default function ExtraMaterialIssueView({
               </span>
             </div>
           </div>
-        </div>
 
-        {/* Items Grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: '10px'
-        }}>
-          {info.materials.map((m, mIdx) => (
-            <div
-              key={m.key || mIdx}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: '700' }}>
+              ({info.totalChallans} challans):
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowAlreadyIssued(prev => !prev)}
               style={{
-                background: '#ffffff',
-                border: '1.5px solid #fde68a',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                gap: '5px',
+                padding: '4px 12px',
+                borderRadius: '6px',
+                border: '1.5px solid #d97706',
+                background: showAlreadyIssued ? '#fff7ed' : '#d97706',
+                color: showAlreadyIssued ? '#c2410c' : '#ffffff',
+                fontSize: '11.5px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
               }}
+              title={showAlreadyIssued ? "Hide already issued items" : "Show already issued items"}
             >
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  {m.category && (
-                    <span style={{
-                      fontSize: '9.5px',
-                      fontWeight: '800',
-                      color: '#92400e',
-                      background: '#fef3c7',
-                      padding: '1px 6px',
-                      borderRadius: '4px',
-                      textTransform: 'uppercase'
-                    }}>
-                      {m.category}
-                    </span>
-                  )}
-                  <span style={{
-                    fontSize: '13px',
-                    fontWeight: '800',
-                    color: '#0f172a',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis'
-                  }}>
-                    {m.name}
-                  </span>
-                </div>
-                {m.itemCode && (
-                  <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
-                    Code: {m.itemCode}
-                  </div>
-                )}
-                <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
-                  Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
-                  {m.challans[0]?.date && ` • ${m.challans[0].date.split(' ')[0]}`}
-                </div>
-              </div>
-
-              {/* Quantity Pill */}
-              <div style={{
-                textAlign: 'right',
-                background: '#fff7ed',
-                border: '1px solid #fed7aa',
+              {showAlreadyIssued ? <EyeOff size={14} /> : <Eye size={14} />}
+              <span>{showAlreadyIssued ? 'Hide' : `Show (${info.materials.length} Items)`}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDismissedAlreadyIssuedLots(prev => [...prev, info.lotNo]);
+                setShowAlreadyIssued(false);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
                 padding: '4px 10px',
                 borderRadius: '6px',
-                flexShrink: 0
-              }}>
-                <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
-                  {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                border: '1.5px solid #fde68a',
+                background: '#ffffff',
+                color: '#92400e',
+                fontSize: '11.5px',
+                fontWeight: '800',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title="Close and do not show this banner"
+            >
+              <X size={14} />
+              <span>Close</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Items Grid - Shown ONLY when showAlreadyIssued is true */}
+        {showAlreadyIssued && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: '10px'
+          }}>
+            {info.materials.map((m, mIdx) => (
+              <div
+                key={m.key || mIdx}
+                style={{
+                  background: '#ffffff',
+                  border: '1.5px solid #fde68a',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                }}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {m.category && (
+                      <span style={{
+                        fontSize: '9.5px',
+                        fontWeight: '800',
+                        color: '#92400e',
+                        background: '#fef3c7',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
+                        textTransform: 'uppercase'
+                      }}>
+                        {m.category}
+                      </span>
+                    )}
+                    <span style={{
+                      fontSize: '13px',
+                      fontWeight: '800',
+                      color: '#0f172a',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}>
+                      {m.name}
+                    </span>
+                  </div>
+                  {m.itemCode && (
+                    <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                      Code: {m.itemCode}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
+                    Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
+                    {m.challans[0]?.date && ` • ${m.challans[0].date.split(' ')[0]}`}
+                  </div>
                 </div>
-                <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
-                  Issued Qty
+
+                {/* Quantity Pill */}
+                <div style={{
+                  textAlign: 'right',
+                  background: '#fff7ed',
+                  border: '1px solid #fed7aa',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  flexShrink: 0
+                }}>
+                  <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
+                    {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                  </div>
+                  <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
+                    Issued Qty
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -2018,6 +2091,8 @@ export default function ExtraMaterialIssueView({
       setIsLoadingPieces(false);
       if (issueMethod === 'with_bom') {
         setPieces(100);
+      } else {
+        setWoPieces(100);
       }
       return;
     }
@@ -2071,8 +2146,16 @@ export default function ExtraMaterialIssueView({
       if (headerMatch?.Style || designMatch?.category) {
         setWoLotStyle(headerMatch?.Style || designMatch?.category);
       }
-      if (memoryTotal > 0 && (!woPieces || woPieces === 100 || woPieces === 1)) {
+      if (memoryTotal > 0) {
         setWoPieces(memoryTotal);
+        setWoItems(prev => prev.map(it => {
+          const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+          return {
+            ...it,
+            baseQty: memoryTotal,
+            extraQty: Math.ceil(memoryTotal * factor)
+          };
+        }));
       }
     } else {
       if (memoryTotal > 0) {
@@ -2086,8 +2169,22 @@ export default function ExtraMaterialIssueView({
       const matrixRows = cached?.rows || [];
       const matrixTotal = matrixRows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
       const resolvedTotal = matrixTotal > 0 ? matrixTotal : (memoryTotal > 0 ? memoryTotal : (Number(cached?.cuttingQty) || Number(cached?.header?.Cutting_Qty) || 0));
-      if (issueMethod === 'with_bom' && resolvedTotal > 0) {
-        setPieces(resolvedTotal);
+      if (issueMethod === 'without_bom') {
+        if (resolvedTotal > 0) {
+          setWoPieces(resolvedTotal);
+          setWoItems(prev => prev.map(it => {
+            const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+            return {
+              ...it,
+              baseQty: resolvedTotal,
+              extraQty: Math.ceil(resolvedTotal * factor)
+            };
+          }));
+        }
+      } else {
+        if (resolvedTotal > 0) {
+          setPieces(resolvedTotal);
+        }
       }
       setLoadingActiveLotCutting(false);
       setIsLoadingPieces(false);
@@ -2140,7 +2237,17 @@ export default function ExtraMaterialIssueView({
         if (issueMethod === 'without_bom') {
           if (brandVal && (!woBrand || woBrand === 'Mohit Hosiery')) setWoBrand(brandVal);
           if (styleVal && (!woLotStyle || woLotStyle === 'Floor Issue')) setWoLotStyle(styleVal);
-          if (resolvedTotal > 0 && (!woPieces || woPieces === 100 || woPieces === 1)) setWoPieces(resolvedTotal);
+          if (resolvedTotal > 0) {
+            setWoPieces(resolvedTotal);
+            setWoItems(prev => prev.map(it => {
+              const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+              return {
+                ...it,
+                baseQty: resolvedTotal,
+                extraQty: Math.ceil(resolvedTotal * factor)
+              };
+            }));
+          }
         } else {
           if (resolvedTotal > 0) setPieces(resolvedTotal);
         }
@@ -2271,17 +2378,20 @@ export default function ExtraMaterialIssueView({
         updated.selectedForExtra = true;
       }
 
-      if (field === 'baseQty') {
-        const b = parseFloat(value) || 0;
-        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        updated.extraQty = value === '' ? '' : Math.round(b * factor * 100) / 100;
-        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
-      }
+      const lotCutting = activeLotCutting?.totalPieces || (parseFloat(pieces) || 100);
 
       if (field === 'multiplier' || field === 'multiplierOp') {
-        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.round(b * factor * 100) / 100;
+        // Multiplier scales cutting volume to get this accessory's Base Quantity!
+        // e.g. cutting 300 * 10 = 3,000!
+        const newBase = Math.ceil(lotCutting * factor);
+        updated.baseQty = newBase;
+        updated.extraQty = newBase;
+        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
+      } else if (field === 'baseQty') {
+        const b = parseFloat(value) || 0;
+        updated.baseQty = Math.ceil(b);
+        updated.extraQty = Math.ceil(b);
         if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
       }
 
@@ -5212,8 +5322,13 @@ export default function ExtraMaterialIssueView({
                                       min="0.001"
                                       step="any"
                                       placeholder="1"
-                                      value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                      value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
                                       onChange={(e) => handleMappingChange(originalIdx, 'multiplier', e.target.value)}
+                                      onBlur={() => {
+                                        if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
+                                          handleMappingChange(originalIdx, 'multiplier', 1);
+                                        }
+                                      }}
                                       style={{
                                         width: '55px',
                                         height: '36px',
@@ -5475,9 +5590,30 @@ export default function ExtraMaterialIssueView({
                       ))}
                     </datalist>
                     {previouslyIssuedForCurrentLot && (
-                      <span style={{ fontSize: '11px', color: '#b45309', fontWeight: '700', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        📦 {previouslyIssuedForCurrentLot.materials.length} material(s) already issued before ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''})
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', gap: '6px' }}>
+                        <span style={{ fontSize: '11px', color: '#b45309', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          📦 {previouslyIssuedForCurrentLot.materials.length} material(s) already issued before ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDismissedAlreadyIssuedLots(prev => prev.filter(l => l !== previouslyIssuedForCurrentLot.lotNo));
+                            setShowAlreadyIssued(prev => !prev);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#ea580c',
+                            fontSize: '11px',
+                            fontWeight: '800',
+                            cursor: 'pointer',
+                            textDecoration: 'underline',
+                            padding: 0
+                          }}
+                        >
+                          {showAlreadyIssued ? 'Hide Details' : 'Show Details'}
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -5537,9 +5673,24 @@ export default function ExtraMaterialIssueView({
                     <input
                       type="number"
                       min="1"
+                      step="1"
                       placeholder="100"
                       value={woPieces}
-                      onChange={(e) => setWoPieces(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setWoPieces(val);
+                        const numVal = parseFloat(val) || 0;
+                        if (numVal > 0) {
+                          setWoItems(prev => prev.map(it => {
+                            const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+                            return {
+                              ...it,
+                              baseQty: val,
+                              extraQty: Math.ceil(numVal * factor)
+                            };
+                          }));
+                        }
+                      }}
                       className="form-input"
                       style={{
                         width: '100%',
@@ -5647,26 +5798,58 @@ export default function ExtraMaterialIssueView({
                     <Package size={16} style={{ color: '#ea580c' }} />
                     <span>2. Materials to Issue ({woItems.length} Item{woItems.length > 1 ? 's' : ''})</span>
                   </h3>
-                  <button
-                    type="button"
-                    onClick={handleAddWoItem}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      padding: '7px 14px',
-                      borderRadius: '8px',
-                      border: '1.5px solid #fdba74',
-                      background: '#fff7ed',
-                      color: '#c2410c',
-                      fontSize: '12px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                    }}
-                  >
-                    <Plus size={14} /> Add Another Material Row
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cuttingQty = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
+                        setWoItems(prev => prev.map(it => {
+                          const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+                          return {
+                            ...it,
+                            baseQty: cuttingQty,
+                            extraQty: Math.ceil(cuttingQty * factor)
+                          };
+                        }));
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 12px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #cbd5e1',
+                        background: '#f8fafc',
+                        color: '#475569',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer'
+                      }}
+                      title="Reset all rows base quantity to current lot cutting quantity"
+                    >
+                      <RotateCcw size={13} /> Reset Base to Cutting ({activeLotCutting?.totalPieces || woPieces || 100})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleAddWoItem}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        padding: '7px 14px',
+                        borderRadius: '8px',
+                        border: '1.5px solid #fdba74',
+                        background: '#fff7ed',
+                        color: '#c2410c',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}
+                    >
+                      <Plus size={14} /> Add Another Material Row
+                    </button>
+                  </div>
                 </div>
 
                 <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
@@ -5781,11 +5964,18 @@ export default function ExtraMaterialIssueView({
                             <td style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', verticalAlign: 'middle' }}>
                               <input
                                 type="number"
-                                min="0.01"
-                                step="any"
+                                min="1"
+                                step="1"
                                 placeholder="Base Qty"
-                                value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
+                                value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : ''}
                                 onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
+                                onBlur={() => {
+                                  if (item.baseQty === '' || item.baseQty === null || item.baseQty === undefined) {
+                                    const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+                                    const lotCutting = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
+                                    handleUpdateWoItem(item.id, 'baseQty', Math.ceil(lotCutting * factor));
+                                  }
+                                }}
                                 style={{
                                   width: '100%',
                                   height: '38px',
@@ -5837,9 +6027,14 @@ export default function ExtraMaterialIssueView({
                                   </button>
                                   <input
                                     type="text"
-                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
-                                    value={item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1}
+                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1'}
+                                    value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
                                     onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
+                                    onBlur={() => {
+                                      if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
+                                        handleUpdateWoItem(item.id, 'multiplier', 1);
+                                      }
+                                    }}
                                     style={{
                                       width: '64px',
                                       height: '36px',
@@ -5909,14 +6104,14 @@ export default function ExtraMaterialIssueView({
                             <td style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', verticalAlign: 'middle' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
                                 <div style={{ fontSize: '10px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9', fontWeight: '800', whiteSpace: 'nowrap' }}>
-                                  {getMultiplierFormulaText(item.baseQty || item.extraQty || 0, item.multiplier, item.multiplierOp, item.extraQty || 0)}
+                                  {getMultiplierFormulaText(activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100), item.multiplier, item.multiplierOp, item.extraQty || 0)}
                                 </div>
                                 <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
                                   <input
                                     type="number"
-                                    min="0.01"
-                                    step="any"
-                                    placeholder="0.00"
+                                    min="1"
+                                    step="1"
+                                    placeholder="0"
                                     value={item.extraQty}
                                     onChange={(e) => handleUpdateWoItem(item.id, 'extraQty', e.target.value)}
                                     style={{

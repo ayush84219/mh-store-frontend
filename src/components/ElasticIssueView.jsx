@@ -1500,6 +1500,7 @@ export default function ElasticIssueView({
   const handleAddOtherItemRow = (compType = '', defaultMatId = '', entryMode = 'choose') => {
     const mat = defaultMatId ? (materials || []).find(m => String(m.id) === String(defaultMatId)) : null;
     let defUnit = (compType === 'DORI' || compType === 'ELASTIC' || compType === 'TAPE' || compType === 'LACE') ? 'Mtr' : 'Pcs';
+    const lotCutting = activeLotCutting?.totalPieces || Number(lotDetails?.quantity) || parseInt(issuePcs, 10) || 1;
     setOtherItems(prev => [
       ...prev,
       {
@@ -1517,10 +1518,10 @@ export default function ElasticIssueView({
         availableStock: mat ? (Number(mat.stock) || 0) : 0,
         location: mat ? (mat.location || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
         calcMode: 'direct',
-        baseQty: 1,
+        baseQty: lotCutting,
         multiplier: 1,
         multiplierOp: 'multiply',
-        totalQty: 1
+        totalQty: lotCutting
       }
     ]);
   };
@@ -1528,6 +1529,7 @@ export default function ElasticIssueView({
   // Remove Item Row (preserves at least one clean row)
   const handleRemoveOtherItemRow = (rowId) => {
     if (otherItems.length <= 1) {
+      const lotCutting = activeLotCutting?.totalPieces || Number(lotDetails?.quantity) || parseInt(issuePcs, 10) || 1;
       setOtherItems([{
         id: Date.now(),
         componentType: '',
@@ -1542,10 +1544,10 @@ export default function ElasticIssueView({
         availableStock: 0,
         location: '',
         calcMode: 'direct',
-        baseQty: 1,
+        baseQty: lotCutting,
         multiplier: 1,
         multiplierOp: 'multiply',
-        totalQty: 1
+        totalQty: lotCutting
       }]);
       return;
     }
@@ -1560,9 +1562,21 @@ export default function ElasticIssueView({
       const isBaseUpdate = fieldOrObj === 'baseQty' || (typeof fieldOrObj === 'object' && 'baseQty' in fieldOrObj);
       const isMultUpdate = fieldOrObj === 'multiplier' || fieldOrObj === 'multiplierOp' || (typeof fieldOrObj === 'object' && ('multiplier' in fieldOrObj || 'multiplierOp' in fieldOrObj));
       if (isBaseUpdate || isMultUpdate) {
-        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : 1;
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        updated.totalQty = Math.round(b * factor * 100) / 100;
+        const lotCutting = activeLotCutting?.totalPieces || Number(lotDetails?.quantity) || parseInt(issuePcs, 10) || 0;
+        if (isMultUpdate) {
+          const newBase = lotCutting > 0 ? Math.ceil(lotCutting * factor) : (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '' ? Math.ceil(parseFloat(updated.baseQty) * factor) : 1);
+          updated.baseQty = newBase;
+          updated.totalQty = newBase;
+        } else if (isBaseUpdate) {
+          if (updated.baseQty === '') {
+            // Keep empty while typing
+          } else {
+            const b = parseFloat(updated.baseQty) || 0;
+            updated.baseQty = Math.ceil(b);
+            updated.totalQty = Math.ceil(b);
+          }
+        }
       }
       return updated;
     }));
@@ -6125,8 +6139,15 @@ export default function ElasticIssueView({
                                       step="any"
                                       min="0.01"
                                       placeholder="1"
-                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : 1}
+                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : ''}
                                       onChange={(e) => handleUpdateOtherItem(item.id, 'baseQty', e.target.value)}
+                                      onBlur={() => {
+                                        if (item.baseQty === '' || item.baseQty === null || item.baseQty === undefined) {
+                                          const lotCutting = activeLotCutting?.totalPieces || Number(lotDetails?.quantity) || parseInt(issuePcs, 10) || 1;
+                                          const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+                                          handleUpdateOtherItem(item.id, 'baseQty', Math.ceil(lotCutting * factor));
+                                        }
+                                      }}
                                       style={{
                                         width: '80px',
                                         height: '36px',
@@ -6180,8 +6201,13 @@ export default function ElasticIssueView({
                                       <input
                                         type="text"
                                         placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
-                                        value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                        value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
                                         onChange={(e) => handleUpdateOtherItem(item.id, 'multiplier', e.target.value)}
+                                        onBlur={() => {
+                                          if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
+                                            handleUpdateOtherItem(item.id, 'multiplier', 1);
+                                          }
+                                        }}
                                         style={{
                                           width: '70px',
                                           height: '36px',

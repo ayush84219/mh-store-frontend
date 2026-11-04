@@ -1524,7 +1524,10 @@ export default function MaterialIssueView({
     let hasShortage = false;
     const computedItems = bomMappings.map(mapping => {
       const material = materials.find(m => m.id === mapping.materialId);
-      const totalRequired = Math.round(pieces * mapping.ratePerPiece * 100) / 100;
+      const itemUnit = material ? material.unit : (mapping.bomUnit || 'pcs');
+      const isPc = String(itemUnit).trim().toLowerCase().startsWith('pc');
+      const rawReq = pieces * (Number(mapping.ratePerPiece) || 0);
+      const totalRequired = isPc ? Math.ceil(rawReq) : Math.round(rawReq * 100) / 100;
       const currentStock = material ? material.stock : 0;
       // Only mapped materials deduct inventory and can cause an inventory shortage.
       // Unmapped components issue without inventory stock deduction.
