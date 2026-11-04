@@ -1280,7 +1280,7 @@ export default function App() {
     }).catch(err => console.error('Failed to save issue log to DB:', err));
   };
 
-  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '', isWithoutBom = false, customId = null) => {
+  const handleIssueMaterials = (lotId, volume, issuedItems, isReissue = false, personName = '', receiverName = '', receiverDept = '', isWithoutBom = false, customId = null, remarks = '') => {
     const design = designs.find(d => String(d.id).trim().toLowerCase() === String(lotId).trim().toLowerCase());
 
     // Strict BOM validation: If design has required BOM components:
@@ -1338,6 +1338,7 @@ export default function App() {
       personName,
       receiverName: receiverName || '',
       receiverDept: receiverDept || '',
+      remarks: remarks || '',
       date: new Date().toLocaleDateString('en-GB') + ' ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
       materials: validatedItems.map(item => {
         const mat = materials.find(m => m.id === item.materialId);

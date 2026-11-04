@@ -1,5 +1,5 @@
 import { getBackendUrl } from '../utils/api';
-import { getCleanImageUrl } from '../utils/designHelpers';
+import { getCleanImageUrl, computeEffectiveFactor, getMultiplierFormulaText } from '../utils/designHelpers';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -1141,6 +1141,8 @@ export default function ExtraMaterialIssueView({
       id: 1,
       componentName: 'Label',
       materialId: '',
+      baseQty: '',
+      multiplier: 1,
       extraQty: '',
       unit: 'Pcs',
       reason: EXTRA_REASONS[0],
@@ -1156,6 +1158,8 @@ export default function ExtraMaterialIssueView({
         id: Date.now(),
         componentName: finalComp,
         materialId: '',
+        baseQty: '',
+        multiplier: 1,
         extraQty: '',
         unit: 'Pcs',
         reason: EXTRA_REASONS[0],
@@ -1178,6 +1182,15 @@ export default function ExtraMaterialIssueView({
     setWoItems(prev => prev.map(it => {
       if (it.id !== id) return it;
       const updated = { ...it, [field]: value };
+      if (field === 'baseQty') {
+        const b = parseFloat(value) || 0;
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = value === '' ? '' : Math.round(b * factor * 100) / 100;
+      } else if (field === 'multiplier' || field === 'multiplierOp') {
+        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.round(b * factor * 100) / 100;
+      }
       if (field === 'materialId') {
         const mat = materials.find(m => String(m.id) === String(value));
         if (mat) {
@@ -1280,6 +1293,8 @@ export default function ExtraMaterialIssueView({
       };
     });
 
+    const extraRemarks = woItems.map(it => it.remarks || it.reason).filter(Boolean).join('; ');
+
     if (onIssueMaterials) {
       onIssueMaterials(
         woLotId.trim(),
@@ -1290,7 +1305,8 @@ export default function ExtraMaterialIssueView({
         woReceiverName.trim(),
         woReceiverDept.trim(),
         true, // isWithoutBom
-        voucherId // customId
+        voucherId, // customId
+        extraRemarks // remarks
       );
     }
 
@@ -1308,6 +1324,7 @@ export default function ExtraMaterialIssueView({
       issueDate: issueDateStr,
       status: 'Issued',
       isWithoutBom: true,
+      remarks: extraRemarks,
       isReissue: false,
       is_reissue: 0,
       items: issuedPayloadItems.map(it => ({
@@ -1345,6 +1362,8 @@ export default function ExtraMaterialIssueView({
         id: Date.now(),
         componentName: 'Label',
         materialId: '',
+        baseQty: '',
+        multiplier: 1,
         extraQty: '',
         unit: 'Pcs',
         reason: EXTRA_REASONS[0],
@@ -2014,7 +2033,19 @@ export default function ExtraMaterialIssueView({
       String(d.lotNumber || '').trim().toLowerCase() === cleanLower
     );
 
-    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || 0;
+    let challanTotal = 0;
+    if (headerMatch?.Challan_History) {
+      try {
+        const chParsed = typeof headerMatch.Challan_History === 'string' ? JSON.parse(headerMatch.Challan_History) : headerMatch.Challan_History;
+        if (Array.isArray(chParsed) && chParsed.length > 0) {
+          challanTotal = Number(chParsed[0]?.totalQty) || 0;
+        }
+      } catch (_) {}
+    }
+
+    const memoryTotal = (challanTotal > 0 && Math.abs(challanTotal - Number(headerMatch?.Cutting_Qty)) > 50)
+      ? challanTotal
+      : (Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || 0);
     const hasMemoryData = Boolean(headerMatch || designMatch);
 
     // Set immediate cutting details synchronously without waiting for network
@@ -2238,6 +2269,20 @@ export default function ExtraMaterialIssueView({
       // When user inputs extra quantity > 0, auto-check the item!
       if (field === 'extraQty' && parseFloat(value) > 0) {
         updated.selectedForExtra = true;
+      }
+
+      if (field === 'baseQty') {
+        const b = parseFloat(value) || 0;
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = value === '' ? '' : Math.round(b * factor * 100) / 100;
+        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
+      }
+
+      if (field === 'multiplier' || field === 'multiplierOp') {
+        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.round(b * factor * 100) / 100;
+        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
       }
 
       return updated;
@@ -2580,8 +2625,13 @@ export default function ExtraMaterialIssueView({
       reason: it.reason,
       previouslyIssued: it.item.previouslyIssuedQty,
       receiverDept: rDept,
-      receiverName: rName
+      receiverName: rName,
+      remarks: it.item?.extraRemarks || it.reason || ''
     }));
+
+    const extraRemarks = isSingle
+      ? (items[0]?.item?.extraRemarks || items[0]?.reason || '')
+      : items.map(it => it.item?.extraRemarks || it.reason).filter(Boolean).join('; ');
 
     if (onIssueMaterials) {
       onIssueMaterials(
@@ -2595,7 +2645,8 @@ export default function ExtraMaterialIssueView({
         rName,
         rDept,
         false, // isWithoutBom
-        voucherId // customId
+        voucherId, // customId
+        extraRemarks // remarks
       );
     }
 
@@ -2615,6 +2666,7 @@ export default function ExtraMaterialIssueView({
       status: 'Issued',
       isReissue: false,
       is_reissue: 0,
+      remarks: extraRemarks,
       items: items.map(it => ({
         materialId: it.mat.id,
         materialName: it.mat.color && it.mat.color !== 'Default' ? `${it.mat.name} (${it.mat.color})` : it.mat.name,
@@ -2623,6 +2675,7 @@ export default function ExtraMaterialIssueView({
         totalRequired: it.extraQty,
         unit: it.mat.unit || it.item.unit || 'Pcs',
         reason: it.reason,
+        remarks: it.item?.extraRemarks || it.reason || '',
         previouslyIssued: it.item.previouslyIssuedQty,
         receiverDept: rDept,
         receiverName: rName,
@@ -2850,7 +2903,8 @@ export default function ExtraMaterialIssueView({
           combined.push({
             ...log,
             brand,
-            category: log.category || dMatch?.category || dbMatch?.category || 'Garment'
+            category: log.category || dMatch?.category || dbMatch?.category || 'Garment',
+            remarks: log.remarks || dbMatch?.remarks || ''
           });
         }
       }
@@ -2874,12 +2928,14 @@ export default function ExtraMaterialIssueView({
           personName: dbRow.person_name || dbRow.personName,
           receiverName: dbRow.receiver_name || dbRow.receiverName,
           receiverDept: dbRow.receiver_dept || dbRow.receiverDept,
+          remarks: dbRow.remarks || (dbRow.items && dbRow.items[0]?.reason) || '',
           materials: (dbRow.items || []).map(it => ({
             name: it.materialName || it.material_name || it.name,
             bomItemName: it.bomItemName || it.bom_item_name,
             qty: it.totalRequired || it.total_required || it.qty,
             unit: it.unit || 'Pcs',
-            reason: it.reason
+            reason: it.reason,
+            remarks: it.remarks || it.reason || ''
           })),
           isReissue: vId.startsWith('RI') ? true : false,
           category: dbRow.category || dMatch?.category || 'Extra Material Issue',
@@ -3002,12 +3058,14 @@ export default function ExtraMaterialIssueView({
       const receiverMatch = String(log.receiverName || '').toLowerCase().includes(q);
       const deptMatch = String(log.receiverDept || '').toLowerCase().includes(q);
       const catMatch = String(log.category || '').toLowerCase().includes(q);
+      const remarksMatch = String(log.remarks || '').toLowerCase().includes(q);
       const matMatch = log.materials && log.materials.some(m => 
         (m.name || '').toLowerCase().includes(q) || 
         (m.bomItemName || '').toLowerCase().includes(q) ||
-        (m.reason || '').toLowerCase().includes(q)
+        (m.reason || '').toLowerCase().includes(q) ||
+        (m.remarks || '').toLowerCase().includes(q)
       );
-      return idMatch || lotMatch || personMatch || receiverMatch || deptMatch || catMatch || matMatch;
+      return idMatch || lotMatch || personMatch || receiverMatch || deptMatch || catMatch || matMatch || remarksMatch;
     });
   }, [allExtraLogs, historyCategoryFilter, historyDateFrom, historyDateTo, historySearch]);
 
@@ -3350,6 +3408,7 @@ export default function ExtraMaterialIssueView({
                 <th>Issued Materials, Quantities & Specific Reasons</th>
                 <th style="width: 95px;">Issued By</th>
                 <th style="width: 115px;">Received By & Dept</th>
+                <th style="width: 95px;">Remarks</th>
               </tr>
             </thead>
             <tbody>
@@ -3389,6 +3448,9 @@ export default function ExtraMaterialIssueView({
                     <td>
                       <strong style="color: #000000; text-transform: uppercase;">${receiver}</strong>
                       <div style="font-size: 8.5px; color: #000000; font-weight: 600;">${log.receiverDept || 'Cutting'}</div>
+                    </td>
+                    <td>
+                      <div style="font-size: 8.5px; color: #000000; font-weight: 600;">${log.remarks || '—'}</div>
                     </td>
                   </tr>
                 `;
@@ -4989,6 +5051,7 @@ export default function ExtraMaterialIssueView({
                           <th style={{ minWidth: '280px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Assigned Inventory Item Map</th>
                           <th style={{ width: '115px', minWidth: '115px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Stock</th>
                           <th style={{ width: '100px', minWidth: '100px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Prev Issued</th>
+                          <th style={{ width: '105px', minWidth: '105px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Multiplier</th>
                           <th style={{ width: '150px', minWidth: '150px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Extra Qty</th>
                           <th style={{ width: '180px', minWidth: '180px', padding: '11px 10px', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Reason / Remarks</th>
                           <th style={{ width: '90px', minWidth: '90px', padding: '11px 8px', textAlign: 'center', fontWeight: '800', fontSize: '12px', letterSpacing: '0.3px', textTransform: 'uppercase' }}>Action</th>
@@ -4997,7 +5060,7 @@ export default function ExtraMaterialIssueView({
                       <tbody>
                         {displayedBomMappings.length === 0 ? (
                           <tr>
-                            <td colSpan={8} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
+                            <td colSpan={9} style={{ padding: '32px 16px', textAlign: 'center', color: '#64748b' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
                                 <Package size={28} style={{ opacity: 0.4, color: '#6366f1' }} />
                                 <div style={{ fontSize: '13.5px', fontWeight: '700', color: '#1e293b' }}>No active BOM components mapped for this lot.</div>
@@ -5137,6 +5200,37 @@ export default function ExtraMaterialIssueView({
                                         {item.previousLogsCount} {item.previousLogsCount === 1 ? 'log' : 'logs'}
                                       </span>
                                     )}
+                                  </div>
+                                </td>
+
+                                {/* Multiplier */}
+                                <td style={{ textAlign: 'center', padding: '10px 6px', verticalAlign: 'middle' }}>
+                                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                    <span style={{ fontSize: '13px', fontWeight: '800', color: '#6366f1' }}>&times;</span>
+                                    <input
+                                      type="number"
+                                      min="0.001"
+                                      step="any"
+                                      placeholder="1"
+                                      value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                      onChange={(e) => handleMappingChange(originalIdx, 'multiplier', e.target.value)}
+                                      style={{
+                                        width: '55px',
+                                        height: '36px',
+                                        textAlign: 'center',
+                                        fontWeight: '800',
+                                        fontSize: '13px',
+                                        padding: '2px 4px',
+                                        borderRadius: '7px',
+                                        border: '1.5px solid #c7d2fe',
+                                        backgroundColor: '#f5f3ff',
+                                        color: '#4338ca',
+                                        boxSizing: 'border-box',
+                                        outline: 'none',
+                                        MozAppearance: 'textfield'
+                                      }}
+                                      title="Multiplier factor (Default: 1)"
+                                    />
                                   </div>
                                 </td>
 
@@ -5583,7 +5677,9 @@ export default function ExtraMaterialIssueView({
                         <th style={{ padding: '10px 10px', textAlign: 'left', minWidth: '160px' }}>Component Name *</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '280px' }}>Inventory Material *</th>
                         <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Stock Available</th>
-                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Issue Qty *</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', whiteSpace: 'nowrap' }}>Base Qty</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Multiplier / Div</th>
+                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', whiteSpace: 'nowrap' }}>Issue Qty *</th>
                         <th style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', whiteSpace: 'nowrap' }}>Unit</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '180px' }}>Reason for Issue *</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>Remarks</th>
@@ -5681,8 +5777,140 @@ export default function ExtraMaterialIssueView({
                                 <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>—</span>
                               )}
                             </td>
-                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', verticalAlign: 'middle' }}>
+                            {/* Base Qty */}
+                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', verticalAlign: 'middle' }}>
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="any"
+                                placeholder="Base Qty"
+                                value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
+                                onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '6px 8px',
+                                  borderRadius: '8px',
+                                  border: '1.5px solid #cbd5e1',
+                                  background: '#ffffff',
+                                  fontSize: '13px',
+                                  fontWeight: '800',
+                                  textAlign: 'center',
+                                  color: '#0f172a',
+                                  boxSizing: 'border-box',
+                                  outline: 'none',
+                                  MozAppearance: 'textfield'
+                                }}
+                                title="Base Quantity"
+                              />
+                            </td>
+
+                            {/* Multiplier / Divide */}
+                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '130px', minWidth: '130px', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', width: '100%' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
+                                      handleUpdateWoItem(item.id, 'multiplierOp', nextOp);
+                                    }}
+                                    title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
+                                    style={{
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
+                                      background: item.multiplierOp === 'divide' ? '#fef3c7' : '#ede9fe',
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
+                                      borderRadius: '6px',
+                                      padding: '0 4px',
+                                      fontSize: '13px',
+                                      fontWeight: '900',
+                                      cursor: 'pointer',
+                                      height: '32px',
+                                      minWidth: '22px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    {item.multiplierOp === 'divide' ? '÷' : '×'}
+                                  </button>
+                                  <input
+                                    type="text"
+                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
+                                    value={item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1}
+                                    onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
+                                    style={{
+                                      width: '64px',
+                                      height: '36px',
+                                      padding: '0 6px',
+                                      borderRadius: '8px',
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
+                                      background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
+                                      fontSize: '13px',
+                                      fontWeight: '800',
+                                      textAlign: 'center',
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
+                                      boxSizing: 'border-box',
+                                      outline: 'none'
+                                    }}
+                                    title="Multiplier factor or fraction (e.g. 1, 2, 1/12, 1/24, or divide by 12)"
+                                  />
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                  <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                                    {item.multiplierOp === 'divide' ? '÷ Div' : 'Mult'}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleUpdateWoItem(item.id, 'multiplier', '1/12');
+                                      handleUpdateWoItem(item.id, 'multiplierOp', 'multiply');
+                                    }}
+                                    title="Quick set fraction: 1/12 (e.g. per dozen)"
+                                    style={{
+                                      fontSize: '9px',
+                                      fontWeight: '800',
+                                      padding: '1px 4px',
+                                      borderRadius: '4px',
+                                      border: String(item.multiplier).trim() === '1/12' ? '1px solid #6d28d9' : '1px solid #cbd5e1',
+                                      background: String(item.multiplier).trim() === '1/12' ? '#6d28d9' : '#f8fafc',
+                                      color: String(item.multiplier).trim() === '1/12' ? '#ffffff' : '#475569',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    1/12
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleUpdateWoItem(item.id, 'multiplier', '12');
+                                      handleUpdateWoItem(item.id, 'multiplierOp', 'divide');
+                                    }}
+                                    title="Quick set divide: ÷ 12 (Base divided by 12)"
+                                    style={{
+                                      fontSize: '9px',
+                                      fontWeight: '800',
+                                      padding: '1px 4px',
+                                      borderRadius: '4px',
+                                      border: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '1px solid #b45309' : '1px solid #cbd5e1',
+                                      background: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#f59e0b' : '#f8fafc',
+                                      color: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#ffffff' : '#475569',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ÷12
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Total Issue Qty */}
+                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', verticalAlign: 'middle' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                <div style={{ fontSize: '10px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                  {getMultiplierFormulaText(item.baseQty || item.extraQty || 0, item.multiplier, item.multiplierOp, item.extraQty || 0)}
+                                </div>
                                 <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
                                   <input
                                     type="number"
@@ -6371,6 +6599,7 @@ export default function ExtraMaterialIssueView({
                       <th style={{ padding: '10px 12px' }}>Issued Materials</th>
                       <th style={{ padding: '10px 12px' }}>Issued By</th>
                       <th style={{ padding: '10px 12px' }}>Received By</th>
+                      <th style={{ padding: '10px 12px', minWidth: '95px' }}>Remarks</th>
                       <th style={{ padding: '10px 12px', textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
@@ -6505,6 +6734,17 @@ export default function ExtraMaterialIssueView({
                                 </span>
                               )}
                             </div>
+                          </td>
+
+                          {/* Remarks */}
+                          <td style={{ padding: '10px 12px', fontSize: '12px', color: '#334155' }}>
+                            {log.remarks ? (
+                              <span style={{ fontWeight: '600', color: '#0f172a' }} title={log.remarks}>
+                                {log.remarks}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#94a3b8' }}>—</span>
+                            )}
                           </td>
 
                           {/* Actions: Print and Preview buttons matching user screenshot */}

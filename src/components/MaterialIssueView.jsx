@@ -1054,6 +1054,7 @@ export default function MaterialIssueView({
   const [personName, setPersonName] = useState(currentUser?.name || '');
   const [receiverName, setReceiverName] = useState('');
   const [receiverDept, setReceiverDept] = useState('Cutting');
+  const [remarks, setRemarks] = useState('');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logsCategoryFilter, setLogsCategoryFilter] = useState('all'); // 'all' | 'with_bom' | 'without_bom' | 'extra'
   const [printLog, setPrintLog] = useState(null);
@@ -1711,6 +1712,7 @@ export default function MaterialIssueView({
       personName: personName.trim(),
       receiverName: receiverName.trim(),
       receiverDept: receiverDept.trim() || 'Cutting',
+      remarks: remarks.trim(),
       date: dateStr
     };
 
@@ -1719,15 +1721,15 @@ export default function MaterialIssueView({
 
   const handleConfirmIssue = () => {
     if (!previewIssue) return;
-    const { design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, date } = previewIssue;
+    const { design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, remarks: rRemarks, date } = previewIssue;
 
     // Perform actual issue
-    onIssueMaterials(design.id, p, items, isReissue, pName, rName, rDept);
+    onIssueMaterials(design.id, p, items, isReissue, pName, rName, rDept, false, null, rRemarks || '');
 
     setFormSuccess(`Successfully issued materials for Lot ${design.id} production batch of ${p} units!`);
 
     // Save issue data for the print prompt, close preview
-    setShowPrintPrompt({ design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, date });
+    setShowPrintPrompt({ design, pieces: p, items, isReissue, personName: pName, receiverName: rName, receiverDept: rDept, remarks: rRemarks || '', date });
     setPreviewIssue(null);
     setSelectedDesignId('');
     setSearchQuery('');
@@ -1736,6 +1738,7 @@ export default function MaterialIssueView({
     setPersonName(currentUser?.name || '');
     setReceiverName('');
     setReceiverDept('Cutting');
+    setRemarks('');
 
     // Clear success message after 5 seconds
     setTimeout(() => setFormSuccess(''), 5000);
@@ -3217,6 +3220,22 @@ export default function MaterialIssueView({
                 placeholder="e.g. Cutting / Stitching / Line 1"
                 value={receiverDept}
                 onChange={(e) => setReceiverDept(e.target.value)}
+                disabled={isSelectedDesignAlreadyIssued}
+                style={{ height: '38px', fontSize: '13px' }}
+              />
+            </div>
+
+            {/* Remarks / Issue Notes */}
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label" style={{ fontWeight: '600', fontSize: '12.5px', marginBottom: '4px' }}>
+                Remarks / Issue Notes
+              </label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Floor Requisition / Sample Batch"
+                value={remarks}
+                onChange={(e) => setRemarks(e.target.value)}
                 disabled={isSelectedDesignAlreadyIssued}
                 style={{ height: '38px', fontSize: '13px' }}
               />
@@ -5547,7 +5566,8 @@ export default function MaterialIssueView({
                     <th>Lot Number</th>
                     <th>Garment Category</th>
                     <th>Volume (Pieces)</th>
-                    <th>Person Name</th>
+                    <th>Issuer &amp; Receiver</th>
+                    <th>Remarks</th>
                     <th>Date Issued</th>
                     <th>Issued Materials Details</th>
                     <th className="print-hide" style={{ textAlign: 'center' }}>Action</th>
@@ -5556,7 +5576,7 @@ export default function MaterialIssueView({
                 <tbody>
                   {filteredLogs.length === 0 ? (
                     <tr>
-                      <td colSpan="9" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                      <td colSpan="10" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                         {issueLogs.length === 0
                           ? 'No material issues logged for this manufacturing cycle.'
                           : 'No matching transaction logs found.'}
@@ -5623,7 +5643,23 @@ export default function MaterialIssueView({
                               <strong>{(log.volume || 0).toLocaleString()} units</strong>
                             )}
                           </td>
-                        <td><strong>{log.personName || 'System'}</strong></td>
+                        <td>
+                          <strong>{log.personName || 'System'}</strong>
+                          {log.receiverName && (
+                            <div style={{ fontSize: '11px', color: '#64748b' }}>
+                              → {log.receiverName} {log.receiverDept ? `(${log.receiverDept})` : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {log.remarks ? (
+                            <span style={{ fontSize: '11.5px', color: '#475569', fontWeight: '600' }} title={log.remarks}>
+                              {log.remarks}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>—</span>
+                          )}
+                        </td>
                         <td>{log.date}</td>
                         <td style={{ fontSize: '12px' }}>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -5688,8 +5724,10 @@ export default function MaterialIssueView({
                 <div><strong>Date {printLog.isReturn ? 'Returned' : 'Issued'}:</strong> {printLog.date}</div>
                 <div><strong>Garment Category:</strong> {printLog.category}</div>
                 <div><strong>{printLog.isReturn ? 'Reason / Notes' : 'Issuer (Person)'}:</strong> {printLog.personName || 'System'}</div>
+                {printLog.receiverName && <div><strong>Receiver:</strong> {printLog.receiverName} {printLog.receiverDept ? `(${printLog.receiverDept})` : ''}</div>}
                 {!printLog.isReturn && <div><strong>Batch Volume:</strong> {printLog.volume.toLocaleString()} units</div>}
                 <div><strong>Status:</strong> {printLog.isReturn ? 'Returned to Inventory' : printLog.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
+                {printLog.remarks && <div style={{ gridColumn: 'span 2' }}><strong>Remarks / Notes:</strong> {printLog.remarks}</div>}
               </div>
 
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '4px' }}>
@@ -5829,7 +5867,9 @@ export default function MaterialIssueView({
                     <div><strong>Brand:</strong> {previewIssue.design.brand || '—'}</div>
                     <div><strong>Batch Volume:</strong> {previewIssue.pieces.toLocaleString()} units</div>
                     <div><strong>Issuer (Person):</strong> {previewIssue.personName}</div>
+                    <div><strong>Receiver:</strong> {previewIssue.receiverName || 'Cutting'} {previewIssue.receiverDept ? `(${previewIssue.receiverDept})` : ''}</div>
                     <div><strong>Status:</strong> {previewIssue.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
+                    {previewIssue.remarks && <div style={{ gridColumn: 'span 2' }}><strong>Remarks / Notes:</strong> {previewIssue.remarks}</div>}
                   </div>
 
                   {/* Materials table */}
@@ -6074,7 +6114,9 @@ export default function MaterialIssueView({
                     <div><strong>Brand:</strong> {showPrintPrompt.design.brand || '—'}</div>
                     <div><strong>Batch Volume:</strong> {showPrintPrompt.pieces.toLocaleString()} units</div>
                     <div><strong>Issuer (Person):</strong> {showPrintPrompt.personName}</div>
+                    <div><strong>Receiver:</strong> {showPrintPrompt.receiverName || 'Cutting'} {showPrintPrompt.receiverDept ? `(${showPrintPrompt.receiverDept})` : ''}</div>
                     <div><strong>Issue Type:</strong> {showPrintPrompt.isReissue ? 'Re-issue (Wastage / Replacement)' : 'First-Time Initial Issue'}</div>
+                    {showPrintPrompt.remarks && <div style={{ gridColumn: 'span 2' }}><strong>Remarks / Notes:</strong> {showPrintPrompt.remarks}</div>}
                   </div>
 
                   {/* Materials table */}

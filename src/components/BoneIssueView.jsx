@@ -3,7 +3,7 @@ import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
   Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap,
-  Scale, MapPin, Edit2, CheckCircle2, Eye, Clock
+  Scale, MapPin, Edit2, CheckCircle2, Eye, Clock, RotateCcw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -810,6 +810,7 @@ export default function BoneIssueView({
             personName: record.issuerName,
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
+            remarks: record.remarks || '',
             date: record.date,
             materials: [{
               name: record.boneMaterialName || 'Bone Chinese (Beige)',
@@ -1412,14 +1413,42 @@ export default function BoneIssueView({
     }
   };
 
+  const handleResetForm = useCallback(() => {
+    setSearchLotInput('');
+    setLotDetails(null);
+    setActiveLotCutting(null);
+    setLotError('');
+    if (typeof setPrefilledLotNo === 'function') {
+      try { setPrefilledLotNo(''); } catch (_) {}
+    }
+    setBomStatus('idle');
+    setBomDesign(null);
+    setIssuePcs(0);
+    setBoneWeightKg('2.50');
+    setBoneRollCount('');
+    setCustomWidth('');
+    setSelectedShade('');
+    setReceiverName('');
+    setRemarks('');
+    setSelectedBoneMaterialId('ST00346');
+    setBoneMaterialName('Bone Chinese (Beige)');
+    fetchNextIssueSlipNo(isWithoutLot);
+    setTimeout(() => {
+      if (searchInputRef?.current) {
+        try { searchInputRef.current.focus(); } catch (_) {}
+      }
+    }, 150);
+  }, [setPrefilledLotNo, isWithoutLot]);
+
   const handleConfirmAndSaveBill = async () => {
     if (!generatedSlipData) return;
     setSavingSlip(true);
     try {
       await saveToHistory(generatedSlipData);
-      await fetchNextIssueSlipNo();
+      await fetchNextIssueSlipNo(isWithoutLot);
       setGeneratedSlipData(prev => prev ? { ...prev, isSaved: true } : null);
       showToast(`Bone Issue Voucher ${generatedSlipData.slipNo} confirmed and saved successfully!`);
+      handleResetForm();
     } catch (err) {
       console.error('Save error:', err);
       showToast('Failed to save voucher details.', 'error');
@@ -1706,11 +1735,36 @@ export default function BoneIssueView({
               </div>
             </div>
 
-            <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0284c7' }}>
-              {isWithoutLot
-                ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
-                : '🛡️ With BOM: Search and verify Lot against approved BOM.'}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: isWithoutLot ? '#c2410c' : '#0284c7' }}>
+                {isWithoutLot
+                  ? '⚡ Without BOM: Direct floor issue unlocked. Lot No required, BOM verification bypassed!'
+                  : '🛡️ With BOM: Search and verify Lot against approved BOM.'}
+              </span>
+              <button
+                type="button"
+                onClick={handleResetForm}
+                title="Clear all fields & start fresh"
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '7px',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: '#475569',
+                  fontSize: '11.5px',
+                  fontWeight: '700',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease'
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#94a3b8'; e.currentTarget.style.color = '#0f172a'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#475569'; }}
+              >
+                <RotateCcw size={12} /> Reset Form
+              </button>
+            </div>
           </div>
 
           {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT BOM VS WITH BOM */}
@@ -3230,39 +3284,64 @@ export default function BoneIssueView({
                   )}
                 </div>
 
-                <button
-                  type="button"
-                  onClick={generateBoneIssueBill}
-                  disabled={generating || (!isWithoutLot && bomStatus !== 'approved')}
-                  title={(!isWithoutLot && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
-                  style={{
-                    padding: '12px 32px',
-                    borderRadius: '12px',
-                    border: 'none',
-                    background: (isWithoutLot || bomStatus === 'approved')
-                      ? (isWithoutLot ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)')
-                      : '#94a3b8',
-                    color: '#ffffff',
-                    fontSize: '15px',
-                    fontWeight: '800',
-                    cursor: (generating || (!isWithoutLot && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
-                    boxShadow: (isWithoutLot || bomStatus === 'approved') ? '0 6px 18px rgba(2, 132, 199, 0.4)' : 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px'
-                  }}
-                >
-                  {generating ? (
-                    <RefreshCw size={18} className="animate-spin" />
-                  ) : (
-                    <Printer size={18} />
-                  )}
-                  <span>
-                    {generating
-                      ? 'Generating Issue Slip...'
-                      : 'Generate Material Issue Bill'}
-                  </span>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={handleResetForm}
+                    style={{
+                      padding: '12px 18px',
+                      borderRadius: '12px',
+                      border: '1.5px solid #cbd5e1',
+                      background: '#f8fafc',
+                      color: '#475569',
+                      fontSize: '14px',
+                      fontWeight: '700',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      transition: 'all 0.15s ease'
+                    }}
+                    title="Clear and reset all inputs for a fresh voucher"
+                  >
+                    <RotateCcw size={16} />
+                    <span>Reset Form</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={generateBoneIssueBill}
+                    disabled={generating || (!isWithoutLot && bomStatus !== 'approved')}
+                    title={(!isWithoutLot && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
+                    style={{
+                      padding: '12px 32px',
+                      borderRadius: '12px',
+                      border: 'none',
+                      background: (isWithoutLot || bomStatus === 'approved')
+                        ? (isWithoutLot ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)')
+                        : '#94a3b8',
+                      color: '#ffffff',
+                      fontSize: '15px',
+                      fontWeight: '800',
+                      cursor: (generating || (!isWithoutLot && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
+                      boxShadow: (isWithoutLot || bomStatus === 'approved') ? '0 6px 18px rgba(2, 132, 199, 0.4)' : 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}
+                  >
+                    {generating ? (
+                      <RefreshCw size={18} className="animate-spin" />
+                    ) : (
+                      <Printer size={18} />
+                    )}
+                    <span>
+                      {generating
+                        ? 'Generating Issue Slip...'
+                        : 'Generate Material Issue Bill'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
         </>
@@ -3510,7 +3589,12 @@ export default function BoneIssueView({
               </div>
               <button
                 type="button"
-                onClick={() => setGeneratedSlipData(null)}
+                onClick={() => {
+                  setGeneratedSlipData(null);
+                  if (generatedSlipData?.isSaved) {
+                    handleResetForm();
+                  }
+                }}
                 style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
               >
                 <X size={20} />
@@ -3752,7 +3836,10 @@ export default function BoneIssueView({
                   <div style={{ textAlign: 'center' }}>
                     <button
                       type="button"
-                      onClick={() => setGeneratedSlipData(null)}
+                      onClick={() => {
+                        setGeneratedSlipData(null);
+                        handleResetForm();
+                      }}
                       style={{
                         background: 'transparent',
                         border: 'none',

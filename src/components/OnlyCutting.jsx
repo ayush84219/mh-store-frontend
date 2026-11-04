@@ -827,56 +827,89 @@ export default function OnlyCutting({
                                   <RefreshCw size={20} className="animate-spin" style={{ margin: '0 auto 6px auto' }} />
                                   <span>Loading matrix rows for #{lot.Lot_Number}...</span>
                                 </div>
-                              ) : matrix && matrix.rows && matrix.rows.length > 0 ? (
-                                <div style={{ overflowX: 'auto', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
-                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                                    <thead>
-                                      <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
-                                        <th style={{ padding: '8px 14px', textAlign: 'left', borderRight: '1px solid var(--border-color)' }}>Color / Shade</th>
-                                        <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>Table #</th>
-                                        <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>M</th>
-                                        <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>L</th>
-                                        <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>XL</th>
-                                        <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>XXL</th>
-                                        <th style={{ padding: '8px 14px', textAlign: 'right', fontWeight: '700' }}>Total Pcs</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {matrix.rows.map((r, mIdx) => (
-                                        <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                                          <td style={{ padding: '8px 14px', fontWeight: '600', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{r.color}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>{r.cuttingTable || 6}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.M ?? 0}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.L ?? 0}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.XL ?? 0}</td>
-                                          <td style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>{r.sizes?.XXL ?? 0}</td>
-                                          <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: '800', color: '#10b981' }}>{r.totalPcs || 0}</td>
+                              ) : matrix && matrix.rows && matrix.rows.length > 0 ? (() => {
+                                // Dynamically detect all active size columns for this lot (e.g. 24, 26..36, or S, M, L, XL, etc.)
+                                const dynamicSizes = [];
+                                matrix.rows.forEach(r => {
+                                  if (r.sizes && typeof r.sizes === 'object') {
+                                    Object.keys(r.sizes).forEach(k => {
+                                      const cleanK = String(k).trim();
+                                      if (cleanK && !dynamicSizes.includes(cleanK) && !['color', 'table', 'cuttingtable', 'totalpcs', 'total'].includes(cleanK.toLowerCase())) {
+                                        dynamicSizes.push(cleanK);
+                                      }
+                                    });
+                                  }
+                                });
+                                if (dynamicSizes.length === 0 && lot.Sizes) {
+                                  lot.Sizes.split(/[,/;\r\n]+/).map(s => s.trim().toUpperCase()).filter(Boolean).forEach(s => {
+                                    if (!dynamicSizes.includes(s)) dynamicSizes.push(s);
+                                  });
+                                }
+                                const displaySizes = dynamicSizes.length > 0 ? dynamicSizes : ['M', 'L', 'XL', 'XXL'];
+
+                                return (
+                                  <div style={{ overflowX: 'auto', backgroundColor: 'var(--bg-primary)', borderRadius: '6px', border: '1px solid var(--border-color)' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                                      <thead>
+                                        <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+                                          <th style={{ padding: '8px 14px', textAlign: 'left', borderRight: '1px solid var(--border-color)' }}>Color / Shade</th>
+                                          <th style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)' }}>Table #</th>
+                                          {displaySizes.map(sz => (
+                                            <th key={sz} style={{ padding: '8px 10px', textAlign: 'center', borderRight: '1px solid var(--border-color)', fontWeight: '700' }}>
+                                              {sz}
+                                            </th>
+                                          ))}
+                                          <th style={{ padding: '8px 14px', textAlign: 'right', fontWeight: '700' }}>Total Pcs</th>
                                         </tr>
-                                      ))}
-                                    </tbody>
-                                    <tfoot>
-                                      {(() => {
-                                        const totalM = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.M) || 0), 0);
-                                        const totalL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.L) || 0), 0);
-                                        const totalXL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.XL) || 0), 0);
-                                        const totalXXL = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.XXL) || 0), 0);
-                                        const totalAllPcs = matrix.rows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
-                                        return (
-                                          <tr style={{ backgroundColor: 'var(--bg-secondary)', borderTop: '2px solid var(--border-color)', fontWeight: '800' }}>
-                                            <td style={{ padding: '9px 14px', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>Total</td>
-                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>—</td>
-                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalM}</td>
-                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalL}</td>
-                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalXL}</td>
-                                            <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{totalXXL}</td>
-                                            <td style={{ padding: '9px 14px', textAlign: 'right', color: '#10b981', fontSize: '13px' }}>{totalAllPcs}</td>
+                                      </thead>
+                                      <tbody>
+                                        {matrix.rows.map((r, mIdx) => (
+                                          <tr key={mIdx} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                            <td style={{ padding: '8px 14px', fontWeight: '600', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>{r.color}</td>
+                                            <td style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>{r.cuttingTable || 6}</td>
+                                            {displaySizes.map(sz => {
+                                              const qty = r.sizes?.[sz] ?? 0;
+                                              return (
+                                                <td key={sz} style={{
+                                                  padding: '8px 10px',
+                                                  textAlign: 'center',
+                                                  borderRight: '1px solid var(--border-color)',
+                                                  fontWeight: qty > 0 ? '700' : '400',
+                                                  color: qty > 0 ? 'var(--text-main)' : 'var(--text-muted)'
+                                                }}>
+                                                  {qty}
+                                                </td>
+                                              );
+                                            })}
+                                            <td style={{ padding: '8px 14px', textAlign: 'right', fontWeight: '800', color: '#10b981' }}>{r.totalPcs || 0}</td>
                                           </tr>
-                                        );
-                                      })()}
-                                    </tfoot>
-                                  </table>
-                                </div>
-                              ) : (
+                                        ))}
+                                      </tbody>
+                                      <tfoot>
+                                        {(() => {
+                                          const sizeTotals = {};
+                                          displaySizes.forEach(sz => {
+                                            sizeTotals[sz] = matrix.rows.reduce((sum, r) => sum + (Number(r.sizes?.[sz]) || 0), 0);
+                                          });
+                                          const totalAllPcs = matrix.rows.reduce((sum, r) => sum + (Number(r.totalPcs) || 0), 0);
+                                          return (
+                                            <tr style={{ backgroundColor: 'var(--bg-secondary)', borderTop: '2px solid var(--border-color)', fontWeight: '800' }}>
+                                              <td style={{ padding: '9px 14px', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>Total</td>
+                                              <td style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-muted)', borderRight: '1px solid var(--border-color)' }}>—</td>
+                                              {displaySizes.map(sz => (
+                                                <td key={sz} style={{ padding: '9px 10px', textAlign: 'center', color: 'var(--text-main)', borderRight: '1px solid var(--border-color)' }}>
+                                                  {sizeTotals[sz] || 0}
+                                                </td>
+                                              ))}
+                                              <td style={{ padding: '9px 14px', textAlign: 'right', color: '#10b981', fontSize: '13px' }}>{totalAllPcs}</td>
+                                            </tr>
+                                          );
+                                        })()}
+                                      </tfoot>
+                                    </table>
+                                  </div>
+                                );
+                              })() : (
                                 <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
                                   {lot.Shades ? `Shades: ${lot.Shades} | Sizes: ${lot.Sizes}` : 'No detailed matrix breakdown rows available.'}
                                 </div>

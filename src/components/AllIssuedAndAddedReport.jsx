@@ -538,7 +538,7 @@ export default function AllIssuedAndAddedReport({
         receiverDept: isOther ? 'Production Floor' : 'Cutting / Stitching Floor',
         supplier: '—',
         location: 'Store / Floor',
-        remarks: e.remarks || (isOther ? 'Direct W/O BOM Floor Issue' : ''),
+        remarks: e.remarks || payloadObj.remarks || '',
         photo: matPhoto,
         raw: e
       });
@@ -755,7 +755,7 @@ export default function AllIssuedAndAddedReport({
             receiverDept: l.receiverDept || 'Cutting / Stitching',
             supplier: '—',
             location: 'Main Store',
-            remarks: l.isReissue ? 'Re-Issue' : (l.isReturn ? 'Return' : ''),
+            remarks: l.remarks || mat.remarks || l.reason || mat.reason || (l.isReissue ? 'Re-Issue' : (l.isReturn ? 'Return' : '')),
             photo,
             raw: { ...l, materialItem: mat }
           });
@@ -830,7 +830,7 @@ export default function AllIssuedAndAddedReport({
           receiverDept: l.receiverDept || 'Floor',
           supplier: '—',
           location: 'Store',
-          remarks: l.isReissue ? 'Re-Issue' : '',
+          remarks: l.remarks || l.reason || (l.isReissue ? 'Re-Issue' : ''),
           photo: fallbackPhoto,
           raw: l
         });
@@ -1533,7 +1533,7 @@ export default function AllIssuedAndAddedReport({
             `${r.receiverName || '—'}\n${r.receiverDept || ''}`,
             r.issuerName || '—',
             r.location || '—',
-            r.remarks || '—'
+            r.remarks || ''
           ]);
 
       autoTable(doc, {
@@ -1697,7 +1697,7 @@ export default function AllIssuedAndAddedReport({
           <td style="vertical-align: middle;"><strong>${formatPersonName(r.receiverName)}</strong><br/><small>${r.receiverDept}</small></td>
           <td style="vertical-align: middle;">${formatPersonName(r.issuerName)}</td>
           <td style="vertical-align: middle;">${r.location}</td>
-          <td style="max-width: 140px; word-break: break-word; vertical-align: middle;">${r.remarks || '—'}</td>
+          <td style="max-width: 140px; word-break: break-word; vertical-align: middle;">${r.remarks || ''}</td>
         </tr>
       `).join('');
 

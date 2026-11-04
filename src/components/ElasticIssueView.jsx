@@ -5,11 +5,11 @@ import {
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
   ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale,
-  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2, Clock, Scan
+  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2, Clock, Scan, RotateCcw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
-import { getCleanImageUrl } from '../utils/designHelpers';
+import { getCleanImageUrl, computeEffectiveFactor, getMultiplierFormulaText } from '../utils/designHelpers';
 import SmartSelectWithManual from './SmartSelectWithManual';
 import { SearchableMaterialDropdown } from './WithoutBomMaterialIssueView';
 
@@ -952,7 +952,8 @@ export default function ElasticIssueView({
         String(h.issuerName || '').toLowerCase().includes(q) ||
         String(h.otherMaterialName || '').toLowerCase().includes(q) ||
         String(h.date || '').toLowerCase().includes(q) ||
-        String(h.style || '').toLowerCase().includes(q);
+        String(h.style || '').toLowerCase().includes(q) ||
+        String(h.remarks || '').toLowerCase().includes(q);
     });
 
     return [...list].sort((a, b) => {
@@ -1432,10 +1433,10 @@ export default function ElasticIssueView({
 
   // Dropdown options matching Image 2
   const otherComponentTypeOptions = useMemo(() => {
-    const opts = allOtherComponentTypes.map((type, idx) => ({
+    const opts = [{ value: '', label: '-- Select Component --' }, ...allOtherComponentTypes.map((type, idx) => ({
       value: type,
       label: `${idx + 1}. ${type}`
-    }));
+    }))];
     opts.push({ value: '__custom__', label: '✏️ + Add Manually (Custom Type)' });
     if (customOtherComponentTypes.length > 0) {
       opts.push({ value: '__manage__', label: `⚙️ Manage Types (${customOtherComponentTypes.length})...` });
@@ -1447,7 +1448,7 @@ export default function ElasticIssueView({
   const [otherItems, setOtherItems] = useState([
     {
       id: 1,
-      componentType: 'DORI',
+      componentType: '',
       customComponentType: '',
       isCustomType: false,
       entryMode: 'choose', // 'choose' | 'manual'
@@ -1459,6 +1460,8 @@ export default function ElasticIssueView({
       availableStock: 0,
       location: '',
       calcMode: 'direct',
+      baseQty: 1,
+      multiplier: 1,
       totalQty: 1
     }
   ]);
@@ -1494,7 +1497,7 @@ export default function ElasticIssueView({
   };
 
   // Add Item Row
-  const handleAddOtherItemRow = (compType = 'DORI', defaultMatId = '', entryMode = 'choose') => {
+  const handleAddOtherItemRow = (compType = '', defaultMatId = '', entryMode = 'choose') => {
     const mat = defaultMatId ? (materials || []).find(m => String(m.id) === String(defaultMatId)) : null;
     let defUnit = (compType === 'DORI' || compType === 'ELASTIC' || compType === 'TAPE' || compType === 'LACE') ? 'Mtr' : 'Pcs';
     setOtherItems(prev => [
@@ -1506,7 +1509,7 @@ export default function ElasticIssueView({
         isCustomType: false,
         entryMode: entryMode,
         materialId: mat ? mat.id : '',
-        materialName: mat ? mat.name : (entryMode === 'manual' ? `${compType} Item` : ''),
+        materialName: mat ? mat.name : (entryMode === 'manual' ? (compType ? `${compType} Item` : 'Custom Item') : ''),
         itemCode: mat ? (formatItemCode(mat, null, materials) || mat.itemCode || '') : '',
         imageUrl: mat ? (mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '') : '',
         color: mat ? (mat.color || mat.shade || '') : '',
@@ -1514,6 +1517,9 @@ export default function ElasticIssueView({
         availableStock: mat ? (Number(mat.stock) || 0) : 0,
         location: mat ? (mat.location || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
         calcMode: 'direct',
+        baseQty: 1,
+        multiplier: 1,
+        multiplierOp: 'multiply',
         totalQty: 1
       }
     ]);
@@ -1524,7 +1530,7 @@ export default function ElasticIssueView({
     if (otherItems.length <= 1) {
       setOtherItems([{
         id: Date.now(),
-        componentType: allOtherComponentTypes[0] || 'DORI',
+        componentType: '',
         customComponentType: '',
         isCustomType: false,
         entryMode: 'choose',
@@ -1536,6 +1542,9 @@ export default function ElasticIssueView({
         availableStock: 0,
         location: '',
         calcMode: 'direct',
+        baseQty: 1,
+        multiplier: 1,
+        multiplierOp: 'multiply',
         totalQty: 1
       }]);
       return;
@@ -1544,10 +1553,18 @@ export default function ElasticIssueView({
   };
 
   // Update Item Row Field
-  const handleUpdateOtherItem = (rowId, field, value) => {
+  const handleUpdateOtherItem = (rowId, fieldOrObj, value) => {
     setOtherItems(prev => prev.map(item => {
       if (item.id !== rowId) return item;
-      return { ...item, [field]: value };
+      let updated = typeof fieldOrObj === 'object' ? { ...item, ...fieldOrObj } : { ...item, [fieldOrObj]: value };
+      const isBaseUpdate = fieldOrObj === 'baseQty' || (typeof fieldOrObj === 'object' && 'baseQty' in fieldOrObj);
+      const isMultUpdate = fieldOrObj === 'multiplier' || fieldOrObj === 'multiplierOp' || (typeof fieldOrObj === 'object' && ('multiplier' in fieldOrObj || 'multiplierOp' in fieldOrObj));
+      if (isBaseUpdate || isMultUpdate) {
+        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : 1;
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.totalQty = Math.round(b * factor * 100) / 100;
+      }
+      return updated;
     }));
   };
 
@@ -2258,7 +2275,19 @@ export default function ElasticIssueView({
       String(d.lotNumber || '').trim().toLowerCase() === cleanLower
     );
 
-    const memoryTotal = Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || Number(lotDetails?.quantity) || 0;
+    let challanTotal = 0;
+    if (headerMatch?.Challan_History) {
+      try {
+        const chParsed = typeof headerMatch.Challan_History === 'string' ? JSON.parse(headerMatch.Challan_History) : headerMatch.Challan_History;
+        if (Array.isArray(chParsed) && chParsed.length > 0) {
+          challanTotal = Number(chParsed[0]?.totalQty) || 0;
+        }
+      } catch (_) {}
+    }
+
+    const memoryTotal = (challanTotal > 0 && Math.abs(challanTotal - Number(headerMatch?.Cutting_Qty)) > 50)
+      ? challanTotal
+      : (Number(headerMatch?.Cutting_Qty) || Number(designMatch?.quantity) || Number(lotDetails?.quantity) || 0);
     const hasMemoryData = Boolean(headerMatch || designMatch || lotDetails);
 
     setActiveLotCutting({
@@ -2613,6 +2642,7 @@ export default function ElasticIssueView({
             personName: record.issuerName,
             receiverName: record.receiverName,
             receiverDept: 'CUTTING',
+            remarks: record.remarks || '',
             date: record.date,
             materials: itemsToDeduct.length > 0
               ? itemsToDeduct.map(i => ({
@@ -2779,15 +2809,6 @@ export default function ElasticIssueView({
       if (data.style || data.garmentType) {
         setWithoutLotStyle(data.style || data.garmentType);
       }
-
-      const modeDesc = materialMode === 'other'
-        ? `${otherMaterialName || 'Other Accessory'} floor issue`
-        : materialMode === 'tape'
-          ? `${tapeMaterialName || 'Tape'} issue`
-          : materialMode === 'bone'
-            ? `${boneMaterialName || 'Bone'} issue`
-            : 'Internal Elastic waistband issue';
-      setRemarks(`${modeDesc} for Lot ${data.lotNo || cleanLot} (${data.style || 'Garment'} - ${data.brand || ''}).`);
 
       setRecentLots(prev => {
         const updated = [lotToQuery, ...prev.filter(l => l !== lotToQuery)];
@@ -3318,7 +3339,7 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      const remText = remarks || `Standard internal material issue bill for Elastic (${style || 'Garment'}). Cutting Qty: ${quantity || 0} Pcs.`;
+      const remText = remarks || '—';
       doc.text(`Remarks: ${remText}`, im + 8, y + 41);
 
     } else if (effectiveMode === 'tape') {
@@ -3336,8 +3357,8 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      const remText = remarks || `Standard internal material issue bill for Tape (${style || 'Garment'}). Cutting Qty: ${quantity || 0} Pcs.`;
-      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+      const remTextTape = remarks || '—';
+      doc.text(`Remarks: ${remTextTape}`, im + 8, y + 41);
 
     } else if (effectiveMode === 'bone') {
       doc.setFont('helvetica', 'normal');
@@ -3353,8 +3374,8 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      const remText = remarks || `Standard internal material issue bill for Bone (${style || 'Garment'}).`;
-      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+      const remTextBone = remarks || '—';
+      doc.text(`Remarks: ${remTextBone}`, im + 8, y + 41);
 
     } else if (effectiveMode === 'other') {
       doc.setFont('helvetica', 'normal');
@@ -3370,10 +3391,8 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      const remText = (remarks && !remarks.toLowerCase().includes('elastic waistband'))
-        ? remarks
-        : `Direct material floor issue for ${cleanMaterialName(data.otherMaterialName || otherMaterialName || 'Other Accessory')} (${style || 'Garment'}).`;
-      doc.text(`Remarks: ${remText}`, im + 8, y + 41);
+      const remTextOther = remarks || '—';
+      doc.text(`Remarks: ${remTextOther}`, im + 8, y + 41);
     } else {
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
@@ -3388,7 +3407,7 @@ export default function ElasticIssueView({
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8);
       doc.setTextColor(71, 85, 105);
-      doc.text(`Remarks: ${remarks || 'Standard internal combined material issue bill.'}`, im + 8, y + 41);
+      doc.text(`Remarks: ${remarks || '—'}`, im + 8, y + 41);
     }
 
     doc.setTextColor(0, 0, 0);
@@ -3587,6 +3606,8 @@ export default function ElasticIssueView({
           itemCode: it.itemCode || formatItemCode(it.materialId, null, materials) || '',
           entryMode: it.entryMode || 'choose',
           availableStock: it.availableStock || 0,
+          baseQty: it.baseQty !== undefined && it.baseQty !== null && it.baseQty !== '' ? Number(it.baseQty) : Number(it.totalQty) || 1,
+          multiplier: it.multiplier !== undefined && it.multiplier !== null && it.multiplier !== '' ? Number(it.multiplier) : 1,
           totalQty: Number(it.totalQty) || 1,
           unit: it.unit || 'Mtr',
           color: it.color || '',
@@ -3635,7 +3656,7 @@ export default function ElasticIssueView({
         selectedOtherMaterialId,
         otherItemCode: formatItemCode(selectedOtherMaterialId, currentOtherMaterial, materials),
         formulaExplanation: calcResult.formulaExplanation,
-        remarks: remarks || (isWithoutPo ? 'Floor Material Issue without PO' : '')
+        remarks: remarks ? remarks.trim() : ''
       };
 
       const doc = await createElasticIssuePDFDocument(payload);
@@ -3659,6 +3680,80 @@ export default function ElasticIssueView({
     }
   };
 
+  const handleResetForm = useCallback(() => {
+    setSearchLotInput('');
+    setLotDetails(null);
+    setActiveLotCutting(null);
+    setLotError('');
+    if (typeof setPrefilledLotNo === 'function') {
+      try { setPrefilledLotNo(''); } catch (_) {}
+    }
+    setBomStatus('idle');
+    setBomDesign(null);
+    setIssuePcs('');
+    setWithoutLotStyle('Lower / Tracksuit');
+    setRollCount(0);
+    setTapeRollCount(0);
+    setBoneRollCount(1);
+    setBoneWeightKg('2.50');
+    setOtherRollCount(1);
+    setCustomDivisor('');
+    setTapeDivisor('');
+    setCustomWidth('');
+    setCustomTapeWidth('');
+    setCustomBoneWidth('');
+    setSelectedShade('');
+    setRemarks('');
+    setReceiverName('');
+    setSelectedElasticMaterialId('');
+    setElasticMaterialName('Elastic');
+    setSelectedTapeMaterialId('');
+    setTapeMaterialName('Tape');
+    setSelectedBoneMaterialId('');
+    setBoneMaterialName('Bone Chinese (Beige)');
+    setSelectedOtherMaterialId('');
+    setOtherMaterialName('Drawcord / Other Accessory');
+    setOtherUnit('Roll');
+    setIsManualOtherUnit(false);
+    setManualUnitInput('');
+    setOtherBarcodeInput('');
+    setSelectedOtherCategory('ALL');
+    setOtherItems([
+      {
+        id: Date.now(),
+        componentType: (allOtherComponentTypes && allOtherComponentTypes[0]) || 'DORI',
+        customComponentType: '',
+        isCustomType: false,
+        entryMode: 'choose',
+        materialId: '',
+        materialName: '',
+        itemCode: '',
+        color: '',
+        unit: 'Mtr',
+        availableStock: 0,
+        location: '',
+        calcMode: 'direct',
+        totalQty: 1
+      }
+    ]);
+    setCalcResult({
+      elasticPerPcMtr: 1.27,
+      tapePerPcMtr: 0.62,
+      totalElasticMtr: 0,
+      totalTapeMtr: 0,
+      recommendedRolls: 0,
+      elasticFormula: '50 Inch × 0.0254 = 1.27 m',
+      tapeFormula: '62 CM / 100 = 0.62 m',
+      formulaExplanation: '50 Inch × 0.0254 = 1.27 m | 62 CM / 100 = 0.62 m'
+    });
+    fetchNextIssueSlipNo(withoutLotActive, materialMode);
+    setTimeout(() => {
+      if (searchInputRef?.current) {
+        try { searchInputRef.current.focus(); } catch (_) {}
+      }
+    }, 150);
+  }, [allOtherComponentTypes, setPrefilledLotNo, withoutLotActive, materialMode]);
+
   const [savingSlip, setSavingSlip] = useState(false);
 
   const handleConfirmAndSaveBill = async () => {
@@ -3666,7 +3761,7 @@ export default function ElasticIssueView({
     setSavingSlip(true);
     try {
       const deducted = await saveToHistory(generatedSlipData);
-      await fetchNextIssueSlipNo();
+      await fetchNextIssueSlipNo(withoutLotActive, materialMode);
       setGeneratedSlipData(prev => prev ? { ...prev, isSaved: true } : null);
       if (Array.isArray(deducted) && deducted.length > 0) {
         const summary = deducted.map(d => `${d.materialName}: -${d.totalRequired} ${d.unit} (Stock: ${d.stockAfter})`).join(', ');
@@ -3674,6 +3769,7 @@ export default function ElasticIssueView({
       } else {
         showToast(`Original Material Issue Bill ${generatedSlipData.slipNo} confirmed and saved successfully!`);
       }
+      handleResetForm();
     } catch (err) {
       console.error('Save error:', err);
       showToast('Failed to save bill details.', 'error');
@@ -3845,6 +3941,7 @@ export default function ElasticIssueView({
           <td style="text-align: center; font-size: 10px;">${item.issuerName || 'STORE STAFF'}</td>
           <td style="text-align: center; font-size: 10px; font-weight: 800;">${item.receiverName || 'CUTTING MASTER'}</td>
           <td style="text-align: center; font-size: 10px; font-weight: 700;">${item.supervisorName || 'ROHIT / MONU'}</td>
+          <td style="text-align: center; font-size: 10px; max-width: 140px; word-break: break-word;">${item.remarks ? item.remarks : ''}</td>
         </tr>
       `;
     }).join('');
@@ -3908,7 +4005,7 @@ export default function ElasticIssueView({
               <td><strong>Floor Supervisor:</strong></td>
               <td>${item.supervisorName || 'ROHIT / MONU'}</td>
               <td><strong>Remarks / Notes:</strong></td>
-              <td>${(item.remarks && !String(item.remarks).trim().startsWith('[') && !String(item.remarks).trim().startsWith('{')) ? item.remarks : 'Standard Issue'}</td>
+              <td>${(item.remarks && !String(item.remarks).trim().startsWith('[') && !String(item.remarks).trim().startsWith('{')) ? item.remarks : ''}</td>
             </tr>
           </table>
 
@@ -4053,11 +4150,12 @@ export default function ElasticIssueView({
           table.report-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
+            font-size: 8.5px;
+            line-height: 1.15;
           }
           table.report-table th, table.report-table td {
-            border: 1.5px solid #000000;
-            padding: 6px 7px;
+            border: 1px solid #000000;
+            padding: 2.5px 4px;
             vertical-align: middle;
             color: #000000;
           }
@@ -4093,7 +4191,7 @@ export default function ElasticIssueView({
             font-weight: 700;
           }
           .voucher-card {
-            border: 1.5px solid #000000;
+            border: 1px solid #000000;
             border-radius: 8px;
             padding: 12px 14px;
             margin-bottom: 16px;
@@ -4208,6 +4306,7 @@ export default function ElasticIssueView({
                 <th style="text-align: center;">ISSUED BY</th>
                 <th style="text-align: center;">RECEIVED BY</th>
                 <th style="text-align: center;">SUPERVISOR</th>
+                <th style="text-align: center; min-width: 90px;">REMARKS</th>
               </tr>
             </thead>
             <tbody>
@@ -4473,11 +4572,36 @@ export default function ElasticIssueView({
                 </div>
               </div>
 
-              <span style={{ fontSize: '11.5px', fontWeight: '600', color: '#64748b' }}>
-                {withoutLotActive
-                  ? 'Direct floor requisition without BOM'
-                  : 'Verify Lot against approved BOM'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '11.5px', fontWeight: '600', color: '#64748b' }}>
+                  {withoutLotActive
+                    ? 'Direct floor requisition without BOM'
+                    : 'Verify Lot against approved BOM'}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetForm}
+                  title="Clear all fields & start fresh"
+                  style={{
+                    padding: '5px 12px',
+                    borderRadius: '7px',
+                    border: '1px solid #cbd5e1',
+                    background: '#ffffff',
+                    color: '#475569',
+                    fontSize: '11.5px',
+                    fontWeight: '700',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#94a3b8'; e.currentTarget.style.color = '#0f172a'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#475569'; }}
+                >
+                  <RotateCcw size={12} /> Reset Form
+                </button>
+              </div>
             </div>
 
             {/* STEP 1: CONDITIONAL DISPLAY FOR WITHOUT BOM VS WITH BOM */}
@@ -5672,13 +5796,23 @@ export default function ElasticIssueView({
                                 )}
                               </div>
                             </th>
-                            <th style={{ padding: '10px 12px', minWidth: '280px' }}>STORE MATERIAL ITEM</th>
-                            <th style={{ padding: '10px 12px', width: '105px', textAlign: 'center' }}>CURRENT STOCK</th>
-                            <th style={{ padding: '10px 12px', width: '95px', textAlign: 'center' }}>METHOD</th>
-                            <th style={{ padding: '10px 12px', width: '125px', textAlign: 'right' }}>ISSUE QUANTITY</th>
-                            <th style={{ padding: '10px 12px', width: '75px', textAlign: 'center' }}>UNIT</th>
-                            <th style={{ padding: '10px 12px', width: '100px', textAlign: 'right' }}>BALANCE</th>
-                            <th style={{ padding: '10px 12px', width: '42px', textAlign: 'center' }}></th>
+                            <th style={{ padding: '10px 10px', minWidth: '260px' }}>STORE MATERIAL ITEM</th>
+                            <th style={{ padding: '10px 8px', width: '105px', textAlign: 'center' }}>CURRENT STOCK</th>
+                            <th style={{ padding: '10px 8px', width: '110px', textAlign: 'center' }}>
+                              <div>BASE QTY</div>
+                              <div style={{ fontSize: '9px', opacity: 0.85, fontWeight: '600', textTransform: 'none' }}>(Base Units)</div>
+                            </th>
+                            <th style={{ padding: '10px 8px', width: '135px', textAlign: 'center' }}>
+                              <div>MULTIPLIER / DIVIDE</div>
+                              <div style={{ fontSize: '9px', opacity: 0.85, fontWeight: '600', textTransform: 'none' }}>(&times; or &divide; | e.g. 1/12)</div>
+                            </th>
+                            <th style={{ padding: '10px 8px', width: '140px', textAlign: 'right' }}>
+                              <div>TOTAL ISSUE QTY</div>
+                              <div style={{ fontSize: '9px', color: '#a5b4fc', fontWeight: '700', textTransform: 'none' }}>(Base &times; Mult / Div)</div>
+                            </th>
+                            <th style={{ padding: '10px 8px', width: '75px', textAlign: 'center' }}>UNIT</th>
+                            <th style={{ padding: '10px 8px', width: '100px', textAlign: 'right' }}>BALANCE</th>
+                            <th style={{ padding: '10px 8px', width: '42px', textAlign: 'center' }}></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -5789,10 +5923,15 @@ export default function ElasticIssueView({
                                         } else {
                                           handleUpdateOtherItem(item.id, 'componentType', val);
                                           handleUpdateOtherItem(item.id, 'isCustomType', false);
+                                          handleUpdateOtherItem(item.id, 'materialId', '');
+                                          handleUpdateOtherItem(item.id, 'materialName', '');
+                                          handleUpdateOtherItem(item.id, 'itemCode', '');
+                                          handleUpdateOtherItem(item.id, 'imageUrl', '');
+                                          handleUpdateOtherItem(item.id, 'availableStock', 0);
                                           if (val === 'DORI' || val === 'ELASTIC' || val === 'TAPE' || val === 'LACE') {
-                                            if (!item.materialId) handleUpdateOtherItem(item.id, 'unit', 'Mtr');
+                                            handleUpdateOtherItem(item.id, 'unit', 'Mtr');
                                           } else {
-                                            if (!item.materialId) handleUpdateOtherItem(item.id, 'unit', 'Pcs');
+                                            handleUpdateOtherItem(item.id, 'unit', 'Pcs');
                                           }
                                         }
                                       }}
@@ -5800,11 +5939,11 @@ export default function ElasticIssueView({
                                         width: '100%',
                                         padding: '6px 8px',
                                         borderRadius: '6px',
-                                        border: '1.5px solid #cbd5e1',
+                                        border: !item.componentType ? '1.5px dashed #ea580c' : '1.5px solid #cbd5e1',
                                         fontSize: '12px',
                                         fontWeight: '700',
-                                        background: '#ffffff',
-                                        color: '#0f172a',
+                                        background: !item.componentType ? '#fff7ed' : '#ffffff',
+                                        color: !item.componentType ? '#c2410c' : '#0f172a',
                                         boxSizing: 'border-box'
                                       }}
                                     >
@@ -5978,54 +6117,171 @@ export default function ElasticIssueView({
                                   )}
                                 </td>
 
-                                {/* Method: Direct Qty */}
-                                <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  <div style={{
-                                    background: '#f8fafc',
-                                    color: '#475569',
-                                    fontWeight: '800',
-                                    fontSize: '11px',
-                                    padding: '4px 6px',
-                                    borderRadius: '5px',
-                                    border: '1px solid #e2e8f0',
-                                    textAlign: 'center',
-                                    whiteSpace: 'nowrap'
-                                  }}>
-                                    Direct Qty
+                                {/* Base Qty */}
+                                <td style={{ verticalAlign: 'top', padding: '10px 8px', textAlign: 'center' }}>
+                                  <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0.01"
+                                      placeholder="1"
+                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : 1}
+                                      onChange={(e) => handleUpdateOtherItem(item.id, 'baseQty', e.target.value)}
+                                      style={{
+                                        width: '80px',
+                                        height: '36px',
+                                        padding: '0 8px',
+                                        borderRadius: '7px',
+                                        border: '1.5px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        textAlign: 'center',
+                                        fontSize: '13px',
+                                        fontWeight: '800',
+                                        color: '#0f172a',
+                                        boxSizing: 'border-box',
+                                        outline: 'none',
+                                        MozAppearance: 'textfield'
+                                      }}
+                                      title="Base Quantity (Default: 1)"
+                                    />
                                   </div>
                                 </td>
 
-                                {/* Issue Qty */}
-                                <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                                {/* Multiplier / Divide */}
+                                <td style={{ verticalAlign: 'top', padding: '10px 8px', textAlign: 'center' }}>
+                                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
+                                    <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
+                                          handleUpdateOtherItem(item.id, 'multiplierOp', nextOp);
+                                        }}
+                                        title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
+                                        style={{
+                                          border: '1.5px solid #cbd5e1',
+                                           background: item.multiplierOp === 'divide' ? '#f1f5f9' : '#f8fafc',
+                                           color: '#0f172a',
+                                          borderRadius: '6px',
+                                          padding: '0 4px',
+                                          fontSize: '13px',
+                                          fontWeight: '900',
+                                          cursor: 'pointer',
+                                          height: '32px',
+                                          minWidth: '22px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          transition: 'all 0.15s ease'
+                                        }}
+                                      >
+                                        {item.multiplierOp === 'divide' ? '÷' : '×'}
+                                      </button>
+                                      <input
+                                        type="text"
+                                        placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
+                                        value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                        onChange={(e) => handleUpdateOtherItem(item.id, 'multiplier', e.target.value)}
+                                        style={{
+                                          width: '70px',
+                                          height: '36px',
+                                          padding: '0 6px',
+                                          borderRadius: '7px',
+                                          border: '1.5px solid #cbd5e1',
+                                           background: '#ffffff',
+                                           fontSize: '13px',
+                                           fontWeight: '800',
+                                           color: '#0f172a',
+                                          textAlign: 'center',
+                                          boxSizing: 'border-box',
+                                          outline: 'none'
+                                        }}
+                                        title="Multiplier factor or fraction (e.g. 1, 2, 1/12, 1/24, or divide by 12)"
+                                      />
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
+                                        {item.multiplierOp === 'divide' ? '÷ Div' : 'Mult'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateOtherItem(item.id, { multiplier: '1/12', multiplierOp: 'multiply' })}
+                                        title="Quick set fraction: 1/12 (e.g. per dozen)"
+                                        style={{
+                                          fontSize: '9px',
+                                          fontWeight: '800',
+                                          padding: '1px 4px',
+                                          borderRadius: '4px',
+                                          border: String(item.multiplier).trim() === '1/12' ? '1px solid #6d28d9' : '1px solid #cbd5e1',
+                                          background: String(item.multiplier).trim() === '1/12' ? '#6d28d9' : '#f8fafc',
+                                          color: String(item.multiplier).trim() === '1/12' ? '#ffffff' : '#475569',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        1/12
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateOtherItem(item.id, { multiplier: '12', multiplierOp: 'divide' })}
+                                        title="Quick set divide: ÷ 12 (Base divided by 12)"
+                                        style={{
+                                          fontSize: '9px',
+                                          fontWeight: '800',
+                                          padding: '1px 4px',
+                                          borderRadius: '4px',
+                                          border: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '1px solid #0f172a' : '1px solid #cbd5e1',
+                                           background: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#0f172a' : '#f8fafc',
+                                           color: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#ffffff' : '#475569',
+                                          cursor: 'pointer'
+                                        }}
+                                      >
+                                        ÷12
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+
+                                {/* Total Issue Qty */}
+                                <td style={{ verticalAlign: 'top', padding: '10px 8px', textAlign: 'right' }}>
                                   {(() => {
                                     const qty = Number(item.totalQty) || 0;
                                     const liveMat = (materials || []).find(m => String(m.id) === String(item.materialId));
                                     const rackStock = liveMat ? (Number(liveMat.stock) || 0) : (Number(item.availableStock) || 0);
                                     const hasMaterial = Boolean(item.materialId && item.entryMode !== 'manual');
                                     const isStockShortage = hasMaterial && qty > rackStock;
+                                    const baseVal = (item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '')
+                                      ? Number(item.baseQty)
+                                      : 1;
 
                                     return (
-                                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
-                                        <input
-                                          type="number"
-                                          step="any"
-                                          min="0.01"
-                                          value={item.totalQty === '' ? '' : item.totalQty}
-                                          onChange={(e) => handleUpdateOtherItem(item.id, 'totalQty', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
-                                          style={{
-                                            width: '85px',
-                                            padding: '5px 8px',
-                                            borderRadius: '6px',
-                                            border: isStockShortage ? '2px solid #dc2626' : '1.5px solid #cbd5e1',
-                                            background: isStockShortage ? '#fef2f2' : '#ffffff',
-                                            textAlign: 'right',
-                                            fontSize: '13px',
-                                            fontWeight: '800',
-                                            color: isStockShortage ? '#b91c1c' : '#0f172a',
-                                            boxSizing: 'border-box',
-                                            outline: 'none'
-                                          }}
-                                        />
+                                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                                        <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+                                          <input
+                                            type="number"
+                                            step="any"
+                                            min="0.01"
+                                            value={item.totalQty === '' ? '' : item.totalQty}
+                                            onChange={(e) => handleUpdateOtherItem(item.id, 'totalQty', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
+                                            style={{
+                                              width: '90px',
+                                              height: '36px',
+                                              padding: '0 8px',
+                                              borderRadius: '7px',
+                                              border: isStockShortage ? '2px solid #dc2626' : '1.5px solid #cbd5e1',
+                                              background: isStockShortage ? '#fef2f2' : '#ffffff',
+                                              textAlign: 'right',
+                                              fontSize: '13px',
+                                              fontWeight: '800',
+                                              color: isStockShortage ? '#b91c1c' : '#0f172a',
+                                              boxSizing: 'border-box',
+                                              outline: 'none',
+                                              MozAppearance: 'textfield'
+                                            }}
+                                          />
+                                        </div>
+                                        <div style={{ fontSize: '9.5px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9', fontWeight: '700', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                          {getMultiplierFormulaText(baseVal, item.multiplier, item.multiplierOp, qty)}
+                                        </div>
                                         {isStockShortage && (
                                           <span style={{
                                             fontSize: '9.5px',
@@ -6045,23 +6301,28 @@ export default function ElasticIssueView({
                                   })()}
                                 </td>
 
-                                {/* Unit */}
+                                {/* Unit (Locked / Read-Only from material inventory) */}
                                 <td style={{ padding: '10px 12px', textAlign: 'center' }}>
-                                  <input
-                                    type="text"
-                                    value={item.unit}
-                                    onChange={(e) => handleUpdateOtherItem(item.id, 'unit', e.target.value)}
+                                  <span
                                     style={{
-                                      width: '60px',
-                                      padding: '5px 6px',
+                                      minWidth: '55px',
+                                      padding: '5px 8px',
                                       borderRadius: '6px',
                                       border: '1px solid #cbd5e1',
+                                      background: '#f8fafc',
+                                      color: '#334155',
                                       fontSize: '11.5px',
-                                      fontWeight: '700',
+                                      fontWeight: '800',
                                       textAlign: 'center',
-                                      boxSizing: 'border-box'
+                                      display: 'inline-block',
+                                      userSelect: 'none',
+                                      cursor: 'not-allowed',
+                                      whiteSpace: 'nowrap'
                                     }}
-                                  />
+                                    title="Unit is locked from material inventory and cannot be changed"
+                                  >
+                                    {item.unit || 'Pcs'}
+                                  </span>
                                 </td>
 
                                 {/* Balance */}
@@ -6126,7 +6387,7 @@ export default function ElasticIssueView({
                       <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                         <button
                           type="button"
-                          onClick={() => handleAddOtherItemRow('DORI', '', 'choose')}
+                          onClick={() => handleAddOtherItemRow('', '', 'choose')}
                           style={{
                             padding: '8px 18px',
                             borderRadius: '8px',
@@ -6149,25 +6410,6 @@ export default function ElasticIssueView({
                         <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: '700' }}>
                           Total: <strong>{otherItems.length}</strong> item{otherItems.length > 1 ? 's' : ''} &bull; <strong>{otherItems.reduce((sum, it) => sum + (Number(it.totalQty) || 0), 0)}</strong> units
                         </span>
-                      </div>
-
-                      {/* Remarks input */}
-                      <div style={{ minWidth: '260px', flex: '1', maxWidth: '380px' }}>
-                        <input
-                          type="text"
-                          placeholder="Optional allocation notes / floor remarks..."
-                          value={remarks}
-                          onChange={(e) => setRemarks(e.target.value)}
-                          style={{
-                            width: '100%',
-                            padding: '7px 12px',
-                            borderRadius: '7px',
-                            border: '1px solid #cbd5e1',
-                            fontSize: '12px',
-                            boxSizing: 'border-box',
-                            outline: 'none'
-                          }}
-                        />
                       </div>
                     </div>
                   </div>
@@ -8911,44 +9153,69 @@ export default function ElasticIssueView({
                     })()}
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={generateElasticIssueBill}
-                    disabled={generating || (!withoutLotActive && bomStatus !== 'approved')}
-                    title={(!withoutLotActive && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
-                    style={{
-                      padding: '12px 32px',
-                      borderRadius: '12px',
-                      border: 'none',
-                      background: (withoutLotActive || bomStatus === 'approved')
-                        ? (withoutLotActive ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)')
-                        : '#94a3b8',
-                      color: '#ffffff',
-                      fontSize: '15px',
-                      fontWeight: '800',
-                      cursor: (generating || (!withoutLotActive && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
-                      boxShadow: (withoutLotActive || bomStatus === 'approved') ? (withoutLotActive ? '0 6px 18px rgba(234, 88, 12, 0.4)' : '0 6px 18px rgba(5, 150, 105, 0.4)') : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      opacity: (withoutLotActive || bomStatus === 'approved') ? 1 : 0.7
-                    }}
-                  >
-                    {generating ? (
-                      <RefreshCw size={18} className="animate-spin" />
-                    ) : (withoutLotActive || bomStatus === 'approved') ? (
-                      <Printer size={18} />
-                    ) : (
-                      <Lock size={18} />
-                    )}
-                    <span>
-                      {generating
-                        ? 'Generating Original Bill...'
-                        : withoutLotActive
-                          ? `Generate W/O BOM ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
-                          : 'Generate Original Issue Bill / PO'}
-                    </span>
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={handleResetForm}
+                      style={{
+                        padding: '12px 18px',
+                        borderRadius: '12px',
+                        border: '1.5px solid #cbd5e1',
+                        background: '#f8fafc',
+                        color: '#475569',
+                        fontSize: '14px',
+                        fontWeight: '700',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="Clear and reset all inputs for a fresh bill"
+                    >
+                      <RotateCcw size={16} />
+                      <span>Reset Form</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={generateElasticIssueBill}
+                      disabled={generating || (!withoutLotActive && bomStatus !== 'approved')}
+                      title={(!withoutLotActive && bomStatus !== 'approved') ? 'BOM must be created and approved by Admin before generating issue bill' : 'Generate official Original Material Issue Bill / PO'}
+                      style={{
+                        padding: '12px 32px',
+                        borderRadius: '12px',
+                        border: 'none',
+                        background: (withoutLotActive || bomStatus === 'approved')
+                          ? (withoutLotActive ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'linear-gradient(135deg, #059669 0%, #047857 100%)')
+                          : '#94a3b8',
+                        color: '#ffffff',
+                        fontSize: '15px',
+                        fontWeight: '800',
+                        cursor: (generating || (!withoutLotActive && bomStatus !== 'approved')) ? 'not-allowed' : 'pointer',
+                        boxShadow: (withoutLotActive || bomStatus === 'approved') ? (withoutLotActive ? '0 6px 18px rgba(234, 88, 12, 0.4)' : '0 6px 18px rgba(5, 150, 105, 0.4)') : 'none',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        opacity: (withoutLotActive || bomStatus === 'approved') ? 1 : 0.7
+                      }}
+                    >
+                      {generating ? (
+                        <RefreshCw size={18} className="animate-spin" />
+                      ) : (withoutLotActive || bomStatus === 'approved') ? (
+                        <Printer size={18} />
+                      ) : (
+                        <Lock size={18} />
+                      )}
+                      <span>
+                        {generating
+                          ? 'Generating Original Bill...'
+                          : withoutLotActive
+                            ? `Generate W/O BOM ${materialMode === 'tape' ? 'Tape' : materialMode === 'bone' ? 'Bone' : 'Elastic'} Issue Slip`
+                            : 'Generate Original Issue Bill / PO'}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </>
             )}
@@ -9399,6 +9666,7 @@ export default function ElasticIssueView({
                     <th style={{ padding: '10px 12px' }}>TOTAL ISSUE</th>
                     <th style={{ padding: '10px 12px' }}>ISSUED BY</th>
                     <th style={{ padding: '10px 12px' }}>RECEIVED BY</th>
+                    <th style={{ padding: '10px 12px', minWidth: '130px' }}>REMARKS</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right' }}>ACTIONS</th>
                   </tr>
                 </thead>
@@ -9514,6 +9782,9 @@ export default function ElasticIssueView({
                         <td style={{ padding: '10px 12px', color: '#334155', fontWeight: '700' }}>
                           {item.receiverName || 'CUTTING MASTER'}
                         </td>
+                        <td style={{ padding: '10px 12px', color: '#475569', fontSize: '11.5px', maxWidth: '170px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.remarks || ''}>
+                          {item.remarks ? item.remarks : <span style={{ color: '#94a3b8' }}>—</span>}
+                        </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                           <button
                             type="button"
@@ -9619,7 +9890,12 @@ export default function ElasticIssueView({
               </div>
               <button
                 type="button"
-                onClick={() => setGeneratedSlipData(null)}
+                onClick={() => {
+                  setGeneratedSlipData(null);
+                  if (generatedSlipData?.isSaved) {
+                    handleResetForm();
+                  }
+                }}
                 style={{ background: 'transparent', border: 'none', color: '#ffffff', cursor: 'pointer' }}
               >
                 <X size={20} />
@@ -9871,7 +10147,10 @@ export default function ElasticIssueView({
                   <div style={{ textAlign: 'center' }}>
                     <button
                       type="button"
-                      onClick={() => setGeneratedSlipData(null)}
+                      onClick={() => {
+                        setGeneratedSlipData(null);
+                        handleResetForm();
+                      }}
                       style={{
                         background: 'transparent',
                         border: 'none',

@@ -90,3 +90,60 @@ export const GARMENT_CATEGORIES = [
   "TS - UPPER",
   "TS - LOWER"
 ];
+
+/**
+ * Parse and evaluate multiplier or division factor (e.g. 1, 2, "1/12", "1/6", "1/24", 12 in divide mode)
+ */
+export const computeEffectiveFactor = (multiplier, multiplierOp = 'multiply') => {
+  if (multiplier === undefined || multiplier === null || multiplier === '') {
+    return { factor: 1, raw: '1', isFraction: false, op: multiplierOp || 'multiply' };
+  }
+  const str = String(multiplier).trim();
+  const op = multiplierOp || 'multiply';
+
+  // Support fraction string like "1/12", "1/24", "1/6"
+  if (str.includes('/')) {
+    const parts = str.split('/');
+    if (parts.length === 2) {
+      const num = parseFloat(parts[0].trim());
+      const den = parseFloat(parts[1].trim());
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        const fractionVal = num / den;
+        const factor = op === 'divide' ? (fractionVal !== 0 ? 1 / fractionVal : 1) : fractionVal;
+        return {
+          factor,
+          raw: str,
+          isFraction: true,
+          num,
+          den,
+          op
+        };
+      }
+    }
+  }
+
+  const parsed = parseFloat(str);
+  if (!isNaN(parsed) && parsed > 0) {
+    if (op === 'divide') {
+      return { factor: 1 / parsed, raw: str, isFraction: false, divisor: parsed, op: 'divide' };
+    }
+    return { factor: parsed, raw: str, isFraction: false, op: 'multiply' };
+  }
+
+  return { factor: 1, raw: str, isFraction: false, op };
+};
+
+export const getMultiplierFormulaText = (base, multiplier, multiplierOp, totalQty) => {
+  const b = (base !== undefined && base !== null && base !== '') ? Number(base) : 1;
+  const op = multiplierOp || 'multiply';
+  const str = String(multiplier !== undefined && multiplier !== null ? multiplier : 1).trim();
+
+  if (op === 'divide') {
+    return `(= ${b} ÷ ${str || 1} = ${totalQty})`;
+  }
+  if (str.includes('/')) {
+    return `(= ${b} × ${str} = ${totalQty})`;
+  }
+  return `(= ${b} × ${str || 1})`;
+};
+

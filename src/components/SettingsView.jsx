@@ -28,6 +28,130 @@ export const getSTCode = (m) => {
   return rawId ? (rawId.replace(/\D/g, '') ? `ST${rawId.replace(/\D/g, '').padStart(5, '0')}` : `ST-${rawId}`) : '—';
 };
 
+// ─── Brand Detection Helpers ─────────────────────────────────────────────────
+const KNOWN_BRANDS = [
+  'brooks brother', 'brooks brothers', 'criminal damage', 'stone island', 'cp company',
+  'calvin klein', 'ralph lauren', 'hugo boss', 'under armour', 'loro piana', 'fashion patti',
+  'stain off', 'adidas', 'addidas', 'nike', 'coach', 'gucci', 'prada', 'hermes', 'herms',
+  'diesel', 'deisel', 'h&m', 'hm', 'zara', 'levis', "levi's", 'gap',
+  'versace', 'armani', 'puma', 'reebok', 'fila', 'tommy', 'hilfiger',
+  'hacket', 'hackett', 'burberry', 'ralph', 'lauren', 'calvin', 'klein',
+  'dior', 'chanel', 'louis', 'vuitton', 'balenciaga', 'off-white', 'supreme',
+  'moncler', 'lacoste', 'hugo', 'boss',
+  'jack', 'jones', 'pepe', 'wrangler', 'arrow', 'van heusen', 'raymond',
+  'brooksb', 'brooks', 'criminal', 'represent', 'youngla', 'gymshark', 'uniqlo',
+  'essentials', 'jordan', 'casablanca', 'ovo', 'barbour', 'rlx', 'superdry',
+  'allsaints', 'terrex', 'fendi', 'skechers', 'asics', 'gant', 'loropiane',
+  'kapil', 'bengen', 'acitone', 'pasting'
+];
+
+const getBrandFromName = (name) => {
+  if (!name) return null;
+  const lower = String(name).toLowerCase();
+  for (const brand of KNOWN_BRANDS) {
+    if (lower.includes(brand)) {
+      return brand;
+    }
+  }
+  return null;
+};
+
+const getBrandDisplay = (brand) => {
+  if (!brand) return '—';
+  const clean = String(brand).toLowerCase().trim();
+  const map = {
+    adidas: 'ADIDAS', addidas: 'ADIDAS',
+    nike: 'NIKE',
+    coach: 'COACH',
+    gucci: 'GUCCI',
+    hermes: 'HERMÈS', herms: 'HERMÈS',
+    diesel: 'DIESEL', deisel: 'DIESEL',
+    'h&m': 'H&M', hm: 'H&M',
+    zara: 'ZARA',
+    levis: "LEVI'S", "levi's": "LEVI'S",
+    gap: 'GAP',
+    versace: 'VERSACE',
+    armani: 'ARMANI',
+    puma: 'PUMA',
+    reebok: 'REEBOK',
+    fila: 'FILA',
+    tommy: 'TOMMY',
+    hilfiger: 'HILFIGER',
+    hacket: 'HACKETT', hackett: 'HACKETT',
+    burberry: 'BURBERRY',
+    ralph: 'RALPH LAUREN',
+    calvin: 'CALVIN KLEIN',
+    'calvin klein': 'CALVIN KLEIN',
+    dior: 'DIOR',
+    chanel: 'CHANEL',
+    lacoste: 'LACOSTE',
+    hugo: 'HUGO BOSS', boss: 'HUGO BOSS',
+    'hugo boss': 'HUGO BOSS',
+    'brooks brother': 'BROOKS BROTHERS', 'brooks brothers': 'BROOKS BROTHERS',
+    brooksb: 'BROOKS BROTHERS', brooks: 'BROOKS BROTHERS',
+    'criminal damage': 'CRIMINAL DAMAGE', criminal: 'CRIMINAL DAMAGE',
+    represent: 'REPRESENT',
+    youngla: 'YOUNGLA',
+    gymshark: 'GYMSHARK',
+    uniqlo: 'UNIQLO',
+    essentials: 'ESSENTIALS',
+    jordan: 'JORDAN',
+    'under armour': 'UNDER ARMOUR',
+    casablanca: 'CASABLANCA',
+    ovo: 'OVO',
+    barbour: 'BARBOUR',
+    rlx: 'RLX',
+    superdry: 'SUPERDRY',
+    allsaints: 'ALLSAINTS',
+    terrex: 'TERREX',
+    fendi: 'FENDI',
+    skechers: 'SKECHERS',
+    asics: 'ASICS',
+    gant: 'GANT',
+    'loro piana': 'LORO PIANA', loropiane: 'LORO PIANA',
+    kapil: 'KAPIL',
+    'fashion patti': 'FASHION PATTI',
+    'stain off': 'STAIN OFF',
+    bengen: 'BENGEN',
+    acitone: 'ACITONE',
+    pasting: 'PASTING'
+  };
+  return map[clean] || clean.toUpperCase();
+};
+
+export const getMaterialBrand = (m) => {
+  if (!m) return '—';
+  const rawBrand = m.brand || m.brandName || m.brand_name;
+  if (rawBrand && typeof rawBrand === 'string') {
+    const trimmed = rawBrand.trim();
+    if (
+      trimmed &&
+      trimmed !== '—' &&
+      trimmed !== '-' &&
+      trimmed.toLowerCase() !== 'n/a' &&
+      trimmed.toLowerCase() !== 'null' &&
+      trimmed.toLowerCase() !== 'undefined' &&
+      trimmed.toLowerCase() !== 'general' &&
+      trimmed.toLowerCase() !== 'default'
+    ) {
+      const detected = getBrandFromName(trimmed);
+      return detected ? getBrandDisplay(detected) : getBrandDisplay(trimmed);
+    }
+  }
+
+  const nameBrand = getBrandFromName(m.name);
+  if (nameBrand) {
+    return getBrandDisplay(nameBrand);
+  }
+
+  if (m.style && typeof m.style === 'string') {
+    const styleBrand = getBrandFromName(m.style);
+    if (styleBrand) return getBrandDisplay(styleBrand);
+  }
+
+  return '—';
+};
+
 export default function SettingsView({
   currentUser,
   vendors,
@@ -380,6 +504,7 @@ export default function SettingsView({
   const [matSearchQuery, setMatSearchQuery] = useState('');
   const [matItemCode, setMatItemCode] = useState('');
   const [matName, setMatName] = useState('');
+  const [matBrand, setMatBrand] = useState('');
   const [matCategory, setMatCategory] = useState('FABRICS');
   const [matStock, setMatStock] = useState('');
   const [matUnit, setMatUnit] = useState('Pcs');
@@ -549,6 +674,27 @@ export default function SettingsView({
     return Array.from(set).sort();
   }, [vendors, materials]);
 
+  const brandSuggestions = useMemo(() => {
+    const set = new Set();
+    (materials || []).forEach(m => {
+      const b = m.brand || m.brandName;
+      if (b && String(b).trim() && String(b).trim() !== '—') {
+        set.add(String(b).trim().toUpperCase());
+      }
+    });
+    [
+      'ADIDAS', 'NIKE', 'COACH', 'GUCCI', 'HERMÈS', 'DIESEL', 'H&M', 'ZARA',
+      "LEVI'S", 'GAP', 'VERSACE', 'ARMANI', 'PUMA', 'REEBOK', 'FILA', 'TOMMY',
+      'HACKETT', 'BURBERRY', 'RALPH LAUREN', 'CALVIN KLEIN', 'DIOR', 'CHANEL',
+      'LACOSTE', 'HUGO BOSS', 'BROOKS BROTHERS', 'CRIMINAL DAMAGE', 'REPRESENT',
+      'YOUNGLA', 'GYMSHARK', 'UNIQLO', 'ESSENTIALS', 'JORDAN', 'UNDER ARMOUR',
+      'CASABLANCA', 'OVO', 'BARBOUR', 'RLX', 'SUPERDRY', 'ALLSAINTS', 'TERREX',
+      'FENDI', 'SKECHERS', 'ASICS', 'GANT', 'LORO PIANA', 'KAPIL', 'FASHION PATTI',
+      'STAIN OFF', 'BENGEN', 'ACITONE', 'PASTING'
+    ].forEach(b => set.add(b));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [materials]);
+
   // Handle Edit Material Update Submit
   const handleUpdateSubmit = (e) => {
     e.preventDefault();
@@ -561,6 +707,7 @@ export default function SettingsView({
       ...editingMaterial,
       itemCode: effectiveStCode,
       name: matName.trim(),
+      brand: matBrand ? matBrand.trim() : '',
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
       unit: matUnit ? matUnit.trim() : 'Pcs',
@@ -594,6 +741,7 @@ export default function SettingsView({
       id: newId,
       itemCode: effectiveStCode,
       name: matName.trim(),
+      brand: matBrand ? matBrand.trim() : '',
       category: matCategory ? matCategory.trim() : 'FABRICS',
       stock: parseFloat(matStock) || 0,
       unit: matUnit ? matUnit.trim() : 'Pcs',
@@ -612,6 +760,7 @@ export default function SettingsView({
     setIsAddingMaterial(false);
     setMatItemCode('');
     setMatName('');
+    setMatBrand('');
     setMatCategory('FABRICS');
     setMatStock('');
     setMatUnit('Pcs');
@@ -630,9 +779,11 @@ export default function SettingsView({
     const q = matSearchQuery.toLowerCase().trim();
     if (!q) return true;
     const st = getSTCode(m).toLowerCase();
+    const brand = (m.brand || getMaterialBrand(m) || '').toLowerCase();
     return (
       (m.name || '').toLowerCase().includes(q) ||
       st.includes(q) ||
+      brand.includes(q) ||
       (m.category || '').toLowerCase().includes(q) ||
       (m.color || '').toLowerCase().includes(q) ||
       (m.location || '').toLowerCase().includes(q) ||
@@ -2298,7 +2449,9 @@ export default function SettingsView({
             className="btn btn-primary btn-sm"
             onClick={() => {
               setIsAddingMaterial(true);
+              setMatItemCode('');
               setMatName('');
+              setMatBrand('');
               setMatCategory('Fabric');
               setMatStock('');
               setMatUnit('meters');
@@ -2306,6 +2459,8 @@ export default function SettingsView({
               setMatThreshold('50');
               setMatColor('');
               setMatLocation('');
+              setMatPoNumber('');
+              setMatVendorName('');
               setMatError('');
             }}
           >
@@ -2336,6 +2491,7 @@ export default function SettingsView({
               <tr>
                 <th style={{ width: '130px', minWidth: '110px' }}>ST ID</th>
                 <th>Material Name</th>
+                <th>Brand</th>
                 <th>Category</th>
                 <th>Stock Level</th>
                 <th style={{ textAlign: 'right' }}>Actions</th>
@@ -2344,13 +2500,14 @@ export default function SettingsView({
             <tbody>
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                     No raw materials match your search query.
                   </td>
                 </tr>
               ) : (
                 filteredMaterials.map(m => {
                   const stCode = getSTCode(m);
+                  const brand = getMaterialBrand(m);
                   return (
                     <tr key={m.id}>
                       <td>
@@ -2391,6 +2548,26 @@ export default function SettingsView({
                           )}
                         </div>
                       </td>
+                      <td>
+                        {brand && brand !== '—' ? (
+                          <span style={{
+                            fontSize: '11px',
+                            color: '#2563eb',
+                            background: 'rgba(59, 130, 246, 0.08)',
+                            border: '1px solid rgba(59, 130, 246, 0.25)',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            fontWeight: '800',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}>
+                            🏢 {brand}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>
+                        )}
+                      </td>
                       <td style={{ textTransform: 'capitalize' }}>{m.category}</td>
                       <td>
                         <span style={{
@@ -2418,6 +2595,8 @@ export default function SettingsView({
                               setEditingMaterial(m);
                               setMatItemCode(stCode);
                               setMatName(m.name || '');
+                              const detectedBrand = getMaterialBrand(m);
+                              setMatBrand(m.brand || (detectedBrand !== '—' ? detectedBrand : ''));
                               setMatCategory(m.category || 'FABRICS');
                               setMatStock(m.stock !== undefined ? m.stock : '');
                               setMatUnit(m.unit || 'Pcs');
@@ -2520,6 +2699,26 @@ export default function SettingsView({
                 </div>
 
                 <div className="form-group">
+                  <label className="form-label">Brand Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    value={matBrand}
+                    onChange={(e) => setMatBrand(e.target.value)}
+                    list="settings-brand-suggestions"
+                    placeholder="e.g. ADIDAS, NIKE, DIESEL, ZARA..."
+                    autoComplete="on"
+                  />
+                  <datalist id="settings-brand-suggestions">
+                    {brandSuggestions.map((b, idx) => (
+                      <option key={idx} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group">
                   <label className="form-label">Stock Quantity</label>
                   <input
                     type="number"
@@ -2550,8 +2749,10 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
+              </div>
 
-                <div className="form-group">
+              <div className="form-grid">
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                   <label className="form-label">Unit Cost Price ({currencySymbol})</label>
                   <input
                     type="number"
@@ -2791,6 +2992,26 @@ export default function SettingsView({
                 </div>
 
                 <div className="form-group">
+                  <label className="form-label">Brand Name</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. ADIDAS, NIKE, DIESEL, ZARA..."
+                    value={matBrand}
+                    onChange={(e) => setMatBrand(e.target.value)}
+                    list="settings-brand-suggestions-add"
+                    autoComplete="on"
+                  />
+                  <datalist id="settings-brand-suggestions-add">
+                    {brandSuggestions.map((b, idx) => (
+                      <option key={idx} value={b} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="form-grid">
+                <div className="form-group">
                   <label className="form-label">Stock Quantity</label>
                   <input
                     type="number"
@@ -2822,8 +3043,10 @@ export default function SettingsView({
                     ))}
                   </datalist>
                 </div>
+              </div>
 
-                <div className="form-group">
+              <div className="form-grid">
+                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                   <label className="form-label">Unit Cost Price ({currencySymbol})</label>
                   <input
                     type="number"
