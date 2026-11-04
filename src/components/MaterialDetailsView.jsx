@@ -634,7 +634,7 @@ export default function MaterialDetailsView({
         <div class="header-box">
           <div>
             <h2>Garment PDMS — Material Lifecycle & Traceability Audit</h2>
-            <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.itemCode || material.id}</strong> • Material: <strong>${material.name}</strong> (${material.category})</div>
+            <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.itemCode || material.id}</strong> • Material: <strong>${material.name}</strong> • Brand: <strong>${getMaterialBrand(material)}</strong> (${material.category})</div>
           </div>
           <div style="text-align: right; font-size: 10.5px;">
             <div>Generated: ${new Date().toLocaleString()}</div>
@@ -3816,20 +3816,21 @@ export default function MaterialDetailsView({
           <thead>
             <tr style={{ backgroundColor: '#e2e8f0', borderBottom: '1.5px solid #000000' }}>
               <th style={{ border: '1px solid #000000', padding: '6px 4px', textAlign: 'center', width: '28px', fontWeight: '800' }}>#</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '75px', fontWeight: '800' }}>ITEM ID</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '70px', fontWeight: '800' }}>ITEM ID</th>
               <th style={{ border: '1px solid #000000', padding: '6px 8px', textAlign: 'left', fontWeight: '800' }}>MATERIAL NAME & DESCRIPTION</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '85px', fontWeight: '800' }}>CATEGORY</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '95px', fontWeight: '800' }}>COLOR / SHADE</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '105px', fontWeight: '800' }}>STORAGE LOCATION</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '95px', fontWeight: '800' }}>PO & BILL REF</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'right', width: '90px', fontWeight: '800' }}>STOCK QTY</th>
-              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '80px', fontWeight: '800' }}>STATUS</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '80px', fontWeight: '800' }}>BRAND</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '75px', fontWeight: '800' }}>CATEGORY</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '85px', fontWeight: '800' }}>COLOR / SHADE</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '95px', fontWeight: '800' }}>STORAGE LOCATION</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '85px', fontWeight: '800' }}>PO & BILL REF</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'right', width: '80px', fontWeight: '800' }}>STOCK QTY</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '70px', fontWeight: '800' }}>STATUS</th>
             </tr>
           </thead>
           <tbody>
             {filteredMaterials.length === 0 ? (
               <tr>
-                <td colSpan="9" style={{ border: '1px solid #000000', textAlign: 'center', padding: '20px', fontStyle: 'italic' }}>
+                <td colSpan="10" style={{ border: '1px solid #000000', textAlign: 'center', padding: '20px', fontStyle: 'italic' }}>
                   No materials match the current filter selection.
                 </td>
               </tr>
@@ -3839,6 +3840,7 @@ export default function MaterialDetailsView({
                 const numThresh = Number(m.threshold) || 50;
                 const isLow = numStock <= numThresh && numStock > 0;
                 const isZero = numStock <= 0;
+                const brand = getMaterialBrand(m);
 
                 return (
                   <tr key={m.id || idx} style={{ pageBreakInside: 'avoid', borderBottom: '1px solid #000000' }}>
@@ -3853,6 +3855,26 @@ export default function MaterialDetailsView({
                       <div style={{ fontSize: '9px', color: '#555555' }}>
                         Threshold: {m.threshold} {m.unit || 'pcs'}
                       </div>
+                    </td>
+                    <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'center' }}>
+                      {brand && brand !== '—' && brand !== '-' ? (
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '1.5px 6px',
+                          borderRadius: '3px',
+                          border: '1px solid #334155',
+                          background: '#f8fafc',
+                          color: '#0f172a',
+                          fontWeight: '800',
+                          fontSize: '8.5px',
+                          letterSpacing: '0.3px',
+                          textTransform: 'uppercase'
+                        }}>
+                          {brand}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontSize: '10px' }}>—</span>
+                      )}
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 6px', textAlign: 'center', fontWeight: '600' }}>
                       {m.category || 'Accessory'}

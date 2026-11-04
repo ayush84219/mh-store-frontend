@@ -160,7 +160,7 @@ export default function BarcodeMaterialIssueView({
   const [lotNumber, setLotNumber] = useState('');
   const [selectedLotId, setSelectedLotId] = useState('');
   const [receiverName, setReceiverName] = useState('');
-  const [receiverDept, setReceiverDept] = useState('Cutting');
+  const [receiverDept, setReceiverDept] = useState('');
   const [personName, setPersonName] = useState(currentUser?.name || 'Store Operator');
   const [remarks, setRemarks] = useState('');
   

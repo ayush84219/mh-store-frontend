@@ -523,6 +523,84 @@ export default function SettingsView({
   const [pricingPolicyMsg, setPricingPolicyMsg] = useState(null);
   const [matUpdatePolicy, setMatUpdatePolicy] = useState('fcfs');
 
+  // Report Variance Exclusions Settings (Consumables, oil, tape, magic pen, chalk, marker, etc.)
+  const DEFAULT_VARIANCE_EXCLUDED_MATERIALS = [
+    'oil',
+    'tape',
+    'magic pen',
+    'chalk',
+    'marker',
+    'cello tape',
+    'spray'
+  ];
+
+  const [varianceExcludedMaterials, setVarianceExcludedMaterials] = useState(() => {
+    try {
+      const saved = localStorage.getItem('gpdms_variance_excluded_materials');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (_) {}
+    return DEFAULT_VARIANCE_EXCLUDED_MATERIALS;
+  });
+
+  const [newExcludedInput, setNewExcludedInput] = useState('');
+  const [varianceExcludedMsg, setVarianceExcludedMsg] = useState(null);
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/settings`)
+      .then(r => r.json())
+      .then(d => {
+        if (Array.isArray(d?.varianceExcludedMaterials) && d.varianceExcludedMaterials.length > 0) {
+          setVarianceExcludedMaterials(d.varianceExcludedMaterials);
+          try {
+            localStorage.setItem('gpdms_variance_excluded_materials', JSON.stringify(d.varianceExcludedMaterials));
+          } catch (_) {}
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveVarianceExcluded = async (updatedList) => {
+    setVarianceExcludedMaterials(updatedList);
+    try {
+      localStorage.setItem('gpdms_variance_excluded_materials', JSON.stringify(updatedList));
+    } catch (_) {}
+    try {
+      await fetch(`${getBackendUrl()}/api/settings/variance_excluded_materials`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: updatedList })
+      });
+      setVarianceExcludedMsg('✓ Variance exclusions saved successfully.');
+      setTimeout(() => setVarianceExcludedMsg(null), 3000);
+    } catch (err) {
+      console.warn('Failed to update variance_excluded_materials on server:', err);
+    }
+  };
+
+  const handleAddExcludedTerm = (termToAdd) => {
+    const term = String(termToAdd || newExcludedInput || '').trim().toLowerCase();
+    if (!term) return;
+    if (varianceExcludedMaterials.some(t => t.toLowerCase() === term)) {
+      setNewExcludedInput('');
+      return;
+    }
+    const updated = [...varianceExcludedMaterials, term];
+    handleSaveVarianceExcluded(updated);
+    setNewExcludedInput('');
+  };
+
+  const handleRemoveExcludedTerm = (termToRemove) => {
+    const updated = varianceExcludedMaterials.filter(t => t.toLowerCase() !== termToRemove.toLowerCase());
+    handleSaveVarianceExcluded(updated);
+  };
+
+  const handleResetExcludedDefaults = () => {
+    handleSaveVarianceExcluded(DEFAULT_VARIANCE_EXCLUDED_MATERIALS);
+  };
+
   useEffect(() => {
     fetch(`${getBackendUrl()}/api/settings/material-pricing-policy`)
       .then(r => r.json())
@@ -1898,6 +1976,187 @@ export default function SettingsView({
                   )}
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* ── Report Variance Exclusions Panel (Consumables, oil, tape, magic pen, chalk, marker) ── */}
+          <div className="panel" style={{ marginBottom: 0 }}>
+            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="panel-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ShieldAlert size={18} className="text-accent" />
+                Report Variance Exclusions ({varianceExcludedMaterials.length})
+              </h3>
+              <button
+                type="button"
+                onClick={handleResetExcludedDefaults}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#0284c7',
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  cursor: 'pointer'
+                }}
+              >
+                Reset to Defaults
+              </button>
+            </div>
+
+            <p style={{ color: 'var(--text-muted)', fontSize: '12px', margin: '4px 0 12px 0' }}>
+              Materials and supplies added here will <strong>NOT</strong> calculate cutting variance in reports (e.g. oil, tape, magic pen, chalk, marker). Reports will show &quot;No Variance (Consumable)&quot; instead.
+            </p>
+
+            {varianceExcludedMsg && (
+              <div style={{
+                padding: '7px 12px',
+                borderRadius: '6px',
+                background: '#f0fdf4',
+                color: '#15803d',
+                border: '1px solid #bbf7d0',
+                fontSize: '12px',
+                fontWeight: '700',
+                marginBottom: '10px'
+              }}>
+                {varianceExcludedMsg}
+              </div>
+            )}
+
+            {/* Add Input */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleAddExcludedTerm();
+              }}
+              style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}
+            >
+              <input
+                type="text"
+                placeholder="Add material or keyword (e.g. oil, tape, marker)..."
+                value={newExcludedInput}
+                onChange={(e) => setNewExcludedInput(e.target.value)}
+                list="settings-variance-suggestions"
+                style={{
+                  flex: 1,
+                  padding: '7px 12px',
+                  borderRadius: 'var(--border-radius-sm)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '12.5px',
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-primary)'
+                }}
+              />
+              <datalist id="settings-variance-suggestions">
+                {['oil', 'tape', 'magic pen', 'chalk', 'marker', 'cutter', 'pencil', 'spray', 'cello tape', 'fevicol', 'blade']
+                  .concat((materials || []).map(m => m.name || m.bomItemName).filter(Boolean))
+                  .slice(0, 50)
+                  .map((s, idx) => (
+                    <option key={idx} value={s} />
+                  ))}
+              </datalist>
+              <button
+                type="submit"
+                disabled={!newExcludedInput.trim()}
+                className="btn btn-primary"
+                style={{
+                  padding: '7px 14px',
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: newExcludedInput.trim() ? 'pointer' : 'not-allowed'
+                }}
+              >
+                <Plus size={14} /> Add
+              </button>
+            </form>
+
+            {/* Quick Suggestions */}
+            <div style={{ marginBottom: '12px' }}>
+              <span style={{ fontSize: '10.5px', fontWeight: '800', color: 'var(--text-muted)', display: 'block', marginBottom: '5px', textTransform: 'uppercase' }}>
+                Quick Suggestions:
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                {['oil', 'tape', 'magic pen', 'chalk', 'marker', 'cutter', 'pencil', 'spray', 'cello tape', 'fevicol'].map(item => {
+                  const isAdded = varianceExcludedMaterials.some(t => t.toLowerCase() === item.toLowerCase());
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => handleAddExcludedTerm(item)}
+                      disabled={isAdded}
+                      style={{
+                        padding: '2px 7px',
+                        borderRadius: '10px',
+                        border: '1px solid',
+                        borderColor: isAdded ? '#bbf7d0' : 'var(--border-color)',
+                        background: isAdded ? '#f0fdf4' : 'var(--bg-primary)',
+                        color: isAdded ? '#15803d' : 'var(--text-secondary)',
+                        fontSize: '10.5px',
+                        fontWeight: '700',
+                        cursor: isAdded ? 'default' : 'pointer'
+                      }}
+                    >
+                      {isAdded ? '✓' : '+'} {item}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Excluded Chips List */}
+            <div style={{
+              maxHeight: '180px',
+              overflowY: 'auto',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--border-radius-md)',
+              padding: '8px',
+              backgroundColor: 'var(--bg-primary)',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '6px'
+            }}>
+              {varianceExcludedMaterials.length === 0 ? (
+                <div style={{ color: 'var(--text-muted)', fontSize: '12px', padding: '10px', textAlign: 'center', width: '100%' }}>
+                  No materials excluded. All materials calculate cutting variance.
+                </div>
+              ) : (
+                varianceExcludedMaterials.map((term, tIdx) => (
+                  <span
+                    key={tIdx}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-color)',
+                      padding: '3px 8px',
+                      borderRadius: '5px',
+                      fontSize: '11.5px',
+                      fontWeight: '700'
+                    }}
+                  >
+                    <span>🚫 {term}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveExcludedTerm(term)}
+                      title={`Remove ${term}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        fontWeight: '900',
+                        fontSize: '12px',
+                        padding: 0
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))
+              )}
             </div>
           </div>
 

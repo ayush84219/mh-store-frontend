@@ -1350,7 +1350,12 @@ export default function App() {
           itemCode: item.itemCode || (mat ? (mat.itemCode || mat.stCode || mat.materialCode || '') : '') || '',
           location: item.location || (mat ? mat.location : '') || '',
           materialId: item.materialId || '',
-          imageUrl: item.imageUrl || (mat ? (mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '') : '') || ''
+          imageUrl: item.imageUrl || (mat ? (mat.imageUrl || mat.image || mat.photo || mat.imgUrl || '') : '') || '',
+          multiplier: item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1,
+          multiplierOp: item.multiplierOp || 'multiply',
+          multiplierStr: item.multiplierStr || String(item.multiplier || 1),
+          factor: item.factor !== undefined ? item.factor : (item.multiplierOp === 'divide' ? (item.multiplier ? 1 / Number(item.multiplier) : 1) : (Number(item.multiplier) || 1)),
+          baseQty: item.baseQty
         };
       })
     };

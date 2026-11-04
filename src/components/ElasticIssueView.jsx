@@ -1500,6 +1500,7 @@ export default function ElasticIssueView({
   const handleAddOtherItemRow = (compType = '', defaultMatId = '', entryMode = 'choose') => {
     const mat = defaultMatId ? (materials || []).find(m => String(m.id) === String(defaultMatId)) : null;
     let defUnit = (compType === 'DORI' || compType === 'ELASTIC' || compType === 'TAPE' || compType === 'LACE') ? 'Mtr' : 'Pcs';
+    const defBase = (activeLotCutting?.totalPieces > 0 ? activeLotCutting.totalPieces : (lotDetails?.quantity > 0 ? lotDetails.quantity : 1));
     setOtherItems(prev => [
       ...prev,
       {
@@ -1517,10 +1518,10 @@ export default function ElasticIssueView({
         availableStock: mat ? (Number(mat.stock) || 0) : 0,
         location: mat ? (mat.location || 'Main Store') : (entryMode === 'manual' ? 'Custom Entry' : ''),
         calcMode: 'direct',
-        baseQty: 1,
+        baseQty: defBase,
         multiplier: 1,
         multiplierOp: 'multiply',
-        totalQty: 1
+        totalQty: defBase
       }
     ]);
   };
@@ -2307,6 +2308,14 @@ export default function ElasticIssueView({
 
     if (memoryTotal > 0) {
       setIssuePcs(memoryTotal);
+      setOtherItems(prev => prev.map(item => {
+        const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+        return {
+          ...item,
+          baseQty: memoryTotal,
+          totalQty: Math.ceil(memoryTotal * factor)
+        };
+      }));
       triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, { ...lotDetails, quantity: memoryTotal }, memoryTotal);
     }
     if (headerMatch?.Style || designMatch?.category) {
@@ -2325,6 +2334,17 @@ export default function ElasticIssueView({
         rows: matrixRows,
         hasDetails: true
       }));
+      if (resolvedTotal > 0) {
+        setIssuePcs(resolvedTotal);
+        setOtherItems(prev => prev.map(item => {
+          const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+          return {
+            ...item,
+            baseQty: resolvedTotal,
+            totalQty: Math.ceil(resolvedTotal * factor)
+          };
+        }));
+      }
       setLoadingActiveLotCutting(false);
       return;
     }
@@ -2372,6 +2392,14 @@ export default function ElasticIssueView({
 
           if (resolvedTotal > 0) {
             setIssuePcs(resolvedTotal);
+            setOtherItems(prev => prev.map(item => {
+              const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+              return {
+                ...item,
+                baseQty: resolvedTotal,
+                totalQty: Math.ceil(resolvedTotal * factor)
+              };
+            }));
             triggerCalculation(elasticSizeInput, elasticUnit, tapeSizeInput, tapeUnit, { ...lotDetails, quantity: resolvedTotal }, resolvedTotal);
           }
           if (styleVal) {
@@ -5799,8 +5827,8 @@ export default function ElasticIssueView({
                             <th style={{ padding: '10px 10px', minWidth: '260px' }}>STORE MATERIAL ITEM</th>
                             <th style={{ padding: '10px 8px', width: '105px', textAlign: 'center' }}>CURRENT STOCK</th>
                             <th style={{ padding: '10px 8px', width: '110px', textAlign: 'center' }}>
-                              <div>BASE QTY</div>
-                              <div style={{ fontSize: '9px', opacity: 0.85, fontWeight: '600', textTransform: 'none' }}>(Base Units)</div>
+                              <div>CUTTING QTY</div>
+                              <div style={{ fontSize: '9px', opacity: 0.85, fontWeight: '600', textTransform: 'none' }}>(Cutting Pcs)</div>
                             </th>
                             <th style={{ padding: '10px 8px', width: '135px', textAlign: 'center' }}>
                               <div>MULTIPLIER / DIVIDE</div>
@@ -6117,15 +6145,16 @@ export default function ElasticIssueView({
                                   )}
                                 </td>
 
-                                {/* Base Qty */}
+                                {/* Cutting Qty (Base) */}
                                 <td style={{ verticalAlign: 'top', padding: '10px 8px', textAlign: 'center' }}>
                                   <div style={{ height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                     <input
                                       type="number"
-                                      step="any"
-                                      min="0.01"
-                                      placeholder="1"
-                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : 1}
+                                      step="1"
+                                      min="1"
+                                      placeholder={String(activeLotCutting?.totalPieces || lotDetails?.quantity || 1)}
+                                      title="Cutting Quantity"
+                                      value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (activeLotCutting?.totalPieces || lotDetails?.quantity || 1)}
                                       onChange={(e) => handleUpdateOtherItem(item.id, 'baseQty', e.target.value)}
                                       style={{
                                         width: '80px',
@@ -6179,64 +6208,25 @@ export default function ElasticIssueView({
                                       </button>
                                       <input
                                         type="text"
-                                        placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
-                                        value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                        placeholder={item.multiplierOp === 'divide' ? '÷12' : '1'}
+                                        value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
                                         onChange={(e) => handleUpdateOtherItem(item.id, 'multiplier', e.target.value)}
                                         style={{
-                                          width: '70px',
+                                          width: '64px',
                                           height: '36px',
                                           padding: '0 6px',
-                                          borderRadius: '7px',
-                                          border: '1.5px solid #cbd5e1',
-                                           background: '#ffffff',
-                                           fontSize: '13px',
-                                           fontWeight: '800',
-                                           color: '#0f172a',
+                                          borderRadius: '6px',
+                                          border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
+                                          background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
+                                          fontSize: '14px',
+                                          fontWeight: '800',
+                                          color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
                                           textAlign: 'center',
                                           boxSizing: 'border-box',
                                           outline: 'none'
                                         }}
-                                        title="Multiplier factor or fraction (e.g. 1, 2, 1/12, 1/24, or divide by 12)"
+                                        title="Multiplier factor or fraction (e.g. 1, 2, 10, 1/12)"
                                       />
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                                      <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
-                                        {item.multiplierOp === 'divide' ? '÷ Div' : 'Mult'}
-                                      </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUpdateOtherItem(item.id, { multiplier: '1/12', multiplierOp: 'multiply' })}
-                                        title="Quick set fraction: 1/12 (e.g. per dozen)"
-                                        style={{
-                                          fontSize: '9px',
-                                          fontWeight: '800',
-                                          padding: '1px 4px',
-                                          borderRadius: '4px',
-                                          border: String(item.multiplier).trim() === '1/12' ? '1px solid #6d28d9' : '1px solid #cbd5e1',
-                                          background: String(item.multiplier).trim() === '1/12' ? '#6d28d9' : '#f8fafc',
-                                          color: String(item.multiplier).trim() === '1/12' ? '#ffffff' : '#475569',
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        1/12
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleUpdateOtherItem(item.id, { multiplier: '12', multiplierOp: 'divide' })}
-                                        title="Quick set divide: ÷ 12 (Base divided by 12)"
-                                        style={{
-                                          fontSize: '9px',
-                                          fontWeight: '800',
-                                          padding: '1px 4px',
-                                          borderRadius: '4px',
-                                          border: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '1px solid #0f172a' : '1px solid #cbd5e1',
-                                           background: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#0f172a' : '#f8fafc',
-                                           color: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#ffffff' : '#475569',
-                                          cursor: 'pointer'
-                                        }}
-                                      >
-                                        ÷12
-                                      </button>
                                     </div>
                                   </div>
                                 </td>

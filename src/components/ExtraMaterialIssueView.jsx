@@ -1135,7 +1135,7 @@ export default function ExtraMaterialIssueView({
   const [woCategory, setWoCategory] = useState('Floor Requisition');
   const [woPieces, setWoPieces] = useState(100);
   const [woReceiverName, setWoReceiverName] = useState('');
-  const [woReceiverDept, setWoReceiverDept] = useState('Cutting Floor');
+  const [woReceiverDept, setWoReceiverDept] = useState('');
   const [showAddWoModal, setShowAddWoModal] = useState(false);
   const [addWoInputName, setAddWoInputName] = useState('Label');
   const [woItems, setWoItems] = useState([
@@ -1290,6 +1290,11 @@ export default function ExtraMaterialIssueView({
         bomItemDetail: `Direct Extra Issue (Without BOM) - [${compName}]`,
         totalRequired: parseFloat(it.extraQty),
         unit: mat.unit || it.unit || 'Pcs',
+        multiplier: it.multiplier !== undefined && it.multiplier !== null && it.multiplier !== '' ? it.multiplier : 1,
+        multiplierOp: it.multiplierOp || 'multiply',
+        multiplierStr: String(it.multiplier || 1),
+        factor: computeEffectiveFactor(it.multiplier, it.multiplierOp).factor,
+        baseQty: it.baseQty,
         reason: it.reason + (it.remarks ? ` - ${it.remarks}` : ''),
         previouslyIssued: 0,
         receiverDept: woReceiverDept.trim(),
@@ -1986,83 +1991,76 @@ export default function ExtraMaterialIssueView({
           </div>
         </div>
 
-        {/* Items Grid - Shown ONLY when showAlreadyIssued is true */}
+        {/* Items Table - Proper Structured Form in Detail */}
         {showAlreadyIssued && (
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-            gap: '10px'
-          }}>
-            {info.materials.map((m, mIdx) => (
-              <div
-                key={m.key || mIdx}
-                style={{
-                  background: '#ffffff',
-                  border: '1.5px solid #fde68a',
-                  borderRadius: '8px',
-                  padding: '10px 14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '12px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-                }}
-              >
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                    {m.category && (
-                      <span style={{
-                        fontSize: '9.5px',
-                        fontWeight: '800',
-                        color: '#92400e',
-                        background: '#fef3c7',
-                        padding: '1px 6px',
-                        borderRadius: '4px',
-                        textTransform: 'uppercase'
-                      }}>
-                        {m.category}
-                      </span>
-                    )}
-                    <span style={{
-                      fontSize: '13px',
-                      fontWeight: '800',
-                      color: '#0f172a',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis'
-                    }}>
-                      {m.name}
-                    </span>
-                  </div>
-                  {m.itemCode && (
-                    <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
-                      Code: {m.itemCode}
-                    </div>
-                  )}
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
-                    Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
-                    {m.challans[0]?.date && ` • ${m.challans[0].date.split(' ')[0]}`}
-                  </div>
-                </div>
-
-                {/* Quantity Pill */}
-                <div style={{
-                  textAlign: 'right',
-                  background: '#fff7ed',
-                  border: '1px solid #fed7aa',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  flexShrink: 0
-                }}>
-                  <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
-                    {m.totalQty.toLocaleString('en-IN')} {m.unit}
-                  </div>
-                  <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
-                    Issued Qty
-                  </div>
-                </div>
-              </div>
-            ))}
+          <div style={{ marginTop: '8px' }}>
+            <div style={{ overflowX: 'auto', border: '1px solid #fde68a', borderRadius: '8px', background: '#ffffff', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '11.5px' }}>
+                <thead>
+                  <tr style={{ background: '#fef3c7', borderBottom: '1.5px solid #fde68a', color: '#92400e', fontSize: '10.5px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                    <th style={{ padding: '6px 8px', width: '90px' }}>Date</th>
+                    <th style={{ padding: '6px 8px', width: '105px' }}>Challan #</th>
+                    <th style={{ padding: '6px 8px', width: '100px' }}>Category</th>
+                    <th style={{ padding: '6px 10px', minWidth: '180px' }}>Material Name & Code</th>
+                    <th style={{ padding: '6px 8px', width: '95px', textAlign: 'right' }}>Issue Qty</th>
+                    <th style={{ padding: '6px 8px', width: '115px' }}>Received By</th>
+                    <th style={{ padding: '6px 8px', width: '100px' }}>Issued By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {info.materials.map((m, mIdx) => {
+                    return m.challans.map((ch, chIdx) => (
+                      <tr
+                        key={`${m.key || mIdx}-${chIdx}`}
+                        style={{
+                          background: (mIdx + chIdx) % 2 === 0 ? '#ffffff' : '#fffdfa',
+                          borderBottom: '1px solid #fde68a'
+                        }}
+                      >
+                        <td style={{ padding: '6px 8px', color: '#334155', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                          {ch.date ? ch.date.split(' ')[0] : '—'}
+                          {ch.date && ch.date.split(' ')[1] && (
+                            <div style={{ fontSize: '9px', color: '#94a3b8' }}>{ch.date.split(' ').slice(1).join(' ')}</div>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 8px', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontFamily: 'monospace', background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '1px 5px', borderRadius: '4px', fontSize: '10.5px' }}>
+                            {ch.id}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontSize: '9.5px', fontWeight: '800', background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', padding: '1.5px 5px', borderRadius: '3px', textTransform: 'uppercase' }}>
+                            🏷️ {m.category || 'GENERAL'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px 10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                            <strong style={{ color: '#0f172a' }}>{m.name}</strong>
+                            {m.itemCode && (
+                              <span style={{ fontSize: '8.5px', fontFamily: 'monospace', color: '#64748b', background: '#f1f5f9', padding: '0 4px', borderRadius: '2px' }}>
+                                [{m.itemCode}]
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <span style={{ fontWeight: '900', color: '#c2410c', fontSize: '12px' }}>
+                            {(Number(ch.qty) || 0).toLocaleString('en-IN')} <span style={{ fontSize: '9.5px' }}>{ch.unit}</span>
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px 8px', color: '#0f172a', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                          <div>{ch.receiver || 'Cutting'}</div>
+                          {ch.receiverDept && <div style={{ fontSize: '9px', color: '#64748b' }}>{ch.receiverDept}</div>}
+                        </td>
+                        <td style={{ padding: '6px 8px', color: '#475569', fontWeight: '700', whiteSpace: 'nowrap' }}>
+                          {ch.issuer || 'Store'}
+                        </td>
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
@@ -5841,7 +5839,7 @@ export default function ExtraMaterialIssueView({
                         <th style={{ padding: '10px 10px', textAlign: 'left', minWidth: '160px' }}>Component Name *</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '280px' }}>Inventory Material *</th>
                         <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Stock Available</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', whiteSpace: 'nowrap' }}>Base Qty</th>
+                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '110px', minWidth: '110px', whiteSpace: 'nowrap' }}>Cutting Qty</th>
                         <th style={{ padding: '10px 8px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Multiplier / Div</th>
                         <th style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', whiteSpace: 'nowrap' }}>Issue Qty *</th>
                         <th style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', whiteSpace: 'nowrap' }}>Unit</th>
@@ -5941,13 +5939,13 @@ export default function ExtraMaterialIssueView({
                                 <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>—</span>
                               )}
                             </td>
-                            {/* Base Qty */}
+                            {/* Cutting Qty (Base) */}
                             <td style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', verticalAlign: 'middle' }}>
                               <input
                                 type="number"
                                 min="1"
                                 step="1"
-                                placeholder="Base Qty"
+                                placeholder="Cutting Qty"
                                 value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
                                 onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
                                 style={{
@@ -5965,107 +5963,60 @@ export default function ExtraMaterialIssueView({
                                   outline: 'none',
                                   MozAppearance: 'textfield'
                                 }}
-                                title="Base Quantity"
+                                title="Cutting Quantity"
                               />
                             </td>
 
                             {/* Multiplier / Divide */}
-                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '130px', minWidth: '130px', verticalAlign: 'middle' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', width: '100%' }}>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
-                                      handleUpdateWoItem(item.id, 'multiplierOp', nextOp);
-                                    }}
-                                    title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
-                                    style={{
-                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                      background: item.multiplierOp === 'divide' ? '#fef3c7' : '#ede9fe',
-                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
-                                      borderRadius: '6px',
-                                      padding: '0 4px',
-                                      fontSize: '13px',
-                                      fontWeight: '900',
-                                      cursor: 'pointer',
-                                      height: '32px',
-                                      minWidth: '22px',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      transition: 'all 0.15s ease'
-                                    }}
-                                  >
-                                    {item.multiplierOp === 'divide' ? '÷' : '×'}
-                                  </button>
-                                  <input
-                                    type="text"
-                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
-                                    value={item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1}
-                                    onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
-                                    style={{
-                                      width: '64px',
-                                      height: '36px',
-                                      padding: '0 6px',
-                                      borderRadius: '8px',
-                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                      background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
-                                      fontSize: '13px',
-                                      fontWeight: '800',
-                                      textAlign: 'center',
-                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
-                                      boxSizing: 'border-box',
-                                      outline: 'none'
-                                    }}
-                                    title="Multiplier factor or fraction (e.g. 1, 2, 1/12, 1/24, or divide by 12)"
-                                  />
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginTop: '2px', flexWrap: 'wrap', justifyContent: 'center' }}>
-                                  <span style={{ fontSize: '9px', color: '#64748b', fontWeight: '700' }}>
-                                    {item.multiplierOp === 'divide' ? '÷ Div' : 'Mult'}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleUpdateWoItem(item.id, 'multiplier', '1/12');
-                                      handleUpdateWoItem(item.id, 'multiplierOp', 'multiply');
-                                    }}
-                                    title="Quick set fraction: 1/12 (e.g. per dozen)"
-                                    style={{
-                                      fontSize: '9px',
-                                      fontWeight: '800',
-                                      padding: '1px 4px',
-                                      borderRadius: '4px',
-                                      border: String(item.multiplier).trim() === '1/12' ? '1px solid #6d28d9' : '1px solid #cbd5e1',
-                                      background: String(item.multiplier).trim() === '1/12' ? '#6d28d9' : '#f8fafc',
-                                      color: String(item.multiplier).trim() === '1/12' ? '#ffffff' : '#475569',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    1/12
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      handleUpdateWoItem(item.id, 'multiplier', '12');
-                                      handleUpdateWoItem(item.id, 'multiplierOp', 'divide');
-                                    }}
-                                    title="Quick set divide: ÷ 12 (Base divided by 12)"
-                                    style={{
-                                      fontSize: '9px',
-                                      fontWeight: '800',
-                                      padding: '1px 4px',
-                                      borderRadius: '4px',
-                                      border: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '1px solid #b45309' : '1px solid #cbd5e1',
-                                      background: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#f59e0b' : '#f8fafc',
-                                      color: item.multiplierOp === 'divide' && String(item.multiplier).trim() === '12' ? '#ffffff' : '#475569',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    ÷12
-                                  </button>
-                                </div>
+                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '110px', minWidth: '110px', verticalAlign: 'middle' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
+                                    handleUpdateWoItem(item.id, 'multiplierOp', nextOp);
+                                  }}
+                                  title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
+                                  style={{
+                                    border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
+                                    background: item.multiplierOp === 'divide' ? '#fef3c7' : '#ede9fe',
+                                    color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
+                                    borderRadius: '6px',
+                                    padding: '0 6px',
+                                    fontSize: '14px',
+                                    fontWeight: '900',
+                                    cursor: 'pointer',
+                                    height: '36px',
+                                    minWidth: '28px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    transition: 'all 0.15s ease'
+                                  }}
+                                >
+                                  {item.multiplierOp === 'divide' ? '÷' : '×'}
+                                </button>
+                                <input
+                                  type="text"
+                                  placeholder={item.multiplierOp === 'divide' ? '÷12' : '1'}
+                                  value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
+                                  onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
+                                  style={{
+                                    width: '64px',
+                                    height: '36px',
+                                    padding: '0 6px',
+                                    borderRadius: '6px',
+                                    border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
+                                    background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
+                                    fontSize: '14px',
+                                    fontWeight: '800',
+                                    textAlign: 'center',
+                                    color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
+                                    boxSizing: 'border-box',
+                                    outline: 'none'
+                                  }}
+                                  title="Multiplier factor or fraction (e.g. 1, 2, 10, 1/12)"
+                                />
                               </div>
                             </td>
 

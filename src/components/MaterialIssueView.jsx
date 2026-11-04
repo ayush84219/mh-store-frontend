@@ -1053,7 +1053,7 @@ export default function MaterialIssueView({
   const issueMode = 'initial';
   const [personName, setPersonName] = useState(currentUser?.name || '');
   const [receiverName, setReceiverName] = useState('');
-  const [receiverDept, setReceiverDept] = useState('Cutting');
+  const [receiverDept, setReceiverDept] = useState('');
   const [remarks, setRemarks] = useState('');
   const [logSearchQuery, setLogSearchQuery] = useState('');
   const [logsCategoryFilter, setLogsCategoryFilter] = useState('all'); // 'all' | 'with_bom' | 'without_bom' | 'extra'
@@ -1737,7 +1737,7 @@ export default function MaterialIssueView({
     setBomMappings([]);
     setPersonName(currentUser?.name || '');
     setReceiverName('');
-    setReceiverDept('Cutting');
+    setReceiverDept('');
     setRemarks('');
 
     // Clear success message after 5 seconds

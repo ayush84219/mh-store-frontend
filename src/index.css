@@ -2619,7 +2619,8 @@ body.dark-theme .notification-toast {
 
 /* Print and Screen Utility Classes */
 @media screen {
-  .print-only-element {
+  .print-only-element,
+  .print-only-tfoot {
     display: none !important;
   }
 }
@@ -2634,6 +2635,10 @@ body.dark-theme .notification-toast {
     width: 100% !important;
     height: 100% !important;
     min-height: 380px !important;
+  }
+
+  .print-only-tfoot {
+    display: table-footer-group !important;
   }
 }
 
