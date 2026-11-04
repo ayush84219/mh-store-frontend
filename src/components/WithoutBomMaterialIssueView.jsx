@@ -2591,15 +2591,8 @@ export default function WithoutBomMaterialIssueView({
 
   // Helper to determine previous issues for a specific material or component category under the current lot
   const getMaterialPriorIssueInfo = useCallback((matOrItem, currentRowId = null) => {
-    const { factor } = computeEffectiveFactor(matOrItem?.multiplier, matOrItem?.multiplierOp);
-    const effFactor = (factor && factor > 0) ? factor : 1;
-
-    // Multiplier scales the cutting pieces and allowed quota for this accessory item!
-    // e.g. cutting 300 shirts * 10 buttons/shirt = 3,000 buttons!
-    const rawCutting = cuttingPieces > 0 ? cuttingPieces : 0;
-    const maxCutting = Math.ceil(rawCutting * effFactor);
-    const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : rawCutting;
-    const maxAllowedTotal = Math.ceil(rawAllowed * effFactor);
+    const maxCutting = cuttingPieces > 0 ? cuttingPieces : 0;
+    const maxAllowedTotal = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : maxCutting;
 
     if (!matOrItem) {
       return {
@@ -2641,16 +2634,16 @@ export default function WithoutBomMaterialIssueView({
       const catData = previouslyIssuedForCurrentLot?.categoryTotals?.[catKey];
       const categoryPriorQty = catData?.totalQty || 0;
 
-      // Sum quantities of OTHER rows in current items table with same catKey
+      // Sum base quantities of OTHER rows in current items table with same catKey
       let currentOtherRowsQty = 0;
       if (Array.isArray(items)) {
         items.forEach(r => {
           if (currentRowId && String(r.id) === String(currentRowId)) return;
           const rCatKey = normalizeCategoryKey(r.componentType || r.category, r.materialName || r.name);
           if (rCatKey === catKey) {
-            const rQty = (r.totalQty !== undefined && r.totalQty !== null && r.totalQty !== '')
-              ? Number(r.totalQty)
-              : ((r.baseQty !== undefined && r.baseQty !== null && r.baseQty !== '') ? Number(r.baseQty) : 0);
+            const rQty = (r.baseQty !== undefined && r.baseQty !== null && r.baseQty !== '')
+              ? Number(r.baseQty)
+              : 0;
             currentOtherRowsQty += rQty;
           }
         });
@@ -3160,33 +3153,35 @@ export default function WithoutBomMaterialIssueView({
       const isMultOpUpdate = field === 'multiplierOp' || (typeof fieldOrObj === 'object' && 'multiplierOp' in fieldOrObj);
       const isQtyUpdate = field === 'totalQty' || (typeof fieldOrObj === 'object' && 'totalQty' in fieldOrObj);
 
-      const garmentCutting = cuttingPieces > 0 ? cuttingPieces : (defaultAutoIssueQty > 0 ? defaultAutoIssueQty : (parseFloat(pieces) || 1));
-
-      if (isMultUpdate || isMultOpUpdate) {
+      if (isBaseUpdate) {
+        const rawBase = parseFloat(updated.baseQty);
+        const base = (!isNaN(rawBase) && rawBase >= 0) ? rawBase : (cuttingPieces > 0 ? defaultAutoIssueQty : 1);
+        updated.baseQty = base;
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        // Multiplier scales the garment cutting volume to get this accessory's Base Quantity!
-        // e.g. lot 62115 (300 shirts) * multiplier 10 = base quantity 3,000 buttons!
-        const newBase = Math.ceil(garmentCutting * factor);
-        updated.baseQty = newBase;
-        updated.totalQty = newBase > 0 ? newBase : 1;
-      } else if (isBaseUpdate) {
-        if (updated.baseQty === '') {
-          // Allow empty during typing
-        } else {
-          const rawBase = parseFloat(updated.baseQty);
-          const b = (!isNaN(rawBase) && rawBase >= 0) ? rawBase : garmentCutting;
-          updated.baseQty = Math.ceil(b);
-          updated.totalQty = Math.ceil(b);
-        }
+        const total = Math.ceil(base * factor);
+        updated.totalQty = total > 0 ? total : (base === 0 ? 0 : 1);
+      } else if (isMultUpdate || isMultOpUpdate) {
+        const base = (item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '')
+          ? (parseFloat(item.baseQty) || 0)
+          : (cuttingPieces > 0 ? defaultAutoIssueQty : 1);
+        updated.baseQty = base;
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        const total = Math.ceil(base * factor);
+        updated.totalQty = total > 0 ? total : (base === 0 ? 0 : 1);
       } else if (isQtyUpdate) {
-        if (updated.totalQty === '') {
-          // Allow empty during typing
-        } else {
-          const rawQ = parseFloat(updated.totalQty !== undefined ? updated.totalQty : value) || 0;
-          const qVal = Math.ceil(rawQ);
-          updated.totalQty = qVal;
-          if (updated.baseQty === undefined || updated.baseQty === null || updated.baseQty === '') {
-            updated.baseQty = qVal;
+        const rawQ = parseFloat(updated.totalQty !== undefined ? updated.totalQty : value) || 0;
+        const qVal = Math.ceil(rawQ);
+        updated.totalQty = qVal;
+        const base = (item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '')
+          ? (parseFloat(item.baseQty) || 0)
+          : (cuttingPieces > 0 ? defaultAutoIssueQty : 1);
+        if (base > 0 && qVal > 0) {
+          if (updated.multiplierOp === 'divide') {
+            const newDiv = Math.round((base / qVal) * 100) / 100;
+            if (newDiv > 0) updated.multiplier = newDiv;
+          } else {
+            const newM = Math.round((qVal / base) * 100) / 100;
+            if (newM > 0) updated.multiplier = newM;
           }
         }
       }
@@ -4592,14 +4587,11 @@ export default function WithoutBomMaterialIssueView({
       const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
       const exceeded = validItems.filter(i => {
         const prior = getMaterialPriorIssueInfo(i, i.id);
-        const { factor } = computeEffectiveFactor(i.multiplier, i.multiplierOp);
-        const effFactor = (factor && factor > 0) ? factor : 1;
-        const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : cuttingPieces;
-        const itemAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : Math.ceil(rawAllowed * effFactor);
+        const maxAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : defaultAutoIssueQty;
         const b = (i.baseQty !== undefined && i.baseQty !== null && i.baseQty !== '')
           ? Number(i.baseQty)
-          : itemAllowed;
-        return b > itemAllowed;
+          : maxAllowed;
+        return b > maxAllowed;
       });
       if (exceeded.length > 0) {
         setApprovalModalData({
@@ -4609,17 +4601,13 @@ export default function WithoutBomMaterialIssueView({
           defaultAutoIssueQty,
           exceededItems: exceeded.map(i => {
             const prior = getMaterialPriorIssueInfo(i, i.id);
-            const { factor } = computeEffectiveFactor(i.multiplier, i.multiplierOp);
-            const effFactor = (factor && factor > 0) ? factor : 1;
-            const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : cuttingPieces;
-            const itemAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : Math.ceil(rawAllowed * effFactor);
-            const itemCutting = Math.ceil(cuttingPieces * effFactor);
+            const maxAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : defaultAutoIssueQty;
             const b = (i.baseQty !== undefined && i.baseQty !== null && i.baseQty !== '')
               ? Number(i.baseQty)
-              : itemAllowed;
-            const excess = b - itemAllowed;
-            const excessPct = itemCutting > 0 ? ((excess / itemCutting) * 100).toFixed(1) : '0';
-            return { ...i, qty: b, baseQty: b, alreadyIssued: prior.alreadyIssued, maxAllowed: itemAllowed, excess, excessPct };
+              : maxAllowed;
+            const excess = b - maxAllowed;
+            const excessPct = cuttingPieces > 0 ? ((excess / cuttingPieces) * 100).toFixed(1) : '0';
+            return { ...i, qty: b, baseQty: b, alreadyIssued: prior.alreadyIssued, maxAllowed, excess, excessPct };
           }),
           allItems: validItems
         });
@@ -4687,14 +4675,11 @@ export default function WithoutBomMaterialIssueView({
       const validItems = items.filter(i => (i.materialId || i.materialName.trim()) && Number(i.totalQty) > 0);
       const exceeded = validItems.filter(i => {
         const prior = getMaterialPriorIssueInfo(i, i.id);
-        const { factor } = computeEffectiveFactor(i.multiplier, i.multiplierOp);
-        const effFactor = (factor && factor > 0) ? factor : 1;
-        const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : cuttingPieces;
-        const itemAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : Math.ceil(rawAllowed * effFactor);
+        const maxAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : defaultAutoIssueQty;
         const b = (i.baseQty !== undefined && i.baseQty !== null && i.baseQty !== '')
           ? Number(i.baseQty)
-          : itemAllowed;
-        return b > itemAllowed;
+          : maxAllowed;
+        return b > maxAllowed;
       });
       if (exceeded.length > 0) {
         setApprovalModalData({
@@ -4704,17 +4689,13 @@ export default function WithoutBomMaterialIssueView({
           defaultAutoIssueQty,
           exceededItems: exceeded.map(i => {
             const prior = getMaterialPriorIssueInfo(i, i.id);
-            const { factor } = computeEffectiveFactor(i.multiplier, i.multiplierOp);
-            const effFactor = (factor && factor > 0) ? factor : 1;
-            const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : cuttingPieces;
-            const itemAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : Math.ceil(rawAllowed * effFactor);
-            const itemCutting = Math.ceil(cuttingPieces * effFactor);
+            const maxAllowed = prior.alreadyIssued > 0 ? prior.allowedWith1Pct : defaultAutoIssueQty;
             const b = (i.baseQty !== undefined && i.baseQty !== null && i.baseQty !== '')
               ? Number(i.baseQty)
-              : itemAllowed;
-            const excess = b - itemAllowed;
-            const excessPct = itemCutting > 0 ? ((excess / itemCutting) * 100).toFixed(1) : '0';
-            return { ...i, qty: b, baseQty: b, alreadyIssued: prior.alreadyIssued, maxAllowed: itemAllowed, excess, excessPct };
+              : maxAllowed;
+            const excess = b - maxAllowed;
+            const excessPct = cuttingPieces > 0 ? ((excess / cuttingPieces) * 100).toFixed(1) : '0';
+            return { ...i, qty: b, baseQty: b, alreadyIssued: prior.alreadyIssued, maxAllowed, excess, excessPct };
           }),
           allItems: validItems
         });
@@ -5206,11 +5187,9 @@ export default function WithoutBomMaterialIssueView({
             ? Number((batchTargetRequired / cuttingPieces).toFixed(2))
             : (batch.items.length === 1 ? getMaterialMultiplier(batch.items[0].m, log, cuttingPieces) : 1);
           const catVariance = cuttingPieces > 0 ? (batchTargetRequired - catIssueQty) : 0;
-          const allowed1Pct = Math.ceil(batchTargetRequired * 0.01);
-          const isBalanced = Math.abs(catVariance) <= allowed1Pct || catVariance === 0;
           const hasCatVariance = !isDirect && cuttingPieces > 0 && batch.isPc;
-          const catVarianceText = isBalanced ? '0 Pcs' : (catVariance > 0 ? `+${catVariance.toLocaleString('en-IN')} Pcs` : `${catVariance.toLocaleString('en-IN')} Pcs`);
-          const catVarianceBadge = isBalanced ? 'BALANCED' : catVariance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED';
+          const catVarianceText = catVariance > 0 ? `+${catVariance.toLocaleString('en-IN')} Pcs` : `${catVariance.toLocaleString('en-IN')} Pcs`;
+          const catVarianceBadge = catVariance === 0 ? 'BALANCED' : catVariance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED';
 
           const challanRowBorder = isLastInChallan ? 'border-bottom: 2px solid #64748b;' : (isLastInBatch ? 'border-bottom: 1px solid #cbd5e1;' : 'border-bottom: 1px dashed #e2e8f0;');
 
@@ -5258,10 +5237,10 @@ export default function WithoutBomMaterialIssueView({
                 <td rowspan="${batchItemCount}" style="text-align: right; vertical-align: middle; white-space: nowrap; padding: 6px 6px; background: ${batch.isPooled ? '#f8fafc' : 'inherit'}; border-right: 1px solid #cbd5e1;">
                   ${!isDirect && cuttingPieces > 0 ? `
                     <div style="font-weight: 900; font-size: 10.5px; color: #0f172a; line-height: 1.1;">
-                      ${(batchTargetRequired > 0 ? batchTargetRequired : cuttingPieces).toLocaleString('en-IN')} <span style="font-size: 8.5px; color: #64748b;">Pcs</span>
+                      ${cuttingPieces.toLocaleString('en-IN')} <span style="font-size: 8.5px; color: #64748b;">Pcs</span>
                     </div>
                     <div style="font-size: 7.5px; font-weight: 800; color: #1d4ed8; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 2px; padding: 0.5px 3px; display: inline-block; margin-top: 2px;">
-                      ${effectiveBatchMult !== 1 ? `TARGET (${cuttingPieces} × ${effectiveBatchMult})` : 'CUTTING'}
+                      CUTTING
                     </div>
                   ` : `
                     <div style="font-size: 10px; color: #94a3b8; font-weight: 700;">—</div>
@@ -7065,10 +7044,16 @@ export default function WithoutBomMaterialIssueView({
                           ({(Number(defaultAutoIssueQty) || 0).toLocaleString()})
                         </div>
                       </th>
-                      <th style={{ padding: '10px 8px', width: '135px', textAlign: 'center' }}>
+                      <th style={{ padding: '10px 6px', width: '85px', textAlign: 'center' }}>
                         <div>Mult / Per Pc</div>
                         <div style={{ fontSize: '8.5px', color: '#cbd5e1', fontWeight: '600', textTransform: 'none' }}>
                           (× / ÷)
+                        </div>
+                      </th>
+                      <th style={{ padding: '10px 6px', width: '90px', textAlign: 'center' }}>
+                        <div>Multiplier</div>
+                        <div style={{ fontSize: '8.5px', color: '#cbd5e1', fontWeight: '600', textTransform: 'none' }}>
+                          (e.g. 10 / Pc)
                         </div>
                       </th>
                       <th style={{ padding: '10px 10px', width: '130px', textAlign: 'right' }}>
@@ -7265,19 +7250,16 @@ export default function WithoutBomMaterialIssueView({
                                 <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: '800' }}>—</span>
                               ) : (() => {
                                 const hasPrior = prior.alreadyIssued > 0;
-                                const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
-                                const effFactor = (factor && factor > 0) ? factor : 1;
-                                const rawAllowed = defaultAutoIssueQty > 0 ? defaultAutoIssueQty : cuttingPieces;
-                                const itemMaxAllowed = hasPrior ? prior.allowedWith1Pct : Math.ceil(rawAllowed * effFactor);
-                                const itemBaseTarget = hasPrior ? prior.remainingBase : Math.ceil(cuttingPieces * effFactor);
+                                const maxAllowed = hasPrior ? prior.allowedWith1Pct : defaultAutoIssueQty;
+                                const remBase = hasPrior ? prior.remainingBase : cuttingPieces;
 
                                 const rawBase = (item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '')
                                   ? Number(item.baseQty)
-                                  : itemBaseTarget;
+                                  : (hasPrior ? prior.remainingBase : (cuttingPieces > 0 ? defaultAutoIssueQty : 1));
 
-                                const isBaseExceeded = cuttingPieces > 0 && rawBase > itemMaxAllowed;
-                                const isBaseWithin = cuttingPieces > 0 && rawBase >= 0 && rawBase <= itemMaxAllowed;
-                                const excess = rawBase - itemMaxAllowed;
+                                const isBaseExceeded = cuttingPieces > 0 && rawBase > maxAllowed;
+                                const isBaseWithin = cuttingPieces > 0 && rawBase >= 0 && rawBase <= maxAllowed;
+                                const excess = rawBase - maxAllowed;
 
                                 return (
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
@@ -7286,19 +7268,13 @@ export default function WithoutBomMaterialIssueView({
                                       className="no-spin"
                                       step="any"
                                       min="0"
-                                      placeholder={String(itemBaseTarget)}
-                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : ''}
+                                      value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : (hasPrior ? prior.remainingBase : (cuttingPieces > 0 ? defaultAutoIssueQty : 1))}
                                       onChange={(e) => handleUpdateItem(item.id, 'baseQty', e.target.value)}
-                                      onBlur={() => {
-                                        if (item.baseQty === '' || item.baseQty === null || item.baseQty === undefined) {
-                                          handleUpdateItem(item.id, 'baseQty', itemBaseTarget);
-                                        }
-                                      }}
                                       style={{
-                                        width: '85px',
-                                        height: '36px',
+                                        width: '80px',
+                                        height: '34px',
                                         padding: '0 6px',
-                                        borderRadius: '7px',
+                                        borderRadius: '6px',
                                         border: isBaseExceeded ? '2px solid #ef4444' : isBaseWithin ? '1.5px solid #10b981' : '1.5px solid #cbd5e1',
                                         background: isBaseExceeded ? '#fef2f2' : isBaseWithin ? '#f0fdf4' : '#ffffff',
                                         textAlign: 'center',
@@ -7315,11 +7291,11 @@ export default function WithoutBomMaterialIssueView({
                                         </span>
                                         <button
                                           type="button"
-                                          onClick={() => handleUpdateItem(item.id, 'baseQty', itemMaxAllowed)}
+                                          onClick={() => handleUpdateItem(item.id, 'baseQty', maxAllowed)}
                                           style={{ fontSize: '9px', color: '#047857', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: '3px', cursor: 'pointer', fontWeight: '800', padding: '1px 4px' }}
-                                          title={"Reset to remaining 1% allowance (" + itemMaxAllowed + ")"}
+                                          title={"Reset to remaining 1% allowance (" + maxAllowed + ")"}
                                         >
-                                          Set 1% ({itemMaxAllowed})
+                                          Set 1% ({maxAllowed})
                                         </button>
                                       </div>
                                     )}
@@ -7328,12 +7304,12 @@ export default function WithoutBomMaterialIssueView({
                               })()}
                             </td>
 
-                            {/* 5. Multiplier / Per Pc (× / ÷) Combined */}
-                            <td style={{ verticalAlign: 'middle', padding: '10px 8px', textAlign: 'center' }}>
+                            {/* 5. Mult / Divide Operator */}
+                            <td style={{ verticalAlign: 'middle', padding: '10px 6px', textAlign: 'center' }}>
                               {isFullyIssued ? (
                                 <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: '800' }}>—</span>
                               ) : (
-                                <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '3px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                   <button
                                     type="button"
                                     onClick={() => {
@@ -7342,16 +7318,15 @@ export default function WithoutBomMaterialIssueView({
                                     }}
                                     title={"Toggle Multiply (×) / Divide (÷). Currently: " + (item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)')}
                                     style={{
-                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                      background: item.multiplierOp === 'divide' ? '#fef3c7' : '#ede9fe',
-                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
-                                      borderRadius: '7px',
-                                      padding: '0 6px',
-                                      fontSize: '14px',
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #6366f1',
+                                      background: item.multiplierOp === 'divide' ? '#fef3c7' : '#e0e7ff',
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#4338ca',
+                                      borderRadius: '6px',
+                                      fontSize: '15px',
                                       fontWeight: '900',
                                       cursor: 'pointer',
-                                      height: '36px',
-                                      minWidth: '28px',
+                                      height: '34px',
+                                      width: '34px',
                                       display: 'flex',
                                       alignItems: 'center',
                                       justifyContent: 'center',
@@ -7360,37 +7335,69 @@ export default function WithoutBomMaterialIssueView({
                                   >
                                     {item.multiplierOp === 'divide' ? '÷' : '×'}
                                   </button>
-                                  <input
-                                    type="text"
-                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1'}
-                                    value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
-                                    onChange={(e) => handleUpdateItem(item.id, 'multiplier', e.target.value)}
-                                    onBlur={() => {
-                                      if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
-                                        handleUpdateItem(item.id, 'multiplier', 1);
-                                      }
-                                    }}
-                                    style={{
-                                      width: '65px',
-                                      height: '36px',
-                                      padding: '0 6px',
-                                      borderRadius: '7px',
-                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                      background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
-                                      fontSize: '13px',
-                                      fontWeight: '800',
-                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
-                                      textAlign: 'center',
-                                      boxSizing: 'border-box',
-                                      outline: 'none'
-                                    }}
-                                    title="Multiplier factor or fraction (e.g. 1, 2, 10, 1/12, or divide by 12)"
-                                  />
                                 </div>
                               )}
                             </td>
 
-                            {/* 6. Total Issue Qty */}
+                            {/* 6. Multiplier / Divide Value */}
+                            <td style={{ verticalAlign: 'middle', padding: '10px 6px', textAlign: 'center' }}>
+                              {isFullyIssued ? (
+                                <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: '800' }}>—</span>
+                              ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                  <input
+                                    type="text"
+                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1'}
+                                    value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
+                                    onChange={(e) => handleUpdateItem(item.id, 'multiplier', e.target.value)}
+                                    style={{
+                                      width: '68px',
+                                      height: '34px',
+                                      padding: '0 6px',
+                                      borderRadius: '6px',
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #6366f1',
+                                      background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
+                                      fontSize: '13px',
+                                      fontWeight: '800',
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#4338ca',
+                                      textAlign: 'center',
+                                      boxSizing: 'border-box'
+                                    }}
+                                  />
+                                  {(() => {
+                                    const compCat = String(item.componentType || item.category || '').toUpperCase();
+                                    const matName = String(item.name || item.bomItemName || item.materialName || '').toUpperCase();
+                                    const isBtn = compCat.includes('BUTTON') || matName.includes('BUTTON');
+                                    return (
+                                      <div style={{ display: 'flex', gap: '2px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                        {(isBtn ? [10, 9, 8, 14, 1] : [1, 10]).map(val => (
+                                          <button
+                                            key={val}
+                                            type="button"
+                                            onClick={() => handleUpdateItem(item.id, { multiplier: val, multiplierOp: 'multiply' })}
+                                            style={{
+                                              fontSize: '8px',
+                                              fontWeight: '800',
+                                              padding: '1px 3px',
+                                              borderRadius: '3px',
+                                              border: Number(item.multiplier) === val && item.multiplierOp !== 'divide' ? '1px solid #4338ca' : '1px solid #cbd5e1',
+                                              background: Number(item.multiplier) === val && item.multiplierOp !== 'divide' ? '#4338ca' : '#f8fafc',
+                                              color: Number(item.multiplier) === val && item.multiplierOp !== 'divide' ? '#ffffff' : '#475569',
+                                              cursor: 'pointer'
+                                            }}
+                                            title={`Set Multiplier to ${val} / Pc`}
+                                          >
+                                            {val === 1 ? '1/Pc' : `×${val}`}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
+                                </div>
+                              )}
+                            </td>
+
+                            {/* 7. Total Issue Qty */}
                             <td style={{ verticalAlign: 'middle', padding: '10px 10px', textAlign: 'right' }}>
                               {isFullyIssued ? (
                                 <span style={{ color: '#94a3b8', fontSize: '16px', fontWeight: '800' }}>—</span>
@@ -7411,19 +7418,13 @@ export default function WithoutBomMaterialIssueView({
                                       className="no-spin"
                                       step="1"
                                       min="1"
-                                      placeholder="Qty"
-                                      value={item.totalQty !== undefined && item.totalQty !== null ? item.totalQty : ''}
-                                      onChange={(e) => handleUpdateItem(item.id, 'totalQty', e.target.value)}
-                                      onBlur={() => {
-                                        if (item.totalQty === '' || item.totalQty === null || item.totalQty === undefined) {
-                                          handleUpdateItem(item.id, 'totalQty', item.baseQty || 1);
-                                        }
-                                      }}
+                                      value={item.totalQty || ''}
+                                      onChange={(e) => handleUpdateItem(item.id, 'totalQty', Math.ceil(parseFloat(e.target.value) || 0))}
                                       style={{
-                                        width: '95px',
-                                        height: '36px',
+                                        width: '90px',
+                                        height: '34px',
                                         padding: '0 8px',
-                                        borderRadius: '7px',
+                                        borderRadius: '6px',
                                         border: isStockShortage ? '2px solid #dc2626' : '1.5px solid #cbd5e1',
                                         background: isStockShortage ? '#fef2f2' : '#ffffff',
                                         textAlign: 'right',
@@ -7434,16 +7435,14 @@ export default function WithoutBomMaterialIssueView({
                                       }}
                                     />
                                     {(() => {
-                                      const garmentCutting = cuttingPieces > 0 ? cuttingPieces : (defaultAutoIssueQty > 0 ? defaultAutoIssueQty : (parseFloat(pieces) || 1));
-                                      const multVal = item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1;
-                                      const isDiv = item.multiplierOp === 'divide';
-                                      const showFormula = (multVal !== 1 && String(multVal) !== '1') || isDiv;
-                                      if (!showFormula) return null;
+                                      const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+                                      const rawCalc = Math.round(baseVal * factor * 100) / 100;
+                                      const hasDec = rawCalc % 1 !== 0;
                                       return (
-                                        <span style={{ fontSize: '8.5px', color: isDiv ? '#b45309' : '#6d28d9', fontWeight: '800', marginTop: '2px', whiteSpace: 'nowrap' }}>
-                                          {isDiv
-                                            ? `(= ${garmentCutting.toLocaleString('en-IN')} ÷ ${multVal} = ${qty})`
-                                            : `(= ${garmentCutting.toLocaleString('en-IN')} × ${multVal} = ${qty})`}
+                                        <span style={{ fontSize: '8.5px', color: '#64748b', fontWeight: '700', marginTop: '1px', whiteSpace: 'nowrap' }}>
+                                          {item.multiplierOp === 'divide'
+                                            ? `(= ${baseVal.toLocaleString('en-IN')} ÷ ${item.multiplier || 12} = ${rawCalc}${hasDec ? ` → ${qty}` : ''})`
+                                            : `(= ${baseVal.toLocaleString('en-IN')} × ${item.multiplier !== undefined ? item.multiplier : 1} = ${rawCalc}${hasDec ? ` → ${qty}` : ''})`}
                                         </span>
                                       );
                                     })()}
@@ -7542,7 +7541,7 @@ export default function WithoutBomMaterialIssueView({
                           {/* IF ALREADY FULLY ISSUED ACCORDING TO LOT: SHOW OUTSIDE THE BOX COMPLETELY ACROSS THE FULL ROW */}
                           {isFullyIssued && (
                             <tr key={`${item.id}-already-issued-alert`} style={{ background: '#fff1f2' }}>
-                              <td colSpan={9} style={{ padding: '10px 16px', borderBottom: '2px solid #fecdd3' }}>
+                              <td colSpan={10} style={{ padding: '10px 16px', borderBottom: '2px solid #fecdd3' }}>
                                 <div style={{
                                   display: 'flex',
                                   alignItems: 'center',
@@ -9462,11 +9461,9 @@ export default function WithoutBomMaterialIssueView({
                                 ? Number((batchTargetRequired / cuttingPieces).toFixed(2))
                                 : (batch.items.length === 1 ? getMaterialMultiplier(batch.items[0].m, log, cuttingPieces) : 1);
                               const categoryVariance = cuttingPieces > 0 ? (batchTargetRequired - categoryIssueQty) : 0;
-                              const allowed1PctTolerance = Math.ceil(batchTargetRequired * 0.01);
-                              const isCategoryBalanced = Math.abs(categoryVariance) <= allowed1PctTolerance || categoryVariance === 0;
                               const hasCategoryVariance = !isDirectLot && cuttingPieces > 0 && batch.isPc;
-                              const categoryVarianceText = isCategoryBalanced ? '0 Pcs' : (categoryVariance > 0 ? `+${categoryVariance.toLocaleString('en-IN')} Pcs` : `${categoryVariance.toLocaleString('en-IN')} Pcs`);
-                              const categoryVarianceBadge = isCategoryBalanced ? 'BALANCED' : categoryVariance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED';
+                              const categoryVarianceText = categoryVariance > 0 ? `+${categoryVariance.toLocaleString('en-IN')} Pcs` : `${categoryVariance.toLocaleString('en-IN')} Pcs`;
+                              const categoryVarianceBadge = categoryVariance === 0 ? 'BALANCED' : categoryVariance > 0 ? 'CUTTING BALANCE' : 'OVER ISSUED';
 
                               return (
                                 <tr
@@ -9663,7 +9660,7 @@ export default function WithoutBomMaterialIssueView({
                                       {!isDirectLot && cuttingPieces > 0 ? (
                                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '1px' }}>
                                           <span style={{ fontWeight: '800', color: '#0f172a', fontSize: '12px' }}>
-                                            {(batchTargetRequired > 0 ? batchTargetRequired : cuttingPieces).toLocaleString('en-IN')} <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
+                                            {cuttingPieces.toLocaleString('en-IN')} <span style={{ fontSize: '10px', color: '#64748b' }}>Pcs</span>
                                           </span>
                                           <span style={{
                                             fontSize: '8.5px',
@@ -9675,7 +9672,7 @@ export default function WithoutBomMaterialIssueView({
                                             borderRadius: '3px',
                                             whiteSpace: 'nowrap'
                                           }}>
-                                            {effectiveBatchMult !== 1 ? `Target (${cuttingPieces} × ${effectiveBatchMult})` : 'Cutting'}
+                                            Cutting
                                           </span>
                                         </div>
                                       ) : (

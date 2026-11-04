@@ -1154,18 +1154,17 @@ export default function ExtraMaterialIssueView({
 
   const confirmAddWoItem = (compName = '') => {
     const finalComp = (compName !== undefined && compName !== null ? String(compName) : '').trim();
-    const lotCutting = activeLotCutting?.totalPieces > 0 ? activeLotCutting.totalPieces : (parseFloat(woPieces) > 0 ? parseFloat(woPieces) : 100);
-    const initialBase = Math.ceil(Number(lotCutting) * 1);
+    const defaultBase = (activeLotCutting?.totalPieces > 0 ? activeLotCutting.totalPieces : (parseFloat(woPieces) > 0 ? parseFloat(woPieces) : ''));
+    const initialExtra = defaultBase !== '' ? Math.ceil(Number(defaultBase) * 1) : '';
     setWoItems(prev => [
       ...prev,
       {
         id: Date.now(),
         componentName: finalComp,
         materialId: '',
-        baseQty: initialBase,
+        baseQty: defaultBase,
         multiplier: 1,
-        multiplierOp: 'multiply',
-        extraQty: initialBase,
+        extraQty: initialExtra,
         unit: 'Pcs',
         reason: EXTRA_REASONS[0],
         remarks: ''
@@ -1184,27 +1183,17 @@ export default function ExtraMaterialIssueView({
   };
 
   const handleUpdateWoItem = (id, field, value) => {
-    const lotCutting = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
     setWoItems(prev => prev.map(it => {
       if (it.id !== id) return it;
       const updated = { ...it, [field]: value };
-      if (field === 'multiplier' || field === 'multiplierOp') {
+      if (field === 'baseQty') {
+        const b = parseFloat(value) || 0;
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        // Multiplier scales garment cutting volume to get this accessory's Base Quantity!
-        // e.g. cutting 300 * multiplier 10 = base quantity 3,000 buttons!
-        const newBase = Math.ceil(lotCutting * factor);
-        updated.baseQty = newBase;
-        updated.extraQty = newBase;
-      } else if (field === 'baseQty') {
-        if (value === '') {
-          updated.baseQty = '';
-        } else {
-          const b = parseFloat(value) || 0;
-          updated.baseQty = Math.ceil(b);
-          updated.extraQty = Math.ceil(b);
-        }
-      } else if (field === 'extraQty') {
-        updated.extraQty = value === '' ? '' : Math.ceil(parseFloat(value) || 0);
+        updated.extraQty = value === '' ? '' : Math.ceil(b * factor);
+      } else if (field === 'multiplier' || field === 'multiplierOp') {
+        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.ceil(b * factor);
       }
       if (field === 'materialId') {
         const mat = materials.find(m => String(m.id) === String(value));
@@ -2378,20 +2367,17 @@ export default function ExtraMaterialIssueView({
         updated.selectedForExtra = true;
       }
 
-      const lotCutting = activeLotCutting?.totalPieces || (parseFloat(pieces) || 100);
+      if (field === 'baseQty') {
+        const b = parseFloat(value) || 0;
+        const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
+        updated.extraQty = value === '' ? '' : Math.ceil(b * factor);
+        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
+      }
 
       if (field === 'multiplier' || field === 'multiplierOp') {
+        const b = (updated.baseQty !== undefined && updated.baseQty !== null && updated.baseQty !== '') ? (parseFloat(updated.baseQty) || 0) : (parseFloat(updated.extraQty) || 0);
         const { factor } = computeEffectiveFactor(updated.multiplier, updated.multiplierOp);
-        // Multiplier scales cutting volume to get this accessory's Base Quantity!
-        // e.g. cutting 300 * 10 = 3,000!
-        const newBase = Math.ceil(lotCutting * factor);
-        updated.baseQty = newBase;
-        updated.extraQty = newBase;
-        if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
-      } else if (field === 'baseQty') {
-        const b = parseFloat(value) || 0;
-        updated.baseQty = Math.ceil(b);
-        updated.extraQty = Math.ceil(b);
+        updated.extraQty = b === 0 && !updated.baseQty ? '' : Math.ceil(b * factor);
         if (parseFloat(updated.extraQty) > 0) updated.selectedForExtra = true;
       }
 
@@ -5322,13 +5308,8 @@ export default function ExtraMaterialIssueView({
                                       min="0.001"
                                       step="any"
                                       placeholder="1"
-                                      value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
+                                      value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : 1}
                                       onChange={(e) => handleMappingChange(originalIdx, 'multiplier', e.target.value)}
-                                      onBlur={() => {
-                                        if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
-                                          handleMappingChange(originalIdx, 'multiplier', 1);
-                                        }
-                                      }}
                                       style={{
                                         width: '55px',
                                         height: '36px',
@@ -5967,15 +5948,8 @@ export default function ExtraMaterialIssueView({
                                 min="1"
                                 step="1"
                                 placeholder="Base Qty"
-                                value={item.baseQty !== undefined && item.baseQty !== null ? item.baseQty : ''}
+                                value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
                                 onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
-                                onBlur={() => {
-                                  if (item.baseQty === '' || item.baseQty === null || item.baseQty === undefined) {
-                                    const { factor } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
-                                    const lotCutting = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
-                                    handleUpdateWoItem(item.id, 'baseQty', Math.ceil(lotCutting * factor));
-                                  }
-                                }}
                                 style={{
                                   width: '100%',
                                   height: '38px',
@@ -6027,14 +6001,9 @@ export default function ExtraMaterialIssueView({
                                   </button>
                                   <input
                                     type="text"
-                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1'}
-                                    value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
+                                    placeholder={item.multiplierOp === 'divide' ? '12 or 1/12' : '1 or 1/12'}
+                                    value={item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? item.multiplier : 1}
                                     onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
-                                    onBlur={() => {
-                                      if (item.multiplier === '' || item.multiplier === null || item.multiplier === undefined) {
-                                        handleUpdateWoItem(item.id, 'multiplier', 1);
-                                      }
-                                    }}
                                     style={{
                                       width: '64px',
                                       height: '36px',
@@ -6104,7 +6073,7 @@ export default function ExtraMaterialIssueView({
                             <td style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', verticalAlign: 'middle' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
                                 <div style={{ fontSize: '10px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9', fontWeight: '800', whiteSpace: 'nowrap' }}>
-                                  {getMultiplierFormulaText(activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100), item.multiplier, item.multiplierOp, item.extraQty || 0)}
+                                  {getMultiplierFormulaText(item.baseQty || item.extraQty || 0, item.multiplier, item.multiplierOp, item.extraQty || 0)}
                                 </div>
                                 <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
                                   <input
