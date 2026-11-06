@@ -1867,7 +1867,7 @@ export default function AllIssuedAndAddedReport({
           <div>
             <div class="company-title">MH TEXTILES &amp; ACCESSORIES WAREHOUSE</div>
             <div class="doc-title">ALL ISSUED &amp; ADDED MATERIAL MOVEMENT REGISTER</div>
-            <div class="doc-sub">Consolidated: Bone Issue, Elastic Issue, Tape Issue, Extra Pic Issue, General BOM Issue &amp; Added Material</div>
+            <div class="doc-sub">Consolidated: Bone Issue, Elastic Issue, Tape Issue, General BOM Issue &amp; Added Material</div>
           </div>
           <div class="meta-info">
             <div><strong>Report Date:</strong> ${new Date().toLocaleDateString('en-IN')}</div>
@@ -1901,10 +1901,6 @@ export default function AllIssuedAndAddedReport({
           <div class="summary-card">
             Tape Issue
             <strong>${summaryKpis.tapeCount} (${summaryKpis.tapeMeters} m)</strong>
-          </div>
-          <div class="summary-card">
-            Extra Pic Issue
-            <strong>${summaryKpis.extraPicCount} (${summaryKpis.extraPicQty} pcs)</strong>
           </div>
         </div>
 
@@ -2162,7 +2158,7 @@ export default function AllIssuedAndAddedReport({
               ALL ISSUED &amp; ADDED MATERIAL MOVEMENT REGISTER (B&amp;W INK-SAVER)
             </div>
             <div style={{ fontSize: '8.5pt', color: '#333333' }}>
-              Consolidated Record: Bone Issue, Elastic Issue, Tape Issue, Extra Pic Issue, General BOM Issue &amp; Added Material
+              Consolidated Record: Bone Issue, Elastic Issue, Tape Issue, General BOM Issue &amp; Added Material
             </div>
           </div>
           <div style={{ textAlign: 'right', fontSize: '8pt', color: '#000000', lineHeight: '1.4' }}>
@@ -2197,9 +2193,6 @@ export default function AllIssuedAndAddedReport({
         </div>
         <div style={{ flex: 1, border: '1px solid #000000', background: '#f8fafc', padding: '4px 6px', fontSize: '7.5pt', textAlign: 'center' }}>
           Tape Issue: <strong>{summaryKpis.tapeCount} ({summaryKpis.tapeMeters}m)</strong>
-        </div>
-        <div style={{ flex: 1, border: '1px solid #000000', background: '#f8fafc', padding: '4px 6px', fontSize: '7.5pt', textAlign: 'center' }}>
-          Extra Pic: <strong>{summaryKpis.extraPicCount} ({summaryKpis.extraPicQty} pcs)</strong>
         </div>
       </div>
 
@@ -2271,7 +2264,7 @@ export default function AllIssuedAndAddedReport({
             color: '#cbd5e1',
             lineHeight: '1.5'
           }}>
-            Complete unified tracking of <strong>Bone Issue</strong>, <strong>Elastic Issue</strong>, <strong>Tape Issue</strong>, <strong>Extra Pic Issue</strong>, General BOM Issues &amp; <strong>Added Materials (Inward)</strong> with daily &amp; date-wise filtering.
+            Complete unified tracking of <strong>Bone Issue</strong>, <strong>Elastic Issue</strong>, <strong>Tape Issue</strong>, General BOM Issues &amp; <strong>Added Materials (Inward)</strong> with daily &amp; date-wise filtering.
           </p>
         </div>
 
@@ -2544,62 +2537,6 @@ export default function AllIssuedAndAddedReport({
             {summaryKpis.tapeMeters.toLocaleString()} meters issued
           </span>
         </div>
-
-        {/* Metric 7: Extra Pic Issue */}
-        <div 
-          onClick={() => setMovementFilter('extra_pic_issue')}
-          style={{
-            background: 'var(--bg-secondary, #ffffff)',
-            border: movementFilter === 'extra_pic_issue' ? '2px solid #e11d48' : '1px solid #fda4af',
-            borderRadius: '14px',
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            boxShadow: '0 2px 6px rgba(225, 29, 72, 0.08)',
-            cursor: 'pointer'
-          }}
-          title="Filter by Extra Pic Issue"
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#be123c', textTransform: 'uppercase' }}>➕ Extra Pic Issue</span>
-            <span style={{ fontSize: '16px' }}>➕</span>
-          </div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: '#e11d48' }}>
-            {summaryKpis.extraPicCount}
-          </div>
-          <span style={{ fontSize: '11px', color: '#9f1239' }}>
-            {summaryKpis.extraPicQty.toLocaleString()} extra pcs
-          </span>
-        </div>
-
-        {/* Metric 8: Other Accessories Issue */}
-        <div 
-          onClick={() => setMovementFilter('other_issue')}
-          style={{
-            background: 'var(--bg-secondary, #ffffff)',
-            border: movementFilter === 'other_issue' ? '2px solid #7c3aed' : '1px solid #d8b4fe',
-            borderRadius: '14px',
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-            boxShadow: '0 2px 6px rgba(124, 58, 237, 0.08)',
-            cursor: 'pointer'
-          }}
-          title="Filter by Other Accessories Issue"
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#7c3aed', textTransform: 'uppercase' }}>📦 Other Accessories</span>
-            <span style={{ fontSize: '16px' }}>📦</span>
-          </div>
-          <div style={{ fontSize: '24px', fontWeight: '800', color: '#7c3aed' }}>
-            {summaryKpis.otherCount}
-          </div>
-          <span style={{ fontSize: '11px', color: '#6b21a8' }}>
-            {summaryKpis.otherQty.toLocaleString()} items / rolls issued
-          </span>
-        </div>
       </div>
 
       {/* ── FILTER CONTROL PANEL (SCREEN ONLY) ─────────────────────────────────── */}
@@ -2613,10 +2550,38 @@ export default function AllIssuedAndAddedReport({
         flexDirection: 'column',
         gap: '16px'
       }}>
-        {/* ROW 1: Movement Type Filter Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', marginRight: '4px' }}>
+        {/* ROW 1: Movement Type Filter Pills (Scroll-wise) */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', width: '100%' }}>
+          <div
+            className="filter-scroll-container"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              flexWrap: 'nowrap',
+              padding: '4px 2px 8px 2px',
+              flex: '1 1 auto',
+              minWidth: 0,
+              WebkitOverflowScrolling: 'touch',
+              scrollbarWidth: 'thin'
+            }}
+          >
+            <span style={{
+              fontSize: '12px',
+              fontWeight: '700',
+              color: '#64748b',
+              textTransform: 'uppercase',
+              marginRight: '4px',
+              flexShrink: 0,
+              whiteSpace: 'nowrap'
+            }}>
               Filter By Type:
             </span>
 
@@ -2628,9 +2593,7 @@ export default function AllIssuedAndAddedReport({
               { id: 'return_material', label: 'Material Return', icon: '🔄' },
               { id: 'bone_issue', label: 'Bone Issue', icon: '🦴' },
               { id: 'elastic_issue', label: 'Elastic Issue', icon: '🧵' },
-              { id: 'tape_issue', label: 'Tape Issue', icon: '📏' },
-              { id: 'other_issue', label: 'Other Accessories Issue', icon: '📦' },
-              { id: 'extra_pic_issue', label: 'Extra Pic Issue', icon: '➕' }
+              { id: 'tape_issue', label: 'Tape Issue', icon: '📏' }
             ].map(tab => {
               const active = movementFilter === tab.id;
               return (
@@ -2638,7 +2601,7 @@ export default function AllIssuedAndAddedReport({
                   key={tab.id}
                   onClick={() => setMovementFilter(tab.id)}
                   style={{
-                    padding: '6px 13px',
+                    padding: '6px 14px',
                     borderRadius: '20px',
                     fontSize: '12px',
                     fontWeight: active ? '700' : '600',
@@ -2646,9 +2609,11 @@ export default function AllIssuedAndAddedReport({
                     background: active ? '#2563eb' : 'var(--bg-primary, #ffffff)',
                     color: active ? '#ffffff' : 'var(--text-main, #334155)',
                     cursor: 'pointer',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
                     gap: '6px',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
                     transition: 'all 0.15s',
                     boxShadow: active ? '0 2px 6px rgba(37, 99, 235, 0.25)' : 'none'
                   }}
@@ -2665,6 +2630,7 @@ export default function AllIssuedAndAddedReport({
             <div style={{
               display: 'flex',
               alignItems: 'center',
+              flexShrink: 0,
               background: 'var(--bg-primary, #f1f5f9)',
               padding: '3px',
               borderRadius: '10px',
@@ -2727,9 +2693,37 @@ export default function AllIssuedAndAddedReport({
           paddingTop: '12px',
           borderTop: '1px dashed var(--border-color, #e2e8f0)'
         }}>
-          {/* Quick Date Pills */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', marginRight: '4px' }}>
+          {/* Quick Date Pills (Scroll-wise) */}
+          <div
+            className="filter-scroll-container"
+            onWheel={(e) => {
+              if (e.deltaY !== 0 && e.currentTarget.scrollWidth > e.currentTarget.clientWidth) {
+                e.currentTarget.scrollLeft += e.deltaY;
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              flexWrap: 'nowrap',
+              padding: '2px 2px 6px 2px',
+              flex: '1 1 auto',
+              minWidth: 0,
+              WebkitOverflowScrolling: 'touch',
+              scrollbarWidth: 'thin'
+            }}
+          >
+            <span style={{
+              fontSize: '12px',
+              fontWeight: '700',
+              color: '#64748b',
+              textTransform: 'uppercase',
+              marginRight: '4px',
+              flexShrink: 0,
+              whiteSpace: 'nowrap'
+            }}>
               Daily / Date Wise:
             </span>
 
@@ -2759,6 +2753,10 @@ export default function AllIssuedAndAddedReport({
                     background: active ? '#0284c7' : 'transparent',
                     color: active ? '#ffffff' : 'var(--text-main, #334155)',
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap',
                     transition: 'all 0.15s'
                   }}
                 >
@@ -3085,7 +3083,7 @@ export default function AllIssuedAndAddedReport({
         }}>
           <RefreshCw size={36} className="animate-spin" style={{ margin: '0 auto 16px auto', color: '#2563eb' }} />
           <h3 style={{ margin: '0 0 6px 0', fontSize: '17px', color: 'var(--text-main)' }}>Aggregating Movement Records...</h3>
-          <p style={{ margin: 0, fontSize: '13px' }}>Fetching Bone Issues, Elastic Issues, Tape Issues, Extra Pic Issues &amp; Added Materials</p>
+          <p style={{ margin: 0, fontSize: '13px' }}>Fetching Bone Issues, Elastic Issues, Tape Issues &amp; Added Materials</p>
         </div>
       ) : filteredRecords.length === 0 ? (
         <div style={{
@@ -3269,32 +3267,6 @@ export default function AllIssuedAndAddedReport({
                         borderRadius: '6px'
                       }}>
                         📏 {group.tapeCount} Tape
-                      </span>
-                    )}
-                    {group.otherCount > 0 && (
-                      <span style={{
-                        background: '#faf5ff',
-                        border: '1px solid #d8b4fe',
-                        color: '#7c3aed',
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        padding: '3px 8px',
-                        borderRadius: '6px'
-                      }}>
-                        📦 {group.otherCount} Other
-                      </span>
-                    )}
-                    {group.extraPicCount > 0 && (
-                      <span style={{
-                        background: '#fff1f2',
-                        border: '1px solid #fda4af',
-                        color: '#be123c',
-                        fontSize: '11px',
-                        fontWeight: '700',
-                        padding: '3px 8px',
-                        borderRadius: '6px'
-                      }}>
-                        ➕ {group.extraPicCount} Extra Pic
                       </span>
                     )}
 

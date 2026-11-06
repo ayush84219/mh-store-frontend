@@ -333,7 +333,7 @@ export default function StandardPoRedownload() {
       };
 
       // Construct URLs and QR images
-      const supervisorName = selectedPO["Supervisor"] || selectedPO["REQUISITION RAISED BY"] || "";
+      const supervisorName = selectedPO["Supervisor"] || selectedPO["supervisorName"] || selectedPO["supervisor"] || selectedPO["REQUISITION RAISED BY"] || "";
       const { gateUrl, recvUrl } = buildPoQrUrls({
         base: WEB_APP_BASE,
         poNo,
@@ -730,7 +730,7 @@ export default function StandardPoRedownload() {
                   </div>
                   <div className="po-dash-info-block">
                     <span className="po-dash-info-label">Supervisor</span>
-                    <span className="po-dash-info-value">{selectedPO["Supervisor"] || "N/A"}</span>
+                    <span className="po-dash-info-value">{selectedPO["Supervisor"] || selectedPO["supervisorName"] || selectedPO["supervisor"] || "N/A"}</span>
                   </div>
                   <div className="po-dash-info-block po-dash-info-lot-block">
                     <span className="po-dash-info-label">Original Lot No</span>

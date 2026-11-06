@@ -8,6 +8,8 @@ import {
   Camera, Upload, Eye, Image as ImageIcon, X
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { getBackendUrl } from '../utils/api';
 import { getCleanImageUrl } from '../utils/designHelpers';
 import useDebounce from '../utils/useDebounce';
@@ -607,6 +609,8 @@ export default function MaterialDetailsView({
     const captures = traceInfo?.captures || [];
     const issues = traceInfo?.issues || [];
     const transfers = traceInfo?.transfers || [];
+    const matImg = material.imageUrl || material.image || material.photo || material.photoUrl;
+    const cleanImgUrl = matImg ? getCleanImageUrl(matImg) : null;
 
     printWindow.document.write(`
       <!DOCTYPE html>
@@ -628,13 +632,17 @@ export default function MaterialDetailsView({
           .card-lbl { font-size: 10px; text-transform: uppercase; color: #555; }
           .sig-row { display: flex; justify-content: space-between; margin-top: 35px; font-size: 11px; }
           .sig-box { border-top: 1.5px solid #000; width: 180px; text-align: center; padding-top: 4px; font-weight: bold; }
+          img { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         </style>
       </head>
       <body>
         <div class="header-box">
-          <div>
-            <h2>Garment PDMS — Material Lifecycle & Traceability Audit</h2>
-            <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.itemCode || material.id}</strong> • Material: <strong>${material.name}</strong> • Brand: <strong>${getMaterialBrand(material)}</strong> (${material.category})</div>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            ${cleanImgUrl ? `<img src="${cleanImgUrl}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #000; flex-shrink: 0;" />` : ''}
+            <div>
+              <h2>Garment PDMS — Material Lifecycle & Traceability Audit</h2>
+              <div style="font-size: 11px; color: #555;">Item Code: <strong>${material.itemCode || material.id}</strong> • Material: <strong>${material.name}</strong> • Brand: <strong>${getMaterialBrand(material)}</strong> (${material.category})</div>
+            </div>
           </div>
           <div style="text-align: right; font-size: 10.5px;">
             <div>Generated: ${new Date().toLocaleString()}</div>
@@ -1060,9 +1068,14 @@ export default function MaterialDetailsView({
 
   const handlePrint = () => {
     document.body.classList.add('print-materials-mode');
+    const cleanup = () => {
+      document.body.classList.remove('print-materials-mode');
+      window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
     setTimeout(() => {
       window.print();
-    }, 60);
+    }, 250);
   };
 
   // Extract unique material categories with casing normalization
@@ -1182,6 +1195,7 @@ export default function MaterialDetailsView({
   const [imageUrl, setImageUrl] = useState('');
   const [imageInputMode, setImageInputMode] = useState('upload'); // 'upload' | 'url'
   const [imageUploading, setImageUploading] = useState(false);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const availableItemCodes = useMemo(() => {
     const set = new Set();
@@ -1248,19 +1262,23 @@ export default function MaterialDetailsView({
   };
 
   const handleExcelExport = () => {
-    // Structure data for Excel sheet
-    const excelData = materials.map(m => ({
-      'Item Code': m.itemCode || m.id,
+    // Structure data for Excel sheet from filtered selection
+    const listToExport = filteredMaterials && filteredMaterials.length > 0 ? filteredMaterials : materials;
+    const excelData = listToExport.map((m, idx) => ({
+      '#': idx + 1,
+      'Item Code': m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id)),
       'Material Name': m.name,
       'Brand': getMaterialBrand(m),
-      'Category': m.category,
+      'Category': m.category || 'Accessory',
       'Color/Style': m.color || 'Default',
-      'Location': m.location || 'Main Store',
-      'Stock Level': m.stock,
-      'Unit Of Measure': m.unit,
-      'Unit Cost': m.cost,
-      'Reorder Threshold': m.threshold,
-      'Status': m.stock <= m.threshold ? 'Reorder Required' : 'Optimal'
+      'Location': (m.location || 'Main Store').trim(),
+      'PO Number': (m.poNumber && m.poNumber !== 'N/A') ? m.poNumber : 'Direct / No PO',
+      'Invoice No': (m.invoiceNo && m.invoiceNo !== 'N/A') ? m.invoiceNo : '—',
+      'Stock Level': Number(m.stock) || 0,
+      'Unit Of Measure': m.unit || 'pcs',
+      'Unit Cost': m.cost || 0,
+      'Reorder Threshold': m.threshold || 50,
+      'Status': Number(m.stock) <= 0 ? 'Zero Stock' : (Number(m.stock) <= Number(m.threshold || 50) ? 'Low Stock' : 'In Stock')
     }));
 
     // Create worksheet
@@ -1282,8 +1300,262 @@ export default function MaterialDetailsView({
       wch: maxColumnLengths[key] + 3
     }));
 
-    // Download spreadsheet
-    XLSX.writeFile(workbook, 'materials_inventory.xlsx');
+    // Download spreadsheet with date
+    const todayStr = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(workbook, `Raw_Materials_Inventory_${todayStr}.xlsx`);
+  };
+
+  // Helper to convert image URL or data URI to Base64 for jsPDF
+  const getBase64ImageFromUrl = (url) => {
+    if (!url) return Promise.resolve(null);
+    const cleanUrl = getCleanImageUrl(url);
+    if (!cleanUrl) return Promise.resolve(null);
+    if (cleanUrl.startsWith('data:image/')) return Promise.resolve(cleanUrl);
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      const timer = setTimeout(() => resolve(null), 2500);
+
+      img.onload = () => {
+        clearTimeout(timer);
+        try {
+          const canvas = document.createElement('canvas');
+          const maxDim = 100;
+          let w = img.naturalWidth || img.width || maxDim;
+          let h = img.naturalHeight || img.height || maxDim;
+          if (w > h) {
+            if (w > maxDim) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            }
+          } else {
+            if (h > maxDim) {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          canvas.width = Math.max(1, w);
+          canvas.height = Math.max(1, h);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          resolve(dataUrl);
+        } catch (err) {
+          resolve(null);
+        }
+      };
+
+      img.onerror = () => {
+        clearTimeout(timer);
+        resolve(null);
+      };
+
+      img.src = cleanUrl;
+    });
+  };
+
+  // Download Formal PDF Inventory Report with Material Photos saved directly to computer
+  const handleDownloadPdf = async () => {
+    setIsDownloadingPdf(true);
+    try {
+      const listToDownload = filteredMaterials && filteredMaterials.length > 0 ? filteredMaterials : materials;
+      if (!listToDownload || listToDownload.length === 0) {
+        alert('No material records found to download.');
+        setIsDownloadingPdf(false);
+        return;
+      }
+
+      // Preload Base64 images for all materials in list (parallel)
+      const base64Images = await Promise.all(
+        listToDownload.map(m => getBase64ImageFromUrl(m.imageUrl || m.image || m.photo || m.photoUrl))
+      );
+
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+
+      // Top Header Dark Banner
+      doc.setFillColor(15, 23, 42); // #0f172a
+      doc.rect(0, 0, pageWidth, 52, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(255, 255, 255);
+      doc.text('MH STORE — RAW MATERIALS STOCK DATABASE & INVENTORY AUDIT REPORT', 24, 23);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(203, 213, 225);
+      doc.text('Textile fabrics, buttons, zippers, trims, and stock distribution across warehouse locations.', 24, 38);
+
+      // Metadata on Right of Banner
+      doc.setFontSize(8);
+      doc.setTextColor(241, 245, 249);
+      const rightText = `Date: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })} | By: ${currentUser?.name || 'Ayush'} (${currentUser?.role || 'Admin'})`;
+      doc.text(rightText, pageWidth - 24, 23, { align: 'right' });
+
+      const catText = `Category: ${selectedCategory === 'all' ? 'All Categories' : selectedCategory} | Status: ${statusFilter === 'all' ? 'All Status' : statusFilter === 'in_stock' ? 'In Stock' : statusFilter === 'low_stock' ? 'Low Stock' : 'Zero Stock'}`;
+      doc.text(catText, pageWidth - 24, 38, { align: 'right' });
+
+      // KPI Overview Strip
+      const kpiY = 60;
+      const kpiWidth = (pageWidth - 48 - 24) / 4;
+      const kpis = [
+        { label: 'TOTAL MATERIALS', val: `${metrics.total} Items`, bg: [248, 250, 252], text: [15, 23, 42] },
+        { label: 'IN-STOCK OPTIMAL', val: `${metrics.inStock} Items`, bg: [240, 253, 244], text: [22, 101, 52] },
+        { label: 'LOW STOCK ALERT', val: `${metrics.lowStock} Items`, bg: [255, 251, 235], text: [146, 64, 14] },
+        { label: 'ZERO STOCK / PENDING', val: `${metrics.zeroStock} Items`, bg: [254, 242, 242], text: [153, 27, 27] }
+      ];
+
+      kpis.forEach((kpi, idx) => {
+        const x = 24 + idx * (kpiWidth + 8);
+        doc.setFillColor(kpi.bg[0], kpi.bg[1], kpi.bg[2]);
+        doc.setDrawColor(203, 213, 225);
+        doc.roundedRect(x, kpiY, kpiWidth, 26, 3, 3, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7);
+        doc.setTextColor(100, 116, 139);
+        doc.text(kpi.label, x + kpiWidth / 2, kpiY + 10, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setTextColor(kpi.text[0], kpi.text[1], kpi.text[2]);
+        doc.text(kpi.val, x + kpiWidth / 2, kpiY + 22, { align: 'center' });
+      });
+
+      // Data Table Head & Rows (INCLUDING PHOTO COLUMN)
+      const tableHead = [
+        ['#', 'ITEM ID', 'PHOTO', 'MATERIAL NAME & DESCRIPTION', 'BRAND', 'CATEGORY', 'COLOR / SHADE', 'STORAGE LOCATION', 'PO & BILL REF', 'STOCK QTY', 'STATUS']
+      ];
+
+      const tableBody = listToDownload.map((m, idx) => {
+        const numStock = Number(m.stock) || 0;
+        const numThresh = Number(m.threshold) || 50;
+        const isLow = numStock <= numThresh && numStock > 0;
+        const isZero = numStock <= 0;
+        const brand = getMaterialBrand(m);
+        const itemCodeStr = m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id));
+
+        const poInfo = (m.poNumber && m.poNumber !== 'N/A') ? `PO: ${m.poNumber}` : 'Direct / No PO';
+        const invInfo = (m.invoiceNo && m.invoiceNo !== 'N/A') ? `\nInv: ${m.invoiceNo}` : '';
+
+        return [
+          idx + 1,
+          itemCodeStr,
+          '', // Photo drawn by didDrawCell
+          `${m.name}\n(Threshold: ${m.threshold || 50} ${m.unit || 'pcs'})`,
+          brand && brand !== '—' && brand !== '-' ? brand : '—',
+          m.category || 'Accessory',
+          m.color || 'Default',
+          (m.location || 'Main Store').trim(),
+          `${poInfo}${invInfo}`,
+          `${numStock.toLocaleString()} ${m.unit || 'pcs'}`,
+          isZero ? 'Zero Stock' : isLow ? 'Low Stock' : 'In Stock'
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 94,
+        margin: { left: 24, right: 24, bottom: 26 },
+        head: tableHead,
+        body: tableBody,
+        theme: 'grid',
+        headStyles: {
+          fillColor: [30, 41, 59],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8,
+          halign: 'left'
+        },
+        styles: {
+          font: 'helvetica',
+          fontSize: 7.5,
+          textColor: [15, 23, 42],
+          cellPadding: 4,
+          valign: 'middle',
+          minCellHeight: 28,
+          lineColor: [226, 232, 240],
+          lineWidth: 0.5,
+          overflow: 'linebreak'
+        },
+        columnStyles: {
+          0: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+          1: { cellWidth: 58, font: 'courier', fontStyle: 'bold' },
+          2: { cellWidth: 36, halign: 'center' }, // PHOTO column
+          3: { cellWidth: 'auto' },
+          4: { cellWidth: 62, halign: 'center' },
+          5: { cellWidth: 56, halign: 'center' },
+          6: { cellWidth: 62 },
+          7: { cellWidth: 78 },
+          8: { cellWidth: 72, fontSize: 7 },
+          9: { cellWidth: 66, halign: 'right', fontStyle: 'bold' },
+          10: { cellWidth: 60, halign: 'center', fontStyle: 'bold' }
+        },
+        didDrawCell: (data) => {
+          // Draw Material Photo Thumbnail in Column 2
+          if (data.section === 'body' && data.column.index === 2) {
+            const photoBase64 = base64Images[data.row.index];
+            if (photoBase64) {
+              try {
+                const imgSize = 22;
+                const imgX = data.cell.x + (data.cell.width - imgSize) / 2;
+                const imgY = data.cell.y + (data.cell.height - imgSize) / 2;
+                doc.addImage(photoBase64, 'JPEG', imgX, imgY, imgSize, imgSize);
+                doc.setDrawColor(203, 213, 225);
+                doc.setLineWidth(0.5);
+                doc.rect(imgX, imgY, imgSize, imgSize, 'S');
+              } catch (err) {
+                // Ignore draw error
+              }
+            } else {
+              doc.setFontSize(7.5);
+              doc.setTextColor(148, 163, 184);
+              doc.text('—', data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 2, { align: 'center' });
+            }
+          }
+
+          // Status column (Column index 10)
+          if (data.section === 'body' && data.column.index === 10) {
+            const statusText = data.cell.text[0];
+            if (statusText === 'Zero Stock') {
+              doc.setTextColor(220, 38, 38);
+            } else if (statusText === 'Low Stock') {
+              doc.setTextColor(217, 119, 6);
+            } else if (statusText === 'In Stock') {
+              doc.setTextColor(22, 163, 74);
+            }
+          }
+        },
+        didDrawPage: (data) => {
+          const pageCount = doc.internal.getNumberOfPages();
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(7.5);
+          doc.setTextColor(148, 163, 184);
+          doc.text(
+            'MH STORE • Raw Materials Requirements & Inventory Audit Register • CONFIDENTIAL',
+            24,
+            pageHeight - 10
+          );
+          doc.text(
+            `Page ${data.pageNumber} of ${pageCount}`,
+            pageWidth - 24,
+            pageHeight - 10,
+            { align: 'right' }
+          );
+        }
+      });
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      doc.save(`Raw_Materials_Inventory_Report_${todayStr}.pdf`);
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+      alert('Error downloading PDF report: ' + err.message);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
   };
 
   const handleSubmit = (e, shouldDirectPrint = directPrintOnAdd) => {
@@ -1364,12 +1636,52 @@ export default function MaterialDetailsView({
           <p style={{ color: 'var(--text-muted)', fontSize: '13.5px', margin: 0 }}>Monitor textile fabrics, buttons, zippers, trims, and stock across warehouse locations.</p>
         </div>
 
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }} className="print-hide">
-          <button className="btn btn-secondary" onClick={handleExcelExport} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }} className="print-hide">
+          <button
+            className="btn btn-secondary"
+            onClick={handleExcelExport}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}
+            title="Download material inventory details as Excel file (.xlsx)"
+          >
             <FileSpreadsheet size={16} style={{ color: '#10b981' }} />
             <span>Export to Excel</span>
           </button>
-          <button className="btn btn-secondary" onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}>
+          <button
+            className="btn btn-secondary"
+            onClick={handleDownloadPdf}
+            disabled={isDownloadingPdf}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              borderRadius: '8px',
+              fontWeight: '600',
+              color: '#0284c7',
+              borderColor: '#bae6fd',
+              background: '#f0f9ff',
+              cursor: isDownloadingPdf ? 'wait' : 'pointer',
+              opacity: isDownloadingPdf ? 0.75 : 1
+            }}
+            title="Download and save formal Inventory Audit Report with Photos as PDF (.pdf)"
+          >
+            {isDownloadingPdf ? (
+              <>
+                <RefreshCw size={16} className="spin" style={{ color: '#0284c7' }} />
+                <span>Generating PDF...</span>
+              </>
+            ) : (
+              <>
+                <Download size={16} style={{ color: '#0284c7' }} />
+                <span>Download PDF</span>
+              </>
+            )}
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={handlePrint}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', borderRadius: '8px', fontWeight: '600' }}
+            title="Open printable inventory audit layout"
+          >
             <Printer size={16} style={{ color: 'var(--accent-color)' }} />
             <span>Print Inventory</span>
           </button>
@@ -3817,6 +4129,7 @@ export default function MaterialDetailsView({
             <tr style={{ backgroundColor: '#e2e8f0', borderBottom: '1.5px solid #000000' }}>
               <th style={{ border: '1px solid #000000', padding: '6px 4px', textAlign: 'center', width: '28px', fontWeight: '800' }}>#</th>
               <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'left', width: '70px', fontWeight: '800' }}>ITEM ID</th>
+              <th style={{ border: '1px solid #000000', padding: '6px 4px', textAlign: 'center', width: '48px', fontWeight: '800' }}>PHOTO</th>
               <th style={{ border: '1px solid #000000', padding: '6px 8px', textAlign: 'left', fontWeight: '800' }}>MATERIAL NAME & DESCRIPTION</th>
               <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '80px', fontWeight: '800' }}>BRAND</th>
               <th style={{ border: '1px solid #000000', padding: '6px 6px', textAlign: 'center', width: '75px', fontWeight: '800' }}>CATEGORY</th>
@@ -3830,7 +4143,7 @@ export default function MaterialDetailsView({
           <tbody>
             {filteredMaterials.length === 0 ? (
               <tr>
-                <td colSpan="10" style={{ border: '1px solid #000000', textAlign: 'center', padding: '20px', fontStyle: 'italic' }}>
+                <td colSpan="11" style={{ border: '1px solid #000000', textAlign: 'center', padding: '20px', fontStyle: 'italic' }}>
                   No materials match the current filter selection.
                 </td>
               </tr>
@@ -3841,6 +4154,7 @@ export default function MaterialDetailsView({
                 const isLow = numStock <= numThresh && numStock > 0;
                 const isZero = numStock <= 0;
                 const brand = getMaterialBrand(m);
+                const matPhoto = m.imageUrl || m.image || m.photo || m.photoUrl;
 
                 return (
                   <tr key={m.id || idx} style={{ pageBreakInside: 'avoid', borderBottom: '1px solid #000000' }}>
@@ -3849,6 +4163,41 @@ export default function MaterialDetailsView({
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 6px', fontFamily: 'monospace', fontWeight: '800', fontSize: '10.5px' }}>
                       {m.itemCode || m.stCode || (String(m.id || '').toUpperCase().startsWith('MT') ? String(m.id).toUpperCase().replace(/^MT/, 'ST') : (/^M\d+/i.test(m.id) ? `ST${String(m.id).replace(/\D/g, '').padStart(5, '0')}` : m.id))}
+                    </td>
+                    <td style={{ border: '1px solid #000000', padding: '3px 4px', textAlign: 'center', verticalAlign: 'middle', width: '48px' }}>
+                      {matPhoto ? (
+                        <div style={{
+                          width: '40px',
+                          height: '40px',
+                          margin: '0 auto',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                          borderRadius: '4px',
+                          border: '1px solid #cbd5e1',
+                          backgroundColor: '#f8fafc'
+                        }}>
+                          <img
+                            src={getCleanImageUrl(matPhoto)}
+                            alt={m.name || 'material'}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                              display: 'block'
+                            }}
+                            onError={(e) => {
+                              e.target.style.display = 'none';
+                              if (e.target.parentElement) {
+                                e.target.parentElement.innerHTML = '<span style="font-size:7px;color:#94a3b8;font-weight:700;">No Img</span>';
+                              }
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '9px', color: '#94a3b8', fontStyle: 'italic' }}>—</span>
+                      )}
                     </td>
                     <td style={{ border: '1px solid #000000', padding: '5px 8px' }}>
                       <div style={{ fontWeight: '700', fontSize: '10.5px' }}>{m.name}</div>

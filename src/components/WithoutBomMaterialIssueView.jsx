@@ -7614,62 +7614,205 @@ export default function WithoutBomMaterialIssueView({
                             {/* 2. Component / Type & Store Material Item */}
                             <td style={{ verticalAlign: 'middle', padding: '10px 12px' }}>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                                {/* Row 1: Component Selector */}
+                                {/* Row 1: Component Selector OR Custom Type Input */}
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <select
-                                    value={item.componentType}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      if (val === '__custom__') {
-                                        handleUpdateItem(item.id, 'isCustomType', true);
-                                        handleUpdateItem(item.id, 'customComponentType', '');
-                                      } else if (val === '__manage__') {
-                                        setShowManageTypesModal(true);
-                                      } else {
-                                        const nextPrior = getMaterialPriorIssueInfo({ componentType: val }, item.id);
-                                        const targetBase = nextPrior.alreadyIssued > 0
-                                          ? (nextPrior.isFullyIssued ? 0 : nextPrior.remainingBase)
-                                          : (defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1);
-                                        const { factor: mult } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
-                                        const targetTotal = Math.ceil(targetBase * mult);
+                                  {item.isCustomType ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <input
+                                          type="text"
+                                          placeholder="✏️ Type custom component name (e.g. BUTTON, ZIP, LABEL)..."
+                                          value={item.customComponentType || ''}
+                                          onChange={(e) => handleUpdateItem(item.id, 'customComponentType', e.target.value.toUpperCase())}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              e.preventDefault();
+                                              commitCustomType(item.id, item.customComponentType);
+                                            } else if (e.key === 'Escape') {
+                                              handleUpdateItem(item.id, {
+                                                isCustomType: false,
+                                                customComponentType: '',
+                                                componentType: item.componentType && item.componentType !== '__custom__' ? item.componentType : (allComponentTypes[0] || 'DORI')
+                                              });
+                                            }
+                                          }}
+                                          onBlur={() => {
+                                            if (item.customComponentType && item.customComponentType.trim()) {
+                                              commitCustomType(item.id, item.customComponentType);
+                                            }
+                                          }}
+                                          style={{
+                                            flex: 1,
+                                            height: '32px',
+                                            padding: '0 8px',
+                                            borderRadius: '6px',
+                                            border: '1.5px solid #ea580c',
+                                            background: '#fff7ed',
+                                            fontSize: '12px',
+                                            fontWeight: '700',
+                                            color: '#0f172a',
+                                            boxSizing: 'border-box'
+                                          }}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => commitCustomType(item.id, item.customComponentType)}
+                                          title="Save and add to list"
+                                          style={{
+                                            background: '#059669',
+                                            color: '#ffffff',
+                                            border: 'none',
+                                            borderRadius: '5px',
+                                            cursor: 'pointer',
+                                            padding: '0 10px',
+                                            height: '32px',
+                                            fontSize: '11px',
+                                            fontWeight: '800',
+                                            whiteSpace: 'nowrap',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '2px'
+                                          }}
+                                        >
+                                          ✓ Add
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            handleUpdateItem(item.id, {
+                                              isCustomType: false,
+                                              customComponentType: '',
+                                              componentType: item.componentType && item.componentType !== '__custom__' ? item.componentType : (allComponentTypes[0] || 'DORI')
+                                            });
+                                          }}
+                                          title="Cancel"
+                                          style={{
+                                            background: '#f1f5f9',
+                                            border: '1px solid #cbd5e1',
+                                            borderRadius: '5px',
+                                            cursor: 'pointer',
+                                            padding: '0 8px',
+                                            height: '32px',
+                                            fontSize: '12px',
+                                            color: '#64748b',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                          }}
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                      <span style={{ fontSize: '9.5px', color: '#ea580c', fontWeight: '700' }}>
+                                        ↵ Press Enter or click ✓ Add to save
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <select
+                                      value={item.componentType}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (val === '__custom__') {
+                                          handleUpdateItem(item.id, { isCustomType: true, customComponentType: '' });
+                                        } else if (val === '__manage__') {
+                                          setShowManageTypesModal(true);
+                                        } else {
+                                          const nextPrior = getMaterialPriorIssueInfo({ componentType: val }, item.id);
+                                          const targetBase = nextPrior.alreadyIssued > 0
+                                            ? (nextPrior.isFullyIssued ? 0 : nextPrior.remainingBase)
+                                            : (defaultAutoIssueQty > 0 ? defaultAutoIssueQty : 1);
+                                          const { factor: mult } = computeEffectiveFactor(item.multiplier, item.multiplierOp);
+                                          const targetTotal = Math.ceil(targetBase * mult);
 
-                                        handleUpdateItem(item.id, {
-                                          componentType: val,
-                                          isCustomType: false,
-                                          materialId: '',
-                                          materialName: '',
-                                          itemCode: '',
-                                          imageUrl: '',
-                                          availableStock: 0,
-                                          unit: (val === 'DORI' || val === 'ELASTIC') ? 'Mtr' : 'Pcs',
-                                          baseQty: targetBase,
-                                          totalQty: targetTotal
-                                        });
-                                      }
-                                    }}
-                                    style={{
-                                      flex: 1,
-                                      height: '32px',
-                                      padding: '0 8px',
-                                      borderRadius: '6px',
-                                      border: !item.componentType ? '1.5px dashed #ea580c' : '1.5px solid #cbd5e1',
-                                      fontSize: '11.5px',
-                                      fontWeight: '700',
-                                      background: !item.componentType ? '#fff7ed' : '#ffffff',
-                                      color: !item.componentType ? '#c2410c' : '#0f172a',
-                                      cursor: 'pointer'
-                                    }}
-                                  >
-                                    {componentTypeOptions.map(opt => (
-                                      <option key={opt.value} value={opt.value}>
-                                        {opt.label}
-                                      </option>
-                                    ))}
-                                  </select>
+                                          handleUpdateItem(item.id, {
+                                            componentType: val,
+                                            isCustomType: false,
+                                            materialId: '',
+                                            materialName: '',
+                                            itemCode: '',
+                                            imageUrl: '',
+                                            availableStock: 0,
+                                            unit: (val === 'DORI' || val === 'ELASTIC') ? 'Mtr' : 'Pcs',
+                                            baseQty: targetBase,
+                                            totalQty: targetTotal
+                                          });
+                                        }
+                                      }}
+                                      style={{
+                                        flex: 1,
+                                        height: '32px',
+                                        padding: '0 8px',
+                                        borderRadius: '6px',
+                                        border: !item.componentType ? '1.5px dashed #ea580c' : '1.5px solid #cbd5e1',
+                                        fontSize: '11.5px',
+                                        fontWeight: '700',
+                                        background: !item.componentType ? '#fff7ed' : '#ffffff',
+                                        color: !item.componentType ? '#c2410c' : '#0f172a',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {componentTypeOptions.map(opt => (
+                                        <option
+                                          key={opt.value}
+                                          value={opt.value}
+                                          style={{
+                                            fontWeight: opt.value.startsWith('__') ? '600' : '700',
+                                            color: opt.value === '__custom__' ? '#c2410c' : opt.value === '__manage__' ? '#475569' : '#0f172a'
+                                          }}
+                                        >
+                                          {opt.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
                                 </div>
 
-                                {/* Row 2: Searchable Material Dropdown OR Selected Material Card */}
-                                {item.materialId ? (
+                                {/* Row 2: Searchable Material Dropdown OR Manual Entry OR Selected Material Card */}
+                                {item.entryMode === 'manual' ? (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                      <input
+                                        type="text"
+                                        placeholder="✏️ Type Material Name (e.g. 5mm White Dori)..."
+                                        value={item.materialName || ''}
+                                        onChange={(e) => handleUpdateItem(item.id, 'materialName', e.target.value)}
+                                        style={{
+                                          flex: 1,
+                                          height: '32px',
+                                          padding: '0 8px',
+                                          borderRadius: '6px',
+                                          border: '1.5px solid #ea580c',
+                                          background: '#fff7ed',
+                                          fontSize: '12px',
+                                          fontWeight: '700',
+                                          color: '#0f172a',
+                                          boxSizing: 'border-box'
+                                        }}
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUpdateItem(item.id, { entryMode: 'choose', materialId: '', materialName: '', itemCode: '' })}
+                                        title="Switch back to stock dropdown"
+                                        style={{
+                                          fontSize: '10.5px',
+                                          padding: '0 8px',
+                                          height: '32px',
+                                          borderRadius: '4px',
+                                          border: '1.5px solid #cbd5e1',
+                                          background: '#ffffff',
+                                          color: '#0284c7',
+                                          cursor: 'pointer',
+                                          fontWeight: '700',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        Choose Stock
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : item.materialId ? (
                                   <div style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -7745,6 +7888,7 @@ export default function WithoutBomMaterialIssueView({
                                     value={item.materialId}
                                     componentType={item.isCustomType ? (item.customComponentType || '') : item.componentType}
                                     onChange={(matId) => handleSelectMaterial(item.id, matId)}
+                                    onSwitchToManual={() => handleUpdateItem(item.id, { entryMode: 'manual', materialId: '', materialName: item.componentType ? `${item.componentType} Item` : '', availableStock: 0 })}
                                     placeholder={item.componentType ? `🔍 Select ${item.componentType}...` : "⚠️ Choose Category First..."}
                                     getPriorIssueInfo={getMaterialPriorIssueInfo}
                                   />

@@ -5,7 +5,7 @@ import {
   CheckCircle, AlertTriangle, Layers, X,
   Calendar, User, Scissors, Sliders, Calculator, Zap, ArrowRight, Table,
   ShieldCheck, Lock, ExternalLink, Ruler, Edit2, MapPin, Tag, Box, Package, Scale,
-  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, Trash2, Clock, Scan, RotateCcw
+  ChevronDown, ZoomIn, Check, Sparkles, Filter, CheckCircle2, Eye, EyeOff, Trash2, Clock, Scan, RotateCcw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -738,6 +738,15 @@ export default function ElasticIssueView({
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
 
+  // Previously Issued Materials Banner: Closed/Hidden by default, user clicks Show to open
+  const [showAlreadyIssued, setShowAlreadyIssued] = useState(false);
+  const [dismissedAlreadyIssuedLots, setDismissedAlreadyIssuedLots] = useState([]);
+
+  // Reset showAlreadyIssued to false (closed by default) whenever lot changes
+  useEffect(() => {
+    setShowAlreadyIssued(false);
+  }, [lotDetails?.lotNo, searchLotInput]);
+
   // ── Cutting Details Cache & 30-Minute Auto-Reload ───────────────────────────
   const CUTTING_CACHE_MAX_ENTRIES = 100;
   const CUTTING_CACHE_RELOAD_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
@@ -1462,6 +1471,7 @@ export default function ElasticIssueView({
       calcMode: 'direct',
       baseQty: 1,
       multiplier: 1,
+      multiplierOp: 'multiply',
       totalQty: 1
     }
   ]);
@@ -2123,7 +2133,29 @@ export default function ElasticIssueView({
         if (res.ok) {
           const records = await res.json();
           if (Array.isArray(records) && records.length > 0) {
-            const normalized = records.map(r => ({ ...r, slipNo: normalizeSlipNo(r.slipNo) }));
+            const normalized = records.map(r => {
+              let p = {};
+              try {
+                if (r.payload) p = typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload;
+              } catch (_) {}
+              const mStr = r.multiplier !== undefined && r.multiplier !== null && r.multiplier !== ''
+                ? String(r.multiplier).trim()
+                : (p.multiplier !== undefined && p.multiplier !== null ? String(p.multiplier).trim() : (r.otherItems?.[0]?.multiplier ? String(r.otherItems[0].multiplier).trim() : ''));
+              const op = r.multiplierOp || r.multiplier_op || p.multiplierOp || p.multiplier_op || (r.otherItems?.[0]?.multiplierOp) || 'multiply';
+              const cleanOtherItems = (Array.isArray(r.otherItems) && r.otherItems.length > 0)
+                ? r.otherItems
+                : ((Array.isArray(p.otherItems) && p.otherItems.length > 0) ? p.otherItems : (r.other_items || []));
+              return {
+                ...p,
+                ...r,
+                slipNo: normalizeSlipNo(r.slipNo || r.slip_no),
+                multiplier: mStr,
+                multiplierOp: op,
+                multiplier_op: op,
+                otherItems: cleanOtherItems,
+                other_items: cleanOtherItems
+              };
+            });
             setIssueHistory(normalized);
             localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(normalized.slice(0, 100)));
             setLoadingHistory(false);
@@ -2517,12 +2549,22 @@ export default function ElasticIssueView({
             if (matId && item.entryMode !== 'manual') {
               const mat = (materials || []).find(m => String(m.id) === String(matId) || String(m.itemCode) === String(matId));
               const qty = parseFloat(item.totalQty || item.qty) || 1;
+              const mStr = item.multiplier !== undefined && item.multiplier !== null && item.multiplier !== '' ? String(item.multiplier).trim() : '1';
+              const op = item.multiplierOp || 'multiply';
+              const { factor } = computeEffectiveFactor(mStr, op);
+              const perPcText = op === 'divide' ? `÷ ${mStr}` : (mStr === '1' ? '1 / Pc' : `× ${mStr}`);
+
               itemsToDeduct.push({
                 materialId: mat ? mat.id : matId,
                 materialName: mat ? mat.name : (item.materialName || item.componentType || 'Other Accessory'),
                 itemCode: formatItemCode(matId, mat, materials),
                 bomItemName: item.componentType || item.materialName || 'Other Accessory',
                 unit: mat?.unit || item.unit || 'Mtr',
+                baseQty: item.baseQty !== undefined && item.baseQty !== null ? Number(item.baseQty) : qty,
+                multiplier: mStr,
+                multiplierOp: op,
+                multiplierFactor: factor,
+                perPcMult: perPcText,
                 totalRequired: qty,
                 location: mat?.location || 'Main Store',
                 stockBefore: mat ? (Number(mat.stock) || 0) : 0
@@ -2610,6 +2652,18 @@ export default function ElasticIssueView({
       setIssueHistory(updated);
       localStorage.setItem('gpdms_elastic_issue_history', JSON.stringify(updated.slice(0, 100)));
 
+      // Multiplier / Divide support for Other Accessories
+      const primaryItem = (Array.isArray(record.otherItems) && record.otherItems.length > 0)
+        ? record.otherItems[0]
+        : (otherItems[0] || {});
+      const primaryMultiplier = record.multiplier !== undefined && record.multiplier !== null && record.multiplier !== ''
+        ? String(record.multiplier).trim()
+        : (primaryItem.multiplier !== undefined && primaryItem.multiplier !== null ? String(primaryItem.multiplier).trim() : '1');
+      const primaryMultiplierOp = record.multiplierOp || record.multiplier_op || primaryItem.multiplierOp || 'multiply';
+      const cleanOtherItems = (Array.isArray(record.otherItems) && record.otherItems.length > 0)
+        ? record.otherItems
+        : otherItems;
+
       // 3. Save directly into dedicated elastic_issue MySQL table
       await fetch(`${getBackendUrl()}/api/elastic-issues`, {
         method: 'POST',
@@ -2637,6 +2691,11 @@ export default function ElasticIssueView({
           tapePerPcMtr: calcResult.tapePerPcMtr,
           totalTapeMtr: calcResult.totalTapeMtr,
           materialMode: record.materialMode || materialMode,
+          multiplier: primaryMultiplier,
+          multiplierOp: primaryMultiplierOp,
+          multiplier_op: primaryMultiplierOp,
+          otherItems: cleanOtherItems,
+          other_items: cleanOtherItems,
           otherMaterialName: record.otherMaterialName || otherMaterialName,
           otherUnit: record.otherUnit || otherUnit,
           otherRollCount: record.otherRollCount || otherRollCount,
@@ -2677,6 +2736,10 @@ export default function ElasticIssueView({
                 name: i.materialName,
                 materialId: i.materialId,
                 bomItemName: i.bomItemName,
+                baseQty: i.baseQty,
+                multiplier: i.multiplier,
+                multiplierOp: i.multiplierOp,
+                perPcMult: i.perPcMult,
                 qty: i.totalRequired,
                 unit: i.unit,
                 billNo: record.slipNo,
@@ -3273,10 +3336,15 @@ export default function ElasticIssueView({
         doc.setFont('helvetica', 'normal');
         doc.text(it.unit || 'Mtr', im + 180, y + 15);
 
-        doc.setFont('helvetica', 'bold');
-        doc.text('Direct Floor Issue', im + 290, y + 15);
+        const itMult = it.multiplier !== undefined && it.multiplier !== null && it.multiplier !== '' ? String(it.multiplier).trim() : (data.multiplier || '1');
+        const itOp = it.multiplierOp || data.multiplierOp || data.multiplier_op || 'multiply';
+        const multLabel = it.perPcMult || (itOp === 'divide' ? `÷ ${itMult}` : (itMult === '1' ? '1 / Pc' : `× ${itMult}`));
+        const rowBaseQty = it.baseQty !== undefined && it.baseQty !== null ? it.baseQty : (quantity || data.issuePcs || 0);
 
-        doc.text(`${quantity || 0} Pcs`, im + 375, y + 15);
+        doc.setFont('helvetica', 'bold');
+        doc.text(multLabel, im + 290, y + 15);
+
+        doc.text(`${rowBaseQty} Pcs`, im + 375, y + 15);
 
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(9);
@@ -3626,21 +3694,32 @@ export default function ElasticIssueView({
         otherRollCount: totalOtherQty,
         otherMaterialName: otherItems.map(it => it.materialName || it.componentType).filter(Boolean).join(', ') || otherMaterialName || 'Other Accessory',
         otherUnit: otherItems[0]?.unit || otherUnit || 'Roll',
-        otherItems: otherItems.map(it => ({
-          id: it.id,
-          componentType: it.componentType || 'ACCESSORY',
-          materialId: it.materialId || '',
-          materialName: it.materialName || it.componentType || 'Accessory Item',
-          itemCode: it.itemCode || formatItemCode(it.materialId, null, materials) || '',
-          entryMode: it.entryMode || 'choose',
-          availableStock: it.availableStock || 0,
-          baseQty: it.baseQty !== undefined && it.baseQty !== null && it.baseQty !== '' ? Number(it.baseQty) : Number(it.totalQty) || 1,
-          multiplier: it.multiplier !== undefined && it.multiplier !== null && it.multiplier !== '' ? Number(it.multiplier) : 1,
-          totalQty: Number(it.totalQty) || 1,
-          unit: it.unit || 'Mtr',
-          color: it.color || '',
-          location: it.location || 'Main Store'
-        })),
+        otherItems: otherItems.map(it => {
+          const mStr = it.multiplier !== undefined && it.multiplier !== null && it.multiplier !== '' ? String(it.multiplier).trim() : '1';
+          const op = it.multiplierOp || 'multiply';
+          const { factor } = computeEffectiveFactor(mStr, op);
+          const perPcText = op === 'divide' ? `÷ ${mStr}` : (mStr === '1' ? '1 / Pc' : `× ${mStr}`);
+          return {
+            id: it.id,
+            componentType: it.componentType || 'ACCESSORY',
+            materialId: it.materialId || '',
+            materialName: it.materialName || it.componentType || 'Accessory Item',
+            itemCode: it.itemCode || formatItemCode(it.materialId, null, materials) || '',
+            entryMode: it.entryMode || 'choose',
+            availableStock: it.availableStock || 0,
+            baseQty: it.baseQty !== undefined && it.baseQty !== null && it.baseQty !== '' ? Number(it.baseQty) : Number(it.totalQty) || 1,
+            multiplier: mStr,
+            multiplierOp: op,
+            multiplierFactor: factor,
+            perPcMult: perPcText,
+            totalQty: Number(it.totalQty) || 1,
+            unit: it.unit || 'Mtr',
+            color: it.color || '',
+            location: it.location || 'Main Store'
+          };
+        }),
+        multiplier: otherItems[0]?.multiplier !== undefined && otherItems[0]?.multiplier !== null && otherItems[0]?.multiplier !== '' ? String(otherItems[0].multiplier).trim() : '1',
+        multiplierOp: otherItems[0]?.multiplierOp || 'multiply',
         tapeRolls: calculatedTapeRolls,
         totalTapeRolls: calculatedTapeRolls,
         width: effectiveWidth,
@@ -3761,6 +3840,9 @@ export default function ElasticIssueView({
         availableStock: 0,
         location: '',
         calcMode: 'direct',
+        baseQty: 1,
+        multiplier: 1,
+        multiplierOp: 'multiply',
         totalQty: 1
       }
     ]);
@@ -5268,6 +5350,35 @@ export default function ElasticIssueView({
                         {showActiveCuttingMatrix ? 'Hide Matrix' : `Matrix Breakdown (${activeLotCutting.rows.length} Colors)`}
                       </button>
                     )}
+
+                    {previouslyIssuedForCurrentLot && dismissedAlreadyIssuedLots.includes(previouslyIssuedForCurrentLot.lotNo) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDismissedAlreadyIssuedLots(prev => prev.filter(l => l !== previouslyIssuedForCurrentLot.lotNo));
+                          setShowAlreadyIssued(true);
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          padding: '7px 12px',
+                          borderRadius: '8px',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          border: '1.5px solid #fde68a',
+                          background: '#fffbeb',
+                          color: '#b45309',
+                          cursor: 'pointer',
+                          boxShadow: '0 1px 4px rgba(217, 119, 6, 0.15)',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Show previously issued materials banner"
+                      >
+                        <Eye size={13} />
+                        <span>Show Already Issued ({previouslyIssuedForCurrentLot.materials.length})</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -5391,14 +5502,15 @@ export default function ElasticIssueView({
             )}
 
             {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT ── */}
-            {previouslyIssuedForCurrentLot && (
+            {previouslyIssuedForCurrentLot && !dismissedAlreadyIssuedLots.includes(previouslyIssuedForCurrentLot.lotNo) && (
               <div style={{
                 marginBottom: '18px',
-                padding: '14px 18px',
+                padding: showAlreadyIssued ? '14px 18px' : '10px 18px',
                 borderRadius: '10px',
                 background: '#fffbeb',
                 border: '1.5px solid #fde68a',
-                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)',
+                transition: 'all 0.2s ease'
               }}>
                 <div style={{
                   display: 'flex',
@@ -5406,9 +5518,9 @@ export default function ElasticIssueView({
                   justifyContent: 'space-between',
                   flexWrap: 'wrap',
                   gap: '10px',
-                  borderBottom: '1px solid #fef3c7',
-                  paddingBottom: '10px',
-                  marginBottom: '12px'
+                  borderBottom: showAlreadyIssued ? '1px solid #fef3c7' : 'none',
+                  paddingBottom: showAlreadyIssued ? '10px' : '0',
+                  marginBottom: showAlreadyIssued ? '12px' : '0'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div style={{
@@ -5445,85 +5557,142 @@ export default function ElasticIssueView({
                       </span>
                     </div>
                   </div>
-                </div>
 
-                {/* Items Grid */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: '10px'
-                }}>
-                  {previouslyIssuedForCurrentLot.materials.map((m, mIdx) => (
-                    <div
-                      key={m.key || mIdx}
+                  {/* Actions: Hide/Show Toggle (Closed by Default) & Close Dismiss */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: '700' }}>
+                      ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''}):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAlreadyIssued(prev => !prev)}
                       style={{
-                        background: '#ffffff',
-                        border: '1.5px solid #fde68a',
-                        borderRadius: '8px',
-                        padding: '10px 14px',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                        gap: '5px',
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: '1.5px solid #d97706',
+                        background: showAlreadyIssued ? '#fff7ed' : '#d97706',
+                        color: showAlreadyIssued ? '#c2410c' : '#ffffff',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
                       }}
+                      title={showAlreadyIssued ? "Hide already issued items" : "Show already issued items"}
                     >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          {m.category && (
-                            <span style={{
-                              fontSize: '9.5px',
-                              fontWeight: '800',
-                              color: '#92400e',
-                              background: '#fef3c7',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              textTransform: 'uppercase'
-                            }}>
-                              {m.category}
-                            </span>
-                          )}
-                          <span style={{
-                            fontSize: '13px',
-                            fontWeight: '800',
-                            color: '#0f172a',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}>
-                            {m.name}
-                          </span>
-                        </div>
-                        {m.itemCode && (
-                          <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
-                            Code: {m.itemCode}
-                          </div>
-                        )}
-                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
-                          Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
-                          {m.challans[0]?.date && ` • ${String(m.challans[0].date).split(' ')[0]}`}
-                        </div>
-                      </div>
-
-                      {/* Quantity Pill */}
-                      <div style={{
-                        textAlign: 'right',
-                        background: '#fff7ed',
-                        border: '1px solid #fed7aa',
+                      {showAlreadyIssued ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <span>{showAlreadyIssued ? 'Hide' : `Show (${previouslyIssuedForCurrentLot.materials.length} Items)`}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDismissedAlreadyIssuedLots(prev => [...prev, previouslyIssuedForCurrentLot.lotNo]);
+                        setShowAlreadyIssued(false);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
                         padding: '4px 10px',
                         borderRadius: '6px',
-                        flexShrink: 0
-                      }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
-                          {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                        border: '1.5px solid #fde68a',
+                        background: '#ffffff',
+                        color: '#92400e',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="Close and do not show this banner"
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Items Grid - Collapsible, Closed by default */}
+                {showAlreadyIssued && (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                    gap: '10px'
+                  }}>
+                    {previouslyIssuedForCurrentLot.materials.map((m, mIdx) => (
+                      <div
+                        key={m.key || mIdx}
+                        style={{
+                          background: '#ffffff',
+                          border: '1.5px solid #fde68a',
+                          borderRadius: '8px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {m.category && (
+                              <span style={{
+                                fontSize: '9.5px',
+                                fontWeight: '800',
+                                color: '#92400e',
+                                background: '#fef3c7',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                textTransform: 'uppercase'
+                              }}>
+                                {m.category}
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: '13px',
+                              fontWeight: '800',
+                              color: '#0f172a',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}>
+                              {m.name}
+                            </span>
+                          </div>
+                          {m.itemCode && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                              Code: {m.itemCode}
+                            </div>
+                          )}
+                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
+                            Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
+                            {m.challans[0]?.date && ` • ${String(m.challans[0].date).split(' ')[0]}`}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
-                          Issued Qty
+
+                        {/* Quantity Pill */}
+                        <div style={{
+                          textAlign: 'right',
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          flexShrink: 0
+                        }}>
+                          <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
+                            {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                          </div>
+                          <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
+                            Issued Qty
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -5944,8 +6113,7 @@ export default function ElasticIssueView({
                                       onChange={(e) => {
                                         const val = e.target.value;
                                         if (val === '__custom__') {
-                                          handleUpdateOtherItem(item.id, 'isCustomType', true);
-                                          handleUpdateOtherItem(item.id, 'customComponentType', '');
+                                          handleUpdateOtherItem(item.id, { isCustomType: true, customComponentType: '' });
                                         } else if (val === '__manage__') {
                                           setShowManageOtherTypesModal(true);
                                         } else {

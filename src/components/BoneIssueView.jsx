@@ -3,7 +3,7 @@ import {
   FileText, Search, Plus, Minus, Download, Printer, RefreshCw,
   CheckCircle, AlertTriangle, ArrowRight, Layers, Box, Check, X,
   Calendar, User, ShieldCheck, Sparkles, Sliders, Scissors, Lock, ExternalLink, Zap,
-  Scale, MapPin, Edit2, CheckCircle2, Eye, Clock, RotateCcw
+  Scale, MapPin, Edit2, CheckCircle2, Eye, EyeOff, Clock, RotateCcw
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { getBackendUrl } from '../utils/api';
@@ -32,6 +32,15 @@ export default function BoneIssueView({
   const [lotDetails, setLotDetails] = useState(null);
   const [lotError, setLotError] = useState('');
   const [recentLots, setRecentLots] = useState([]);
+
+  // Previously Issued Materials Banner: Closed/Hidden by default, user clicks Show to open
+  const [showAlreadyIssued, setShowAlreadyIssued] = useState(false);
+  const [dismissedAlreadyIssuedLots, setDismissedAlreadyIssuedLots] = useState([]);
+
+  // Reset showAlreadyIssued to false (closed by default) whenever lot changes
+  useEffect(() => {
+    setShowAlreadyIssued(false);
+  }, [lotDetails?.lotNo, searchLotInput]);
 
   // ── Cutting Details Cache & 30-Minute Auto-Reload ───────────────────────────
   const CUTTING_CACHE_MAX_ENTRIES = 100;
@@ -2478,14 +2487,15 @@ export default function BoneIssueView({
             )}
 
             {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT ── */}
-            {previouslyIssuedForCurrentLot && (
+            {previouslyIssuedForCurrentLot && !dismissedAlreadyIssuedLots.includes(previouslyIssuedForCurrentLot.lotNo) && (
               <div style={{
                 marginBottom: '18px',
-                padding: '14px 18px',
+                padding: showAlreadyIssued ? '14px 18px' : '10px 18px',
                 borderRadius: '10px',
                 background: '#fffbeb',
                 border: '1.5px solid #fde68a',
-                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)'
+                boxShadow: '0 2px 8px rgba(217, 119, 6, 0.08)',
+                transition: 'all 0.2s ease'
               }}>
                 <div style={{
                   display: 'flex',
@@ -2493,9 +2503,9 @@ export default function BoneIssueView({
                   justifyContent: 'space-between',
                   flexWrap: 'wrap',
                   gap: '10px',
-                  borderBottom: '1px solid #fef3c7',
-                  paddingBottom: '10px',
-                  marginBottom: '12px'
+                  borderBottom: showAlreadyIssued ? '1px solid #fef3c7' : 'none',
+                  paddingBottom: showAlreadyIssued ? '10px' : '0',
+                  marginBottom: showAlreadyIssued ? '12px' : '0'
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                     <div style={{
@@ -2532,85 +2542,142 @@ export default function BoneIssueView({
                       </span>
                     </div>
                   </div>
-                </div>
 
-                {/* Items Grid */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: '10px'
-                }}>
-                  {previouslyIssuedForCurrentLot.materials.map((m, mIdx) => (
-                    <div
-                      key={m.key || mIdx}
+                  {/* Actions: Hide/Show Toggle (Closed by Default) & Close Dismiss */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '11.5px', color: '#92400e', fontWeight: '700' }}>
+                      ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''}):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowAlreadyIssued(prev => !prev)}
                       style={{
-                        background: '#ffffff',
-                        border: '1.5px solid #fde68a',
-                        borderRadius: '8px',
-                        padding: '10px 14px',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                        gap: '5px',
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: '1.5px solid #d97706',
+                        background: showAlreadyIssued ? '#fff7ed' : '#d97706',
+                        color: showAlreadyIssued ? '#c2410c' : '#ffffff',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
                       }}
+                      title={showAlreadyIssued ? "Hide already issued items" : "Show already issued items"}
                     >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                          {m.category && (
-                            <span style={{
-                              fontSize: '9.5px',
-                              fontWeight: '800',
-                              color: '#92400e',
-                              background: '#fef3c7',
-                              padding: '1px 6px',
-                              borderRadius: '4px',
-                              textTransform: 'uppercase'
-                            }}>
-                              {m.category}
-                            </span>
-                          )}
-                          <span style={{
-                            fontSize: '13px',
-                            fontWeight: '800',
-                            color: '#0f172a',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}>
-                            {m.name}
-                          </span>
-                        </div>
-                        {m.itemCode && (
-                          <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
-                            Code: {m.itemCode}
-                          </div>
-                        )}
-                        <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
-                          Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
-                          {m.challans[0]?.date && ` • ${String(m.challans[0].date).split(' ')[0]}`}
-                        </div>
-                      </div>
-
-                      {/* Quantity Pill */}
-                      <div style={{
-                        textAlign: 'right',
-                        background: '#fff7ed',
-                        border: '1px solid #fed7aa',
+                      {showAlreadyIssued ? <EyeOff size={14} /> : <Eye size={14} />}
+                      <span>{showAlreadyIssued ? 'Hide' : `Show (${previouslyIssuedForCurrentLot.materials.length} Items)`}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDismissedAlreadyIssuedLots(prev => [...prev, previouslyIssuedForCurrentLot.lotNo]);
+                        setShowAlreadyIssued(false);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
                         padding: '4px 10px',
                         borderRadius: '6px',
-                        flexShrink: 0
-                      }}>
-                        <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
-                          {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                        border: '1.5px solid #fde68a',
+                        background: '#ffffff',
+                        color: '#92400e',
+                        fontSize: '11.5px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                      title="Close and do not show this banner"
+                    >
+                      <X size={14} />
+                      <span>Close</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Items Grid - Collapsible, Closed by default */}
+                {showAlreadyIssued && (
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                    gap: '10px'
+                  }}>
+                    {previouslyIssuedForCurrentLot.materials.map((m, mIdx) => (
+                      <div
+                        key={m.key || mIdx}
+                        style={{
+                          background: '#ffffff',
+                          border: '1.5px solid #fde68a',
+                          borderRadius: '8px',
+                          padding: '10px 14px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '12px',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            {m.category && (
+                              <span style={{
+                                fontSize: '9.5px',
+                                fontWeight: '800',
+                                color: '#92400e',
+                                background: '#fef3c7',
+                                padding: '1px 6px',
+                                borderRadius: '4px',
+                                textTransform: 'uppercase'
+                              }}>
+                                {m.category}
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: '13px',
+                              fontWeight: '800',
+                              color: '#0f172a',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis'
+                            }}>
+                              {m.name}
+                            </span>
+                          </div>
+                          {m.itemCode && (
+                            <div style={{ fontSize: '10.5px', color: '#64748b', fontFamily: 'monospace', marginTop: '2px' }}>
+                              Code: {m.itemCode}
+                            </div>
+                          )}
+                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '3px' }}>
+                            Challan: <strong>{m.challans.map(c => c.id).join(', ')}</strong>
+                            {m.challans[0]?.date && ` • ${String(m.challans[0].date).split(' ')[0]}`}
+                          </div>
                         </div>
-                        <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
-                          Issued Qty
+
+                        {/* Quantity Pill */}
+                        <div style={{
+                          textAlign: 'right',
+                          background: '#fff7ed',
+                          border: '1px solid #fed7aa',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          flexShrink: 0
+                        }}>
+                          <div style={{ fontSize: '13.5px', fontWeight: '900', color: '#c2410c' }}>
+                            {m.totalQty.toLocaleString('en-IN')} {m.unit}
+                          </div>
+                          <div style={{ fontSize: '9px', fontWeight: '700', color: '#9a3412', textTransform: 'uppercase' }}>
+                            Issued Qty
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

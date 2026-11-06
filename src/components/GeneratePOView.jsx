@@ -565,6 +565,7 @@ export function generatePurchaseOrderPDF({ payload, options = {} }) {
         ["Order Date/Time", [payload.meta?.orderDate, payload.meta?.orderTime].filter(Boolean).join(" ")],
         ...(payload.meta?.expectedDate ? [["Expected Date/Time", payload.meta.expectedDate]] : []),
         ...(payload.meta?.leadTimeHuman ? [["Lead Time", payload.meta.leadTimeHuman]] : []),
+        ...(payload.meta?.supervisorName ? [["Supervisor Name", payload.meta.supervisorName]] : []),
         ...(payload.meta?.requisitionRaisedBy ? [["Requisition Raised By", payload.meta.requisitionRaisedBy]] : []),
         ...(payload.meta?.preparedBy ? [["Prepared By", payload.meta.preparedBy]] : []),
         ...(payload.meta?.approvedBy ? [["Approved By", payload.meta.approvedBy]] : []),
@@ -1645,6 +1646,9 @@ export default function GeneratePOView({
           if (po.requisitionRaisedBy) setRequisitionRaisedBy(po.requisitionRaisedBy);
           if (po.preparedBy) setPreparedBy(po.preparedBy);
           if (po.approvedBy) setApprovedBy(po.approvedBy);
+          if (po.supervisorName || po.supervisor || po.Supervisor) {
+            setSupervisorName(po.supervisorName || po.supervisor || po.Supervisor);
+          }
 
           if (po.tax !== undefined && po.tax !== null) {
             setGstEnabled(parseFloat(po.tax) > 0);
@@ -1725,6 +1729,7 @@ export default function GeneratePOView({
         orderTime: orderTimePart,
         expectedDate: po.deliveryDate || null,
         expectedTime: null,
+        supervisorName: (po.supervisorName || po.supervisor || po.Supervisor || '').trim() || null,
         requisitionRaisedBy: (po.requisitionRaisedBy || '').trim(),
         preparedBy: (po.preparedBy || '').trim(),
         approvedBy: (po.approvedBy || '').trim(),
@@ -1766,7 +1771,7 @@ export default function GeneratePOView({
       poNo: po.poNumber,
       orderDate: payload.meta.orderDate,
       expectedDate: payload.meta.expectedDate,
-      supervisorName: po.preparedBy || po.approvedBy,
+      supervisorName: (po.supervisorName || po.supervisor || po.Supervisor || '').trim() || po.preparedBy || po.approvedBy,
     });
 
     const [gateQR, recvQR] = await Promise.all([
@@ -1836,7 +1841,8 @@ export default function GeneratePOView({
             ? 'Completed'
             : (po.status === 'Partially Received' ? 'Partially Received' : (po.status || 'Sent to Vendor')));
 
-        const auditStr = `Raised: ${po.requisitionRaisedBy || '—'}\nPrep: ${po.preparedBy || '—'}\nApp: ${po.approvedBy || '—'}`;
+        const sup = po.supervisorName || po.supervisor || po.Supervisor || '';
+        const auditStr = `${sup ? `Sup: ${sup}\n` : ''}Raised: ${po.requisitionRaisedBy || '—'}\nPrep: ${po.preparedBy || '—'}\nApp: ${po.approvedBy || '—'}`;
 
         return [
           po.poNumber || '—',
@@ -1901,7 +1907,7 @@ export default function GeneratePOView({
       const headers = [
         "PO Number", "Date Issued", "Expected Date", "Vendor / Supplier", "Design Lot",
         "Department", "Item Description", "UOM", "Qty", "Rate (INR)", "Line Amount (INR)",
-        "PO Total Amount (INR)", "Status", "Requisitioned By", "Prepared By", "Approved By", "Remarks"
+        "PO Total Amount (INR)", "Status", "Supervisor Name", "Requisitioned By", "Prepared By", "Approved By", "Remarks"
       ];
 
       const rowsData = [];
@@ -1918,6 +1924,8 @@ export default function GeneratePOView({
           : (po.status === 'Completed' || po.status === 'Received Done'
             ? 'Completed'
             : (po.status === 'Partially Received' ? 'Partially Received' : (po.status || 'Sent to Vendor')));
+
+        const sup = po.supervisorName || po.supervisor || po.Supervisor || '';
 
         if (Array.isArray(items) && items.length > 0) {
           items.forEach(i => {
@@ -1942,6 +1950,7 @@ export default function GeneratePOView({
               amt,
               po.total || 0,
               statusTxt,
+              sup,
               po.requisitionRaisedBy || '',
               po.preparedBy || '',
               po.approvedBy || '',
@@ -1963,6 +1972,7 @@ export default function GeneratePOView({
             po.total || 0,
             po.total || 0,
             statusTxt,
+            sup,
             po.requisitionRaisedBy || '',
             po.preparedBy || '',
             po.approvedBy || '',
@@ -2284,6 +2294,8 @@ export default function GeneratePOView({
   const [orderTime, setOrderTime] = useState(nowTime());
   const [expectedDate, setExpectedDate] = useState("");
   const [expectedTime, setExpectedTime] = useState("");
+  const [supervisorName, setSupervisorName] = useState("");
+  const [dbSupervisors, setDbSupervisors] = useState([]);
   const [supplierName, setSupplierName] = useState("");
   // const [supplierAddress, setSupplierAddress] = useState("");
   // const [supplierEmail, setSupplierEmail] = useState("");
@@ -2311,6 +2323,7 @@ export default function GeneratePOView({
   const [editSigRaised, setEditSigRaised] = useState("");
   const [editSigPrep, setEditSigPrep] = useState("");
   const [editSigApp, setEditSigApp] = useState("");
+  const [editSigSup, setEditSigSup] = useState("");
   const [isSavingSignatures, setIsSavingSignatures] = useState(false);
 
   const [searchPoNumber, setSearchPoNumber] = useState("");
@@ -2360,6 +2373,35 @@ export default function GeneratePOView({
     savedBrands.forEach(b => { if (b) set.add(b.trim()); });
     return Array.from(set).filter(Boolean).sort((a, b) => a.localeCompare(b));
   }, [designs, materials, dbItemCodes, savedBrands]);
+
+  useEffect(() => {
+    fetch(`${getBackendUrl()}/api/supervisors`)
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.success && Array.isArray(d.supervisors)) {
+          setDbSupervisors(d.supervisors);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const supervisorSuggestions = useMemo(() => {
+    const list = new Set(['ROHIT / MONU', 'MOHIT SIR', 'MANISH', 'FLOOR SUPERVISOR', 'STORE INCHARGE']);
+    dbSupervisors.forEach(s => { if (s && s.trim()) list.add(s.trim()); });
+    if (Array.isArray(pos)) {
+      pos.forEach(p => {
+        const s = (p.supervisorName || p.supervisor || p.Supervisor || '').trim();
+        if (s) list.add(s);
+      });
+    }
+    if (Array.isArray(designs)) {
+      designs.forEach(d => {
+        const s = (d.supervisor || d.Supervisor || '').trim();
+        if (s) list.add(s);
+      });
+    }
+    return Array.from(list);
+  }, [dbSupervisors, pos, designs]);
 
   // Real-time Autocomplete state savers
   const saveDescriptionWithDebounce = (description) => {
@@ -2550,6 +2592,9 @@ export default function GeneratePOView({
     if (prefilledPoData) {
       const data = prefilledPoData;
       setPrefilledPoData(null);
+      if (data.supervisorName || data.supervisor || data.Supervisor) {
+        setSupervisorName(data.supervisorName || data.supervisor || data.Supervisor);
+      }
       setTimeout(() => {
         setSelectedDesignId(data.lotId || '');
         setRows([
@@ -2589,8 +2634,11 @@ export default function GeneratePOView({
       if (poMode === 'lot') setRows([blankRow()]);
       return;
     }
+    const design = designs.find(d => String(d.id) === String(designId));
+    if (design && (design.supervisor || design.Supervisor) && !supervisorName) {
+      setSupervisorName(design.supervisor || design.Supervisor);
+    }
     if (poMode === 'lot') {
-      const design = designs.find(d => String(d.id) === String(designId));
       if (design && design.bom) {
         const mapped = design.bom
           .filter(item => String(item.status).toLowerCase() === 'yes')
@@ -2818,6 +2866,7 @@ export default function GeneratePOView({
       orderTime: orderTime || null,
       expectedDate: expectedDate || null,
       expectedTime: expectedTime || null,
+      supervisorName: (supervisorName || '').trim() || null,
       orderDateTimeISO: orderDT ? orderDT.toISOString() : null,
       expectedDateTimeISO: expectedDT ? expectedDT.toISOString() : null,
       leadTimeMs: leadMs,
@@ -2876,6 +2925,7 @@ export default function GeneratePOView({
     setLotCuttingPieces(null);
     setShowLotBomTable(false);
     setPoMode("lot");
+    setSupervisorName("");
     setRequisitionRaisedBy("");
     setPreparedBy("");
     setApprovedBy("");
@@ -2892,6 +2942,7 @@ export default function GeneratePOView({
   function handleOpenSignatureModal(po) {
     if (!po) return;
     setEditingPoSignatures(po);
+    setEditSigSup(po.supervisorName || po.supervisor || po.Supervisor || "");
     setEditSigRaised(po.requisitionRaisedBy || "");
     setEditSigPrep(po.preparedBy || "");
     setEditSigApp(po.approvedBy || "");
@@ -2906,12 +2957,15 @@ export default function GeneratePOView({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          supervisorName: editSigSup.trim(),
           requisitionRaisedBy: editSigRaised.trim(),
           preparedBy: editSigPrep.trim(),
           approvedBy: editSigApp.trim()
         })
       });
       if (res.ok) {
+        editingPoSignatures.supervisorName = editSigSup.trim();
+        editingPoSignatures.supervisor = editSigSup.trim();
         editingPoSignatures.requisitionRaisedBy = editSigRaised.trim();
         editingPoSignatures.preparedBy = editSigPrep.trim();
         editingPoSignatures.approvedBy = editSigApp.trim();
@@ -2920,6 +2974,8 @@ export default function GeneratePOView({
           if (p.id === editingPoSignatures.id || p.poNumber === editingPoSignatures.poNumber) {
             return {
               ...p,
+              supervisorName: editSigSup.trim(),
+              supervisor: editSigSup.trim(),
               requisitionRaisedBy: editSigRaised.trim(),
               preparedBy: editSigPrep.trim(),
               approvedBy: editSigApp.trim()
@@ -2985,6 +3041,9 @@ export default function GeneratePOView({
             if (po.requisitionRaisedBy) setRequisitionRaisedBy(po.requisitionRaisedBy);
             if (po.preparedBy) setPreparedBy(po.preparedBy);
             if (po.approvedBy) setApprovedBy(po.approvedBy);
+            if (po.supervisorName || po.supervisor || po.Supervisor) {
+              setSupervisorName(po.supervisorName || po.supervisor || po.Supervisor);
+            }
 
             if (po.tax !== undefined && po.tax !== null) {
               setGstEnabled(parseFloat(po.tax) > 0);
@@ -3127,6 +3186,8 @@ export default function GeneratePOView({
         date: formattedOrderDate,
         deliveryDate: formattedDeliveryDate,
         status: 'Sent to Vendor',
+        supervisorName: (supervisorName || payload.meta?.supervisorName || '').trim(),
+        supervisor: (supervisorName || payload.meta?.supervisorName || '').trim(),
         requisitionRaisedBy: (requisitionRaisedBy || payload.meta?.requisitionRaisedBy || '').trim(),
         preparedBy: (preparedBy || payload.meta?.preparedBy || '').trim(),
         approvedBy: (approvedBy || payload.meta?.approvedBy || '').trim(),
@@ -3179,7 +3240,7 @@ export default function GeneratePOView({
         poNo: payload.meta.poNumber,
         orderDate: payload.meta.orderDate,
         expectedDate: payload.meta.expectedDate,
-        supervisorName: preparedBy || approvedBy,
+        supervisorName: (supervisorName || '').trim() || preparedBy || approvedBy,
       });
 
       const [gateQR, recvQR] = await Promise.all([
@@ -3222,7 +3283,7 @@ export default function GeneratePOView({
       poNo: payload.meta.poNumber,
       orderDate: payload.meta.orderDate,
       expectedDate: payload.meta.expectedDate,
-      supervisorName: preparedBy || approvedBy,
+      supervisorName: (supervisorName || '').trim() || preparedBy || approvedBy,
     });
 
     const [gateQR, recvQR] = await Promise.all([
@@ -4188,6 +4249,51 @@ export default function GeneratePOView({
                     </div>
                   </div>
 
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <label className="FormLabel" style={{ margin: 0 }}>
+                        Supervisor Name
+                      </label>
+                      {selectedDesignId && (matchedDesign?.supervisor || matchedDesign?.Supervisor) && (
+                        <button
+                          type="button"
+                          onClick={() => setSupervisorName(matchedDesign.supervisor || matchedDesign.Supervisor)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--primary-color, #2563eb)',
+                            fontSize: '11px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            padding: '2px 4px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                          title="Auto-fill supervisor name recorded in cutting lot"
+                        >
+                          Use Lot Supervisor ({matchedDesign.supervisor || matchedDesign.Supervisor})
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        list="po-supervisor-suggestions"
+                        placeholder="Enter Supervisor Name (e.g. ROHIT / MONU, MOHIT SIR)..."
+                        value={supervisorName}
+                        onChange={e => setSupervisorName(e.target.value)}
+                        style={{ borderRadius: '8px', fontWeight: '600', color: '#0f172a' }}
+                      />
+                      <datalist id="po-supervisor-suggestions">
+                        {supervisorSuggestions.map((s, idx) => (
+                          <option key={idx} value={s} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </div>
+
                   {leadHuman && (
                     <div style={{ fontSize: '12px', background: 'var(--accent-light)', padding: '6px 12px', borderRadius: '8px', color: 'var(--accent-color)', fontWeight: '600', alignSelf: 'start' }}>
                       Expected Lead Time: {leadHuman}
@@ -4319,6 +4425,18 @@ export default function GeneratePOView({
                     />
                   </div>
                   <div>
+                    <label className="FormLabel">Supervisor Name (Floor Incharge)</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      list="po-supervisor-suggestions"
+                      placeholder="Search or type supervisor name (e.g. ROHIT / MONU)..."
+                      value={supervisorName}
+                      onChange={e => setSupervisorName(e.target.value)}
+                      style={{ borderRadius: '8px' }}
+                    />
+                  </div>
+                  <div>
                     <label className="FormLabel">Remarks / Instructions</label>
                     <textarea
                       className="form-input"
@@ -4376,6 +4494,7 @@ export default function GeneratePOView({
                     <div><strong>Order Date:</strong> {orderDate} {orderTime}</div>
                     {expectedDate && <div><strong>Expected:</strong> {expectedDate} {expectedTime}</div>}
                     {leadHuman && <div><strong>Lead Time:</strong> {leadHuman}</div>}
+                    {supervisorName && <div><strong>Supervisor:</strong> {supervisorName}</div>}
                     {selectedDesignId && (
                       <div><strong>Lot No:</strong> Lot #{matchedDesign?.id || selectedDesignId} {matchedDesign?.name ? `(${matchedDesign.name})` : ''}</div>
                     )}
@@ -5042,6 +5161,9 @@ export default function GeneratePOView({
                         </td>
                         <td style={{ padding: '12px 10px', fontSize: '11px', color: 'var(--text-muted)' }}>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {(po.supervisorName || po.supervisor || po.Supervisor) && (
+                              <div><strong style={{ color: '#4f46e5' }}>Supervisor:</strong> {po.supervisorName || po.supervisor || po.Supervisor}</div>
+                            )}
                             <div><strong style={{ color: 'var(--text-main)' }}>Raised:</strong> {po.requisitionRaisedBy || '—'}</div>
                             <div><strong style={{ color: 'var(--text-main)' }}>Prep:</strong> {po.preparedBy || '—'}</div>
                             <div><strong style={{ color: 'var(--text-main)' }}>App:</strong> {po.approvedBy || '—'}</div>
@@ -5494,6 +5616,13 @@ export default function GeneratePOView({
                 <label className="FormLabel">Authorized By *</label>
                 <input type="text" className="form-input" value={approvedBy} disabled style={{ background: 'var(--bg-primary)', opacity: 0.7, borderRadius: '8px' }} />
               </div>
+
+              {supervisorName && (
+                <div>
+                  <label className="FormLabel">Supervisor Name</label>
+                  <input type="text" className="form-input" value={supervisorName} disabled style={{ background: 'var(--bg-primary)', opacity: 0.7, borderRadius: '8px' }} />
+                </div>
+              )}
             </div>
             <div className="modal-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
               <button className="btn btn-secondary" onClick={() => setShowSupervisorDialog(false)} style={{ borderRadius: '8px' }}>Cancel</button>
@@ -5667,6 +5796,26 @@ export default function GeneratePOView({
                   localStorageKey={LOCAL_STORAGE_KEYS.APPROVED_NAMES}
                   onSaveToLocalStorage={refreshSavedNames}
                 />
+              </div>
+
+              <div>
+                <label className="FormLabel" style={{ display: 'block', marginBottom: '4px', fontWeight: '700', fontSize: '12px' }}>
+                  Supervisor Name:
+                </label>
+                <input
+                  type="text"
+                  className="form-input"
+                  list="po-edit-supervisor-suggestions"
+                  placeholder="Select or type supervisor name..."
+                  value={editSigSup}
+                  onChange={e => setEditSigSup(e.target.value)}
+                  style={{ borderRadius: '8px' }}
+                />
+                <datalist id="po-edit-supervisor-suggestions">
+                  {supervisorSuggestions.map((s, idx) => (
+                    <option key={idx} value={s} />
+                  ))}
+                </datalist>
               </div>
             </div>
 

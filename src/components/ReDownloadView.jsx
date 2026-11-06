@@ -937,7 +937,7 @@ export default function ReDownloadView({ currencySymbol = 'R', currentUser = nul
                         </span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                           <User size={14} />
-                          Supervisor: {activeSubTab === 'po' ? (selectedDoc.approvedBy || selectedDoc.preparedBy || 'N/A') :
+                          Supervisor: {activeSubTab === 'po' ? (selectedDoc.supervisorName || selectedDoc.supervisor || selectedDoc.Supervisor || selectedDoc.approvedBy || selectedDoc.preparedBy || 'N/A') :
                             activeSubTab === 'zip' || activeSubTab === 'dori' ? (selectedDoc.Supervisor || 'N/A') :
                               (selectedDoc.preparedBy || 'N/A')}
                         </span>

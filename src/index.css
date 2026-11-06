@@ -2552,6 +2552,13 @@ body.dark-theme .notification-toast {
     margin: 0 auto !important;
   }
 
+  body.print-materials-mode img {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+    max-width: 100% !important;
+  }
+
   /* Scoped rules for Tech Spec Sheet BOM Printing */
   body.print-techpack-mode .sidebar,
   body.print-techpack-mode .app-container .sidebar,

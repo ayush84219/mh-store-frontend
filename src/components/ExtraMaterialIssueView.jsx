@@ -8,7 +8,7 @@ import {
   Package, ChevronDown, CheckCircle, HelpCircle,
   TrendingUp, Sparkles, Filter, RefreshCw, Eye, EyeOff, Boxes, BarChart3,
   User, Send, Box, Scissors, Tag, Info, Calendar, Barcode, QrCode,
-  Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn, Download
+  Zap, Plus, Trash2, Image as ImageIcon, X, ZoomIn, Download, Scan, Shirt
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -28,6 +28,9 @@ const COMPONENT_PRESETS = [
   'Patch',
   'Polybag'
 ];
+
+// Receiver department quick-selector pills
+const commonDepts = ['Cutting', 'Stitching', 'Finishing', 'Packing', 'Sampling', 'Main Store'];
 
 // Reusable Searchable Material Select with Portal & Smart Positioning
 function SearchableMaterialSelect({ materials = [], value, onChange, disabled = false, placeholder = "-- Select Material --", hasError = false, brandHint = '', categoryHint = '' }) {
@@ -1136,6 +1139,15 @@ export default function ExtraMaterialIssueView({
   const [woPieces, setWoPieces] = useState(100);
   const [woReceiverName, setWoReceiverName] = useState('');
   const [woReceiverDept, setWoReceiverDept] = useState('');
+  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [quickSelectedComponent, setQuickSelectedComponent] = useState('');
+
+  const availableBrands = useMemo(() => {
+    const set = new Set();
+    (designs || []).forEach(d => { if (d.brand) set.add(d.brand); });
+    (cuttingHeaders || []).forEach(c => { if (c.Brand) set.add(c.Brand); });
+    return Array.from(set).sort();
+  }, [designs, cuttingHeaders]);
   const [showAddWoModal, setShowAddWoModal] = useState(false);
   const [addWoInputName, setAddWoInputName] = useState('Label');
   const [woItems, setWoItems] = useState([
@@ -1441,50 +1453,95 @@ export default function ExtraMaterialIssueView({
     // Play crisp scan audio chirp
     playScanChirp();
 
-    // 2. Auto-map or select row in BOM component table
-    let matchedRowId = null;
-
-    setBomMappings(prev => {
-      const next = [...prev];
-      // Check if material is already assigned to a BOM row
-      const existingIdx = next.findIndex(item => String(item.materialId) === String(matchedMat.id));
-
-      if (existingIdx !== -1) {
-        matchedRowId = next[existingIdx].id;
-        const currentQty = parseFloat(next[existingIdx].extraQty) || 0;
-        next[existingIdx] = {
-          ...next[existingIdx],
-          selectedForExtra: true,
-          extraQty: currentQty > 0 ? currentQty + 1 : 1
-        };
-      } else {
-        // Find first row without assigned material or matching component name
-        const unassignedIdx = next.findIndex(item => !item.materialId || item.materialId === '');
-        if (unassignedIdx !== -1) {
-          matchedRowId = next[unassignedIdx].id;
-          next[unassignedIdx] = {
-            ...next[unassignedIdx],
-            materialId: matchedMat.id,
-            selectedForExtra: true,
-            extraQty: 1
+    if (issueMethod === 'without_bom') {
+      const cuttingQty = activeLotCutting?.totalPieces > 0 ? activeLotCutting.totalPieces : (parseFloat(woPieces) > 0 ? parseFloat(woPieces) : 100);
+      setWoItems(prev => {
+        const next = [...prev];
+        const existingIdx = next.findIndex(item => String(item.materialId) === String(matchedMat.id));
+        if (existingIdx !== -1) {
+          const curExtra = parseFloat(next[existingIdx].extraQty) || 0;
+          next[existingIdx] = {
+            ...next[existingIdx],
+            extraQty: curExtra > 0 ? curExtra + 1 : 1
           };
-        } else if (next.length > 0) {
-          matchedRowId = next[0].id;
-          next[0] = {
-            ...next[0],
-            selectedForExtra: true,
-            extraQty: (parseFloat(next[0].extraQty) || 0) + 1
-          };
+        } else {
+          const emptyIdx = next.findIndex(item => !item.materialId);
+          if (emptyIdx !== -1) {
+            next[emptyIdx] = {
+              ...next[emptyIdx],
+              materialId: matchedMat.id,
+              componentName: matchedMat.category || next[emptyIdx].componentName || 'Trims',
+              unit: matchedMat.unit || 'Pcs',
+              baseQty: cuttingQty,
+              extraQty: 1
+            };
+          } else {
+            next.push({
+              id: Date.now() + Math.random(),
+              componentName: matchedMat.category || 'Trims',
+              materialId: matchedMat.id,
+              unit: matchedMat.unit || 'Pcs',
+              multiplier: 1,
+              multiplierOp: 'multiply',
+              baseQty: cuttingQty,
+              extraQty: 1,
+              reason: EXTRA_REASONS[0],
+              remarks: ''
+            });
+          }
         }
-      }
-      return next;
-    });
+        return next;
+      });
+      setBarcodeScanFeedback({
+        type: 'success',
+        msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.itemCode || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row added/updated.`
+      });
+    } else {
+      // 2. Auto-map or select row in BOM component table
+      let matchedRowId = null;
 
-    setHighlightedRowIndex(matchedRowId);
-    setBarcodeScanFeedback({
-      type: 'success',
-      msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.itemCode || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row selected for Extra Issue.`
-    });
+      setBomMappings(prev => {
+        const next = [...prev];
+        // Check if material is already assigned to a BOM row
+        const existingIdx = next.findIndex(item => String(item.materialId) === String(matchedMat.id));
+
+        if (existingIdx !== -1) {
+          matchedRowId = next[existingIdx].id;
+          const currentQty = parseFloat(next[existingIdx].extraQty) || 0;
+          next[existingIdx] = {
+            ...next[existingIdx],
+            selectedForExtra: true,
+            extraQty: currentQty > 0 ? currentQty + 1 : 1
+          };
+        } else {
+          // Find first row without assigned material or matching component name
+          const unassignedIdx = next.findIndex(item => !item.materialId || item.materialId === '');
+          if (unassignedIdx !== -1) {
+            matchedRowId = next[unassignedIdx].id;
+            next[unassignedIdx] = {
+              ...next[unassignedIdx],
+              materialId: matchedMat.id,
+              selectedForExtra: true,
+              extraQty: 1
+            };
+          } else if (next.length > 0) {
+            matchedRowId = next[0].id;
+            next[0] = {
+              ...next[0],
+              selectedForExtra: true,
+              extraQty: (parseFloat(next[0].extraQty) || 0) + 1
+            };
+          }
+        }
+        return next;
+      });
+
+      setHighlightedRowIndex(matchedRowId);
+      setBarcodeScanFeedback({
+        type: 'success',
+        msg: `✅ Barcode Scanned: Matched "${matchedMat.name || matchedMat.itemCode || matchedMat.materialCode}" (Stock: ${matchedMat.totalStock || matchedMat.stock || 0} ${matchedMat.unit || 'Pcs'}). Row selected for Extra Issue.`
+      });
+    }
 
     setBarcodeInput('');
     setTimeout(() => {
@@ -4397,12 +4454,12 @@ export default function ExtraMaterialIssueView({
             gap: '12px',
             padding: '12px 18px',
             borderRadius: '14px',
-            background: issueMethod === 'without_bom' ? '#fff7ed' : '#f0f9ff',
-            border: issueMethod === 'without_bom' ? '1.5px solid #fdba74' : '1.5px solid #bae6fd',
+            background: issueMethod === 'without_bom' ? '#faf5ff' : '#f0f9ff',
+            border: issueMethod === 'without_bom' ? '1.5px solid #ddd6fe' : '1.5px solid #bae6fd',
             marginBottom: '4px'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '13px', fontWeight: '800', color: issueMethod === 'without_bom' ? '#9a3412' : '#0369a1' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', color: issueMethod === 'without_bom' ? '#581c87' : '#0369a1' }}>
                 Select Issue Method:
               </span>
               <div style={{ display: 'inline-flex', background: '#ffffff', padding: '4px', borderRadius: '10px', border: '1px solid #cbd5e1', gap: '4px' }}>
@@ -4436,9 +4493,9 @@ export default function ExtraMaterialIssueView({
                     cursor: 'pointer',
                     fontSize: '12.5px',
                     fontWeight: '800',
-                    background: issueMethod === 'without_bom' ? 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)' : 'transparent',
+                    background: issueMethod === 'without_bom' ? 'linear-gradient(135deg, #7c3aed 0%, #581c87 100%)' : 'transparent',
                     color: issueMethod === 'without_bom' ? '#ffffff' : '#64748b',
-                    boxShadow: issueMethod === 'without_bom' ? '0 2px 8px rgba(234, 88, 12, 0.35)' : 'none',
+                    boxShadow: issueMethod === 'without_bom' ? '0 2px 8px rgba(124, 58, 237, 0.35)' : 'none',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px'
@@ -4449,7 +4506,7 @@ export default function ExtraMaterialIssueView({
               </div>
             </div>
 
-            <span style={{ fontSize: '12px', fontWeight: '700', color: issueMethod === 'without_bom' ? '#c2410c' : '#0369a1' }}>
+            <span style={{ fontSize: '12px', fontWeight: '700', color: issueMethod === 'without_bom' ? '#6b21a8' : '#0369a1' }}>
               {issueMethod === 'without_bom'
                 ? '⚡ Without BOM: Issue any material directly without pre-approved BOM restrictions.'
                 : '🏷️ With BOM: Select an issued production lot to issue extra mapped BOM components.'}
@@ -5464,38 +5521,38 @@ export default function ExtraMaterialIssueView({
               gap: '16px',
               width: '100%'
             }}>
-              {/* Header Banner */}
+              {/* Header Banner - Royal Purple Theme */}
               <div style={{
-                background: 'linear-gradient(135deg, #fff7ed 0%, #ffedd5 100%)',
-                borderRadius: '14px',
-                border: '1.5px solid #fdba74',
-                padding: '18px 22px',
+                background: 'linear-gradient(135deg, #faf5ff 0%, #f3e8ff 100%)',
+                borderRadius: '12px',
+                border: '1.5px solid #ddd6fe',
+                padding: '16px 20px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 flexWrap: 'wrap',
                 gap: '12px',
-                boxShadow: '0 2px 8px rgba(234, 88, 12, 0.06)'
+                boxShadow: '0 2px 8px rgba(107, 33, 168, 0.05)'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={{
                     width: '42px',
                     height: '42px',
                     borderRadius: '10px',
-                    backgroundColor: '#ea580c',
+                    backgroundColor: '#7c3aed',
                     color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 4px 10px rgba(234, 88, 12, 0.3)'
+                    boxShadow: '0 4px 10px rgba(124, 58, 237, 0.3)'
                   }}>
                     <Zap size={22} />
                   </div>
                   <div>
-                    <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#9a3412' }}>
+                    <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#581c87' }}>
                       Direct Extra Material Requisition (Without BOM)
                     </h2>
-                    <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#c2410c', fontWeight: '600' }}>
+                    <p style={{ margin: '3px 0 0 0', fontSize: '12px', color: '#6b21a8', fontWeight: '600' }}>
                       Issue any inventory trims or accessories directly to cutting/production floor without requiring a pre-approved BOM.
                     </p>
                   </div>
@@ -5506,10 +5563,10 @@ export default function ExtraMaterialIssueView({
                     fontSize: '11px',
                     fontWeight: '800',
                     backgroundColor: '#ffffff',
-                    color: '#ea580c',
+                    color: '#6b21a8',
                     padding: '6px 14px',
                     borderRadius: '8px',
-                    border: '1px solid #fed7aa',
+                    border: '1px solid #ddd6fe',
                     boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
                   }}>
                     ⚡ UNRESTRICTED FLOOR ISSUE
@@ -5517,664 +5574,1057 @@ export default function ExtraMaterialIssueView({
                 </div>
               </div>
 
-              {/* Floor Details Card */}
+              {/* ── 2-COLUMN SIDE-BY-SIDE SECTION: 1. ISSUE HEADER & 2. CUTTING DETAILS ── */}
               <div style={{
-                backgroundColor: 'var(--bg-primary, #ffffff)',
-                borderRadius: '14px',
-                border: '1.5px solid var(--border-color, #cbd5e1)',
-                padding: '20px 22px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(460px, 1fr))',
+                gap: '16px',
+                alignItems: 'start'
               }}>
-                <h3 style={{ margin: '0 0 14px 0', fontSize: '14px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <FileText size={16} style={{ color: '#ea580c' }} />
-                  <span>1. Production & Floor Movement Details</span>
-                </h3>
-
+                {/* LEFT BOX: 1. Issue Header & Receiver Particulars */}
                 <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                  gap: '14px'
+                  background: '#ffffff',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                  overflow: 'hidden'
                 }}>
-                  {/* Lot Number */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      LOT NUMBER (REQUIRED) <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. 62116, LOT-104..."
-                      value={woLotId}
-                      onChange={(e) => setWoLotId(e.target.value)}
-                      className="form-input"
-                      list="recent-lots-list"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                    <datalist id="recent-lots-list">
-                      {cuttingHeaders.slice(0, 100).map((ch, idx) => (
-                        <option key={`ch-${ch.Lot_Number || idx}`} value={ch.Lot_Number}>
-                          {ch.Style ? `${ch.Style} (${ch.Brand || 'Cutting'})` : (ch.Brand || 'Cutting Lot')}
-                        </option>
-                      ))}
-                      {designs.map(d => (
-                        <option key={d.id} value={d.id}>{d.name || d.style || d.category}</option>
-                      ))}
-                    </datalist>
-                    {previouslyIssuedForCurrentLot && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px', gap: '6px' }}>
-                        <span style={{ fontSize: '11px', color: '#b45309', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          📦 {previouslyIssuedForCurrentLot.materials.length} material(s) already issued before ({previouslyIssuedForCurrentLot.totalChallans} challan{previouslyIssuedForCurrentLot.totalChallans > 1 ? 's' : ''})
+                  {/* Header Bar */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #6b21a8 0%, #581c87 100%)',
+                    color: '#ffffff',
+                    padding: '10px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '800' }}>
+                      <User size={16} />
+                      <span>1. Issue Header &amp; Receiver Particulars</span>
+                    </div>
+                    <span style={{ fontSize: '10.5px', fontWeight: '800', background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px' }}>
+                      ⚡ Extra Floor Issue
+                    </span>
+                  </div>
+
+                  {/* Form Grid */}
+                  <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {/* Row 1: Lot Number, Brand Name, Requisition Purpose/Style */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                      {/* Lot Number */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Lot Number <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <div style={{ position: 'relative' }}>
+                          <input
+                            type="text"
+                            list="existing-lots-list"
+                            placeholder="e.g. 73088..."
+                            value={woLotId}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setWoLotId(val);
+                              if (formError) setFormError('');
+                              const clean = val.trim().toLowerCase();
+                              if (clean) {
+                                const ch = (cuttingHeaders || []).find(h => String(h.Lot_Number || '').trim().toLowerCase() === clean);
+                                if (ch) {
+                                  if (ch.Brand) setWoBrand(ch.Brand);
+                                  if (ch.Style) setWoLotStyle(ch.Style);
+                                  const q = Number(ch.Cutting_Qty) || 0;
+                                  if (q > 0) {
+                                    setWoPieces(q);
+                                    setWoItems(prev => prev.map(it => {
+                                      const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+                                      return { ...it, baseQty: q, extraQty: Math.ceil(q * factor) };
+                                    }));
+                                  }
+                                } else {
+                                  const d = (designs || []).find(x => String(x.id || '').trim().toLowerCase() === clean || String(x.lotNumber || '').trim().toLowerCase() === clean);
+                                  if (d) {
+                                    if (d.brand) setWoBrand(d.brand);
+                                    if (d.name || d.style || d.category) setWoLotStyle(d.name || d.style || d.category);
+                                    const q = Number(d.quantity) || 0;
+                                    if (q > 0) {
+                                      setWoPieces(q);
+                                      setWoItems(prev => prev.map(it => {
+                                        const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+                                        return { ...it, baseQty: q, extraQty: Math.ceil(q * factor) };
+                                      }));
+                                    }
+                                  }
+                                }
+                              }
+                            }}
+                            required
+                            style={{
+                              width: '100%',
+                              height: '36px',
+                              padding: '0 10px 0 30px',
+                              fontSize: '13px',
+                              fontWeight: '800',
+                              border: (formError && !woLotId.trim()) ? '2px solid #ef4444' : '1.5px solid #7c3aed',
+                              background: (formError && !woLotId.trim()) ? '#fef2f2' : '#faf5ff',
+                              color: '#0f172a',
+                              borderRadius: '6px',
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                          <Search size={14} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#7c3aed' }} />
+                          <datalist id="existing-lots-list">
+                            {(cuttingHeaders || []).slice(0, 100).map((ch, idx) => (
+                              <option key={`ch-${ch.Lot_Number || idx}`} value={ch.Lot_Number}>
+                                {ch.Style ? `${ch.Style} (${ch.Brand || 'Cutting'})` : (ch.Brand || 'Cutting Lot')}
+                              </option>
+                            ))}
+                            {(designs || []).slice(0, 50).map(d => (
+                              <option key={d.id} value={d.id}>{`Lot ${d.id} — ${d.category} (${d.brand || 'No Brand'})`}</option>
+                            ))}
+                          </datalist>
+                        </div>
+                        <span style={{ fontSize: '10px', color: '#64748b', fontWeight: '600', marginTop: '3px', display: 'block' }}>
+                          * Required: lot / cutting batch number
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDismissedAlreadyIssuedLots(prev => prev.filter(l => l !== previouslyIssuedForCurrentLot.lotNo));
-                            setShowAlreadyIssued(prev => !prev);
+                      </div>
+
+                      {/* Brand Name */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Brand Name
+                        </label>
+                        <input
+                          type="text"
+                          list="existing-brands-list"
+                          placeholder="e.g. Barbour..."
+                          value={woBrand}
+                          onChange={(e) => setWoBrand(e.target.value)}
+                          style={{ width: '100%', height: '36px', padding: '0 10px', fontSize: '12.5px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
+                        />
+                        <datalist id="existing-brands-list">
+                          {availableBrands.map(b => (
+                            <option key={b} value={b} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      {/* Requisition Purpose / Style */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Requisition Purpose / Style
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Extra Floor Issue"
+                          value={woLotStyle}
+                          onChange={(e) => setWoLotStyle(e.target.value)}
+                          style={{ width: '100%', height: '36px', padding: '0 10px', fontSize: '12.5px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 2: Person Name (Issuer), Received By (Receiver Person), Receiver Department / Line */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                      {/* Person Name (Issuer) */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Person Name (Issuer) <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. ayush"
+                          value={personName}
+                          onChange={(e) => {
+                            setPersonName(e.target.value);
+                            if (formError) setFormError('');
                           }}
                           style={{
-                            background: 'none',
-                            border: 'none',
-                            color: '#ea580c',
-                            fontSize: '11px',
-                            fontWeight: '800',
-                            cursor: 'pointer',
-                            textDecoration: 'underline',
-                            padding: 0
+                            width: '100%',
+                            height: '36px',
+                            padding: '0 10px',
+                            fontSize: '12.5px',
+                            border: (formError && !personName.trim()) ? '2px solid #ef4444' : '1px solid #cbd5e1',
+                            background: (formError && !personName.trim()) ? '#fef2f2' : '#ffffff',
+                            borderRadius: '6px',
+                            boxSizing: 'border-box'
                           }}
-                        >
-                          {showAlreadyIssued ? 'Hide Details' : 'Show Details'}
-                        </button>
+                          required
+                        />
+                        {formError && !personName.trim() && (
+                          <span style={{ color: '#dc2626', fontSize: '10.5px', fontWeight: '800', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            ⚠️ Required: Please enter Person Name (Issuer)
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* Style / Garment Name */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      STYLE / GARMENT ITEM
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Lower, Tracksuit, T-Shirt..."
-                      value={woLotStyle}
-                      onChange={(e) => setWoLotStyle(e.target.value)}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
+                      {/* Received By */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Received By (Receiver Person) <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Rohit (Cutting Master / Tailor)"
+                          value={woReceiverName}
+                          onChange={(e) => {
+                            setWoReceiverName(e.target.value);
+                            if (formError) setFormError('');
+                          }}
+                          style={{
+                            width: '100%',
+                            height: '36px',
+                            padding: '0 10px',
+                            fontSize: '12.5px',
+                            fontWeight: '700',
+                            border: (formError && !woReceiverName.trim()) ? '2px solid #ef4444' : '1.5px solid #ddd6fe',
+                            background: (formError && !woReceiverName.trim()) ? '#fef2f2' : '#ffffff',
+                            borderRadius: '6px',
+                            boxSizing: 'border-box'
+                          }}
+                          required
+                        />
+                        {formError && !woReceiverName.trim() && (
+                          <span style={{ color: '#dc2626', fontSize: '10.5px', fontWeight: '800', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            ⚠️ Required: Please enter Received By (Cutting Master / Tailor)
+                          </span>
+                        )}
+                      </div>
 
-                  {/* Brand */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      BUYER / BRAND
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Mohit Hosiery, Hermes..."
-                      value={woBrand}
-                      onChange={(e) => setWoBrand(e.target.value)}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
+                      {/* Receiver Department */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                          Receiver Department / Line
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Cutting / Stitching / Line"
+                          value={woReceiverDept}
+                          onChange={(e) => setWoReceiverDept(e.target.value)}
+                          style={{ width: '100%', height: '36px', padding: '0 10px', fontSize: '12.5px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
+                        />
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginTop: '4px' }}>
+                          {commonDepts.map(dept => (
+                            <button
+                              key={dept}
+                              type="button"
+                              onClick={() => setWoReceiverDept(prev => prev === dept ? '' : dept)}
+                              style={{
+                                padding: '2px 6px',
+                                fontSize: '10px',
+                                borderRadius: '4px',
+                                border: '1px solid #cbd5e1',
+                                background: woReceiverDept === dept ? '#581c87' : '#f8fafc',
+                                color: woReceiverDept === dept ? '#ffffff' : '#475569',
+                                cursor: 'pointer'
+                              }}
+                            >
+                              {dept}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
 
-                  {/* Order Pieces */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      BATCH CUTTING VOLUME (PCS)
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      placeholder="100"
-                      value={woPieces}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setWoPieces(val);
-                        const numVal = parseFloat(val) || 0;
-                        if (numVal > 0) {
-                          setWoItems(prev => prev.map(it => {
-                            const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
-                            return {
-                              ...it,
-                              baseQty: val,
-                              extraQty: Math.ceil(numVal * factor)
-                            };
-                          }));
-                        }
-                      }}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  {/* Issuer Person */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      ISSUER PERSON <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Store Incharge"
-                      value={personName}
-                      onChange={(e) => setPersonName(e.target.value)}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  {/* Receiver Person */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      RECEIVER PERSON <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Rohit (Cutting Master)"
-                      value={woReceiverName}
-                      onChange={(e) => setWoReceiverName(e.target.value)}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-
-                  {/* Receiver Department */}
-                  <div>
-                    <label style={{ fontSize: '11.5px', fontWeight: '800', color: '#1e293b', display: 'block', marginBottom: '5px' }}>
-                      RECEIVER DEPT / LINE <span style={{ color: '#ef4444' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Cutting Floor, Finishing..."
-                      value={woReceiverDept}
-                      onChange={(e) => setWoReceiverDept(e.target.value)}
-                      className="form-input"
-                      style={{
-                        width: '100%',
-                        height: '38px',
-                        fontSize: '13px',
-                        fontWeight: '700',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        boxSizing: 'border-box'
-                      }}
-                    />
+                    {/* Row 3: Issue Date */}
+                    <div style={{ width: '200px' }}>
+                      <label style={{ display: 'block', fontSize: '11.5px', fontWeight: '700', color: '#334155', marginBottom: '5px' }}>
+                        Issue Date
+                      </label>
+                      <input
+                        type="date"
+                        value={issueDate}
+                        onChange={(e) => setIssueDate(e.target.value)}
+                        style={{ width: '100%', height: '36px', padding: '0 10px', fontSize: '12.5px', border: '1px solid #cbd5e1', borderRadius: '6px', boxSizing: 'border-box' }}
+                      />
+                    </div>
                   </div>
                 </div>
 
-                {/* ── LIVE CUTTING DETAILS ACCORDING TO ENTERED LOT NUMBER (SAME AS MATERIAL ISSUE) ── */}
-                {renderCuttingCard(woLotId, woBrand)}
+                {/* RIGHT BOX: 2. Cutting Details & Batch Metrics */}
+                <div style={{
+                  background: '#ffffff',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                  overflow: 'hidden'
+                }}>
+                  {/* Header Bar */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #6b21a8 0%, #581c87 100%)',
+                    color: '#ffffff',
+                    padding: '10px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '800' }}>
+                      <Scissors size={16} />
+                      <span>2. Cutting Details &amp; Batch Metrics</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '800', fontFamily: 'monospace', background: '#0f172a', color: '#ffffff', padding: '2px 8px', borderRadius: '5px' }}>
+                        Lot #{woLotId.trim() || '—'}
+                      </span>
+                      {activeLotCutting?.hasDetails ? (
+                        <span style={{ fontSize: '10.5px', fontWeight: '700', background: '#dcfce7', color: '#15803d', padding: '2px 7px', borderRadius: '5px', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <CheckCircle2 size={11} /> Verified Cutting Sheet
+                        </span>
+                      ) : loadingActiveLotCutting ? (
+                        <span style={{ fontSize: '10.5px', color: '#e9d5ff', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                          <RefreshCw size={11} className="animate-spin" /> Checking...
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => reloadCuttingCache(true)}
+                        disabled={isReloadingCuttingCache}
+                        title="Reload cutting database"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '2px 8px',
+                          fontSize: '10.5px',
+                          fontWeight: '700',
+                          color: '#6b21a8',
+                          background: '#faf5ff',
+                          border: '1px solid #ddd6fe',
+                          borderRadius: '5px',
+                          cursor: isReloadingCuttingCache ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        <RefreshCw size={10} className={isReloadingCuttingCache ? "animate-spin" : ""} />
+                        <span>{isReloadingCuttingCache ? 'Reloading...' : 'Reload (30m Auto)'}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Sub-notice */}
+                  <div style={{ padding: '6px 16px', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', fontSize: '11px', color: '#64748b' }}>
+                    Lot #{woLotId.trim() || '—'} &bull; Auto-refreshes every 30m
+                  </div>
+
+                  {/* Body */}
+                  <div style={{ padding: '14px 16px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '14px', alignItems: 'start' }}>
+                      {/* Specs Grid */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Garment Style</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting?.style || woLotStyle || '—'}</span>
+                        </div>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Fabric</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting?.fabric || '—'}</span>
+                        </div>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Brand / Buyer</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting?.brand || woBrand || '—'}</span>
+                        </div>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Party Name</span>
+                          <span style={{ fontSize: '12px', fontWeight: '800', color: '#0f172a' }}>{activeLotCutting?.partyName || '—'}</span>
+                        </div>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', gridColumn: 'span 2' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Shades</span>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting?.shades || '—'}</span>
+                        </div>
+                        <div style={{ background: '#f8fafc', padding: '7px 10px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                          <span style={{ display: 'block', fontSize: '9.5px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase' }}>Sizes</span>
+                          <span style={{ fontSize: '11.5px', fontWeight: '700', color: '#0f172a' }}>{activeLotCutting?.sizes || '—'}</span>
+                        </div>
+                      </div>
+
+                      {/* Hero Total Cutting Quantity Box */}
+                      <div style={{
+                        minWidth: '135px',
+                        padding: '12px 14px',
+                        borderRadius: '8px',
+                        background: '#f0fdf4',
+                        border: '1.5px solid #86efac',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#15803d', marginBottom: '4px' }}>
+                          <Shirt size={16} />
+                          <span style={{ fontSize: '9.5px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                            Total Cutting Qty
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '20px', fontWeight: '900', color: '#14532d' }}>
+                          {(Number(activeLotCutting?.totalPieces || woPieces) || 0).toLocaleString()} <span style={{ fontSize: '12px', fontWeight: '700' }}>Pcs</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Matrix Toggle Button */}
+                    {activeLotCutting?.rows?.length > 0 && (
+                      <div style={{ marginTop: '10px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowActiveCuttingMatrix(prev => !prev)}
+                          style={{
+                            width: '100%',
+                            padding: '7px 12px',
+                            borderRadius: '6px',
+                            border: '1px solid #ddd6fe',
+                            background: showActiveCuttingMatrix ? '#7c3aed' : '#faf5ff',
+                            color: showActiveCuttingMatrix ? '#ffffff' : '#581c87',
+                            fontSize: '11.5px',
+                            fontWeight: '700',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Eye size={13} />
+                            <span>Cutting Ratio &amp; Color Matrix Breakdown ({activeLotCutting?.rows?.length || 0} Colors &bull; Total {(Number(activeLotCutting?.totalPieces) || 0).toLocaleString()} Pcs)</span>
+                          </span>
+                          <span>{showActiveCuttingMatrix ? 'Hide Matrix' : 'Show Matrix'}</span>
+                        </button>
+
+                        {/* Expandable Table */}
+                        {showActiveCuttingMatrix && (
+                          <div style={{ marginTop: '8px', border: '1px solid #cbd5e1', borderRadius: '6px', overflowX: 'auto', maxHeight: '200px' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', textAlign: 'left' }}>
+                              <thead>
+                                <tr style={{ background: '#f1f5f9', color: '#475569', borderBottom: '1px solid #cbd5e1' }}>
+                                  <th style={{ padding: '5px 8px', fontWeight: '800' }}>Color / Shade</th>
+                                  <th style={{ padding: '5px 6px', fontWeight: '800', textAlign: 'center' }}>Table</th>
+                                  {activeSizes.map(sz => (
+                                    <th key={sz} style={{ padding: '5px 6px', fontWeight: '800', textAlign: 'center' }}>{sz}</th>
+                                  ))}
+                                  <th style={{ padding: '5px 8px', fontWeight: '800', textAlign: 'right' }}>Total Pcs</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {activeLotCutting.rows.map((row, idx) => (
+                                  <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                                    <td style={{ padding: '5px 8px', fontWeight: '700', color: '#0f172a' }}>{row.color || '—'}</td>
+                                    <td style={{ padding: '5px 6px', textAlign: 'center', color: '#64748b' }}>{row.cuttingTable || '—'}</td>
+                                    {activeSizes.map(sz => (
+                                      <td key={sz} style={{ padding: '5px 6px', textAlign: 'center', fontWeight: '600', color: Number(row.sizes?.[sz]) > 0 ? '#0f172a' : '#cbd5e1' }}>
+                                        {row.sizes?.[sz] || 0}
+                                      </td>
+                                    ))}
+                                    <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: '800', color: '#15803d' }}>
+                                      {(Number(row.totalPcs) || 0).toLocaleString()}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* ── PREVIOUSLY ISSUED MATERIALS FOR THIS LOT (WITHOUT-BOM MODE) ── */}
               {renderAlreadyIssuedBanner(previouslyIssuedForCurrentLot)}
 
-              {/* Material Items Requisition Table Card */}
-              <div style={{
-                backgroundColor: 'var(--bg-primary, #ffffff)',
-                borderRadius: '14px',
-                border: '1.5px solid var(--border-color, #cbd5e1)',
-                padding: '20px 22px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
-                  <h3 style={{ margin: 0, fontSize: '14px', fontWeight: '800', color: 'var(--text-main, #0f172a)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Package size={16} style={{ color: '#ea580c' }} />
-                    <span>2. Materials to Issue ({woItems.length} Item{woItems.length > 1 ? 's' : ''})</span>
-                  </h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* ── SECTION 3: MATERIAL ALLOCATION & STOCK DEDUCTION GRID ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* Toolbar Above Header */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                  padding: '0 2px'
+                }}>
+                  {/* Left: Barcode Scanner */}
+                  <form onSubmit={handleBarcodeScanSubmit} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        ref={barcodeInputRef}
+                        type="text"
+                        placeholder="Scan Barcode / Enter Code..."
+                        value={barcodeInput}
+                        onChange={(e) => setBarcodeInput(e.target.value)}
+                        style={{
+                          padding: '7px 10px 7px 30px',
+                          borderRadius: '7px',
+                          border: '1.5px solid #cbd5e1',
+                          fontSize: '12.5px',
+                          width: '240px',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                      <Scan size={14} style={{ position: 'absolute', left: '9px', top: '50%', transform: 'translateY(-50%)', color: '#7c3aed' }} />
+                    </div>
                     <button
-                      type="button"
-                      onClick={() => {
-                        const cuttingQty = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
-                        setWoItems(prev => prev.map(it => {
-                          const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
-                          return {
-                            ...it,
-                            baseQty: cuttingQty,
-                            extraQty: Math.ceil(cuttingQty * factor)
-                          };
-                        }));
-                      }}
+                      type="submit"
                       style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        padding: '7px 12px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #cbd5e1',
-                        background: '#f8fafc',
-                        color: '#475569',
-                        fontSize: '12px',
-                        fontWeight: '800',
-                        cursor: 'pointer'
-                      }}
-                      title="Reset all rows base quantity to current lot cutting quantity"
-                    >
-                      <RotateCcw size={13} /> Reset Base to Cutting ({activeLotCutting?.totalPieces || woPieces || 100})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAddWoItem}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
                         padding: '7px 14px',
-                        borderRadius: '8px',
-                        border: '1.5px solid #fdba74',
-                        background: '#fff7ed',
-                        color: '#c2410c',
+                        borderRadius: '7px',
+                        border: 'none',
+                        background: 'linear-gradient(135deg, #7c3aed 0%, #6b21a8 100%)',
+                        color: '#ffffff',
                         fontSize: '12px',
                         fontWeight: '800',
                         cursor: 'pointer',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        boxShadow: '0 2px 4px rgba(124, 58, 237, 0.25)'
                       }}
                     >
-                      <Plus size={14} /> Add Another Material Row
+                      <Zap size={13} />
+                      <span>Scan Add</span>
+                    </button>
+                  </form>
+
+                  {/* Right: Quick Component Select + Add Row */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <select
+                      value={quickSelectedComponent}
+                      onChange={(e) => setQuickSelectedComponent(e.target.value)}
+                      style={{
+                        height: '35px',
+                        padding: '0 10px',
+                        borderRadius: '7px',
+                        border: '1.5px solid #cbd5e1',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        color: '#0f172a',
+                        background: '#ffffff',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="">-- Select Component --</option>
+                      {COMPONENT_PRESETS.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        confirmAddWoItem(quickSelectedComponent);
+                      }}
+                      style={{
+                        height: '35px',
+                        padding: '0 16px',
+                        borderRadius: '7px',
+                        border: 'none',
+                        background: '#581c87',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                        fontWeight: '800',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        boxShadow: '0 2px 4px rgba(88, 28, 135, 0.2)'
+                      }}
+                    >
+                      <Plus size={14} />
+                      <span>Add Row</span>
                     </button>
                   </div>
                 </div>
 
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', width: '100%' }}>
-                  <table style={{ width: '100%', minWidth: '1080px', borderCollapse: 'collapse', fontSize: '12.5px' }}>
-                    <thead>
-                      <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', color: '#475569' }}>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '38px', minWidth: '38px' }}>#</th>
-                        <th style={{ padding: '10px 10px', textAlign: 'left', minWidth: '160px' }}>Component Name *</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '280px' }}>Inventory Material *</th>
-                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', whiteSpace: 'nowrap' }}>Stock Available</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '110px', minWidth: '110px', whiteSpace: 'nowrap' }}>Cutting Qty</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '130px', minWidth: '130px', whiteSpace: 'nowrap' }}>Multiplier / Div</th>
-                        <th style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', whiteSpace: 'nowrap' }}>Issue Qty *</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', whiteSpace: 'nowrap' }}>Unit</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '180px' }}>Reason for Issue *</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', minWidth: '150px' }}>Remarks</th>
-                        <th style={{ padding: '10px 8px', textAlign: 'center', width: '45px', minWidth: '45px' }}></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {woItems.map((item, idx) => {
-                        const selectedMat = materials.find(m => String(m.id) === String(item.materialId));
-                        const currentStock = selectedMat ? parseFloat(selectedMat.stock || selectedMat.totalStock || 0) : null;
-                        const qtyNum = parseFloat(item.extraQty) || 0;
-                        const isStockLow = currentStock !== null && qtyNum > currentStock;
+                {/* Feedback banner if barcode scanned */}
+                {barcodeScanFeedback && (
+                  <div style={{
+                    padding: '8px 12px',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    fontWeight: '700',
+                    backgroundColor: barcodeScanFeedback.type === 'error' ? '#fef2f2' : '#faf5ff',
+                    color: barcodeScanFeedback.type === 'error' ? '#dc2626' : '#6b21a8',
+                    border: `1px solid ${barcodeScanFeedback.type === 'error' ? '#fca5a5' : '#ddd6fe'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <span>{barcodeScanFeedback.msg}</span>
+                    <button
+                      type="button"
+                      onClick={() => setBarcodeScanFeedback(null)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontWeight: 'bold', fontSize: '13px' }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
 
-                        return (
-                          <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
-                            <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: '800', color: '#64748b', verticalAlign: 'middle' }}>
-                              {idx + 1}
-                            </td>
-                            <td style={{ padding: '10px 10px', verticalAlign: 'middle' }}>
-                              <input
-                                type="text"
-                                list={`comp-types-${item.id}`}
-                                placeholder="e.g. Label, Tape, Tag..."
-                                value={item.componentName || ''}
-                                onChange={(e) => handleUpdateWoItem(item.id, 'componentName', e.target.value)}
-                                style={{
-                                  width: '100%',
-                                  height: '38px',
-                                  padding: '7px 10px',
-                                  borderRadius: '7px',
-                                  border: !item.componentName?.trim() ? '1.5px solid #fdba74' : '1.5px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  fontSize: '13px',
-                                  fontWeight: '700',
-                                  color: '#0f172a',
-                                  boxSizing: 'border-box'
-                                }}
-                              />
-                              <datalist id={`comp-types-${item.id}`}>
-                                {COMPONENT_PRESETS.map(c => (
-                                  <option key={c} value={c} />
-                                ))}
-                              </datalist>
-                            </td>
-                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
-                              <SearchableMaterialSelect
-                                materials={materials}
-                                value={item.materialId}
-                                onChange={(val) => handleUpdateWoItem(item.id, 'materialId', val)}
-                                placeholder={item.componentName?.trim() ? `-- Select ${item.componentName} Material --` : "-- Search & Select Inventory Material --"}
-                                categoryHint={item.componentName}
-                              />
-                            </td>
-                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '140px', minWidth: '140px', verticalAlign: 'middle' }}>
-                              {selectedMat ? (
-                                <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                                  <div style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    gap: '5px',
-                                    fontSize: '12.5px',
-                                    fontWeight: '800',
-                                    padding: '5px 12px',
-                                    borderRadius: '8px',
-                                    whiteSpace: 'nowrap',
-                                    lineHeight: '1.2',
-                                    background: currentStock <= 0 ? '#fef2f2' : currentStock < 20 ? '#fffbeb' : '#f0fdf4',
-                                    color: currentStock <= 0 ? '#dc2626' : currentStock < 20 ? '#d97706' : '#16a34a',
-                                    border: `1.5px solid ${currentStock <= 0 ? '#fecaca' : currentStock < 20 ? '#fde68a' : '#86efac'}`,
-                                    boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-                                  }}>
-                                    <span style={{
-                                      width: '7px',
-                                      height: '7px',
-                                      borderRadius: '50%',
-                                      backgroundColor: currentStock <= 0 ? '#ef4444' : currentStock < 20 ? '#f59e0b' : '#16a34a',
-                                      display: 'inline-block',
-                                      flexShrink: 0
-                                    }} />
-                                    <span style={{ fontSize: '13px', fontWeight: '900' }}>
-                                      {Number(currentStock).toLocaleString()}
-                                    </span>
-                                    <span style={{ fontSize: '11px', fontWeight: '700', opacity: 0.85 }}>
-                                      {selectedMat.unit || 'Pcs'}
-                                    </span>
-                                  </div>
-                                  {currentStock <= 0 && (
-                                    <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', whiteSpace: 'nowrap' }}>
-                                      Out of Stock
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>—</span>
-                              )}
-                            </td>
-                            {/* Cutting Qty (Base) */}
-                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', verticalAlign: 'middle' }}>
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
-                                placeholder="Cutting Qty"
-                                value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
-                                onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
-                                style={{
-                                  width: '100%',
-                                  height: '38px',
-                                  padding: '6px 8px',
-                                  borderRadius: '8px',
-                                  border: '1.5px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  fontSize: '13px',
-                                  fontWeight: '800',
-                                  textAlign: 'center',
-                                  color: '#0f172a',
-                                  boxSizing: 'border-box',
-                                  outline: 'none',
-                                  MozAppearance: 'textfield'
-                                }}
-                                title="Cutting Quantity"
-                              />
-                            </td>
+                {/* Table Container Card */}
+                <div style={{
+                  background: '#ffffff',
+                  borderRadius: '10px',
+                  border: '1px solid #cbd5e1',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                  overflow: 'hidden'
+                }}>
+                  {/* Purple Banner */}
+                  <div style={{
+                    background: 'linear-gradient(135deg, #6b21a8 0%, #581c87 100%)',
+                    color: '#ffffff',
+                    padding: '10px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '8px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13.5px', fontWeight: '800' }}>
+                      <Package size={16} />
+                      <span>3. Material Allocation &amp; Stock Deduction Grid</span>
+                    </div>
+                    <span style={{ fontSize: '11px', color: '#e9d5ff' }}>
+                      Select one or multiple items to issue. Inventory stock will be deducted and recorded on the official Challan / Bill.
+                    </span>
+                  </div>
 
-                            {/* Multiplier / Divide */}
-                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '110px', minWidth: '110px', verticalAlign: 'middle' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
-                                    handleUpdateWoItem(item.id, 'multiplierOp', nextOp);
-                                  }}
-                                  title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
-                                  style={{
-                                    border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                    background: item.multiplierOp === 'divide' ? '#fef3c7' : '#ede9fe',
-                                    color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
-                                    borderRadius: '6px',
-                                    padding: '0 6px',
-                                    fontSize: '14px',
-                                    fontWeight: '900',
-                                    cursor: 'pointer',
-                                    height: '36px',
-                                    minWidth: '28px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    transition: 'all 0.15s ease'
-                                  }}
-                                >
-                                  {item.multiplierOp === 'divide' ? '÷' : '×'}
-                                </button>
+                  {/* Table */}
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12.5px' }}>
+                      <thead>
+                        <tr style={{ background: '#3b0764', color: '#ffffff', fontSize: '11px', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          <th style={{ padding: '10px 8px', width: '36px', textAlign: 'center' }}>#</th>
+                          <th style={{ padding: '10px 10px', minWidth: '150px' }}>Component / Type ({woItems.length})</th>
+                          <th style={{ padding: '10px 12px', minWidth: '250px' }}>Inventory Material *</th>
+                          <th style={{ padding: '10px 10px', width: '130px', textAlign: 'center' }}>Current Stock</th>
+                          <th style={{ padding: '10px 8px', width: '110px', textAlign: 'center' }}>
+                            <div>Cutting Qty</div>
+                            <div style={{ fontSize: '9px', color: '#86efac', fontWeight: '700', textTransform: 'none' }}>
+                              ({(Number(activeLotCutting?.totalPieces || woPieces) || 0).toLocaleString()})
+                            </div>
+                          </th>
+                          <th style={{ padding: '10px 6px', width: '85px', textAlign: 'center' }}>
+                            <div>Mult / Per Pc</div>
+                            <div style={{ fontSize: '8.5px', color: '#e9d5ff', fontWeight: '600', textTransform: 'none' }}>(× / ÷)</div>
+                          </th>
+                          <th style={{ padding: '10px 6px', width: '90px', textAlign: 'center' }}>
+                            <div>Multiplier</div>
+                            <div style={{ fontSize: '8.5px', color: '#e9d5ff', fontWeight: '600', textTransform: 'none' }}>(e.g. 10 / Pc)</div>
+                          </th>
+                          <th style={{ padding: '10px 10px', width: '125px', textAlign: 'center' }}>Total Issue Qty</th>
+                          <th style={{ padding: '10px 8px', width: '75px', textAlign: 'center' }}>Unit</th>
+                          <th style={{ padding: '10px 10px', minWidth: '160px', textAlign: 'left' }}>Reason for Issue *</th>
+                          <th style={{ padding: '10px 10px', minWidth: '130px', textAlign: 'left' }}>Remarks</th>
+                          <th style={{ padding: '10px 8px', width: '85px', textAlign: 'center' }}>Balance</th>
+                          <th style={{ padding: '10px 8px', width: '45px', textAlign: 'center' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {woItems.map((item, idx) => {
+                          const selectedMat = materials.find(m => String(m.id) === String(item.materialId));
+                          const currentStock = selectedMat ? parseFloat(selectedMat.stock || selectedMat.totalStock || 0) : null;
+                          const qtyNum = parseFloat(item.extraQty) || 0;
+                          const balance = currentStock !== null ? Math.round((currentStock - qtyNum) * 100) / 100 : null;
+                          const isStockLow = currentStock !== null && qtyNum > currentStock;
+
+                          return (
+                            <tr key={item.id} style={{ borderBottom: '1px solid #f1f5f9', background: idx % 2 === 0 ? '#ffffff' : '#fafafa' }}>
+                              <td style={{ padding: '10px 8px', textAlign: 'center', fontWeight: '800', color: '#64748b', verticalAlign: 'middle' }}>
+                                {idx + 1}
+                              </td>
+                              <td style={{ padding: '10px 10px', verticalAlign: 'middle' }}>
                                 <input
                                   type="text"
-                                  placeholder={item.multiplierOp === 'divide' ? '÷12' : '1'}
-                                  value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
-                                  onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
+                                  list={`comp-types-${item.id}`}
+                                  placeholder="e.g. Label, Tape, Tag..."
+                                  value={item.componentName || ''}
+                                  onChange={(e) => handleUpdateWoItem(item.id, 'componentName', e.target.value)}
                                   style={{
-                                    width: '64px',
-                                    height: '36px',
-                                    padding: '0 6px',
-                                    borderRadius: '6px',
-                                    border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #8b5cf6',
-                                    background: item.multiplierOp === 'divide' ? '#fffbeb' : '#f5f3ff',
-                                    fontSize: '14px',
+                                    width: '100%',
+                                    height: '38px',
+                                    padding: '7px 10px',
+                                    borderRadius: '7px',
+                                    border: !item.componentName?.trim() ? '1.5px solid #ddd6fe' : '1.5px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
+                                    fontWeight: '700',
+                                    color: '#0f172a',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
+                                <datalist id={`comp-types-${item.id}`}>
+                                  {COMPONENT_PRESETS.map(c => (
+                                    <option key={c} value={c} />
+                                  ))}
+                                </datalist>
+                              </td>
+                              <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                <SearchableMaterialSelect
+                                  materials={materials}
+                                  value={item.materialId}
+                                  onChange={(val) => handleUpdateWoItem(item.id, 'materialId', val)}
+                                  placeholder={item.componentName?.trim() ? `-- Select ${item.componentName} Material --` : "-- Search & Select Inventory Material --"}
+                                  categoryHint={item.componentName}
+                                />
+                              </td>
+                              <td style={{ padding: '10px 10px', textAlign: 'center', width: '130px', minWidth: '130px', verticalAlign: 'middle' }}>
+                                {selectedMat ? (
+                                  <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                    <div style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      gap: '5px',
+                                      fontSize: '12.5px',
+                                      fontWeight: '800',
+                                      padding: '5px 12px',
+                                      borderRadius: '8px',
+                                      whiteSpace: 'nowrap',
+                                      lineHeight: '1.2',
+                                      background: currentStock <= 0 ? '#fef2f2' : currentStock < 20 ? '#fffbeb' : '#f0fdf4',
+                                      color: currentStock <= 0 ? '#dc2626' : currentStock < 20 ? '#d97706' : '#16a34a',
+                                      border: `1.5px solid ${currentStock <= 0 ? '#fecaca' : currentStock < 20 ? '#fde68a' : '#86efac'}`,
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                                    }}>
+                                      <span style={{
+                                        width: '7px',
+                                        height: '7px',
+                                        borderRadius: '50%',
+                                        backgroundColor: currentStock <= 0 ? '#ef4444' : currentStock < 20 ? '#f59e0b' : '#16a34a',
+                                        display: 'inline-block',
+                                        flexShrink: 0
+                                      }} />
+                                      <span style={{ fontSize: '13px', fontWeight: '900' }}>
+                                        {Number(currentStock).toLocaleString()}
+                                      </span>
+                                      <span style={{ fontSize: '11px', fontWeight: '700', opacity: 0.85 }}>
+                                        {selectedMat.unit || 'Pcs'}
+                                      </span>
+                                    </div>
+                                    {currentStock <= 0 && (
+                                      <span style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                        Out of Stock
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: '600' }}>—</span>
+                                )}
+                              </td>
+                              {/* Cutting Qty (Base) */}
+                              <td style={{ padding: '10px 8px', textAlign: 'center', width: '105px', minWidth: '105px', verticalAlign: 'middle' }}>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  placeholder="Cutting Qty"
+                                  value={item.baseQty !== undefined && item.baseQty !== null && item.baseQty !== '' ? item.baseQty : (item.extraQty || '')}
+                                  onChange={(e) => handleUpdateWoItem(item.id, 'baseQty', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    height: '38px',
+                                    padding: '6px 8px',
+                                    borderRadius: '8px',
+                                    border: '1.5px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
                                     fontWeight: '800',
                                     textAlign: 'center',
-                                    color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9',
+                                    color: '#0f172a',
                                     boxSizing: 'border-box',
-                                    outline: 'none'
+                                    outline: 'none',
+                                    MozAppearance: 'textfield'
                                   }}
-                                  title="Multiplier factor or fraction (e.g. 1, 2, 10, 1/12)"
+                                  title="Cutting Quantity"
                                 />
-                              </div>
-                            </td>
+                              </td>
 
-                            {/* Total Issue Qty */}
-                            <td style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', verticalAlign: 'middle' }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                                <div style={{ fontSize: '10px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6d28d9', fontWeight: '800', whiteSpace: 'nowrap' }}>
-                                  {getMultiplierFormulaText(item.baseQty || item.extraQty || 0, item.multiplier, item.multiplierOp, item.extraQty || 0)}
-                                </div>
-                                <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    step="1"
-                                    placeholder="0"
-                                    value={item.extraQty}
-                                    onChange={(e) => handleUpdateWoItem(item.id, 'extraQty', e.target.value)}
+                              {/* Multiplier / Divide */}
+                              <td style={{ padding: '10px 8px', textAlign: 'center', width: '110px', minWidth: '110px', verticalAlign: 'middle' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const nextOp = item.multiplierOp === 'divide' ? 'multiply' : 'divide';
+                                      handleUpdateWoItem(item.id, 'multiplierOp', nextOp);
+                                    }}
+                                    title={`Click to toggle Multiply (×) / Divide (÷). Currently: ${item.multiplierOp === 'divide' ? 'Divide (÷)' : 'Multiply (×)'}`}
                                     style={{
-                                      width: '100%',
-                                      height: '38px',
-                                      padding: '6px 10px',
-                                      borderRadius: '8px',
-                                      border: isStockLow ? '2px solid #ef4444' : (parseFloat(item.extraQty) > 0 ? '2px solid #ea580c' : '1.5px solid #cbd5e1'),
-                                      background: isStockLow ? '#fef2f2' : '#ffffff',
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #a855f7',
+                                      background: item.multiplierOp === 'divide' ? '#fef3c7' : '#faf5ff',
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#6b21a8',
+                                      borderRadius: '6px',
+                                      padding: '0 6px',
+                                      fontSize: '14px',
+                                      fontWeight: '900',
+                                      cursor: 'pointer',
+                                      height: '36px',
+                                      minWidth: '28px',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    {item.multiplierOp === 'divide' ? '÷' : '×'}
+                                  </button>
+                                  <input
+                                    type="text"
+                                    placeholder={item.multiplierOp === 'divide' ? '÷12' : '1'}
+                                    value={item.multiplier !== undefined && item.multiplier !== null ? item.multiplier : ''}
+                                    onChange={(e) => handleUpdateWoItem(item.id, 'multiplier', e.target.value)}
+                                    style={{
+                                      width: '64px',
+                                      height: '36px',
+                                      padding: '0 6px',
+                                      borderRadius: '6px',
+                                      border: item.multiplierOp === 'divide' ? '1.5px solid #f59e0b' : '1.5px solid #ddd6fe',
+                                      background: item.multiplierOp === 'divide' ? '#fffbeb' : '#faf5ff',
                                       fontSize: '14px',
                                       fontWeight: '800',
                                       textAlign: 'center',
-                                      color: isStockLow ? '#dc2626' : (parseFloat(item.extraQty) > 0 ? '#c2410c' : '#0f172a'),
+                                      color: item.multiplierOp === 'divide' ? '#b45309' : '#581c87',
                                       boxSizing: 'border-box',
-                                      outline: 'none',
-                                      boxShadow: isStockLow
-                                        ? '0 0 0 2px rgba(239, 68, 68, 0.15)'
-                                        : (parseFloat(item.extraQty) > 0 ? '0 0 0 2px rgba(234, 88, 12, 0.15)' : 'none'),
-                                      transition: 'all 0.15s ease'
+                                      outline: 'none'
                                     }}
+                                    title="Multiplier factor or fraction (e.g. 1, 2, 10, 1/12)"
                                   />
                                 </div>
-                                {isStockLow && (
-                                  <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', marginTop: '1px', textAlign: 'center', whiteSpace: 'nowrap' }}>
-                                    ⚠ Exceeds stock!
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', verticalAlign: 'middle' }}>
-                              <span style={{
-                                fontSize: '12px',
-                                fontWeight: '800',
-                                color: '#475569',
-                                background: '#f1f5f9',
-                                border: '1px solid #e2e8f0',
-                                padding: '4px 10px',
-                                borderRadius: '6px',
-                                display: 'inline-block',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                {item.unit || selectedMat?.unit || 'Pcs'}
-                              </span>
-                            </td>
-                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
-                              <select
-                                value={item.reason}
-                                onChange={(e) => handleUpdateWoItem(item.id, 'reason', e.target.value)}
-                                style={{
-                                  width: '100%',
-                                  height: '38px',
-                                  padding: '7px 10px',
-                                  borderRadius: '7px',
-                                  border: '1.5px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  fontSize: '12.5px',
-                                  fontWeight: '600',
-                                  boxSizing: 'border-box'
-                                }}
-                              >
-                                {EXTRA_REASONS.map(r => (
-                                  <option key={r} value={r}>{r}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
-                              <input
-                                type="text"
-                                placeholder="e.g. Floor request..."
-                                value={item.remarks}
-                                onChange={(e) => handleUpdateWoItem(item.id, 'remarks', e.target.value)}
-                                style={{
-                                  width: '100%',
-                                  height: '38px',
-                                  padding: '7px 10px',
-                                  borderRadius: '7px',
-                                  border: '1.5px solid #cbd5e1',
-                                  background: '#ffffff',
-                                  fontSize: '12px',
-                                  boxSizing: 'border-box'
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: '10px 8px', textAlign: 'center', width: '45px', minWidth: '45px', verticalAlign: 'middle' }}>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveWoItem(item.id)}
-                                disabled={woItems.length <= 1}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  color: woItems.length <= 1 ? '#cbd5e1' : '#ef4444',
-                                  cursor: woItems.length <= 1 ? 'not-allowed' : 'pointer',
-                                  padding: '4px'
-                                }}
-                                title="Remove item"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              </td>
 
-                {/* Bottom Bar */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginTop: '16px',
-                  paddingTop: '16px',
-                  borderTop: '1.5px solid #f1f5f9',
-                  flexWrap: 'wrap',
-                  gap: '12px'
-                }}>
-                  <div style={{ fontSize: '12.5px', color: '#64748b', fontWeight: '600' }}>
-                    Configured Items: <strong style={{ color: '#0f172a' }}>{woItems.filter(i => i.materialId && parseFloat(i.extraQty) > 0).length}</strong> of <strong>{woItems.length}</strong> items ready to issue
+                              {/* Total Issue Qty */}
+                              <td style={{ padding: '10px 10px', textAlign: 'center', width: '135px', minWidth: '135px', verticalAlign: 'middle' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                                  <div style={{ fontSize: '10px', color: item.multiplierOp === 'divide' ? '#b45309' : '#6b21a8', fontWeight: '800', whiteSpace: 'nowrap' }}>
+                                    {getMultiplierFormulaText(item.baseQty || item.extraQty || 0, item.multiplier, item.multiplierOp, item.extraQty || 0)}
+                                  </div>
+                                  <div style={{ position: 'relative', width: '100%', maxWidth: '120px' }}>
+                                    <input
+                                      type="number"
+                                      min="1"
+                                      step="1"
+                                      placeholder="0"
+                                      value={item.extraQty}
+                                      onChange={(e) => handleUpdateWoItem(item.id, 'extraQty', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        height: '38px',
+                                        padding: '6px 10px',
+                                        borderRadius: '8px',
+                                        border: isStockLow ? '2px solid #ef4444' : (parseFloat(item.extraQty) > 0 ? '2px solid #7c3aed' : '1.5px solid #cbd5e1'),
+                                        background: isStockLow ? '#fef2f2' : '#ffffff',
+                                        fontSize: '14px',
+                                        fontWeight: '800',
+                                        textAlign: 'center',
+                                        color: isStockLow ? '#dc2626' : (parseFloat(item.extraQty) > 0 ? '#581c87' : '#0f172a'),
+                                        boxSizing: 'border-box',
+                                        outline: 'none',
+                                        boxShadow: isStockLow
+                                          ? '0 0 0 2px rgba(239, 68, 68, 0.15)'
+                                          : (parseFloat(item.extraQty) > 0 ? '0 0 0 2px rgba(124, 58, 237, 0.15)' : 'none'),
+                                        transition: 'all 0.15s ease'
+                                      }}
+                                    />
+                                  </div>
+                                  {isStockLow && (
+                                    <div style={{ fontSize: '10px', color: '#dc2626', fontWeight: '800', marginTop: '1px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                      ⚠ Exceeds stock!
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td style={{ padding: '10px 8px', textAlign: 'center', width: '85px', minWidth: '85px', verticalAlign: 'middle' }}>
+                                <span style={{
+                                  fontSize: '12px',
+                                  fontWeight: '800',
+                                  color: '#475569',
+                                  background: '#f1f5f9',
+                                  border: '1px solid #e2e8f0',
+                                  padding: '4px 10px',
+                                  borderRadius: '6px',
+                                  display: 'inline-block',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  {item.unit || selectedMat?.unit || 'Pcs'}
+                                </span>
+                              </td>
+                              <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                <select
+                                  value={item.reason}
+                                  onChange={(e) => handleUpdateWoItem(item.id, 'reason', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    height: '38px',
+                                    padding: '7px 10px',
+                                    borderRadius: '7px',
+                                    border: '1.5px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '12.5px',
+                                    fontWeight: '600',
+                                    boxSizing: 'border-box'
+                                  }}
+                                >
+                                  {EXTRA_REASONS.map(r => (
+                                    <option key={r} value={r}>{r}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td style={{ padding: '10px 12px', verticalAlign: 'middle' }}>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. Floor request..."
+                                  value={item.remarks}
+                                  onChange={(e) => handleUpdateWoItem(item.id, 'remarks', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    height: '38px',
+                                    padding: '7px 10px',
+                                    borderRadius: '7px',
+                                    border: '1.5px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '12px',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
+                              </td>
+                              {/* Balance */}
+                              <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                                {selectedMat && balance !== null ? (
+                                  <span style={{
+                                    fontSize: '12px',
+                                    fontWeight: '800',
+                                    color: balance < 0 ? '#dc2626' : '#15803d',
+                                    background: balance < 0 ? '#fef2f2' : '#f0fdf4',
+                                    border: `1px solid ${balance < 0 ? '#fca5a5' : '#86efac'}`,
+                                    padding: '3px 8px',
+                                    borderRadius: '5px',
+                                    display: 'inline-block'
+                                  }}>
+                                    {balance.toLocaleString()} {selectedMat.unit || item.unit || 'Pcs'}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#94a3b8', fontSize: '12px' }}>—</span>
+                                )}
+                              </td>
+                              {/* Action */}
+                              <td style={{ padding: '10px 8px', textAlign: 'center', width: '45px', minWidth: '45px', verticalAlign: 'middle' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveWoItem(item.id)}
+                                  disabled={woItems.length <= 1}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: woItems.length <= 1 ? '#cbd5e1' : '#ef4444',
+                                    cursor: woItems.length <= 1 ? 'not-allowed' : 'pointer',
+                                    padding: '4px'
+                                  }}
+                                  title="Remove item"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleIssueWithoutBom}
-                    style={{
-                      padding: '11px 26px',
-                      borderRadius: '10px',
-                      border: 'none',
-                      background: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
-                      color: '#ffffff',
-                      fontSize: '13.5px',
-                      fontWeight: '800',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    <Zap size={16} /> Issue Extra Material (Without BOM) & Generate Slip
-                  </button>
+                  {/* Footer Toolbar */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '14px 16px',
+                    background: '#faf5ff',
+                    borderTop: '1.5px solid #ddd6fe',
+                    flexWrap: 'wrap',
+                    gap: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => confirmAddWoItem('')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px 14px',
+                          borderRadius: '7px',
+                          border: 'none',
+                          background: '#581c87',
+                          color: '#ffffff',
+                          fontSize: '12.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          boxShadow: '0 2px 4px rgba(88, 28, 135, 0.2)'
+                        }}
+                      >
+                        <Plus size={14} /> Add Row
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const cuttingQty = activeLotCutting?.totalPieces || (parseFloat(woPieces) || 100);
+                          setWoItems(prev => prev.map(it => {
+                            const { factor } = computeEffectiveFactor(it.multiplier, it.multiplierOp);
+                            return {
+                              ...it,
+                              baseQty: cuttingQty,
+                              extraQty: Math.ceil(cuttingQty * factor)
+                            };
+                          }));
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '8px 14px',
+                          borderRadius: '7px',
+                          border: '1.5px solid #ddd6fe',
+                          background: '#ffffff',
+                          color: '#581c87',
+                          fontSize: '12px',
+                          fontWeight: '800',
+                          cursor: 'pointer'
+                        }}
+                        title="Reset all rows base quantity to current lot cutting quantity"
+                      >
+                        <RotateCcw size={13} /> Reset Base to Cutting ({activeLotCutting?.totalPieces || woPieces || 100})
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: '12px', color: '#6b21a8', fontWeight: '700' }}>
+                        Configured: <strong>{woItems.filter(i => i.materialId && parseFloat(i.extraQty) > 0).length}</strong> of <strong>{woItems.length}</strong> items ready
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleIssueWithoutBom}
+                        style={{
+                          padding: '11px 26px',
+                          borderRadius: '9px',
+                          border: 'none',
+                          background: 'linear-gradient(135deg, #7c3aed 0%, #581c87 100%)',
+                          color: '#ffffff',
+                          fontSize: '13.5px',
+                          fontWeight: '800',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          boxShadow: '0 4px 14px rgba(88, 28, 135, 0.35)',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        <Zap size={16} /> Issue Extra Material (Without BOM) &amp; Generate Slip
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
