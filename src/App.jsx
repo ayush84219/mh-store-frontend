@@ -1202,6 +1202,8 @@ export default function App() {
       ...newDesign,
       created_at: new Date().toISOString()
     };
+
+    // Update local state immediately for instant UI feedback
     setDesigns(prev => {
       const exists = prev.some(d => d.id === designWithTime.id);
       let updated;
@@ -1224,6 +1226,50 @@ export default function App() {
         return b.id.localeCompare(a.id);
       });
     });
+
+    // ── PERSIST TO DATABASE ────────────────────────────────────────────────────
+    try {
+      const payload = {
+        ...designWithTime,
+        actorName: designWithTime.designer || 'Designer',
+        bom: Array.isArray(designWithTime.bom)
+          ? JSON.stringify(designWithTime.bom)
+          : (designWithTime.bom || '[]')
+      };
+      const res = await fetch(`${getBackendUrl()}/api/designs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        // If BOM already approved on server side, show error
+        if (errData.alreadyCreated) {
+          setToast({
+            type: 'error',
+            title: 'Already Approved',
+            message: errData.error || `BOM for Lot #${newDesign.id} is already approved.`
+          });
+          return { success: false, error: errData.error };
+        }
+        console.warn('BOM save to DB returned non-OK status:', res.status, errData);
+      } else {
+        setToast({
+          type: 'success',
+          title: 'BOM Saved',
+          message: `BOM for Lot #${designWithTime.id} saved to database successfully.`
+        });
+      }
+    } catch (err) {
+      console.error('Failed to save BOM design to database:', err);
+      setToast({
+        type: 'error',
+        title: 'DB Save Failed',
+        message: `BOM saved locally but failed to sync to database: ${err.message}. Please check server connection.`
+      });
+    }
+
+    return { success: true };
   };
 
   // Helper to persist updated material stock to the backend database
